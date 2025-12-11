@@ -9,12 +9,12 @@ import (
 // Config represents the management-plane persistent configuration.
 // It intentionally stays narrow until broader models are added.
 type Config struct {
-	System      SystemConfig    `json:"system"`
-	Interfaces  []Interface     `json:"interfaces"`
-	Zones       []Zone          `json:"zones"`
-	Firewall    FirewallConfig  `json:"firewall"`
-	Description string          `json:"description,omitempty"`
-	Version     string          `json:"version,omitempty"`
+	System      SystemConfig   `json:"system"`
+	Interfaces  []Interface    `json:"interfaces"`
+	Zones       []Zone         `json:"zones"`
+	Firewall    FirewallConfig `json:"firewall"`
+	Description string         `json:"description,omitempty"`
+	Version     string         `json:"version,omitempty"`
 }
 
 type SystemConfig struct {
@@ -34,8 +34,8 @@ type Zone struct {
 }
 
 type FirewallConfig struct {
-	DefaultAction Action  `json:"defaultAction"`
-	Rules         []Rule  `json:"rules"`
+	DefaultAction Action `json:"defaultAction"`
+	Rules         []Rule `json:"rules"`
 }
 
 type Action string
@@ -46,18 +46,18 @@ const (
 )
 
 type Rule struct {
-	ID          string        `json:"id"`
-	Description string        `json:"description,omitempty"`
-	SourceZones []string      `json:"sourceZones,omitempty"`
-	DestZones   []string      `json:"destZones,omitempty"`
-	Sources     []string      `json:"sources,omitempty"`     // CIDR strings
-	Destinations []string     `json:"destinations,omitempty"` // CIDR strings
-	Protocols   []Protocol    `json:"protocols,omitempty"`
-	Action      Action        `json:"action"`
+	ID           string     `json:"id"`
+	Description  string     `json:"description,omitempty"`
+	SourceZones  []string   `json:"sourceZones,omitempty"`
+	DestZones    []string   `json:"destZones,omitempty"`
+	Sources      []string   `json:"sources,omitempty"`      // CIDR strings
+	Destinations []string   `json:"destinations,omitempty"` // CIDR strings
+	Protocols    []Protocol `json:"protocols,omitempty"`
+	Action       Action     `json:"action"`
 }
 
 type Protocol struct {
-	Name string `json:"name"`          // e.g. tcp, udp, icmp
+	Name string `json:"name"`           // e.g. tcp, udp, icmp
 	Port string `json:"port,omitempty"` // single or range "80", "443", "1000-2000"
 }
 

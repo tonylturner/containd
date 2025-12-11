@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	httpapi "github.com/containd/containd/api/http"
+	"github.com/containd/containd/pkg/cp/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,9 +22,10 @@ type mgmtHealthResponse struct {
 
 func main() {
 	addr := addrFromEnv("NGFW_MGMT_ADDR", ":8080")
-	router := gin.Default()
+	store := mustInitStore()
+	defer store.Close()
 
-	router.GET("/api/v1/health", health)
+	router := httpapi.NewServer(store)
 	serveStaticUI(router)
 
 	log.Printf("ngfw-mgmt listening on %s", addr)
@@ -86,4 +89,16 @@ func pickUIDir() string {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func mustInitStore() config.Store {
+	dbPath := addrFromEnv("NGFW_CONFIG_DB", filepath.Join("data", "config.db"))
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		log.Fatalf("failed to create config dir: %v", err)
+	}
+	store, err := config.NewSQLiteStore(dbPath)
+	if err != nil {
+		log.Fatalf("failed to open config store: %v", err)
+	}
+	return store
 }

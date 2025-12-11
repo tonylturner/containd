@@ -8,12 +8,12 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Add minimal CI job (lint + build) for Go and UI.
 - [ ] Config model foundation
   - [x] Define interface, zone, and firewall rule structs in `pkg/cp/config` with validation.
-  - [ ] Add SQLite-backed persistence abstraction.
+  - [x] Add SQLite-backed persistence abstraction.
   - [x] Expand `docs/config-format.md` with schema outline.
 - [ ] Control-plane API
-  - [ ] Scaffold Gin router in `api/http` with `/api/v1` grouping.
-  - [ ] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules.
-  - [ ] Add request validation and basic unit tests.
+  - [x] Scaffold Gin router in `api/http` with `/api/v1` grouping.
+  - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
+  - [x] Add request validation and basic unit tests.
 - [ ] Data-plane capture stub
   - [ ] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [ ] Create `pkg/dp/engine` harness to load/swap rule snapshots.
