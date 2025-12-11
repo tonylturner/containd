@@ -26,7 +26,7 @@ func main() {
 	addr := addrFromEnv("NGFW_MGMT_ADDR", ":8080")
 	store := mustInitStore()
 	defer store.Close()
-	_ = cli.NewRegistry(store) // placeholder until wired into SSH/HTTP transports
+	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
 
 	router := httpapi.NewServer(store)
 	serveStaticUI(router)

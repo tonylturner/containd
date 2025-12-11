@@ -128,6 +128,37 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	}
 }
 
+func TestUpdateZone(t *testing.T) {
+	m := &mockStore{
+		cfg: &config.Config{
+			Zones: []config.Zone{{Name: "it", Description: "old"}},
+		},
+	}
+	s := NewServer(m)
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/api/v1/zones/it", bytes.NewBufferString(`{"description":"new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if m.cfg.Zones[0].Description != "new" {
+		t.Fatalf("zone not updated")
+	}
+}
+
+func TestUpdateInterfaceNotFound(t *testing.T) {
+	m := &mockStore{cfg: &config.Config{}}
+	s := NewServer(m)
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/api/v1/interfaces/eth0", bytes.NewBufferString(`{"zone":"it"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
 func TestExportImportConfig(t *testing.T) {
 	m := &mockStore{}
 	s := NewServer(m)
@@ -151,6 +182,32 @@ func TestExportImportConfig(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"hostname":"containd"`)) {
 		t.Fatalf("export missing hostname: %s", rec.Body.String())
+	}
+}
+
+func TestSyslogHandlers(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m)
+
+	// Set syslog
+	body := `{"forwarders":[{"address":"1.2.3.4","port":514,"proto":"udp"}]}`
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/services/syslog", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Get syslog
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/services/syslog", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"1.2.3.4"`)) {
+		t.Fatalf("unexpected syslog payload: %s", rec.Body.String())
 	}
 }
 

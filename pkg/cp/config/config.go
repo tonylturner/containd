@@ -13,6 +13,7 @@ type Config struct {
 	Interfaces  []Interface    `json:"interfaces"`
 	Zones       []Zone         `json:"zones"`
 	Firewall    FirewallConfig `json:"firewall"`
+	Services    ServicesConfig `json:"services"`
 	Description string         `json:"description,omitempty"`
 	Version     string         `json:"version,omitempty"`
 }
@@ -20,6 +21,20 @@ type Config struct {
 type SystemConfig struct {
 	Hostname string `json:"hostname"`
 	// Placeholder for future system settings (NTP/DNS/syslog).
+}
+
+type ServicesConfig struct {
+	Syslog SyslogConfig `json:"syslog"`
+}
+
+type SyslogConfig struct {
+	Forwarders []SyslogForwarder `json:"forwarders"`
+}
+
+type SyslogForwarder struct {
+	Address string `json:"address"` // IP or hostname
+	Port    int    `json:"port"`
+	Proto   string `json:"proto"` // udp|tcp
 }
 
 type Interface struct {
@@ -76,6 +91,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateFirewall(c.Firewall, c.Zones); err != nil {
+		return err
+	}
+	if err := validateServices(c.Services); err != nil {
 		return err
 	}
 	return nil
@@ -167,6 +185,21 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 			if p.Name == "" {
 				return fmt.Errorf("rule %s has protocol with empty name", r.ID)
 			}
+		}
+	}
+	return nil
+}
+
+func validateServices(s ServicesConfig) error {
+	for _, fwd := range s.Syslog.Forwarders {
+		if fwd.Address == "" {
+			return errors.New("syslog forwarder address is required")
+		}
+		if fwd.Port <= 0 || fwd.Port > 65535 {
+			return fmt.Errorf("syslog forwarder %s has invalid port %d", fwd.Address, fwd.Port)
+		}
+		if fwd.Proto != "" && fwd.Proto != "udp" && fwd.Proto != "tcp" {
+			return fmt.Errorf("syslog forwarder %s has invalid proto %q", fwd.Address, fwd.Proto)
 		}
 	}
 	return nil

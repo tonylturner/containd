@@ -26,14 +26,19 @@ func NewServer(store config.Store) *gin.Engine {
 		api.POST("/config/validate", validateConfigHandler())
 		api.GET("/config/export", exportConfigHandler(store))
 		api.POST("/config/import", importConfigHandler(store))
+		api.GET("/services/syslog", getSyslogHandler(store))
+		api.POST("/services/syslog", setSyslogHandler(store))
 		api.GET("/zones", listZonesHandler(store))
 		api.POST("/zones", createZoneHandler(store))
+		api.PATCH("/zones/:name", updateZoneHandler(store))
 		api.DELETE("/zones/:name", deleteZoneHandler(store))
 		api.GET("/interfaces", listInterfacesHandler(store))
 		api.POST("/interfaces", createInterfaceHandler(store))
+		api.PATCH("/interfaces/:name", updateInterfaceHandler(store))
 		api.DELETE("/interfaces/:name", deleteInterfaceHandler(store))
 		api.GET("/firewall/rules", listFirewallRulesHandler(store))
 		api.POST("/firewall/rules", createFirewallRuleHandler(store))
+		api.PATCH("/firewall/rules/:id", updateFirewallRuleHandler(store))
 		api.DELETE("/firewall/rules/:id", deleteFirewallRuleHandler(store))
 	}
 
@@ -135,6 +140,37 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+func getSyslogHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.Syslog)
+	}
+}
+
+func setSyslogHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var syslogCfg config.SyslogConfig
+		if err := c.ShouldBindJSON(&syslogCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.Syslog = syslogCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.Syslog)
+	}
+}
 func listZonesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -215,6 +251,42 @@ func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+func updateZoneHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := c.Param("name")
+		var z config.Zone
+		if err := c.ShouldBindJSON(&z); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid zone payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Zones {
+			if existing.Name == name {
+				if z.Name == "" {
+					z.Name = existing.Name
+				}
+				cfg.Zones[i] = z
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, z)
+	}
+}
+
 func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -278,6 +350,42 @@ func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.Status(http.StatusNoContent)
+	}
+}
+
+func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := c.Param("name")
+		var iface config.Interface
+		if err := c.ShouldBindJSON(&iface); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid interface payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Interfaces {
+			if existing.Name == name {
+				if iface.Name == "" {
+					iface.Name = existing.Name
+				}
+				cfg.Interfaces[i] = iface
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "interface not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, iface)
 	}
 }
 
@@ -347,6 +455,42 @@ func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.Status(http.StatusNoContent)
+	}
+}
+
+func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var rule config.Rule
+		if err := c.ShouldBindJSON(&rule); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Firewall.Rules {
+			if existing.ID == id {
+				if rule.ID == "" {
+					rule.ID = existing.ID
+				}
+				cfg.Firewall.Rules[i] = rule
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, rule)
 	}
 }
 

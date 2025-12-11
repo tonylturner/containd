@@ -16,17 +16,21 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add request validation and basic unit tests.
   - [x] Add config export/import endpoints.
 - [ ] Data-plane capture stub
-  - [ ] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
-  - [ ] Create `pkg/dp/engine` harness to load/swap rule snapshots.
+  - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
+  - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
 - [ ] Rule engine skeleton
-  - [ ] Define immutable rule bundle structs in `pkg/dp/rules`.
-  - [ ] Add swap mechanism and basic allow/deny evaluation stub.
+  - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
+  - [x] Add swap mechanism and basic allow/deny evaluation stub.
+  - [ ] Add ICS/identity predicates to evaluator (placeholders added in rule structs).
 - [ ] Flow tracking scaffold
-  - [ ] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
-  - [ ] Add unit tests for flow key hashing/equality.
+  - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
+  - [x] Add unit tests for flow key hashing/equality.
 - [ ] CLI shell
   - [x] Outline command registry in `pkg/cli`.
   - [x] Add `show version`, `show interfaces`, `show zones` stubs wired to control-plane config store (API wiring TBD).
+  - [x] Add API-backed commands (`show health`, `show config`) using management HTTP endpoints.
+  - [x] Add mutating commands (`set zone`, `set interface`) via API.
+  - [ ] Add mutating commands for firewall rules (set/delete).
 - [ ] UI integration
   - [ ] Add dashboard fetching `/api/v1/health`.
   - [ ] Set up API client layer.
@@ -40,10 +44,12 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] Observability/logging
   - [x] Add structured logging helper in `pkg/common`.
   - [x] Use helper in both binaries.
-  - [ ] Plan syslog forwarding API surface in control plane.
+  - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
+  - [ ] Implement syslog forwarding pipeline (UDP/TCP) and hook to events.
 - [ ] Security/auth foundations
   - [ ] Draft admin user/auth config model hooks (even if unauthenticated initially).
   - [ ] Plan SSH server integration points for Phase 4.
 - [ ] Documentation
-  - [ ] Expand `docs/architecture.md` with module boundaries and data/control/management plane flows.
-  - [ ] Update `docs/dataplane.md` with policy compilation → engine flow.
+  - [x] Expand `docs/architecture.md` with module boundaries and data/control/management plane flows.
+  - [x] Update `docs/dataplane.md` with policy compilation → engine flow.
+  - [x] Flesh out `docs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
