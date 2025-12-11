@@ -14,6 +14,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Scaffold Gin router in `api/http` with `/api/v1` grouping.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
   - [x] Add request validation and basic unit tests.
+  - [x] Add config export/import endpoints.
 - [ ] Data-plane capture stub
   - [ ] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [ ] Create `pkg/dp/engine` harness to load/swap rule snapshots.
@@ -24,8 +25,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [ ] Add unit tests for flow key hashing/equality.
 - [ ] CLI shell
-  - [ ] Outline command registry in `pkg/cli`.
-  - [ ] Add `show version`, `show interfaces`, `show running-config` stubs wired to control-plane API calls.
+  - [x] Outline command registry in `pkg/cli`.
+  - [x] Add `show version`, `show interfaces`, `show zones` stubs wired to control-plane config store (API wiring TBD).
 - [ ] UI integration
   - [ ] Add dashboard fetching `/api/v1/health`.
   - [ ] Set up API client layer.
@@ -37,8 +38,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Document compose usage in README and `docs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
 - [ ] Observability/logging
-  - [ ] Add structured logging helper in `pkg/common`.
-  - [ ] Use helper in both binaries.
+  - [x] Add structured logging helper in `pkg/common`.
+  - [x] Use helper in both binaries.
   - [ ] Plan syslog forwarding API surface in control plane.
 - [ ] Security/auth foundations
   - [ ] Draft admin user/auth config model hooks (even if unauthenticated initially).

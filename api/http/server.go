@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -22,6 +24,8 @@ func NewServer(store config.Store) *gin.Engine {
 		api.GET("/config", getConfigHandler(store))
 		api.POST("/config", saveConfigHandler(store))
 		api.POST("/config/validate", validateConfigHandler())
+		api.GET("/config/export", exportConfigHandler(store))
+		api.POST("/config/import", importConfigHandler(store))
 		api.GET("/zones", listZonesHandler(store))
 		api.POST("/zones", createZoneHandler(store))
 		api.DELETE("/zones/:name", deleteZoneHandler(store))
@@ -89,6 +93,45 @@ func validateConfigHandler() gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "valid"})
+	}
+}
+
+func exportConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := store.Load(c.Request.Context())
+		if err != nil {
+			if errors.Is(err, config.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg)
+	}
+}
+
+func importConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+			return
+		}
+		var cfg config.Config
+		if err := json.Unmarshal(body, &cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		if err := cfg.Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.Save(c.Request.Context(), &cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "imported"})
 	}
 }
 

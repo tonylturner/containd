@@ -128,6 +128,32 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	}
 }
 
+func TestExportImportConfig(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m)
+
+	// Import config
+	importBody := `{"system":{"hostname":"containd"},"zones":[{"name":"it"}],"interfaces":[{"name":"eth0","zone":"it"}],"firewall":{"defaultAction":"ALLOW","rules":[]}}`
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/config/import", bytes.NewBufferString(importBody))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Export should return same hostname
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/config/export", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"hostname":"containd"`)) {
+		t.Fatalf("export missing hostname: %s", rec.Body.String())
+	}
+}
+
 func TestSaveConfigValidationError(t *testing.T) {
 	m := &mockStore{
 		save: func(cfg *config.Config) error {

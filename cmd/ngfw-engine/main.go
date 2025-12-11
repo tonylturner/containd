@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
+
+	"github.com/containd/containd/pkg/common/logging"
 )
 
 type healthResponse struct {
@@ -16,13 +17,14 @@ type healthResponse struct {
 
 func main() {
 	addr := addrFromEnv("NGFW_ENGINE_ADDR", ":8081")
+	logger := logging.New("[engine]")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 
-	log.Printf("ngfw-engine starting on %s", addr)
+	logger.Printf("ngfw-engine starting on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("server exited: %v", err)
+		logger.Fatalf("server exited: %v", err)
 	}
 }
 

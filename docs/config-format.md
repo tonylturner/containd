@@ -42,3 +42,13 @@ Notes:
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
+
+## API endpoints (initial)
+- `GET /api/v1/config` – fetch current config (404 if none).
+- `POST /api/v1/config` – replace config (validates).
+- `POST /api/v1/config/validate` – validate JSON without saving.
+- `GET /api/v1/config/export` – export current config.
+- `POST /api/v1/config/import` – import+save config (validates).
+- `GET/POST/DELETE /api/v1/zones` – list/add/delete zones.
+- `GET/POST/DELETE /api/v1/interfaces` – list/add/delete interfaces.
+- `GET/POST/DELETE /api/v1/firewall/rules` – list/add/delete firewall rules.
