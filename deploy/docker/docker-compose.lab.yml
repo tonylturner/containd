@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  ngfw-engine:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.engine
+    image: containd/ngfw-engine:dev
+    environment:
+      - NGFW_ENGINE_ADDR=:8081
+    ports:
+      - "8081:8081"
+    networks:
+      it:
+      ot_control:
+      ot_safety:
+    command: ["/usr/bin/ngfw-engine"]
+
+  ngfw-mgmt:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mgmt
+    image: containd/ngfw-mgmt:dev
+    environment:
+      - NGFW_MGMT_ADDR=:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ngfw-engine
+    networks:
+      mgmt:
+      it:
+    command: ["/usr/bin/ngfw-mgmt"]
+
+networks:
+  mgmt: {}
+  it: {}
+  ot_control: {}
+  ot_safety: {}

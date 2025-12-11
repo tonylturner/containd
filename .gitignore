@@ -23,3 +23,26 @@ go.work.sum
 
 # env file
 .env
+
+# macOS cruft
+.DS_Store
+
+# Go / build caches
+.cache/
+bin/
+
+# Node/Next.js
+node_modules/
+ui/.next/
+ui/node_modules/
+ui/.turbo/
+ui/.vercel/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor/IDE
+.idea/
+.vscode/
