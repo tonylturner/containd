@@ -48,8 +48,8 @@ func health(c *gin.Context) {
 }
 
 func serveStaticUI(router *gin.Engine) {
-	uiDir := filepath.Join(".", "ui", "public")
-	if _, err := os.Stat(uiDir); err == nil {
+	uiDir := pickUIDir()
+	if uiDir != "" {
 		router.Static("/", uiDir)
 		return
 	}
@@ -58,4 +58,32 @@ func serveStaticUI(router *gin.Engine) {
 	router.NoRoute(func(c *gin.Context) {
 		c.String(http.StatusOK, "containd management API is running. UI build not found.")
 	})
+}
+
+func pickUIDir() string {
+	// Allow override for packaged builds.
+	if override := os.Getenv("NGFW_UI_DIR"); override != "" {
+		if dirExists(override) {
+			return override
+		}
+	}
+
+	// Prefer Next.js static export if present.
+	candidates := []string{
+		filepath.Join(".", "ui", "out"),
+		filepath.Join(".", "ui", "public"),
+		"/var/lib/ngfw/ui",
+	}
+
+	for _, c := range candidates {
+		if dirExists(c) {
+			return c
+		}
+	}
+	return ""
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

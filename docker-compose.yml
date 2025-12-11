@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  containd:
+    build:
+      context: .
+      dockerfile: Dockerfile.mgmt
+    image: containd/containd:dev
+    environment:
+      - NGFW_MGMT_ADDR=:8080
+    ports:
+      - "8080:8080"
+    command: ["/usr/bin/ngfw-mgmt"]
