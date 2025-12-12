@@ -75,6 +75,13 @@ type MgmtConfig struct {
 	// TrustedCAFile is an optional PEM bundle of additional trusted CAs for outbound TLS clients.
 	// If empty, the OS trust store is used.
 	TrustedCAFile string `json:"trustedCAFile,omitempty"` // e.g. "/data/tls/trusted_ca.pem"
+
+	// RedirectHTTPToHTTPS, when enabled, redirects GET/HEAD HTTP requests to HTTPS.
+	RedirectHTTPToHTTPS *bool `json:"redirectHTTPToHTTPS,omitempty"`
+	// EnableHSTS, when enabled, adds Strict-Transport-Security on HTTPS responses.
+	EnableHSTS *bool `json:"enableHSTS,omitempty"`
+	// HSTSMaxAgeSeconds controls the Strict-Transport-Security max-age.
+	HSTSMaxAgeSeconds int `json:"hstsMaxAgeSeconds,omitempty"`
 }
 
 // SSHConfig controls the embedded SSH server (interactive CLI).
@@ -403,6 +410,9 @@ func validateMgmt(m MgmtConfig) error {
 	}
 	if m.TrustedCAFile != "" && len(m.TrustedCAFile) > 256 {
 		return fmt.Errorf("mgmt.trustedCAFile too long")
+	}
+	if m.HSTSMaxAgeSeconds < 0 || m.HSTSMaxAgeSeconds > 10*365*24*60*60 {
+		return fmt.Errorf("mgmt.hstsMaxAgeSeconds out of range")
 	}
 	// We accept anything net/http can listen on; detailed parsing later.
 	return nil

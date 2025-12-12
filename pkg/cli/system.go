@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,8 +66,25 @@ func showSystem(api *API) Command {
 		_ = api.getJSON(ctx, "/api/v1/config", &cfg)
 
 		fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
-		if cfg.System.Mgmt.ListenAddr != "" {
-			fmt.Fprintf(out, "mgmt.listen: %s\n", cfg.System.Mgmt.ListenAddr)
+		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+		fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)))
+		fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)))
+		fmt.Fprintf(out, "mgmt.http_listen: %s\n", mgmtHTTP)
+		fmt.Fprintf(out, "mgmt.https_listen: %s\n", mgmtHTTPS)
+		fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
+		fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)))
+		if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
+			fmt.Fprintf(out, "mgmt.hsts_max_age_seconds: %d\n", cfg.System.Mgmt.HSTSMaxAgeSeconds)
+		}
+		if cfg.System.Mgmt.TLSCertFile != "" {
+			fmt.Fprintf(out, "mgmt.tls_cert_file: %s\n", cfg.System.Mgmt.TLSCertFile)
+		}
+		if cfg.System.Mgmt.TLSKeyFile != "" {
+			fmt.Fprintf(out, "mgmt.tls_key_file: %s\n", cfg.System.Mgmt.TLSKeyFile)
+		}
+		if cfg.System.Mgmt.TrustedCAFile != "" {
+			fmt.Fprintf(out, "mgmt.trusted_ca_file: %s\n", cfg.System.Mgmt.TrustedCAFile)
 		}
 		if cfg.System.SSH.ListenAddr != "" {
 			fmt.Fprintf(out, "ssh.listen: %s\n", cfg.System.SSH.ListenAddr)
@@ -114,6 +132,115 @@ func setSystemMgmtListenAPI(api *API) Command {
 			return err
 		}
 		cfg.System.Mgmt.ListenAddr = args[0]
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtHTTPListenAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt http listen <addr>")
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.HTTPListenAddr = args[0]
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtHTTPSListenAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt https listen <addr>")
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.HTTPSListenAddr = args[0]
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtEnableHTTPAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt http enable <true|false>")
+		}
+		v, err := parseBoolArg(args[0])
+		if err != nil {
+			return err
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.EnableHTTP = &v
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtEnableHTTPSAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt https enable <true|false>")
+		}
+		v, err := parseBoolArg(args[0])
+		if err != nil {
+			return err
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.EnableHTTPS = &v
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtRedirectHTTPToHTTPSAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt redirect-http-to-https <true|false>")
+		}
+		v, err := parseBoolArg(args[0])
+		if err != nil {
+			return err
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.RedirectHTTPToHTTPS = &v
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemMgmtHSTSAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system mgmt hsts <true|false> [max_age_seconds]")
+		}
+		enabled, err := parseBoolArg(args[0])
+		if err != nil {
+			return err
+		}
+		maxAge := 31536000
+		if len(args) >= 2 {
+			if v, err := strconv.Atoi(strings.TrimSpace(args[1])); err == nil && v > 0 {
+				maxAge = v
+			}
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.Mgmt.EnableHSTS = &enabled
+		if enabled {
+			cfg.System.Mgmt.HSTSMaxAgeSeconds = maxAge
+		}
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }
@@ -170,6 +297,18 @@ func setSystemSSHAuthorizedKeysDirAPI(api *API) Command {
 	}
 }
 
+func parseBoolArg(s string) (bool, error) {
+	v := strings.ToLower(strings.TrimSpace(s))
+	switch v {
+	case "1", "true", "yes", "on", "enable", "enabled":
+		return true, nil
+	case "0", "false", "no", "off", "disable", "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value %q", s)
+	}
+}
+
 func showIDSRulesAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var idsCfg config.IDSConfig
@@ -209,4 +348,11 @@ func loadCandidateOrRunning(ctx context.Context, api *API) (*config.Config, erro
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func boolDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
 }

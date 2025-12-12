@@ -364,14 +364,14 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 		writeLn("containd console menu")
 		writeLn("")
 		writeLn("0)  Logout")
-		writeLn("1)  Setup wizard")
-		writeLn("2)  Diagnostics")
-		writeLn("3)  Assign interface (zone + addresses)")
-		writeLn("4)  Show system")
-		writeLn("5)  Show interfaces")
-		writeLn("6)  Show ip route")
-		writeLn("7)  Reset your password")
-		writeLn("8)  Commit candidate config")
+		writeLn("1)  Assign interfaces (zone)")
+		writeLn("2)  Set interface IP address")
+		writeLn("3)  Reset admin password")
+		writeLn("4)  Setup wizard")
+		writeLn("5)  Diagnostics")
+		writeLn("6)  Show system")
+		writeLn("7)  Show interfaces")
+		writeLn("8)  Show ip route")
 		writeLn("9)  Help")
 		writeLn("")
 
@@ -383,10 +383,7 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 		case "0":
 			return
 		case "1":
-			s.runWizard(ctx, username, rw, reader, reg)
-		case "2":
-			s.runDiagnosticsMenu(ctx, rw, reader, reg)
-		case "3":
+			_ = exec("show interfaces")
 			iface, ok := ask("Interface name (e.g. lan1): ")
 			if !ok {
 				continue
@@ -405,23 +402,31 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 				writeLn("Zone is required.")
 				continue
 			}
-			addrs, ok := ask("Addresses (CIDRs, space-separated; blank for none): ")
+			_ = exec("set interface zone " + shellEscape(iface) + " " + shellEscape(zone))
+		case "2":
+			_ = exec("show interfaces")
+			iface, ok := ask("Interface name (e.g. lan1): ")
+			if !ok {
+				continue
+			}
+			iface = strings.TrimSpace(iface)
+			if iface == "" {
+				writeLn("Interface name is required.")
+				continue
+			}
+			addrs, ok := ask("Addresses (CIDRs, space-separated; blank to clear): ")
 			if !ok {
 				continue
 			}
 			addrs = strings.TrimSpace(addrs)
-			cmd := "set interface " + shellEscape(iface) + " " + shellEscape(zone)
-			if addrs != "" {
+			cmd := "set interface ip " + shellEscape(iface)
+			if addrs == "" {
+				cmd += " none"
+			} else {
 				cmd += " " + addrs
 			}
 			_ = exec(cmd)
-		case "4":
-			_ = exec("show system")
-		case "5":
-			_ = exec("show interfaces")
-		case "6":
-			_ = exec("show ip route")
-		case "7":
+		case "3":
 			pw, ok := ask("New password (blank to cancel): ")
 			if !ok {
 				continue
@@ -449,8 +454,16 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 				})
 			}
 			writeLn("Password updated.")
+		case "4":
+			s.runWizard(ctx, username, rw, reader, reg)
+		case "5":
+			s.runDiagnosticsMenu(ctx, rw, reader, reg)
+		case "6":
+			_ = exec("show system")
+		case "7":
+			_ = exec("show interfaces")
 		case "8":
-			_ = exec("commit")
+			_ = exec("show ip route")
 		case "9":
 			_ = exec("help")
 		default:
@@ -711,6 +724,38 @@ func (s *Server) runWizard(ctx context.Context, username string, rw io.ReadWrite
 	} else {
 		writeLn("Wizard cancelled.")
 		return
+	}
+
+	// SSH key enrollment (optional).
+	keyAdded := false
+	if v, ok := ask("Paste an SSH public key to enroll for this user (blank to skip): "); ok {
+		if strings.TrimSpace(v) != "" {
+			if err := s.SeedAuthorizedKey(username, v); err != nil {
+				writeLn("error: failed to add key: " + err.Error())
+			} else {
+				writeLn("ssh key added")
+				keyAdded = true
+			}
+		}
+	} else {
+		writeLn("Wizard cancelled.")
+		return
+	}
+
+	if keyAdded {
+		if v, ok := ask("Disable SSH password auth now? (yes/no, blank to keep): "); ok && v != "" {
+			v = strings.ToLower(strings.TrimSpace(v))
+			if v == "y" || v == "yes" {
+				if !exec("set system ssh allow-password false") {
+					writeLn("Wizard cancelled.")
+					return
+				}
+				writeLn("ok")
+			}
+		} else if !ok {
+			writeLn("Wizard cancelled.")
+			return
+		}
 	}
 
 	if v, ok := ask("Commit changes now? (yes/no): "); ok {

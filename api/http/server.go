@@ -150,7 +150,21 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 		cfg, err := store.Load(c.Request.Context())
 		if err != nil {
 			if errors.Is(err, config.ErrNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
+				def := config.DefaultConfig()
+				def.System.Hostname = "containd"
+				def.System.Mgmt.ListenAddr = ":8080"
+				def.System.Mgmt.HTTPListenAddr = ":8080"
+				def.System.Mgmt.HTTPSListenAddr = ":8443"
+				t := true
+				def.System.Mgmt.EnableHTTP = &t
+				def.System.Mgmt.EnableHTTPS = &t
+				def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+				def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+				def.System.SSH.ListenAddr = ":2222"
+				def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
+				// NOTE: password auth is controlled by runtime bootstrap logic; don't force it in config here.
+				_ = store.Save(c.Request.Context(), def)
+				c.JSON(http.StatusOK, def)
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1060,11 +1074,26 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		isAccessUnset := func(a config.InterfaceAccess) bool {
+			return a.Mgmt == nil && a.HTTP == nil && a.HTTPS == nil && a.SSH == nil
+		}
 		updated := false
 		for i, existing := range cfg.Interfaces {
 			if existing.Name == name {
 				if iface.Name == "" {
 					iface.Name = existing.Name
+				}
+				if strings.TrimSpace(iface.Zone) == "" {
+					iface.Zone = existing.Zone
+				}
+				// If addresses are omitted from the JSON payload, keep existing values.
+				// An explicit empty list clears addresses.
+				if iface.Addresses == nil {
+					iface.Addresses = existing.Addresses
+				}
+				// Access is a struct with pointer fields; if omitted (all nil), keep existing.
+				if isAccessUnset(iface.Access) {
+					iface.Access = existing.Access
 				}
 				cfg.Interfaces[i] = iface
 				updated = true
@@ -1079,6 +1108,7 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
 		c.JSON(http.StatusOK, iface)
 	}
 }
@@ -1192,7 +1222,19 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 	cfg, err := store.Load(ctx)
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {
-			return config.DefaultConfig(), nil
+			def := config.DefaultConfig()
+			def.System.Hostname = "containd"
+			def.System.Mgmt.ListenAddr = ":8080"
+			def.System.Mgmt.HTTPListenAddr = ":8080"
+			def.System.Mgmt.HTTPSListenAddr = ":8443"
+			t := true
+			def.System.Mgmt.EnableHTTP = &t
+			def.System.Mgmt.EnableHTTPS = &t
+			def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+			def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+			def.System.SSH.ListenAddr = ":2222"
+			def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
+			return def, nil
 		}
 		return nil, err
 	}

@@ -173,6 +173,10 @@ export default function SystemSettingsPage() {
         <pre className="mt-3 rounded-lg bg-black/40 p-3 text-xs text-slate-200">
 show system{"\n"}
 set system mgmt listen &lt;addr&gt;{"\n"}
+set system mgmt http enable &lt;true|false&gt;{"\n"}
+set system mgmt https enable &lt;true|false&gt;{"\n"}
+set system mgmt redirect-http-to-https &lt;true|false&gt;{"\n"}
+set system mgmt hsts &lt;true|false&gt; [max_age_seconds]{"\n"}
 set system ssh allow-password &lt;true|false&gt;{"\n"}
 commit
         </pre>

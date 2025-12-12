@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,16 @@ func main() {
 	// Start SSH server (admin-only) for interactive CLI.
 	sshAddr, sshEnabled := startSSH(logger, store, userStore, auditStore, httpAddr, httpLoopbackAddr, ipIndex)
 
+	redirectHTTPToHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.RedirectHTTPToHTTPS }), false)
+	enableHSTS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHSTS }), false)
+	hstsMaxAge := cfgGetInt(cfg, func(c *config.Config) int { return c.System.Mgmt.HSTSMaxAgeSeconds }, 31536000)
+	if hstsMaxAge <= 0 {
+		hstsMaxAge = 31536000
+	}
+
+	handler = hstsHandler(enableHSTS, hstsMaxAge, handler)
+	// Note: redirect is applied only for the plain HTTP listeners.
+
 	tlsCert, tlsKey := resolveTLSFiles(cfg)
 	if enableHTTPS {
 		var err error
@@ -114,7 +125,11 @@ func main() {
 	var listeners []net.Listener
 
 	if enableHTTP {
-		srv, lns, err := buildHTTPServers(handler, httpAddr, httpLoopbackAddr)
+		httpHandler := handler
+		if redirectHTTPToHTTPS {
+			httpHandler = redirectToHTTPSHandler(httpsAddr, httpHandler)
+		}
+		srv, lns, err := buildHTTPServers(httpHandler, httpAddr, httpLoopbackAddr)
 		if err != nil {
 			logger.Fatalf("http disabled: %v", err)
 		}
@@ -261,6 +276,44 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 	}
 	cfg, err := store.Load(context.Background())
 	if err == nil && cfg != nil {
+		changed := false
+		if strings.TrimSpace(cfg.System.Hostname) == "" {
+			cfg.System.Hostname = "containd"
+			changed = true
+		}
+		if strings.TrimSpace(cfg.System.Mgmt.ListenAddr) == "" {
+			cfg.System.Mgmt.ListenAddr = ":8080"
+			changed = true
+		}
+		if strings.TrimSpace(cfg.System.Mgmt.HTTPListenAddr) == "" {
+			cfg.System.Mgmt.HTTPListenAddr = ":8080"
+			changed = true
+		}
+		if strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) == "" {
+			cfg.System.Mgmt.HTTPSListenAddr = ":8443"
+			changed = true
+		}
+		if cfg.System.Mgmt.EnableHTTP == nil {
+			cfg.System.Mgmt.EnableHTTP = boolPtr(true)
+			changed = true
+		}
+		if cfg.System.Mgmt.EnableHTTPS == nil {
+			cfg.System.Mgmt.EnableHTTPS = boolPtr(true)
+			changed = true
+		}
+		if strings.TrimSpace(cfg.System.Mgmt.TLSCertFile) == "" {
+			cfg.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+			changed = true
+		}
+		if strings.TrimSpace(cfg.System.Mgmt.TLSKeyFile) == "" {
+			cfg.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+			changed = true
+		}
+		if changed {
+			if err := store.Save(context.Background(), cfg); err != nil {
+				logger.Printf("failed to backfill default config values: %v", err)
+			}
+		}
 		return
 	}
 	if !errors.Is(err, config.ErrNotFound) {
@@ -451,6 +504,13 @@ func cfgGetBool(cfg *config.Config, f func(*config.Config) *bool) *bool {
 	return f(cfg)
 }
 
+func cfgGetInt(cfg *config.Config, f func(*config.Config) int, def int) int {
+	if cfg == nil {
+		return def
+	}
+	return f(cfg)
+}
+
 func resolveTLSFiles(cfg *config.Config) (certFile, keyFile string) {
 	certFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_CERT_FILE"))
 	keyFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_KEY_FILE"))
@@ -467,6 +527,54 @@ func resolveTLSFiles(cfg *config.Config) (certFile, keyFile string) {
 		keyFile = "/data/tls/server.key"
 	}
 	return certFile, keyFile
+}
+
+func hstsHandler(enabled bool, maxAgeSeconds int, next http.Handler) http.Handler {
+	if !enabled {
+		return next
+	}
+	if maxAgeSeconds <= 0 {
+		maxAgeSeconds = 31536000
+	}
+	value := "max-age=" + strconv.Itoa(maxAgeSeconds)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r != nil && r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", value)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func redirectToHTTPSHandler(httpsAddr string, next http.Handler) http.Handler {
+	httpsPort := portOf(httpsAddr)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r == nil || r.TLS != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		host := r.Host
+		if host == "" {
+			host = "localhost"
+		}
+		if strings.Contains(host, "@") {
+			// Don't try to be clever; pass through.
+			next.ServeHTTP(w, r)
+			return
+		}
+		h, _, err := net.SplitHostPort(host)
+		if err == nil && h != "" {
+			host = h
+		}
+		if httpsPort != "" {
+			host = net.JoinHostPort(host, httpsPort)
+		}
+		target := "https://" + host + r.URL.RequestURI()
+		http.Redirect(w, r, target, http.StatusFound)
+	})
 }
 
 type certReloader struct {

@@ -13,8 +13,8 @@ import (
 
 	"bytes"
 
-	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/audit"
+	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/ids"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/kballard/go-shellquote"
@@ -72,6 +72,38 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.BaseURL+path, buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+	}
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	a.updateTokenFromResponse(resp)
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	if out != nil {
+		_, _ = out.Write([]byte("ok\n"))
+	}
+	return nil
+}
+
+func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Writer) error {
+	if a.Client == nil {
+		a.Client = http.DefaultClient
+	}
+	buf := &bytes.Buffer{}
+	if err := json.NewEncoder(buf).Encode(payload); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, a.BaseURL+path, buf)
 	if err != nil {
 		return err
 	}
@@ -164,11 +196,19 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
 		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
 		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
+		r.RegisterRole("set interface zone", RoleAdmin, setInterfaceZoneAPI(api))
+		r.RegisterRole("set interface ip", RoleAdmin, setInterfaceIPAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
 		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
 		r.RegisterRole("set dataplane", RoleAdmin, setDataPlaneAPI(api))
 		r.RegisterRole("set system hostname", RoleAdmin, setSystemHostnameAPI(api))
 		r.RegisterRole("set system mgmt listen", RoleAdmin, setSystemMgmtListenAPI(api))
+		r.RegisterRole("set system mgmt http listen", RoleAdmin, setSystemMgmtHTTPListenAPI(api))
+		r.RegisterRole("set system mgmt https listen", RoleAdmin, setSystemMgmtHTTPSListenAPI(api))
+		r.RegisterRole("set system mgmt http enable", RoleAdmin, setSystemMgmtEnableHTTPAPI(api))
+		r.RegisterRole("set system mgmt https enable", RoleAdmin, setSystemMgmtEnableHTTPSAPI(api))
+		r.RegisterRole("set system mgmt redirect-http-to-https", RoleAdmin, setSystemMgmtRedirectHTTPToHTTPSAPI(api))
+		r.RegisterRole("set system mgmt hsts", RoleAdmin, setSystemMgmtHSTSAPI(api))
 		r.RegisterRole("set system ssh listen", RoleAdmin, setSystemSSHListenAPI(api))
 		r.RegisterRole("set system ssh allow-password", RoleAdmin, setSystemSSHAllowPasswordAPI(api))
 		r.RegisterRole("set system ssh authorized-keys-dir", RoleAdmin, setSystemSSHAuthorizedKeysDirAPI(api))
@@ -586,6 +626,33 @@ func setInterfaceAPI(api *API) Command {
 			Addresses: args[2:],
 		}
 		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
+	}
+}
+
+func setInterfaceZoneAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: set interface zone <name> <zone>")
+		}
+		payload := config.Interface{Zone: args[1]}
+		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
+	}
+}
+
+func setInterfaceIPAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: set interface ip <name> <cidr...|none>")
+		}
+		addrs := args[1:]
+		if len(addrs) == 1 {
+			switch strings.ToLower(strings.TrimSpace(addrs[0])) {
+			case "none", "clear", "-":
+				addrs = []string{}
+			}
+		}
+		payload := config.Interface{Addresses: addrs}
+		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
 	}
 }
 

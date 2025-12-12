@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -37,10 +38,10 @@ func authedRequest(method, path string, body io.Reader) *http.Request {
 }
 
 type mockStore struct {
-	cfg   *config.Config
-	save  func(*config.Config) error
-	load  func() (*config.Config, error)
-	calls int
+	cfg     *config.Config
+	save    func(*config.Config) error
+	load    func() (*config.Config, error)
+	calls   int
 	lastTTL time.Duration
 }
 
@@ -74,14 +75,14 @@ func (m *mockStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
 	return m.Load(ctx)
 }
 
-func (m *mockStore) Commit(ctx context.Context) error   { return nil }
+func (m *mockStore) Commit(ctx context.Context) error { return nil }
 func (m *mockStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
 	m.lastTTL = ttl
 	return nil
 }
 func (m *mockStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *mockStore) Rollback(ctx context.Context) error { return nil }
-func (m *mockStore) Close() error { return nil }
+func (m *mockStore) Rollback(ctx context.Context) error      { return nil }
+func (m *mockStore) Close() error                            { return nil }
 
 type mockEngine struct {
 	applied bool
@@ -106,14 +107,21 @@ func TestGetConfigNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/config", nil)
 	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var cfg config.Config
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if cfg.System.Hostname != "containd" {
+		t.Fatalf("expected default hostname containd, got %q", cfg.System.Hostname)
 	}
 }
 
 func TestSaveConfig(t *testing.T) {
-	    m := &mockStore{}
-	    s := NewServer(m, nil)
+	m := &mockStore{}
+	s := NewServer(m, nil)
 	body := bytes.NewBufferString(`{"system":{"hostname":"containd"},"zones":[{"name":"it"}]}`)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config", body)
@@ -187,7 +195,7 @@ func TestCreateRuleDuplicate(t *testing.T) {
 			},
 		},
 	}
-	    s := NewServer(m, nil)
+	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules", bytes.NewBufferString(`{"id":"1","action":"ALLOW"}`))
 	req.Header.Set("Content-Type", "application/json")
