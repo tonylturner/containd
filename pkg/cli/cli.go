@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"encoding/json"
 
@@ -14,6 +15,8 @@ import (
 
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/audit"
+	"github.com/containd/containd/pkg/cp/ids"
+	"github.com/kballard/go-shellquote"
 )
 
 type HTTPClient interface {
@@ -118,9 +121,18 @@ type Registry struct {
 func NewRegistry(store config.Store, api *API) *Registry {
 	r := &Registry{commands: map[string]Command{}}
 	r.Register("show version", showVersion)
+	r.Register("convert sigma", convertSigma)
+	r.Register("help", helpCommand(r))
+	r.Register("show help", showHelpCommand(r))
+	r.Register("set help", setHelpCommand(r))
 	if api != nil {
 		r.Register("show health", showHealth(api))
 		r.Register("show config", showConfig(api))
+		r.Register("show running-config", showRunningConfig(api))
+		r.Register("show candidate-config", showCandidateConfig(api))
+		r.Register("show diff", showDiff(api))
+		r.Register("show system", showSystem(api))
+		r.Register("show services status", showServicesStatus(api))
 		r.Register("show audit", showAudit(api))
 		r.Register("show dataplane", showDataPlane(api))
 		r.Register("show proxy forward", showForwardProxy(api))
@@ -129,11 +141,14 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("show events", showEvents(api))
 		r.Register("show zones", showZonesAPI(api))
 		r.Register("show interfaces", showInterfacesAPI(api))
+		r.Register("show ids rules", showIDSRulesAPI(api))
 		r.Register("set zone", setZoneAPI(api))
 		r.Register("set interface", setInterfaceAPI(api))
 		r.Register("set firewall rule", setFirewallRuleAPI(api))
 		r.Register("delete firewall rule", deleteFirewallRuleAPI(api))
 		r.Register("set dataplane", setDataPlaneAPI(api))
+		r.Register("set system hostname", setSystemHostnameAPI(api))
+		r.Register("set system mgmt listen", setSystemMgmtListenAPI(api))
 		r.Register("set proxy forward", setForwardProxyAPI(api))
 		r.Register("set proxy reverse", setReverseProxyAPI(api))
 		r.Register("commit", commitAPI(api))
@@ -147,6 +162,13 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("show interfaces", showInterfaces(store))
 	}
 	return r
+}
+
+func convertSigma(ctx context.Context, out io.Writer, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: convert sigma <sigma.yml> [more.yml...]")
+	}
+	return ids.WriteConvertedSigma(out, args)
 }
 
 // Register adds a command handler.
@@ -164,6 +186,56 @@ func (r *Registry) Execute(ctx context.Context, name string, out io.Writer, args
 		return fmt.Errorf("unknown command: %s", name)
 	}
 	return cmd(ctx, out, args)
+}
+
+// Commands returns available command names.
+func (r *Registry) Commands() []string {
+	if r == nil || r.commands == nil {
+		return nil
+	}
+	out := make([]string, 0, len(r.commands))
+	for k := range r.commands {
+		out = append(out, k)
+	}
+	return out
+}
+
+// ParseAndExecute splits a CLI line (bash-style) and executes it.
+// It matches the longest registered command prefix, passing remaining tokens as args.
+func (r *Registry) ParseAndExecute(ctx context.Context, line string, out io.Writer) error {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	tokens, err := shellquote.Split(line)
+	if err != nil {
+		return err
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	name, args := matchCommand(tokens, r.Commands())
+	if name == "" {
+		return fmt.Errorf("unknown command: %s", tokens[0])
+	}
+	return r.Execute(ctx, name, out, args)
+}
+
+func matchCommand(tokens []string, available []string) (string, []string) {
+	if len(tokens) == 0 {
+		return "", nil
+	}
+	availSet := map[string]struct{}{}
+	for _, a := range available {
+		availSet[a] = struct{}{}
+	}
+	for i := len(tokens); i > 0; i-- {
+		candidate := strings.ToLower(strings.Join(tokens[:i], " "))
+		if _, ok := availSet[candidate]; ok {
+			return candidate, tokens[i:]
+		}
+	}
+	return "", nil
 }
 
 func showVersion(ctx context.Context, out io.Writer, args []string) error {

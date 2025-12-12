@@ -11,6 +11,7 @@ import (
 	"github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/ics/modbus"
 	"github.com/containd/containd/pkg/dp/itdpi"
+	"github.com/containd/containd/pkg/dp/flow"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )

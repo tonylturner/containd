@@ -126,6 +126,37 @@ export type ReverseProxyConfig = {
   sites?: ReverseProxySite[];
 };
 
+export type IDSCondition = {
+  all?: IDSCondition[];
+  any?: IDSCondition[];
+  not?: IDSCondition;
+  field?: string;
+  op?: string;
+  value?: unknown;
+};
+
+export type IDSRule = {
+  id: string;
+  title?: string;
+  description?: string;
+  proto?: string;
+  kind?: string;
+  when?: IDSCondition;
+  severity?: string;
+  message?: string;
+  labels?: Record<string, string>;
+};
+
+export type IDSConfig = {
+  enabled?: boolean;
+  rules?: IDSRule[];
+};
+
+export type CLIExecuteResponse = {
+  output: string;
+  error?: string;
+};
+
 export type ConfigBundle = {
   schema_version?: string;
   version?: string;
@@ -259,6 +290,15 @@ export const api = {
     patchJSON<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
   deleteAsset: (id: string) =>
     deleteJSON(`/api/v1/assets/${encodeURIComponent(id)}`),
+
+  // IDS / Sigma
+  getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
+  setIDS: (cfg: IDSConfig) => postJSON<IDSConfig>("/api/v1/ids/rules", cfg),
+  convertSigma: (sigmaYAML: string) =>
+    postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
+
+  executeCLI: (line: string) =>
+    postJSON<CLIExecuteResponse>("/api/v1/cli/execute", { line }),
 
   // Config lifecycle
   getRunningConfig: () => getJSON<ConfigBundle>("/api/v1/config"),

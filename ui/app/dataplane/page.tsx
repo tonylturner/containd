@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import {
   fetchDataPlane,
@@ -52,12 +53,12 @@ export default function DataPlanePage() {
       <main className="relative mx-auto max-w-3xl px-6 py-16">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-white">Dataplane Settings</h1>
-          <a
+          <Link
             href="/"
             className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
           >
             Back
-          </a>
+          </Link>
         </div>
 
         <div className="mt-8 space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">

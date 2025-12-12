@@ -1,0 +1,12 @@
+title: Modbus write attempt
+id: sigma-mb-1
+description: Detect Modbus function codes that can write coils/registers.
+level: high
+tags:
+  - containd.proto.modbus
+  - containd.kind.request
+detection:
+  selection:
+    function_code|in: [5, 6, 15, 16]
+  condition: selection
+

@@ -6,11 +6,17 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 
 - Command registry in `pkg/cli` with stub commands:
   - `show version`
+  - `help` / `show help` / `set help`
   - `show zones`
   - `show interfaces`
 - API-backed commands:
   - `show health`
   - `show config`
+  - `show running-config`
+  - `show candidate-config`
+  - `show diff`
+  - `show system`
+  - `show ids rules`
   - `show audit`
   - `show dataplane`
   - `show zones` / `show interfaces` (HTTP GET if API provided)
@@ -20,6 +26,8 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `set firewall rule <id> <action> [src_zone] [dst_zone]`
   - `delete firewall rule <id>`
   - `set dataplane enforcement <on|off> [table] [iface...]`
+  - `set system hostname <name>` (candidate)
+  - `set system mgmt listen <addr>` (candidate)
   - `commit`
   - `commit confirmed [ttl_seconds]`
   - `confirm`

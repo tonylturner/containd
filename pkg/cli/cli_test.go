@@ -76,6 +76,52 @@ func TestUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestParseAndExecuteMatchesLongestPrefix(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	if err := reg.ParseAndExecute(context.Background(), "show version", &buf); err != nil {
+		t.Fatalf("parse execute: %v", err)
+	}
+	if buf.String() == "" {
+		t.Fatalf("expected output")
+	}
+}
+
+func TestHelpCommands(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	if err := reg.ParseAndExecute(context.Background(), "help", &buf); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("Available commands")) {
+		t.Fatalf("unexpected help output: %s", buf.String())
+	}
+	buf.Reset()
+	if err := reg.ParseAndExecute(context.Background(), "show help", &buf); err != nil {
+		t.Fatalf("show help: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("show commands")) {
+		t.Fatalf("unexpected show help output: %s", buf.String())
+	}
+}
+
+func TestSetSystemHostnameUsage(t *testing.T) {
+	// API-backed command exists only when API is provided.
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	err := reg.ParseAndExecute(context.Background(), "set system hostname containd", &buf)
+	if err != nil {
+		t.Fatalf("expected set system hostname to execute, got %v", err)
+	}
+}
+
 type mockHTTPClient struct {
 	resp *http.Response
 	err  error

@@ -13,15 +13,16 @@ const navGroups: NavGroup[] = [
   },
   {
     label: "Config",
-    items: [
-      { href: "/zones/", label: "Zones" },
-      { href: "/interfaces/", label: "Interfaces" },
-      { href: "/firewall/", label: "Firewall Rules" },
-      { href: "/assets/", label: "Assets" },
-      { href: "/proxies/", label: "Proxies" },
-      { href: "/dataplane/", label: "Dataplane" },
-      { href: "/config/", label: "Config Lifecycle" },
-    ],
+      items: [
+        { href: "/zones/", label: "Zones" },
+        { href: "/interfaces/", label: "Interfaces" },
+        { href: "/firewall/", label: "Firewall Rules" },
+        { href: "/ids/", label: "IDS Rules" },
+        { href: "/assets/", label: "Assets" },
+        { href: "/proxies/", label: "Proxies" },
+        { href: "/dataplane/", label: "Dataplane" },
+        { href: "/config/", label: "Config Lifecycle" },
+      ],
   },
   {
     label: "Monitoring",

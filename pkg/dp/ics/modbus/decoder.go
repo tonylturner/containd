@@ -2,6 +2,7 @@ package modbus
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"net"
 	"time"
 
@@ -39,6 +40,12 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		"function_code":  frame.FunctionCode,
 		"is_write":       IsWriteFunctionCode(frame.FunctionCode),
 	}
+	// Include raw hex for operator visibility (cap to avoid huge payloads).
+	raw := pkt.Payload
+	if len(raw) > 512 {
+		raw = raw[:512]
+	}
+	attrs["raw_hex"] = hex.EncodeToString(raw)
 	// Best-effort parse for common request fields (address/quantity).
 	if len(frame.PDU) >= 4 {
 		addr := binary.BigEndian.Uint16(frame.PDU[0:2])
@@ -71,4 +78,3 @@ func keyFor(src, dst string, sport, dport uint16) flow.Key {
 		Dir:     flow.DirForward,
 	}
 }
-

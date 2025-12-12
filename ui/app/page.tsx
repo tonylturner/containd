@@ -1,27 +1,11 @@
  "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { fetchHealth, type HealthResponse, api } from "../lib/api";
 import { Shell } from "../components/Shell";
-
-const phases = [
-  {
-    title: "Phase 0",
-    status: "in-progress",
-    summary: "Scaffolding, health endpoints, build/test harnesses",
-  },
-  {
-    title: "Phase 1",
-    status: "up-next",
-    summary: "L3/L4 stateful firewall with single-interface capture + policy APIs",
-  },
-  {
-    title: "Phase 2",
-    status: "queued",
-    summary: "Multi-interface, multi-zone enforcement and topology UI",
-  },
-];
+import { Console } from "../components/Console";
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -98,9 +82,9 @@ export default function Home() {
               </div>
             </div>
           </div>
-          <a href="/assets/" className="text-xs text-slate-300 hover:text-white">
+          <Link href="/assets/" className="text-xs text-slate-300 hover:text-white">
             View assets →
-          </a>
+          </Link>
         </DashboardCard>
       </div>
 
@@ -127,56 +111,31 @@ export default function Home() {
 
         <DashboardCard title="Operations">
           <div className="flex flex-col gap-2 text-sm">
-            <a
+            <Link
               href="/config/"
               className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
             >
               Candidate / Commit
-            </a>
-            <a
+            </Link>
+            <Link
               href="/dataplane/"
               className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
             >
               Dataplane settings
-            </a>
-            <a
+            </Link>
+            <Link
               href="/audit/"
               className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
             >
               Audit log
-            </a>
+            </Link>
           </div>
         </DashboardCard>
       </div>
 
-      <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner backdrop-blur">
-        <header className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
-              Delivery roadmap
-            </p>
-            <h2 className="text-xl font-semibold text-white">
-              Implementation phases
-            </h2>
-          </div>
-        </header>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {phases.map((phase) => (
-            <div
-              key={phase.title}
-              className="rounded-xl border border-white/10 bg-black/30 p-4"
-            >
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-semibold text-white">{phase.title}</span>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs uppercase tracking-wide text-slate-200">
-                  {phase.status}
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-slate-200">{phase.summary}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="mt-6">
+        <Console />
+      </div>
     </Shell>
   );
 }
@@ -217,7 +176,7 @@ function Stat({
   href: string;
 }) {
   return (
-    <a
+    <Link
       href={href}
       className="rounded-lg border border-white/10 bg-black/30 p-3 hover:bg-black/40"
     >
@@ -225,6 +184,6 @@ function Stat({
       <div className="text-xs uppercase tracking-wide text-slate-300">
         {label}
       </div>
-    </a>
+    </Link>
   );
 }

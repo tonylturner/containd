@@ -16,9 +16,34 @@ type Config struct {
 	Assets        []Asset        `json:"assets,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
 	Firewall      FirewallConfig `json:"firewall"`
+	IDS           IDSConfig      `json:"ids,omitempty"`
 	Services      ServicesConfig `json:"services"`
 	Description   string         `json:"description,omitempty"`
 	Version       string         `json:"version,omitempty"`
+}
+
+// RedactedCopy returns a copy of c with secrets removed.
+// Today there are no persisted secrets, but this is a stable hook for future redaction.
+func (c *Config) RedactedCopy() *Config {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	// Shallow-copy slices/maps that might later contain secrets.
+	if c.Assets != nil {
+		cp.Assets = append([]Asset(nil), c.Assets...)
+	}
+	if c.Zones != nil {
+		cp.Zones = append([]Zone(nil), c.Zones...)
+	}
+	if c.Interfaces != nil {
+		cp.Interfaces = append([]Interface(nil), c.Interfaces...)
+	}
+	if c.Firewall.Rules != nil {
+		cp.Firewall.Rules = append([]Rule(nil), c.Firewall.Rules...)
+	}
+	// Future: redact Services secrets (proxy upstream creds, TLS keys, etc.).
+	return &cp
 }
 
 type SystemConfig struct {
@@ -188,6 +213,34 @@ type FirewallConfig struct {
 	Rules         []Rule `json:"rules"`
 }
 
+// IDSConfig holds native IDS rules that match on normalized DPI events.
+type IDSConfig struct {
+	Enabled bool      `json:"enabled"`
+	Rules   []IDSRule `json:"rules,omitempty"`
+}
+
+// IDSRule is a Sigma-like event rule.
+type IDSRule struct {
+	ID          string            `json:"id"`
+	Title       string            `json:"title,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Proto       string            `json:"proto,omitempty"` // optional quick filter
+	Kind        string            `json:"kind,omitempty"`  // optional quick filter
+	When        IDSCondition      `json:"when,omitempty"`
+	Severity    string            `json:"severity,omitempty"` // low|medium|high|critical
+	Message     string            `json:"message,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+}
+
+type IDSCondition struct {
+	All   []IDSCondition `json:"all,omitempty"`
+	Any   []IDSCondition `json:"any,omitempty"`
+	Not   *IDSCondition  `json:"not,omitempty"`
+	Field string         `json:"field,omitempty"` // e.g. "attr.function_code"
+	Op    string         `json:"op,omitempty"`    // equals|contains|in|regex|gt|lt
+	Value any            `json:"value,omitempty"`
+}
+
 type Action string
 
 const (
@@ -250,6 +303,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateDataPlane(c.DataPlane); err != nil {
+		return err
+	}
+	if err := validateIDS(c.IDS); err != nil {
 		return err
 	}
 	if err := validateServices(c.Services); err != nil {
@@ -492,6 +548,27 @@ func validateProxy(p ProxyConfig) error {
 		}
 		if len(s.Backends) == 0 {
 			return fmt.Errorf("reverse proxy site %s must have at least one backend", s.Name)
+		}
+	}
+	return nil
+}
+
+func validateIDS(ids IDSConfig) error {
+	seen := map[string]struct{}{}
+	for _, r := range ids.Rules {
+		if r.ID == "" {
+			return errors.New("ids rule id cannot be empty")
+		}
+		if _, ok := seen[r.ID]; ok {
+			return fmt.Errorf("duplicate ids rule id: %s", r.ID)
+		}
+		seen[r.ID] = struct{}{}
+		if r.Severity != "" {
+			switch r.Severity {
+			case "low", "medium", "high", "critical":
+			default:
+				return fmt.Errorf("ids rule %s invalid severity %q", r.ID, r.Severity)
+			}
 		}
 	}
 	return nil

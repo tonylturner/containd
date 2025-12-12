@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,8 @@ import (
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
+	cpids "github.com/containd/containd/pkg/cp/ids"
+	"github.com/containd/containd/pkg/cli"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -80,7 +83,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		api.GET("/events", listEventsHandler(engine))
 		api.GET("/flows", listFlowsHandler(engine))
 		api.GET("/dataplane", getDataPlaneHandler(store))
-		api.POST("/dataplane", setDataPlaneHandler(store))
+		api.POST("/dataplane", setDataPlaneHandler(store, engine))
 		api.GET("/assets", listAssetsHandler(store))
 		api.POST("/assets", createAssetHandler(store))
 		api.PATCH("/assets/:id", updateAssetHandler(store))
@@ -97,6 +100,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		api.POST("/firewall/rules", createFirewallRuleHandler(store))
 		api.PATCH("/firewall/rules/:id", updateFirewallRuleHandler(store))
 		api.DELETE("/firewall/rules/:id", deleteFirewallRuleHandler(store))
+		api.GET("/ids/rules", getIDSHandler(store))
+		api.POST("/ids/rules", setIDSHandler(store))
+		api.POST("/ids/convert/sigma", convertSigmaHandler())
+		api.POST("/cli/execute", cliExecuteHandler(store))
 		if auditStore != nil {
 			auditHandlers(api, auditStore)
 		}
@@ -172,6 +179,9 @@ func exportConfigHandler(store config.Store) gin.HandlerFunc {
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if c.Query("redacted") == "1" || c.Query("redacted") == "true" {
+			cfg = cfg.RedactedCopy()
 		}
 		c.JSON(http.StatusOK, cfg)
 	}
@@ -514,7 +524,88 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setDataPlaneHandler(store config.Store) gin.HandlerFunc {
+func getIDSHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.IDS)
+	}
+}
+
+func setIDSHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var idsCfg config.IDSConfig
+		if err := c.ShouldBindJSON(&idsCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.IDS = idsCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.IDS)
+	}
+}
+
+func convertSigmaHandler() gin.HandlerFunc {
+	type req struct {
+		SigmaYAML string `json:"sigmaYAML"`
+	}
+	return func(c *gin.Context) {
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil || r.SigmaYAML == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing sigmaYAML"})
+			return
+		}
+		rule, err := cpids.ConvertSigmaYAML([]byte(r.SigmaYAML))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, rule)
+	}
+}
+
+func cliExecuteHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Line string `json:"line"`
+	}
+	type resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error,omitempty"`
+	}
+	return func(c *gin.Context) {
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil || r.Line == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing line"})
+			return
+		}
+		baseURL := "http://" + c.Request.Host
+		if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+			baseURL = proto + "://" + c.Request.Host
+		}
+		apiClient := &cli.API{BaseURL: baseURL}
+		reg := cli.NewRegistry(store, apiClient)
+		var buf bytes.Buffer
+		if err := reg.ParseAndExecute(c.Request.Context(), r.Line, &buf); err != nil {
+			c.JSON(http.StatusOK, resp{Output: buf.String(), Error: err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, resp{Output: buf.String()})
+	}
+}
+
+func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dp config.DataPlaneConfig
 		if err := c.ShouldBindJSON(&dp); err != nil {
@@ -530,6 +621,13 @@ func setDataPlaneHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		// Apply runtime dataplane changes immediately (including DPI mock).
+		if engine != nil {
+			if err := engine.Configure(c.Request.Context(), cfg.DataPlane); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "dataplane.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.DataPlane)

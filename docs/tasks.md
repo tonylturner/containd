@@ -45,6 +45,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add mutating commands (`set zone`, `set interface`) via API.
   - [x] Add mutating commands for firewall rules (set/delete).
   - [x] Add CLI commands for commit/rollback/export/import/audit/dataplane.
+  - [ ] Add `show services status` once supervisor status endpoint stable.
+  - [ ] Add redacted export variants (`show running-config redacted`, `export config redacted`).
+  - [ ] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
   - [ ] Plan SSH server integration (key auth default, passwords only in lab) and rate limiting.
 - [ ] UI integration
   - [x] Add dashboard fetching `/api/v1/health`.
