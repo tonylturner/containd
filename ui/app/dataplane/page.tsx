@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
 import {
   fetchDataPlane,
   setDataPlane,
+  isAdmin,
   type DataPlaneConfig,
 } from "../../lib/api";
+import { Shell } from "../../components/Shell";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function DataPlanePage() {
+  const canEdit = isAdmin();
   const [config, setConfig] = useState<DataPlaneConfig>({
     captureInterfaces: [],
     enforcement: false,
@@ -20,17 +22,20 @@ export default function DataPlanePage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
+  async function refresh() {
+    const dp = await fetchDataPlane();
+    if (dp) {
+      setConfig({
+        captureInterfaces: dp.captureInterfaces ?? [],
+        enforcement: dp.enforcement ?? false,
+        enforceTable: dp.enforceTable ?? "containd",
+        dpiMock: dp.dpiMock ?? false,
+      });
+    }
+  }
+
   useEffect(() => {
-    fetchDataPlane().then((dp) => {
-      if (dp) {
-        setConfig({
-          captureInterfaces: dp.captureInterfaces ?? [],
-          enforcement: dp.enforcement ?? false,
-          enforceTable: dp.enforceTable ?? "containd",
-          dpiMock: dp.dpiMock ?? false,
-        });
-      }
-    });
+    refresh();
   }, []);
 
   const ifaceCSV = useMemo(
@@ -39,6 +44,7 @@ export default function DataPlanePage() {
   );
 
   async function onSave() {
+    if (!canEdit) return;
     setSaveState("saving");
     const saved = await setDataPlane(config);
     setSaveState(saved ? "saved" : "error");
@@ -46,22 +52,35 @@ export default function DataPlanePage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-slate-100">
-      <div className="pointer-events-none absolute inset-0 opacity-30">
-        <div className="grid-overlay h-full w-full" />
-      </div>
-      <main className="relative mx-auto max-w-3xl px-6 py-16">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-white">Dataplane Settings</h1>
-          <Link
-            href="/"
+    <Shell
+      title="Dataplane"
+      actions={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={refresh}
             className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
           >
-            Back
-          </Link>
+            Refresh
+          </button>
+          {canEdit && (
+            <button
+              onClick={onSave}
+              disabled={saveState === "saving"}
+              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+            >
+              {saveState === "saving" ? "Saving..." : "Save"}
+            </button>
+          )}
         </div>
+      }
+    >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
 
-        <div className="mt-8 space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
+      <div className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-white">Enforcement</h2>
@@ -73,6 +92,7 @@ export default function DataPlanePage() {
               <input
                 type="checkbox"
                 checked={config.enforcement ?? false}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setConfig((c) => ({ ...c, enforcement: e.target.checked }))
                 }
@@ -89,6 +109,7 @@ export default function DataPlanePage() {
             <input
               type="text"
               value={config.enforceTable ?? ""}
+              disabled={!canEdit}
               onChange={(e) =>
                 setConfig((c) => ({ ...c, enforceTable: e.target.value }))
               }
@@ -108,6 +129,7 @@ export default function DataPlanePage() {
             <input
               type="text"
               value={ifaceCSV}
+              disabled={!canEdit}
               onChange={(e) =>
                 setConfig((c) => ({
                   ...c,
@@ -133,6 +155,7 @@ export default function DataPlanePage() {
               <input
                 type="checkbox"
                 checked={config.dpiMock ?? false}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setConfig((c) => ({ ...c, dpiMock: e.target.checked }))
                 }
@@ -142,23 +165,15 @@ export default function DataPlanePage() {
             </label>
           </div>
 
-          <div className="flex items-center justify-end gap-3">
-            {saveState === "error" && (
-              <span className="text-sm text-amber">Save failed</span>
-            )}
-            {saveState === "saved" && (
-              <span className="text-sm text-mint">Saved</span>
-            )}
-            <button
-              onClick={onSave}
-              disabled={saveState === "saving"}
-              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-            >
-              {saveState === "saving" ? "Saving..." : "Save"}
-            </button>
-          </div>
+        <div className="flex items-center justify-end gap-3">
+          {saveState === "error" && (
+            <span className="text-sm text-amber">Save failed</span>
+          )}
+          {saveState === "saved" && (
+            <span className="text-sm text-mint">Saved</span>
+          )}
         </div>
-      </main>
-    </div>
+      </div>
+    </Shell>
   );
 }

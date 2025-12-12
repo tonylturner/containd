@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Shell } from "../../components/Shell";
-import { api, type IDSConfig, type IDSRule } from "../../lib/api";
+import { api, isAdmin, type IDSConfig, type IDSRule } from "../../lib/api";
 
 export default function IDSPage() {
+  const canEdit = isAdmin();
   const [ids, setIds] = useState<IDSConfig>({ enabled: false, rules: [] });
   const [sigmaText, setSigmaText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +22,7 @@ export default function IDSPage() {
   }, []);
 
   async function onSave() {
+    if (!canEdit) return;
     setError(null);
     const saved = await api.setIDS(ids);
     if (!saved) {
@@ -31,6 +33,7 @@ export default function IDSPage() {
   }
 
   async function onConvertSigma() {
+    if (!canEdit) return;
     setError(null);
     const rule = await api.convertSigma(sigmaText);
     if (!rule) {
@@ -46,6 +49,7 @@ export default function IDSPage() {
   }
 
   function onDelete(id: string) {
+    if (!canEdit) return;
     const existing = ids.rules ?? [];
     setIds({ ...ids, rules: existing.filter((r) => r.id !== id) });
   }
@@ -63,15 +67,22 @@ export default function IDSPage() {
           >
             Refresh
           </button>
-          <button
-            onClick={onSave}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
-          >
-            Save
-          </button>
+          {canEdit && (
+            <button
+              onClick={onSave}
+              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            >
+              Save
+            </button>
+          )}
         </div>
       }
     >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
@@ -83,6 +94,7 @@ export default function IDSPage() {
           <input
             type="checkbox"
             checked={!!ids.enabled}
+            disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
             className="h-4 w-4 rounded border-white/20 bg-black/40"
           />
@@ -90,11 +102,13 @@ export default function IDSPage() {
         </label>
       </div>
 
-      <SigmaImportCard
-        value={sigmaText}
-        onChange={setSigmaText}
-        onConvert={onConvertSigma}
-      />
+      {canEdit && (
+        <SigmaImportCard
+          value={sigmaText}
+          onChange={setSigmaText}
+          onConvert={onConvertSigma}
+        />
+      )}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
         <table className="w-full text-sm">
@@ -146,18 +160,22 @@ export default function IDSPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(r)}
-                    className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(r.id)}
-                    className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                  >
-                    Remove
-                  </button>
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(r.id)}
+                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -165,7 +183,7 @@ export default function IDSPage() {
         </table>
       </div>
 
-      {editing && (
+      {editing && canEdit && (
         <EditRuleModal
           rule={editing}
           onClose={() => setEditing(null)}

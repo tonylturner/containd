@@ -9,6 +9,11 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `help` / `show help` / `set help`
   - `show zones`
   - `show interfaces`
+- Local diagnostics:
+  - `show ip route` (Linux only)
+  - `diag ping <host> [count]`
+  - `diag traceroute <host> [max_hops]`
+  - `diag capture <iface> [seconds] [file]` (Linux only; writes `.pcap`)
 - API-backed commands:
   - `show health`
   - `show config`
@@ -30,6 +35,9 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `set dataplane enforcement <on|off> [table] [iface...]`
   - `set system hostname <name>` (candidate)
   - `set system mgmt listen <addr>` (candidate)
+  - `set system ssh listen <addr>` (candidate)
+  - `set system ssh allow-password <true|false>` (candidate)
+  - `set system ssh authorized-keys-dir <dir>` (candidate)
   - `commit`
   - `commit confirmed [ttl_seconds]`
   - `confirm`
@@ -50,9 +58,23 @@ Environment variables:
 
 When not in lab mode, at least one token must be set or the API will return `503` with an auth configuration error.
 
+## SSH console (appliance-style)
+
+`ngfw-mgmt` exposes an SSH console that runs the same CLI registry (admin-only).
+
+Interactive commands:
+- `menu` - setup + diagnostics menu (OPNsense-style)
+- `wizard` - guided setup that writes to candidate config and optionally commits
+- `diagnostics` / `diag` - diagnostics submenu
+
+Notes:
+- The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
+- `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
+
 ## Future
 
 - Add `show running-config`, `set`/`delete` commands for interfaces/zones/rules.
 - Integrate with embedded SSH server for appliance-style access.
+- Add an interactive `wizard` command over SSH for initial provisioning.
 - Hook command execution to HTTP client layer (or direct store) depending on deployment topology.
 - Add service commands (syslog/NTP/DNS) as system services land.

@@ -29,6 +29,7 @@ go.work.sum
 
 # Go / build caches
 .cache/
+.gocache/
 bin/
 
 # Node/Next.js
@@ -37,11 +38,15 @@ ui/.next/
 ui/node_modules/
 ui/.turbo/
 ui/.vercel/
+ui/out/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Runtime data (docker-compose volumes)
+data/
 
 # Editor/IDE
 .idea/

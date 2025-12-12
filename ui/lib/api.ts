@@ -8,6 +8,7 @@ export type HealthResponse = {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 const TOKEN_KEY = "containd.auth.token";
+const ROLE_KEY = "containd.auth.role";
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -26,6 +27,29 @@ function setStoredToken(token: string | null) {
   } catch {}
 }
 
+function setStoredRole(role: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!role) localStorage.removeItem(ROLE_KEY);
+    else localStorage.setItem(ROLE_KEY, role);
+  } catch {}
+}
+
+export function getStoredRole(): UserRole | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const r = localStorage.getItem(ROLE_KEY);
+    if (r === "admin" || r === "view") return r;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function isAdmin(): boolean {
+  return getStoredRole() === "admin";
+}
+
 function authHeaders(): Record<string, string> {
   const t = getStoredToken() || ENV_TOKEN;
   if (!t) return {};
@@ -38,12 +62,15 @@ function updateTokenFromResponse(res: Response) {
 }
 
 function handleUnauthorized(res: Response) {
-  if (res.status !== 401 && res.status !== 403) return false;
+  if (res.status !== 401) return false;
+  // 401 means the session is not valid anymore; clear local state and force re-auth.
   setStoredToken(null);
+  setStoredRole(null);
   if (typeof window !== "undefined") {
     const path = window.location.pathname;
     if (!path.startsWith("/login")) {
-      window.location.href = "/login";
+      const next = encodeURIComponent(path || "/");
+      window.location.href = `/login?reason=expired&next=${next}`;
     }
   }
   return true;
@@ -152,7 +179,7 @@ export type UpdateMeRequest = {
 };
 
 export type ChangePasswordRequest = {
-  currentPassword?: string;
+  currentPassword: string;
   newPassword: string;
 };
 
@@ -275,6 +302,7 @@ export async function fetchHealth(): Promise<HealthResponse | null> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/health`, {
       cache: "no-store",
+      credentials: "include",
     });
     if (!res.ok) return null;
     return (await res.json()) as HealthResponse;
@@ -288,6 +316,7 @@ export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
     const res = await fetch(`${API_BASE}/api/v1/dataplane`, {
       headers: authHeaders(),
       cache: "no-store",
+      credentials: "include",
     });
     if (!res.ok) return null;
     return (await res.json()) as DataPlaneConfig;
@@ -304,6 +333,7 @@ export async function setDataPlane(
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(cfg),
+      credentials: "include",
     });
     if (!res.ok) return null;
     return (await res.json()) as DataPlaneConfig;
@@ -317,6 +347,7 @@ async function getJSON<T>(path: string): Promise<T | null> {
     const res = await fetch(`${API_BASE}${path}`, {
       cache: "no-store",
       headers: authHeaders(),
+      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
     updateTokenFromResponse(res);
@@ -332,6 +363,7 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
+      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
     updateTokenFromResponse(res);
@@ -347,6 +379,7 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
+      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
     updateTokenFromResponse(res);
@@ -361,6 +394,7 @@ async function deleteJSON(path: string): Promise<boolean> {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "DELETE",
       headers: authHeaders(),
+      credentials: "include",
     });
     if (handleUnauthorized(res)) return false;
     updateTokenFromResponse(res);
@@ -378,14 +412,20 @@ export const api = {
       password,
     });
     if (res?.token) setStoredToken(res.token);
+    if (res?.user?.role) setStoredRole(res.user.role);
     return res;
   },
   logout: async () => {
     const ok = await postJSON<{ status: string }>("/api/v1/auth/logout", {});
     setStoredToken(null);
+    setStoredRole(null);
     return ok;
   },
-  me: () => getJSON<User>("/api/v1/auth/me"),
+  me: async () => {
+    const u = await getJSON<User>("/api/v1/auth/me");
+    if (u?.role) setStoredRole(u.role);
+    return u;
+  },
   updateMe: (patch: UpdateMeRequest) =>
     patchJSON<User>("/api/v1/auth/me", patch),
   changeMyPassword: (currentPassword: string, newPassword: string) =>

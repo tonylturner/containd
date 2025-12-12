@@ -109,7 +109,7 @@ export function Shell({
       }
       setMe(user);
       if ((user?.role ?? "") !== "admin" && pathname.startsWith("/system/") && typeof window !== "undefined") {
-        window.location.href = "/";
+        window.location.href = "/forbidden";
         return;
       }
       setAuthChecked(true);
@@ -224,7 +224,7 @@ export function Shell({
                     type="button"
                     onClick={async () => {
                       await api.logout();
-                      if (typeof window !== "undefined") window.location.href = "/login";
+                      if (typeof window !== "undefined") window.location.href = "/login?reason=logout";
                     }}
                     className="rounded-md px-3 py-2 text-left text-slate-200 hover:bg-white/10"
                   >
@@ -314,6 +314,10 @@ function ProfileModal({
       setError("New password required.");
       return;
     }
+    if (!currentPassword) {
+      setError("Current password required.");
+      return;
+    }
     setState("saving");
     const ok = await api.changeMyPassword(currentPassword, newPassword);
     if (!ok) {
@@ -390,7 +394,7 @@ function ProfileModal({
               type="password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              placeholder="current password (optional)"
+              placeholder="current password"
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
             <input

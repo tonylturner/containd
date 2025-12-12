@@ -13,10 +13,10 @@ export default function SystemSettingsPage() {
 show system{"\n"}
 set system hostname &lt;name&gt;{"\n"}
 set system mgmt listen &lt;addr&gt;{"\n"}
+set system ssh listen &lt;addr&gt;{"\n"}
 commit
         </pre>
       </div>
     </Shell>
   );
 }
-

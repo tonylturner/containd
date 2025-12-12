@@ -31,6 +31,15 @@ type API struct {
 	Token   string
 }
 
+func (a *API) updateTokenFromResponse(resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	if tok := strings.TrimSpace(resp.Header.Get("X-Auth-Token")); tok != "" {
+		a.Token = tok
+	}
+}
+
 func (a *API) getJSON(ctx context.Context, path string, into any) error {
 	if a.Client == nil {
 		a.Client = http.DefaultClient
@@ -47,6 +56,7 @@ func (a *API) getJSON(ctx context.Context, path string, into any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	a.updateTokenFromResponse(resp)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -74,6 +84,7 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 		return err
 	}
 	defer resp.Body.Close()
+	a.updateTokenFromResponse(resp)
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
@@ -100,6 +111,7 @@ func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
 		return err
 	}
 	defer resp.Body.Close()
+	a.updateTokenFromResponse(resp)
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
@@ -116,52 +128,61 @@ type Command func(ctx context.Context, out io.Writer, args []string) error
 // Registry holds available commands.
 type Registry struct {
 	commands map[string]Command
+	roles    map[string]Role
 }
 
 // NewRegistry initializes the command registry with built-in commands.
 func NewRegistry(store config.Store, api *API) *Registry {
-	r := &Registry{commands: map[string]Command{}}
-	r.Register("show version", showVersion)
-	r.Register("convert sigma", convertSigma)
-	r.Register("help", helpCommand(r))
-	r.Register("show help", showHelpCommand(r))
-	r.Register("set help", setHelpCommand(r))
+	r := &Registry{commands: map[string]Command{}, roles: map[string]Role{}}
+	r.RegisterRole("show version", RoleView, showVersion)
+	r.RegisterRole("convert sigma", RoleView, convertSigma)
+	r.RegisterRole("help", RoleView, helpCommand(r))
+	r.RegisterRole("show help", RoleView, showHelpCommand(r))
+	r.RegisterRole("set help", RoleView, setHelpCommand(r))
+	// Local diagnostics (available in SSH; may require CAP_NET_RAW for some features).
+	r.RegisterRole("show ip route", RoleView, showIPRoute())
+	r.RegisterRole("diag ping", RoleView, diagPing())
+	r.RegisterRole("diag traceroute", RoleView, diagTraceroute())
+	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
 	if api != nil {
-		r.Register("show health", showHealth(api))
-		r.Register("show config", showConfig(api))
-		r.Register("show running-config", showRunningConfig(api))
-		r.Register("show running-config redacted", showRunningConfigRedacted(api))
-		r.Register("show candidate-config", showCandidateConfig(api))
-		r.Register("show diff", showDiff(api))
-		r.Register("show system", showSystem(api))
-		r.Register("show services status", showServicesStatus(api))
-		r.Register("show audit", showAudit(api))
-		r.Register("show dataplane", showDataPlane(api))
-		r.Register("show proxy forward", showForwardProxy(api))
-		r.Register("show proxy reverse", showReverseProxy(api))
-		r.Register("show flows", showFlows(api))
-		r.Register("show events", showEvents(api))
-		r.Register("show zones", showZonesAPI(api))
-		r.Register("show interfaces", showInterfacesAPI(api))
-		r.Register("show ids rules", showIDSRulesAPI(api))
-		r.Register("set zone", setZoneAPI(api))
-		r.Register("set interface", setInterfaceAPI(api))
-		r.Register("set firewall rule", setFirewallRuleAPI(api))
-		r.Register("delete firewall rule", deleteFirewallRuleAPI(api))
-		r.Register("set dataplane", setDataPlaneAPI(api))
-		r.Register("set system hostname", setSystemHostnameAPI(api))
-		r.Register("set system mgmt listen", setSystemMgmtListenAPI(api))
-		r.Register("set proxy forward", setForwardProxyAPI(api))
-		r.Register("set proxy reverse", setReverseProxyAPI(api))
-		r.Register("commit", commitAPI(api))
-		r.Register("commit confirmed", commitConfirmedAPI(api))
-		r.Register("confirm", confirmCommitAPI(api))
-		r.Register("rollback", rollbackAPI(api))
-		r.Register("export config", exportConfigAPI(api))
-		r.Register("import config", importConfigAPI(api))
+		r.RegisterRole("show health", RoleView, showHealth(api))
+		r.RegisterRole("show config", RoleView, showConfig(api))
+		r.RegisterRole("show running-config", RoleView, showRunningConfig(api))
+		r.RegisterRole("show running-config redacted", RoleView, showRunningConfigRedacted(api))
+		r.RegisterRole("show candidate-config", RoleView, showCandidateConfig(api))
+		r.RegisterRole("show diff", RoleView, showDiff(api))
+		r.RegisterRole("show system", RoleView, showSystem(api))
+		r.RegisterRole("show services status", RoleView, showServicesStatus(api))
+		r.RegisterRole("show audit", RoleView, showAudit(api))
+		r.RegisterRole("show dataplane", RoleView, showDataPlane(api))
+		r.RegisterRole("show proxy forward", RoleView, showForwardProxy(api))
+		r.RegisterRole("show proxy reverse", RoleView, showReverseProxy(api))
+		r.RegisterRole("show flows", RoleView, showFlows(api))
+		r.RegisterRole("show events", RoleView, showEvents(api))
+		r.RegisterRole("show zones", RoleView, showZonesAPI(api))
+		r.RegisterRole("show interfaces", RoleView, showInterfacesAPI(api))
+		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
+		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
+		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
+		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
+		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
+		r.RegisterRole("set dataplane", RoleAdmin, setDataPlaneAPI(api))
+		r.RegisterRole("set system hostname", RoleAdmin, setSystemHostnameAPI(api))
+		r.RegisterRole("set system mgmt listen", RoleAdmin, setSystemMgmtListenAPI(api))
+		r.RegisterRole("set system ssh listen", RoleAdmin, setSystemSSHListenAPI(api))
+		r.RegisterRole("set system ssh allow-password", RoleAdmin, setSystemSSHAllowPasswordAPI(api))
+		r.RegisterRole("set system ssh authorized-keys-dir", RoleAdmin, setSystemSSHAuthorizedKeysDirAPI(api))
+		r.RegisterRole("set proxy forward", RoleAdmin, setForwardProxyAPI(api))
+		r.RegisterRole("set proxy reverse", RoleAdmin, setReverseProxyAPI(api))
+		r.RegisterRole("commit", RoleAdmin, commitAPI(api))
+		r.RegisterRole("commit confirmed", RoleAdmin, commitConfirmedAPI(api))
+		r.RegisterRole("confirm", RoleAdmin, confirmCommitAPI(api))
+		r.RegisterRole("rollback", RoleAdmin, rollbackAPI(api))
+		r.RegisterRole("export config", RoleAdmin, exportConfigAPI(api))
+		r.RegisterRole("import config", RoleAdmin, importConfigAPI(api))
 	} else if store != nil {
-		r.Register("show zones", showZones(store))
-		r.Register("show interfaces", showInterfaces(store))
+		r.RegisterRole("show zones", RoleView, showZones(store))
+		r.RegisterRole("show interfaces", RoleView, showInterfaces(store))
 	}
 	return r
 }
@@ -179,6 +200,22 @@ func (r *Registry) Register(name string, cmd Command) {
 		r.commands = map[string]Command{}
 	}
 	r.commands[name] = cmd
+	if r.roles == nil {
+		r.roles = map[string]Role{}
+	}
+	// Default to view access unless specified.
+	if _, ok := r.roles[name]; !ok {
+		r.roles[name] = RoleView
+	}
+}
+
+// RegisterRole adds a command handler with an explicit minimum role.
+func (r *Registry) RegisterRole(name string, role Role, cmd Command) {
+	r.Register(name, cmd)
+	if r.roles == nil {
+		r.roles = map[string]Role{}
+	}
+	r.roles[name] = role
 }
 
 // Execute runs a command by full name.
@@ -186,6 +223,16 @@ func (r *Registry) Execute(ctx context.Context, name string, out io.Writer, args
 	cmd, ok := r.commands[name]
 	if !ok {
 		return fmt.Errorf("unknown command: %s", name)
+	}
+	required := RoleView
+	if r.roles != nil {
+		if v, ok := r.roles[name]; ok && v != "" {
+			required = v
+		}
+	}
+	have := roleFromContext(ctx)
+	if !allowed(required, have) {
+		return fmt.Errorf("%w: %s requires %s", ErrPermissionDenied, name, required)
 	}
 	return cmd(ctx, out, args)
 }

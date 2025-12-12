@@ -127,23 +127,39 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 			if expFloat, ok := claims["exp"].(float64); ok {
 				tokenExp := time.Unix(int64(expFloat), 0).UTC()
 				if updated.ExpiresAt.Sub(tokenExp) > 10*time.Second || tokenExp.Sub(updated.ExpiresAt) > 10*time.Second {
-					newTok, _ := signJWT(secret, sub, claims["username"], claims["role"], jti, updated.ExpiresAt)
-					if newTok != "" {
-						c.Header("X-Auth-Token", newTok)
-						setAuthCookie(c, newTok, updated.ExpiresAt)
+					// Re-hydrate identity from DB so role changes take effect immediately.
+					u, err := userStore.GetByID(c.Request.Context(), sub)
+					if err == nil && u != nil {
+						newTok, _ := signJWT(secret, u.ID, u.Username, u.Role, jti, updated.ExpiresAt)
+						if newTok != "" {
+							c.Header("X-Auth-Token", newTok)
+							setAuthCookie(c, newTok, updated.ExpiresAt)
+						}
 					}
 				}
 			}
 			sess = updated
 		}
 
-		r, _ := claims["role"].(string)
+		// Role/username are sourced from DB (not the token claims) to prevent stale role elevation.
+		u, err := userStore.GetByID(c.Request.Context(), sub)
+		if err != nil || u == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			return
+		}
+		if sess.UserID != "" && sess.UserID != u.ID {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session mismatch"})
+			return
+		}
+		r := u.Role
 		if r == "" {
 			r = string(roleView)
 		}
 		c.Set(ctxRoleKey, r)
-		c.Set(ctxUserKey, sub)
+		c.Set(ctxUserKey, u.ID)
 		c.Set(ctxSessionKey, jti)
+		// Populate audit actor hooks.
+		c.Set("actor", u.Username)
 		c.Next()
 	}
 }
@@ -175,7 +191,13 @@ func setAuthCookie(c *gin.Context, token string, exp time.Time) {
 	if maxAge < 0 {
 		maxAge = 0
 	}
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("containd_token", token, maxAge, "/", "", false, true)
+}
+
+func clearAuthCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("containd_token", "", -1, "/", "", false, true)
 }
 
 func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {

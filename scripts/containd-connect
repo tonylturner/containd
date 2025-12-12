@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service="${1:-containd}"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required" >&2
+  exit 1
+fi
+
+ps_out="$(docker compose ps -q "$service" 2>/dev/null || true)"
+# Some Docker/Compose builds print warnings to stdout; only keep container IDs.
+cid="$(printf '%s\n' "$ps_out" | tr -d '\r' | grep -E '^[0-9a-f]{12,64}$' | head -n 1 || true)"
+if [[ -z "${cid}" ]]; then
+  echo "Service '${service}' is not running."
+  echo "Start it with: docker compose up -d"
+  exit 1
+fi
+
+http_map="$(docker compose port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+ssh_map="$(docker compose port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
+
+echo "------------------------------------------------------------"
+echo "containd connection helper"
+echo "Service: ${service} (container: ${cid:0:12})"
+
+echo ""
+if [[ -n "${http_map}" ]]; then
+  echo "UI/API (host published):"
+  if [[ "${http_map%:*}" == "0.0.0.0" ]]; then
+    http_map="localhost:${http_map##*:}"
+  fi
+  echo "  http://${http_map}"
+else
+  echo "UI/API (host published): not published (no 8080/tcp mapping)"
+fi
+
+echo ""
+if [[ -n "${ssh_map}" ]]; then
+  echo "SSH CLI (host published):"
+  # docker compose port prints host:port; assume host is localhost-like.
+  host="${ssh_map%:*}"
+  port="${ssh_map##*:}"
+  if [[ "${host}" == "0.0.0.0" ]]; then
+    host="localhost"
+  fi
+  echo "  ssh -p ${port} containd@${host}"
+  echo "  then type: wizard"
+else
+  echo "SSH CLI (host published): not published (no 2222/tcp mapping)"
+fi
+
+if [[ -n "${ips}" ]]; then
+  echo ""
+  echo "Container IPs (per Docker network):"
+  printf "  %s\n" ${ips}
+fi
+
+echo ""
+echo "Logs:"
+echo "  docker compose logs -f ${service}"
+echo "------------------------------------------------------------"

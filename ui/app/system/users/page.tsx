@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
-import { api, type User, type UserRole } from "../../../lib/api";
+import { api, isAdmin, type User, type UserRole } from "../../../lib/api";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -30,6 +30,11 @@ export default function UsersPage() {
   });
 
   async function refresh() {
+    if (!isAdmin()) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const list = await api.listUsers();
     setUsers(list ?? []);
@@ -96,13 +101,18 @@ export default function UsersPage() {
 
   return (
     <Shell title="User Management">
+      {!isAdmin() && (
+        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 p-4 text-sm text-amber">
+          Admin access required.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 opacity-100">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <h2 className="text-lg font-semibold text-white">Users</h2>
           <p className="mt-1 text-sm text-slate-300">
@@ -148,6 +158,7 @@ export default function UsersPage() {
                         onChange={(e) =>
                           onUpdateRole(u.id, e.target.value as UserRole)
                         }
+                        disabled={!isAdmin()}
                         className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
                       >
                         <option value="view">view-only</option>
@@ -157,6 +168,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => onResetPassword(u.id)}
+                        disabled={!isAdmin()}
                         className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20"
                       >
                         Reset password
@@ -181,6 +193,7 @@ export default function UsersPage() {
               onChange={(e) =>
                 setNewUser((n) => ({ ...n, username: e.target.value }))
               }
+              disabled={!isAdmin()}
               placeholder="username"
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
@@ -190,6 +203,7 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setNewUser((n) => ({ ...n, firstName: e.target.value }))
                 }
+                disabled={!isAdmin()}
                 placeholder="first name"
                 className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
               />
@@ -198,6 +212,7 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setNewUser((n) => ({ ...n, lastName: e.target.value }))
                 }
+                disabled={!isAdmin()}
                 placeholder="last name"
                 className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
               />
@@ -207,6 +222,7 @@ export default function UsersPage() {
               onChange={(e) =>
                 setNewUser((n) => ({ ...n, email: e.target.value }))
               }
+              disabled={!isAdmin()}
               placeholder="email"
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
@@ -215,6 +231,7 @@ export default function UsersPage() {
               onChange={(e) =>
                 setNewUser((n) => ({ ...n, role: e.target.value as UserRole }))
               }
+              disabled={!isAdmin()}
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             >
               <option value="view">view-only</option>
@@ -226,11 +243,13 @@ export default function UsersPage() {
               onChange={(e) =>
                 setNewUser((n) => ({ ...n, password: e.target.value }))
               }
+              disabled={!isAdmin()}
               placeholder="password"
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
             <button
               onClick={onCreate}
+              disabled={!isAdmin()}
               className="mt-2 rounded-lg bg-mint/20 px-3 py-2 text-sm text-mint hover:bg-mint/30"
             >
               Create user

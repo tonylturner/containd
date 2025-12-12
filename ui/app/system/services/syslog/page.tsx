@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
+import { api, isAdmin, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function SyslogPage() {
+  const canEdit = isAdmin();
   const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [] });
   const [newFwd, setNewFwd] = useState<SyslogForwarder>({
     address: "",
@@ -29,6 +30,7 @@ export default function SyslogPage() {
   const fwdCount = useMemo(() => cfg.forwarders?.length ?? 0, [cfg.forwarders]);
 
   function addForwarder() {
+    if (!canEdit) return;
     setError(null);
     if (!newFwd.address.trim()) {
       setError("Address required.");
@@ -45,12 +47,14 @@ export default function SyslogPage() {
   }
 
   function deleteForwarder(idx: number) {
+    if (!canEdit) return;
     setCfg((c) => ({
       forwarders: (c.forwarders ?? []).filter((_, i) => i !== idx),
     }));
   }
 
   async function onSave() {
+    if (!canEdit) return;
     setError(null);
     setSaveState("saving");
     const saved = await api.setSyslog(cfg);
@@ -71,15 +75,22 @@ export default function SyslogPage() {
           >
             Refresh
           </button>
-          <button
-            onClick={onSave}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
-          >
-            Save
-          </button>
+          {canEdit && (
+            <button
+              onClick={onSave}
+              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            >
+              Save
+            </button>
+          )}
         </div>
       }
     >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}
@@ -96,6 +107,7 @@ export default function SyslogPage() {
           <input
             value={newFwd.address}
             onChange={(e) => setNewFwd((f) => ({ ...f, address: e.target.value }))}
+            disabled={!canEdit}
             placeholder="address"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
@@ -103,6 +115,7 @@ export default function SyslogPage() {
             type="number"
             value={newFwd.port}
             onChange={(e) => setNewFwd((f) => ({ ...f, port: Number(e.target.value) }))}
+            disabled={!canEdit}
             placeholder="port"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
@@ -111,17 +124,20 @@ export default function SyslogPage() {
             onChange={(e) =>
               setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))
             }
+            disabled={!canEdit}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           >
             <option value="udp">udp</option>
             <option value="tcp">tcp</option>
           </select>
-          <button
-            onClick={addForwarder}
-            className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
-          >
-            Add
-          </button>
+          {canEdit && (
+            <button
+              onClick={addForwarder}
+              className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
+            >
+              Add
+            </button>
+          )}
         </div>
 
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/30">
@@ -148,12 +164,14 @@ export default function SyslogPage() {
                   <td className="px-4 py-3 text-slate-200">{f.port}</td>
                   <td className="px-4 py-3 text-slate-200">{f.proto ?? "udp"}</td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => deleteForwarder(i)}
-                      className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                    >
-                      Remove
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => deleteForwarder(i)}
+                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -175,4 +193,3 @@ export default function SyslogPage() {
     </Shell>
   );
 }
-

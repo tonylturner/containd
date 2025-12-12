@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type NTPConfig } from "../../../../lib/api";
+import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function NTPPage() {
+  const canEdit = isAdmin();
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
     servers: [],
@@ -35,6 +36,7 @@ export default function NTPPage() {
   );
 
   async function onSave() {
+    if (!canEdit) return;
     setError(null);
     setSaveState("saving");
     const saved = await api.setNTP(cfg);
@@ -55,15 +57,22 @@ export default function NTPPage() {
           >
             Refresh
           </button>
-          <button
-            onClick={onSave}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
-          >
-            Save
-          </button>
+          {canEdit && (
+            <button
+              onClick={onSave}
+              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            >
+              Save
+            </button>
+          )}
         </div>
       }
     >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}
@@ -81,6 +90,7 @@ export default function NTPPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
+              disabled={!canEdit}
               onChange={(e) =>
                 setCfg((c) => ({ ...c, enabled: e.target.checked }))
               }
@@ -96,6 +106,7 @@ export default function NTPPage() {
             <input
               type="number"
               value={cfg.intervalSeconds ?? 0}
+              disabled={!canEdit}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -113,6 +124,7 @@ export default function NTPPage() {
             <textarea
               rows={5}
               value={serversText}
+              disabled={!canEdit}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,

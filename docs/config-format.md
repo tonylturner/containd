@@ -13,6 +13,11 @@ Canonical JSON configuration for export/import and persistent state.
     "hostname": "containd",
     "mgmt": {
       "listenAddr": ":8080"
+    },
+    "ssh": {
+      "listenAddr": ":2222",
+      "authorizedKeysDir": "/data/ssh/authorized_keys.d",
+      "allowPassword": false
     }
   },
   "zones": [

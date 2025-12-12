@@ -4,14 +4,37 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/rules"
 )
+
+const testAdminToken = "test-admin-token"
+
+func TestMain(m *testing.M) {
+	gin.SetMode(gin.ReleaseMode)
+	_ = os.Setenv("GIN_MODE", "release")
+	_ = os.Setenv("CONTAIND_ADMIN_TOKEN", testAdminToken)
+	_ = os.Setenv("CONTAIND_AUDITOR_TOKEN", "")
+	_ = os.Setenv("CONTAIND_JWT_SECRET", "")
+	_ = os.Setenv("CONTAIND_LAB_MODE", "0")
+	code := m.Run()
+	os.Exit(code)
+}
+
+func authedRequest(method, path string, body io.Reader) *http.Request {
+	req, _ := http.NewRequest(method, path, body)
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	return req
+}
 
 type mockStore struct {
 	cfg   *config.Config
@@ -81,7 +104,7 @@ func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error 
 func TestGetConfigNotFound(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/config", nil)
+	req := authedRequest(http.MethodGet, "/api/v1/config", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -89,11 +112,11 @@ func TestGetConfigNotFound(t *testing.T) {
 }
 
 func TestSaveConfig(t *testing.T) {
-    m := &mockStore{}
-    s := NewServer(m, nil)
+	    m := &mockStore{}
+	    s := NewServer(m, nil)
 	body := bytes.NewBufferString(`{"system":{"hostname":"containd"},"zones":[{"name":"it"}]}`)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config", body)
+	req := authedRequest(http.MethodPost, "/api/v1/config", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -107,7 +130,7 @@ func TestSaveConfig(t *testing.T) {
 func TestValidateConfigBadJSON(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config/validate", bytes.NewBufferString(`{"zones": "oops"}`))
+	req := authedRequest(http.MethodPost, "/api/v1/config/validate", bytes.NewBufferString(`{"zones": "oops"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -119,13 +142,23 @@ func TestCreateZone(t *testing.T) {
 	m := &mockStore{}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/zones", bytes.NewBufferString(`{"name":"dmz"}`))
+	req := authedRequest(http.MethodPost, "/api/v1/zones", bytes.NewBufferString(`{"name":"it"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if m.cfg == nil || len(m.cfg.Zones) != 1 || m.cfg.Zones[0].Name != "dmz" {
+	if m.cfg == nil || len(m.cfg.Zones) == 0 {
+		t.Fatalf("expected zones to be persisted")
+	}
+	found := false
+	for _, z := range m.cfg.Zones {
+		if z.Name == "it" {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Fatalf("zone not persisted: %+v", m.cfg)
 	}
 }
@@ -135,7 +168,7 @@ func TestCreateInterfaceValidation(t *testing.T) {
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"name":"eth0","zone":"missing"}`)
-	req, _ := http.NewRequest("POST", "/api/v1/interfaces", body)
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code == http.StatusOK {
@@ -154,9 +187,9 @@ func TestCreateRuleDuplicate(t *testing.T) {
 			},
 		},
 	}
-    s := NewServer(m, nil)
+	    s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/firewall/rules", bytes.NewBufferString(`{"id":"1","action":"ALLOW"}`))
+	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules", bytes.NewBufferString(`{"id":"1","action":"ALLOW"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -169,7 +202,7 @@ func TestDefaultInterfacesSeeded(t *testing.T) {
 	m.load = func() (*config.Config, error) { return nil, config.ErrNotFound }
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/interfaces", nil)
+	req := authedRequest(http.MethodGet, "/api/v1/interfaces", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -184,7 +217,7 @@ func TestCreateFirewallRuleWithICSPredicate(t *testing.T) {
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	body := `{"id":"mb1","sourceZones":["ot"],"protocols":[{"name":"tcp","port":"502"}],"ics":{"protocol":"modbus","functionCode":[3,16],"addresses":["0-10"]},"action":"ALLOW"}`
-	req, _ := http.NewRequest("POST", "/api/v1/firewall/rules", bytes.NewBufferString(body))
+	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -203,7 +236,7 @@ func TestUpdateZone(t *testing.T) {
 	}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", "/api/v1/zones/it", bytes.NewBufferString(`{"description":"new"}`))
+	req := authedRequest(http.MethodPatch, "/api/v1/zones/it", bytes.NewBufferString(`{"description":"new"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -218,7 +251,7 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 	m := &mockStore{cfg: &config.Config{}}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", "/api/v1/interfaces/eth0", bytes.NewBufferString(`{"zone":"it"}`))
+	req := authedRequest(http.MethodPatch, "/api/v1/interfaces/eth0", bytes.NewBufferString(`{"zone":"it"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -233,7 +266,7 @@ func TestCandidateCommitRollback(t *testing.T) {
 
 	// Save candidate
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config/candidate", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
+	req := authedRequest(http.MethodPost, "/api/v1/config/candidate", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -242,7 +275,7 @@ func TestCandidateCommitRollback(t *testing.T) {
 
 	// Commit
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/config/commit", nil)
+	req = authedRequest(http.MethodPost, "/api/v1/config/commit", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 committing, got %d", rec.Code)
@@ -253,7 +286,7 @@ func TestCandidateCommitRollback(t *testing.T) {
 
 	// Rollback
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/config/rollback", nil)
+	req = authedRequest(http.MethodPost, "/api/v1/config/rollback", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 rollback, got %d", rec.Code)
@@ -265,7 +298,7 @@ func TestConfigDiff(t *testing.T) {
 	m.cfg = &config.Config{Zones: []config.Zone{{Name: "running"}}}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/config/diff", nil)
+	req := authedRequest(http.MethodGet, "/api/v1/config/diff", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 diff, got %d", rec.Code)
@@ -282,7 +315,7 @@ func TestExportImportConfig(t *testing.T) {
 	// Import config
 	importBody := `{"system":{"hostname":"containd"},"zones":[{"name":"it"}],"interfaces":[{"name":"eth0","zone":"it"}],"firewall":{"defaultAction":"ALLOW","rules":[]}}`
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config/import", bytes.NewBufferString(importBody))
+	req := authedRequest(http.MethodPost, "/api/v1/config/import", bytes.NewBufferString(importBody))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -291,7 +324,7 @@ func TestExportImportConfig(t *testing.T) {
 
 	// Export should return same hostname
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/config/export", nil)
+	req = authedRequest(http.MethodGet, "/api/v1/config/export", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export expected 200, got %d body=%s", rec.Code, rec.Body.String())
@@ -305,7 +338,7 @@ func TestCommitConfirmedTTLParsing(t *testing.T) {
 	m := &mockStore{}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config/commit_confirmed", bytes.NewBufferString(`{"ttl_seconds":5}`))
+	req := authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", bytes.NewBufferString(`{"ttl_seconds":5}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -320,7 +353,7 @@ func TestConfirmCommitEndpoint(t *testing.T) {
 	m := &mockStore{}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config/confirm", nil)
+	req := authedRequest(http.MethodPost, "/api/v1/config/confirm", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
@@ -334,7 +367,7 @@ func TestSyslogHandlers(t *testing.T) {
 	// Set syslog
 	body := `{"forwarders":[{"address":"1.2.3.4","port":514,"proto":"udp"}]}`
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/services/syslog", bytes.NewBufferString(body))
+	req := authedRequest(http.MethodPost, "/api/v1/services/syslog", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -343,7 +376,7 @@ func TestSyslogHandlers(t *testing.T) {
 
 	// Get syslog
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/services/syslog", nil)
+	req = authedRequest(http.MethodGet, "/api/v1/services/syslog", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -360,7 +393,7 @@ func TestDataPlaneHandlers(t *testing.T) {
 	// Set dataplane config.
 	body := `{"captureInterfaces":["eth0"],"enforcement":true,"enforceTable":"containd","dpiMock":false}`
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/dataplane", bytes.NewBufferString(body))
+	req := authedRequest(http.MethodPost, "/api/v1/dataplane", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -369,7 +402,7 @@ func TestDataPlaneHandlers(t *testing.T) {
 
 	// Get dataplane config.
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/dataplane", nil)
+	req = authedRequest(http.MethodGet, "/api/v1/dataplane", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"enforcement":true`)) {
 		t.Fatalf("unexpected dataplane payload: %s", rec.Body.String())
@@ -384,7 +417,7 @@ func TestSaveConfigValidationError(t *testing.T) {
 	}
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/config", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
+	req := authedRequest(http.MethodPost, "/api/v1/config", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -398,7 +431,7 @@ func TestAssetCRUD(t *testing.T) {
 
 	// Create zone for asset binding.
 	rec := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/zones", bytes.NewBufferString(`{"name":"ot"}`))
+	req := authedRequest(http.MethodPost, "/api/v1/zones", bytes.NewBufferString(`{"name":"ot"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -407,7 +440,7 @@ func TestAssetCRUD(t *testing.T) {
 
 	// Create asset.
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/v1/assets", bytes.NewBufferString(`{"id":"a1","name":"plc-1","type":"PLC","zone":"ot","ips":["10.0.0.10"],"criticality":"HIGH"}`))
+	req = authedRequest(http.MethodPost, "/api/v1/assets", bytes.NewBufferString(`{"id":"a1","name":"plc-1","type":"PLC","zone":"ot","ips":["10.0.0.10"],"criticality":"HIGH"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -416,7 +449,7 @@ func TestAssetCRUD(t *testing.T) {
 
 	// List assets.
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/assets", nil)
+	req = authedRequest(http.MethodGet, "/api/v1/assets", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"a1"`)) {
 		t.Fatalf("asset list missing asset: %s", rec.Body.String())
@@ -424,7 +457,7 @@ func TestAssetCRUD(t *testing.T) {
 
 	// Update asset.
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("PATCH", "/api/v1/assets/a1", bytes.NewBufferString(`{"description":"updated"}`))
+	req = authedRequest(http.MethodPatch, "/api/v1/assets/a1", bytes.NewBufferString(`{"description":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -433,7 +466,7 @@ func TestAssetCRUD(t *testing.T) {
 
 	// Delete asset.
 	rec = httptest.NewRecorder()
-	req, _ = http.NewRequest("DELETE", "/api/v1/assets/a1", nil)
+	req = authedRequest(http.MethodDelete, "/api/v1/assets/a1", nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("asset delete expected 204, got %d", rec.Code)

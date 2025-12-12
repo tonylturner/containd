@@ -7,6 +7,7 @@ import (
 
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -69,14 +70,37 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 func logoutHandler(userStore users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if userStore == nil {
+			clearAuthCookie(c)
 			c.JSON(http.StatusOK, gin.H{"status": "logged_out"})
 			return
 		}
-		sid, _ := c.Get(ctxSessionKey)
-		if s, ok := sid.(string); ok && s != "" {
-			_ = userStore.RevokeSession(c.Request.Context(), s)
+
+		// Try to revoke the session if we can extract a jti from the token,
+		// but always clear cookies even if parsing fails.
+		raw := bearerOrCookie(c)
+		if raw != "" && len(jwtSecret()) > 0 {
+			claims := jwt.MapClaims{}
+			parsed, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, jwt.ErrSignatureInvalid
+				}
+				return jwtSecret(), nil
+			}, jwt.WithoutClaimsValidation())
+			if err == nil && parsed != nil && parsed.Valid {
+				if jti, _ := claims["jti"].(string); jti != "" {
+					_ = userStore.RevokeSession(c.Request.Context(), jti)
+				}
+			}
 		}
-		c.SetCookie("containd_token", "", -1, "/", "", false, true)
+
+		// Best-effort: if auth middleware already set the session, revoke it too.
+		if sid, ok := c.Get(ctxSessionKey); ok {
+			if s, ok := sid.(string); ok && s != "" {
+				_ = userStore.RevokeSession(c.Request.Context(), s)
+			}
+		}
+
+		clearAuthCookie(c)
 		c.JSON(http.StatusOK, gin.H{"status": "logged_out"})
 	}
 }
@@ -126,7 +150,7 @@ func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 type changePasswordRequest struct {
-	CurrentPassword string `json:"currentPassword,omitempty"`
+	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
 }
 
@@ -146,17 +170,18 @@ func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "newPassword required"})
 			return
 		}
+		if req.CurrentPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "currentPassword required"})
+			return
+		}
 		u, err := userStore.GetByID(c.Request.Context(), uid)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
-		// If current password provided, verify before changing.
-		if req.CurrentPassword != "" {
-			if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "current password invalid"})
-				return
-			}
+		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "current password invalid"})
+			return
 		}
 		if err := userStore.SetPassword(c.Request.Context(), uid, req.NewPassword); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

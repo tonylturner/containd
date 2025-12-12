@@ -116,7 +116,8 @@ func TestSetSystemHostnameUsage(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	reg := NewRegistry(nil, api)
 	var buf bytes.Buffer
-	err := reg.ParseAndExecute(context.Background(), "set system hostname containd", &buf)
+	ctx := WithRole(context.Background(), string(RoleAdmin))
+	err := reg.ParseAndExecute(ctx, "set system hostname containd", &buf)
 	if err != nil {
 		t.Fatalf("expected set system hostname to execute, got %v", err)
 	}
@@ -213,7 +214,8 @@ func TestSetZoneViaAPI(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	reg := NewRegistry(nil, api)
 	var buf bytes.Buffer
-	if err := reg.Execute(context.Background(), "set zone", &buf, []string{"it", "desc"}); err != nil {
+	ctx := WithRole(context.Background(), string(RoleAdmin))
+	if err := reg.Execute(ctx, "set zone", &buf, []string{"it", "desc"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("ok")) {
@@ -231,7 +233,8 @@ func TestDeleteFirewallRuleViaAPI(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	reg := NewRegistry(nil, api)
 	var buf bytes.Buffer
-	if err := reg.Execute(context.Background(), "delete firewall rule", &buf, []string{"10"}); err != nil {
+	ctx := WithRole(context.Background(), string(RoleAdmin))
+	if err := reg.Execute(ctx, "delete firewall rule", &buf, []string{"10"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 }
@@ -246,7 +249,8 @@ func TestCommitConfirmedViaAPI(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	reg := NewRegistry(nil, api)
 	var buf bytes.Buffer
-	if err := reg.Execute(context.Background(), "commit confirmed", &buf, []string{"5"}); err != nil {
+	ctx := WithRole(context.Background(), string(RoleAdmin))
+	if err := reg.Execute(ctx, "commit confirmed", &buf, []string{"5"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if len(client.reqs) != 1 {

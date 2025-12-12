@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   containd:
     build:
@@ -8,6 +6,15 @@ services:
     image: containd/containd:dev
     environment:
       - NGFW_MGMT_ADDR=:8080
+      - NGFW_SSH_ADDR=:2222
+      - NGFW_SSH_AUTH_KEYS_DIR=/data/ssh/authorized_keys.d
+      - NGFW_SSH_HOST_KEY=/data/ssh/host_key
+      # Optional: seed initial admin SSH key (avoid chicken/egg in production).
+      # Set to a full authorized_keys line, e.g. "ssh-ed25519 AAAA... user@host".
+      # - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=
+      # - NGFW_SSH_BOOTSTRAP_ADMIN_USER=containd
+      # Optional: override password auth (default enabled only in lab mode).
+      # - NGFW_SSH_ALLOW_PASSWORD=0
       # Dev/lab mode disables auth; set CONTAIND_ADMIN_TOKEN instead for secured runs.
       - CONTAIND_LAB_MODE=1
       # JWT secret for UI/login flows (ignored in lab mode).
@@ -18,6 +25,7 @@ services:
       - NGFW_ENGINE_URL=http://engine:8081
     ports:
       - "8080:8080"
+      - "2222:2222"
     volumes:
       - ./data:/data
     command: ["/usr/bin/ngfw-mgmt"]
@@ -61,11 +69,35 @@ services:
       lan6: {}
 
 networks:
-  wan: {}
-  dmz: {}
-  lan1: {}
-  lan2: {}
-  lan3: {}
-  lan4: {}
-  lan5: {}
-  lan6: {}
+  wan:
+    ipam:
+      config:
+        - subnet: 192.168.240.0/24
+  dmz:
+    ipam:
+      config:
+        - subnet: 192.168.241.0/24
+  lan1:
+    ipam:
+      config:
+        - subnet: 192.168.242.0/24
+  lan2:
+    ipam:
+      config:
+        - subnet: 192.168.243.0/24
+  lan3:
+    ipam:
+      config:
+        - subnet: 192.168.244.0/24
+  lan4:
+    ipam:
+      config:
+        - subnet: 192.168.245.0/24
+  lan5:
+    ipam:
+      config:
+        - subnet: 192.168.246.0/24
+  lan6:
+    ipam:
+      config:
+        - subnet: 192.168.247.0/24

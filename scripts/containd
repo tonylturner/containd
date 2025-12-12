@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd="${1:-up}"
+shift || true
+
+case "${cmd}" in
+  up)
+    # Starts in detached mode and prints connection info immediately after.
+    docker compose up -d "$@"
+    echo ""
+    bash "$(dirname "$0")/containd-connect" containd || true
+    ;;
+  down)
+    docker compose down "$@"
+    ;;
+  logs)
+    docker compose logs -f "$@"
+    ;;
+  connect)
+    bash "$(dirname "$0")/containd-connect" "${1:-containd}"
+    ;;
+  *)
+    echo "Usage: bash scripts/containd <up|down|logs|connect> [args...]" >&2
+    exit 2
+    ;;
+esac
+

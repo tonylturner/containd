@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -62,11 +63,13 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api.GET("/health", healthHandler)
 	// Login is always unauthenticated (unless JWT not configured).
 	api.POST("/auth/login", loginHandler(userStore))
+	// Logout is intentionally unauthenticated so clients can always clear cookies
+	// even if their session expired or local token state is gone.
+	api.POST("/auth/logout", logoutHandler(userStore))
 	// All other endpoints require auth (unless lab mode).
 	protected := api.Group("")
 	protected.Use(authMiddleware(userStore))
 	{
-		protected.POST("/auth/logout", logoutHandler(userStore))
 		protected.GET("/auth/me", meHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
@@ -115,8 +118,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
-		protected.POST("/ids/convert/sigma", requireAdmin(), convertSigmaHandler())
-		protected.POST("/cli/execute", requireAdmin(), cliExecuteHandler(store))
+		protected.POST("/ids/convert/sigma", convertSigmaHandler())
+		protected.POST("/cli/execute", cliExecuteHandler(store))
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
 		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
@@ -198,7 +201,24 @@ func exportConfigHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if c.Query("redacted") == "1" || c.Query("redacted") == "true" {
+		// Exports are redacted by default; only admins can request unredacted.
+		wantRedacted := true
+		switch strings.ToLower(strings.TrimSpace(c.Query("redacted"))) {
+		case "0", "false", "no":
+			wantRedacted = false
+		case "1", "true", "yes":
+			wantRedacted = true
+		case "":
+			// default redacted
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid redacted query value"})
+			return
+		}
+		if !wantRedacted && c.GetString(ctxRoleKey) != string(roleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin role required for unredacted export"})
+			return
+		}
+		if wantRedacted {
 			cfg = cfg.RedactedCopy()
 		}
 		c.JSON(http.StatusOK, cfg)
@@ -683,9 +703,17 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			baseURL = proto + "://" + c.Request.Host
 		}
 		apiClient := &cli.API{BaseURL: baseURL}
+		// Pass through the caller's bearer token so in-app console commands
+		// can access the same protected endpoints as the UI session.
+		if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
+			apiClient.Token = strings.TrimSpace(h[len("bearer "):])
+		} else if ck, err := c.Cookie("containd_token"); err == nil && strings.TrimSpace(ck) != "" {
+			apiClient.Token = strings.TrimSpace(ck)
+		}
+		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
 		reg := cli.NewRegistry(store, apiClient)
 		var buf bytes.Buffer
-		if err := reg.ParseAndExecute(c.Request.Context(), r.Line, &buf); err != nil {
+		if err := reg.ParseAndExecute(ctx, r.Line, &buf); err != nil {
 			c.JSON(http.StatusOK, resp{Output: buf.String(), Error: err.Error()})
 			return
 		}

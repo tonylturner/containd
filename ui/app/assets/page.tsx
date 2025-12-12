@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Asset, type Zone } from "../../lib/api";
+import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
 export default function AssetsPage() {
@@ -78,11 +78,17 @@ export default function AssetsPage() {
 
   return (
     <Shell title="Assets" actions={<button onClick={refresh} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10">Refresh</button>}>
+      {!isAdmin() && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>
       )}
+      {isAdmin() && (
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create asset</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
@@ -148,6 +154,7 @@ export default function AssetsPage() {
           </button>
         </div>
       </div>
+      )}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
         <table className="w-full text-sm">
@@ -185,18 +192,22 @@ export default function AssetsPage() {
                   {a.criticality || "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(a)}
-                    className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(a.id)}
-                    className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                  >
-                    Delete
-                  </button>
+                  {isAdmin() && (
+                    <>
+                      <button
+                        onClick={() => setEditing(a)}
+                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(a.id)}
+                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -204,7 +215,7 @@ export default function AssetsPage() {
         </table>
       </div>
 
-      {editing && (
+      {editing && isAdmin() && (
         <EditAssetModal
           asset={editing}
           zones={zones}

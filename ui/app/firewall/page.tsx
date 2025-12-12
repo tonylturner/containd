@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import {
   api,
+  isAdmin,
   type FirewallRule,
   type Protocol,
   type Zone,
@@ -70,13 +71,18 @@ export default function FirewallPage() {
         </button>
       }
     >
+      {!isAdmin() && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>
       )}
 
-      <CreateRuleForm zones={zones} onCreate={onCreate} />
+      {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
         <table className="w-full text-sm">
@@ -135,18 +141,22 @@ export default function FirewallPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(r)}
-                    className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(r.id)}
-                    className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                  >
-                    Delete
-                  </button>
+                  {isAdmin() && (
+                    <>
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(r.id)}
+                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -154,7 +164,7 @@ export default function FirewallPage() {
         </table>
       </div>
 
-      {editing && (
+      {editing && isAdmin() && (
         <EditRuleModal
           zones={zones}
           rule={editing}

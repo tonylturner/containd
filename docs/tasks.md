@@ -47,8 +47,10 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add CLI commands for commit/rollback/export/import/audit/dataplane.
   - [x] Add `show services status` once supervisor status endpoint stable.
   - [x] Add redacted export variants (`show running-config redacted`, `export config redacted`).
+  - [x] Add SSH console (admin-only) with `menu` + `wizard`.
+  - [x] Add diagnostics commands (`diag ping`, `diag traceroute`, `diag capture`, `show ip route`).
   - [ ] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
-  - [ ] Plan SSH server integration (key auth default, passwords only in lab) and rate limiting.
+  - [ ] Add SSH hardening (rate limiting, banners, host key persistence review).
 - [ ] UI integration
   - [x] Add dashboard fetching `/api/v1/health`.
   - [x] Set up API client layer.
@@ -76,7 +78,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
   - [~] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI (env-token skeleton).
   - [ ] HTTPS defaults with self-signed cert and custom cert install/rotate.
-  - [ ] Plan SSH server integration points for Phase 4.
+  - [x] Add SSH server integration points (admin-only console).
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
 - [ ] ICS/OT features
   - [x] Asset model (ICS assets, criticality, tags) and policy references.

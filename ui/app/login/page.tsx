@@ -1,24 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 import { api } from "../../lib/api";
 
 type State = "idle" | "logging_in" | "error";
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
+  const params = useSearchParams();
   const [username, setUsername] = useState("containd");
   const [password, setPassword] = useState("containd");
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
+    const reason = (params?.get("reason") ?? "").toLowerCase();
+    if (reason === "expired") {
+      setInfo("Session expired. Please log in again.");
+    } else if (reason === "logout") {
+      setInfo("You have been logged out.");
+    } else {
+      setInfo(null);
+    }
     api.me().then((me) => {
       if (me && typeof window !== "undefined") {
         window.location.href = "/";
       }
     });
-  }, []);
+  }, [params]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,7 +52,8 @@ export default function LoginPage() {
       return;
     }
     if (typeof window !== "undefined") {
-      window.location.href = "/";
+      const next = params?.get("next");
+      window.location.href = next && next.startsWith("/") ? next : "/";
     }
   }
 
@@ -47,6 +68,11 @@ export default function LoginPage() {
         {error && (
           <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
             {error}
+          </div>
+        )}
+        {info && (
+          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
+            {info}
           </div>
         )}
 
@@ -86,4 +112,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type ConfigBundle } from "../../lib/api";
+import { api, isAdmin, type ConfigBundle } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
 type Tab = "running" | "candidate" | "diff";
 
 export default function ConfigPage() {
+  const canEdit = isAdmin();
   const [tab, setTab] = useState<Tab>("diff");
   const [running, setRunning] = useState<ConfigBundle | null>(null);
   const [candidate, setCandidate] = useState<ConfigBundle | null>(null);
@@ -29,6 +30,7 @@ export default function ConfigPage() {
   }, []);
 
   async function saveCandidate() {
+    if (!canEdit) return;
     setStatus(null);
     try {
       const parsed = JSON.parse(candidateText) as ConfigBundle;
@@ -45,6 +47,7 @@ export default function ConfigPage() {
   }
 
   async function doCommit() {
+    if (!canEdit) return;
     setStatus(null);
     const res = await api.commit();
     setStatus(res ? "Committed." : "Commit failed.");
@@ -52,6 +55,7 @@ export default function ConfigPage() {
   }
 
   async function doCommitConfirmed() {
+    if (!canEdit) return;
     setStatus(null);
     const ttl = Number(ttlSeconds);
     const res = await api.commitConfirmed(
@@ -62,6 +66,7 @@ export default function ConfigPage() {
   }
 
   async function doConfirm() {
+    if (!canEdit) return;
     setStatus(null);
     const res = await api.confirmCommit();
     setStatus(res ? "Commit confirmed." : "Confirm failed.");
@@ -69,6 +74,7 @@ export default function ConfigPage() {
   }
 
   async function doRollback() {
+    if (!canEdit) return;
     setStatus(null);
     const res = await api.rollback();
     setStatus(res ? "Rolled back." : "Rollback failed.");
@@ -101,6 +107,11 @@ export default function ConfigPage() {
         </button>
       }
     >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap gap-2">
         {(["diff", "running", "candidate"] as Tab[]).map((t) => (
           <button
@@ -129,16 +140,19 @@ export default function ConfigPage() {
             <h2 className="text-sm font-semibold text-white">
               Candidate JSON
             </h2>
-            <button
-              onClick={saveCandidate}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
-            >
-              Save candidate
-            </button>
+            {canEdit && (
+              <button
+                onClick={saveCandidate}
+                className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
+              >
+                Save candidate
+              </button>
+            )}
           </div>
           <textarea
             value={candidateText}
             onChange={(e) => setCandidateText(e.target.value)}
+            readOnly={!canEdit}
             rows={22}
             className="w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs text-white"
           />
@@ -158,40 +172,48 @@ export default function ConfigPage() {
       )}
 
       <div className="mt-6 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-        <button
-          onClick={doCommit}
-          className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
-        >
-          Commit
-        </button>
-        <div className="flex items-center gap-2">
+        {canEdit && (
           <button
-            onClick={doCommitConfirmed}
-            className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+            onClick={doCommit}
+            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
           >
-            Commit-confirmed
+            Commit
           </button>
+        )}
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button
+              onClick={doCommitConfirmed}
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+            >
+              Commit-confirmed
+            </button>
+          )}
           <input
             value={ttlSeconds}
             onChange={(e) => setTtlSeconds(e.target.value)}
+            disabled={!canEdit}
             className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
           />
           <span className="text-xs text-slate-300">seconds</span>
         </div>
-        <button
-          onClick={doConfirm}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-        >
-          Confirm
-        </button>
-        <button
-          onClick={doRollback}
-          className="rounded-lg bg-amber/20 px-3 py-1.5 text-sm font-semibold text-amber hover:bg-amber/30"
-        >
-          Rollback
-        </button>
+        {canEdit && (
+          <>
+            <button
+              onClick={doConfirm}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={doRollback}
+              className="rounded-lg bg-amber/20 px-3 py-1.5 text-sm font-semibold text-amber hover:bg-amber/30"
+            >
+              Rollback
+            </button>
+          </>
+        )}
       </div>
     </Shell>
   );
 }
-

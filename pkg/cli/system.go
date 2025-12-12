@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
@@ -64,6 +65,16 @@ func showSystem(api *API) Command {
 		_ = api.getJSON(ctx, "/api/v1/config", &cfg)
 
 		fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
+		if cfg.System.Mgmt.ListenAddr != "" {
+			fmt.Fprintf(out, "mgmt.listen: %s\n", cfg.System.Mgmt.ListenAddr)
+		}
+		if cfg.System.SSH.ListenAddr != "" {
+			fmt.Fprintf(out, "ssh.listen: %s\n", cfg.System.SSH.ListenAddr)
+		}
+		if cfg.System.SSH.AuthorizedKeysDir != "" {
+			fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
+		}
+		fmt.Fprintf(out, "ssh.allow_password: %s\n", yesNoStr(cfg.System.SSH.AllowPassword))
 		fmt.Fprintf(out, "component: %s\n", h.Component)
 		if h.Build != "" {
 			fmt.Fprintf(out, "build: %s\n", h.Build)
@@ -103,6 +114,58 @@ func setSystemMgmtListenAPI(api *API) Command {
 			return err
 		}
 		cfg.System.Mgmt.ListenAddr = args[0]
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemSSHListenAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh listen <addr>")
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.ListenAddr = args[0]
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemSSHAllowPasswordAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh allow-password <true|false>")
+		}
+		v := strings.ToLower(strings.TrimSpace(args[0]))
+		var enabled bool
+		switch v {
+		case "1", "true", "yes", "on":
+			enabled = true
+		case "0", "false", "no", "off":
+			enabled = false
+		default:
+			return fmt.Errorf("invalid allow-password value %q", args[0])
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.AllowPassword = enabled
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemSSHAuthorizedKeysDirAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh authorized-keys-dir <dir>")
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.AuthorizedKeysDir = args[0]
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }

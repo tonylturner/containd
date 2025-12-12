@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
+  isAdmin,
   type ForwardProxyConfig,
   type ReverseProxyConfig,
   type ReverseProxySite,
@@ -13,6 +14,7 @@ import { Shell } from "../../components/Shell";
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
+  const canEdit = isAdmin();
   const [forward, setForward] = useState<ForwardProxyConfig>({
     enabled: false,
     listenPort: 3128,
@@ -72,6 +74,7 @@ export default function ProxiesPage() {
   );
 
   async function onSaveForward() {
+    if (!canEdit) return;
     setError(null);
     setSaveState("saving");
     const saved = await api.setForwardProxy(forward);
@@ -81,6 +84,7 @@ export default function ProxiesPage() {
   }
 
   async function onSaveReverse() {
+    if (!canEdit) return;
     setError(null);
     setSaveState("saving");
     const saved = await api.setReverseProxy(reverse);
@@ -90,6 +94,7 @@ export default function ProxiesPage() {
   }
 
   function addSite() {
+    if (!canEdit) return;
     setError(null);
     if (!newSite.name.trim()) {
       setError("Site name is required.");
@@ -117,6 +122,7 @@ export default function ProxiesPage() {
   }
 
   function deleteSite(name: string) {
+    if (!canEdit) return;
     setReverse((r) => ({
       ...r,
       sites: (r.sites ?? []).filter((s) => s.name !== name),
@@ -135,6 +141,11 @@ export default function ProxiesPage() {
         </button>
       }
     >
+      {!canEdit && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}
@@ -155,6 +166,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.enabled ?? false}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, enabled: e.target.checked }))
                 }
@@ -170,6 +182,7 @@ export default function ProxiesPage() {
               <input
                 type="number"
                 value={forward.listenPort ?? 3128}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setForward((f) => ({
                     ...f,
@@ -190,6 +203,7 @@ export default function ProxiesPage() {
               <input
                 type="text"
                 value={listenZonesCSV}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setForward((f) => ({
                     ...f,
@@ -214,6 +228,7 @@ export default function ProxiesPage() {
               <input
                 type="text"
                 value={allowedDomainsCSV}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setForward((f) => ({
                     ...f,
@@ -232,6 +247,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.logRequests ?? false}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, logRequests: e.target.checked }))
                 }
@@ -247,13 +263,15 @@ export default function ProxiesPage() {
               {saveState === "saved" && (
                 <span className="text-sm text-mint">Saved</span>
               )}
-              <button
-                onClick={onSaveForward}
-                disabled={saveState === "saving"}
-                className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-              >
-                {saveState === "saving" ? "Saving..." : "Save"}
-              </button>
+              {canEdit && (
+                <button
+                  onClick={onSaveForward}
+                  disabled={saveState === "saving"}
+                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                >
+                  {saveState === "saving" ? "Saving..." : "Save"}
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -270,6 +288,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={reverse.enabled ?? false}
+                disabled={!canEdit}
                 onChange={(e) =>
                   setReverse((r) => ({ ...r, enabled: e.target.checked }))
                 }
@@ -284,6 +303,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={newSite.name}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, name: e.target.value }))
                   }
@@ -293,6 +313,7 @@ export default function ProxiesPage() {
                 <input
                   type="number"
                   value={newSite.listenPort}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setNewSite((s) => ({
                       ...s,
@@ -305,6 +326,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={(newSite.backends ?? []).join(", ")}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setNewSite((s) => ({
                       ...s,
@@ -320,6 +342,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={(newSite.hostnames ?? []).join(", ")}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setNewSite((s) => ({
                       ...s,
@@ -334,12 +357,14 @@ export default function ProxiesPage() {
                 />
               </div>
               <div className="mt-3 flex justify-end">
-                <button
-                  onClick={addSite}
-                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-                >
-                  Add
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={addSite}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                  >
+                    Add
+                  </button>
+                )}
               </div>
             </div>
 
@@ -362,12 +387,14 @@ export default function ProxiesPage() {
                       port {site.listenPort} → {(site.backends ?? []).join(", ")}
                     </div>
                   </div>
-                  <button
-                    onClick={() => deleteSite(site.name)}
-                    className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
-                  >
-                    Delete
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => deleteSite(site.name)}
+                      className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -379,13 +406,15 @@ export default function ProxiesPage() {
               {saveState === "saved" && (
                 <span className="text-sm text-mint">Saved</span>
               )}
-              <button
-                onClick={onSaveReverse}
-                disabled={saveState === "saving"}
-                className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-              >
-                {saveState === "saving" ? "Saving..." : "Save"}
-              </button>
+              {canEdit && (
+                <button
+                  onClick={onSaveReverse}
+                  disabled={saveState === "saving"}
+                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                >
+                  {saveState === "saving" ? "Saving..." : "Save"}
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -393,4 +422,3 @@ export default function ProxiesPage() {
     </Shell>
   );
 }
-

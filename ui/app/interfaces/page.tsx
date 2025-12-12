@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Interface, type Zone } from "../../lib/api";
+import { api, isAdmin, type Interface, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
 export default function InterfacesPage() {
@@ -83,6 +83,11 @@ export default function InterfacesPage() {
         </button>
       }
     >
+      {!isAdmin() && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create interface</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -90,11 +95,13 @@ export default function InterfacesPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name (e.g. eth0)"
+            disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
+            disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           >
             <option value="">(no zone)</option>
@@ -108,18 +115,21 @@ export default function InterfacesPage() {
             value={addresses}
             onChange={(e) => setAddresses(e.target.value)}
             placeholder="addresses (CIDR, comma-separated)"
+            disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
           />
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p className="text-sm text-amber">{error}</p>}
-          <button
-            onClick={onCreate}
-            disabled={saving}
-            className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-          >
-            {saving ? "Creating..." : "Create"}
-          </button>
+          {isAdmin() && (
+            <button
+              onClick={onCreate}
+              disabled={saving}
+              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+            >
+              {saving ? "Creating..." : "Create"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -148,6 +158,7 @@ export default function InterfacesPage() {
                 zones={zones}
                 onDelete={onDelete}
                 onUpdate={onUpdate}
+                canEdit={isAdmin()}
               />
             ))}
           </tbody>
@@ -162,11 +173,13 @@ function InterfaceRow({
   zones,
   onDelete,
   onUpdate,
+  canEdit,
 }: {
   iface: Interface;
   zones: Zone[];
   onDelete: (name: string) => void;
   onUpdate: (name: string, patch: Partial<Interface>) => void;
+  canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [zone, setZone] = useState(iface.zone ?? "");
@@ -180,6 +193,7 @@ function InterfaceRow({
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
+            disabled={!canEdit}
             className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
           >
             <option value="">(no zone)</option>
@@ -198,6 +212,7 @@ function InterfaceRow({
           <input
             value={addresses}
             onChange={(e) => setAddresses(e.target.value)}
+            disabled={!canEdit}
             className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
           />
         ) : (
@@ -239,18 +254,22 @@ function InterfaceRow({
           </div>
         ) : (
           <div className="inline-flex gap-2">
-            <button
-              onClick={() => setEditing(true)}
-              className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => onDelete(iface.name)}
-              className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-            >
-              Delete
-            </button>
+            {canEdit && (
+              <>
+                <button
+                  onClick={() => setEditing(true)}
+                  className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onDelete(iface.name)}
+                  className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                >
+                  Delete
+                </button>
+              </>
+            )}
           </div>
         )}
       </td>

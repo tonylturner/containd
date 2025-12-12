@@ -51,6 +51,7 @@ type SystemConfig struct {
 	Hostname string `json:"hostname"`
 	// Placeholder for future system settings (NTP/DNS/syslog).
 	Mgmt MgmtConfig `json:"mgmt,omitempty"`
+	SSH  SSHConfig  `json:"ssh,omitempty"`
 }
 
 // MgmtConfig controls management plane binding and access.
@@ -58,6 +59,18 @@ type SystemConfig struct {
 // on WAN/DMZ/LAN interfaces in lab deployments. Operators can narrow this later.
 type MgmtConfig struct {
 	ListenAddr string `json:"listenAddr,omitempty"` // e.g. ":8080", "127.0.0.1:8080"
+}
+
+// SSHConfig controls the embedded SSH server (interactive CLI).
+type SSHConfig struct {
+	// ListenAddr is the address the SSH server listens on (inside the appliance/container).
+	// Use ":2222" by default in containers (non-root). Appliances may map it to 22 externally.
+	ListenAddr string `json:"listenAddr,omitempty"` // e.g. ":2222", "0.0.0.0:2222", "127.0.0.1:2222"
+	// AuthorizedKeysDir is a directory containing OpenSSH authorized_keys files.
+	// Implementations may look up keys by username (e.g. "<dir>/<username>.pub").
+	AuthorizedKeysDir string `json:"authorizedKeysDir,omitempty"`
+	// AllowPassword enables SSH password authentication. Should only be enabled in lab mode.
+	AllowPassword bool `json:"allowPassword,omitempty"`
 }
 
 type ServicesConfig struct {
@@ -309,6 +322,9 @@ func (c *Config) Validate() error {
 	if err := validateMgmt(c.System.Mgmt); err != nil {
 		return err
 	}
+	if err := validateSSH(c.System.SSH); err != nil {
+		return err
+	}
 	if err := validateZones(c.Zones); err != nil {
 		return err
 	}
@@ -351,6 +367,16 @@ func validateMgmt(m MgmtConfig) error {
 		return fmt.Errorf("mgmt.listenAddr too long")
 	}
 	// We accept anything net/http can listen on; detailed parsing later.
+	return nil
+}
+
+func validateSSH(s SSHConfig) error {
+	if s.ListenAddr != "" && len(s.ListenAddr) > 128 {
+		return fmt.Errorf("ssh.listenAddr too long")
+	}
+	if s.AuthorizedKeysDir != "" && len(s.AuthorizedKeysDir) > 256 {
+		return fmt.Errorf("ssh.authorizedKeysDir too long")
+	}
 	return nil
 }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Zone } from "../../lib/api";
+import { api, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
 export default function ZonesPage() {
@@ -74,6 +74,11 @@ export default function ZonesPage() {
         </button>
       }
     >
+      {!isAdmin() && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          View-only mode: configuration changes are disabled.
+        </div>
+      )}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
@@ -81,24 +86,28 @@ export default function ZonesPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name (e.g. ot)"
+            disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="description"
+            disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
           />
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p className="text-sm text-amber">{error}</p>}
-          <button
-            onClick={onCreate}
-            disabled={saving}
-            className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-          >
-            {saving ? "Creating..." : "Create"}
-          </button>
+          {isAdmin() && (
+            <button
+              onClick={onCreate}
+              disabled={saving}
+              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+            >
+              {saving ? "Creating..." : "Create"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -120,7 +129,13 @@ export default function ZonesPage() {
               </tr>
             )}
             {zones.map((z) => (
-              <ZoneRow key={z.name} zone={z} onDelete={onDelete} onUpdate={onUpdate} />
+              <ZoneRow
+                key={z.name}
+                zone={z}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+                canEdit={isAdmin()}
+              />
             ))}
           </tbody>
         </table>
@@ -133,10 +148,12 @@ function ZoneRow({
   zone,
   onDelete,
   onUpdate,
+  canEdit,
 }: {
   zone: Zone;
   onDelete: (name: string) => void;
   onUpdate: (name: string, patch: Partial<Zone>) => void;
+  canEdit: boolean;
 }) {
   const [desc, setDesc] = useState(zone.description ?? "");
   const [editing, setEditing] = useState(false);
@@ -149,6 +166,7 @@ function ZoneRow({
           <input
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
+            disabled={!canEdit}
             className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
           />
         ) : (
@@ -179,18 +197,22 @@ function ZoneRow({
           </div>
         ) : (
           <div className="inline-flex gap-2">
-            <button
-              onClick={() => setEditing(true)}
-              className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => onDelete(zone.name)}
-              className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-            >
-              Delete
-            </button>
+            {canEdit && (
+              <>
+                <button
+                  onClick={() => setEditing(true)}
+                  className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onDelete(zone.name)}
+                  className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                >
+                  Delete
+                </button>
+              </>
+            )}
           </div>
         )}
       </td>
