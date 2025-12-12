@@ -16,6 +16,7 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/ids"
+	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -129,6 +130,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("show health", showHealth(api))
 		r.Register("show config", showConfig(api))
 		r.Register("show running-config", showRunningConfig(api))
+		r.Register("show running-config redacted", showRunningConfigRedacted(api))
 		r.Register("show candidate-config", showCandidateConfig(api))
 		r.Register("show diff", showDiff(api))
 		r.Register("show system", showSystem(api))
@@ -249,7 +251,12 @@ func showHealth(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/health", &payload); err != nil {
 			return err
 		}
-		return printJSON(out, payload)
+		kv := map[string]string{}
+		for k, v := range payload {
+			kv[k] = fmtAny(v)
+		}
+		kvTable(out, kv)
+		return nil
 	}
 }
 
@@ -269,7 +276,28 @@ func showAudit(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/audit", &records); err != nil {
 			return err
 		}
-		return printJSON(out, records)
+		if out == nil {
+			return nil
+		}
+		if len(records) == 0 {
+			fmt.Fprintln(out, "No audit records.")
+			return nil
+		}
+		t := newTable("ID", "TIME", "ACTOR", "SOURCE", "ACTION", "TARGET", "RESULT", "DETAIL")
+		for _, r := range records {
+			t.addRow(
+				fmt.Sprintf("%d", r.ID),
+				fmtTime(r.Timestamp),
+				truncate(r.Actor, 20),
+				truncate(r.Source, 10),
+				truncate(r.Action, 24),
+				truncate(r.Target, 20),
+				truncate(r.Result, 8),
+				truncate(r.Detail, 40),
+			)
+		}
+		t.render(out)
+		return nil
 	}
 }
 
@@ -279,7 +307,13 @@ func showDataPlane(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
 			return err
 		}
-		return printJSON(out, dp)
+		kvTable(out, map[string]string{
+			"captureInterfaces": joinCSV(dp.CaptureInterfaces),
+			"enforcement":       yesNoStr(dp.Enforcement),
+			"enforceTable":      firstNonEmpty(dp.EnforceTable, "containd"),
+			"dpiMock":           yesNoStr(dp.DPIMock),
+		})
+		return nil
 	}
 }
 
@@ -289,7 +323,16 @@ func showForwardProxy(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/services/proxy/forward", &fp); err != nil {
 			return err
 		}
-		return printJSON(out, fp)
+		kvTable(out, map[string]string{
+			"enabled":        yesNoStr(fp.Enabled),
+			"listenPort":     fmtAny(fp.ListenPort),
+			"listenZones":    joinCSV(fp.ListenZones),
+			"allowedClients": joinCSV(fp.AllowedClients),
+			"allowedDomains": joinCSV(fp.AllowedDomains),
+			"upstream":       firstNonEmpty(fp.Upstream, "—"),
+			"logRequests":    yesNoStr(fp.LogRequests),
+		})
+		return nil
 	}
 }
 
@@ -299,27 +342,94 @@ func showReverseProxy(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/services/proxy/reverse", &rp); err != nil {
 			return err
 		}
-		return printJSON(out, rp)
+		if out == nil {
+			return nil
+		}
+		kvTable(out, map[string]string{
+			"enabled": yesNoStr(rp.Enabled),
+			"sites":   fmt.Sprintf("%d", len(rp.Sites)),
+		})
+		if len(rp.Sites) > 0 {
+			t := newTable("NAME", "PORT", "HOSTNAMES", "BACKENDS", "TLS")
+			for _, s := range rp.Sites {
+				t.addRow(
+					s.Name,
+					fmt.Sprintf("%d", s.ListenPort),
+					truncate(joinCSV(s.Hostnames), 40),
+					truncate(joinCSV(s.Backends), 40),
+					yesNoStr(s.TLSEnabled),
+				)
+			}
+			fmt.Fprintln(out)
+			t.render(out)
+		}
+		return nil
 	}
 }
 
 func showFlows(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		var flows []map[string]any
+		var flows []dpevents.FlowSummary
 		if err := api.getJSON(ctx, "/api/v1/flows", &flows); err != nil {
 			return err
 		}
-		return printJSON(out, flows)
+		if out == nil {
+			return nil
+		}
+		if len(flows) == 0 {
+			fmt.Fprintln(out, "No flows.")
+			return nil
+		}
+		t := newTable("FLOW", "SRC", "DST", "TRANSPORT", "APP", "FIRST", "LAST", "EVENTS")
+		for _, f := range flows {
+			src := fmt.Sprintf("%s:%d", f.SrcIP, f.SrcPort)
+			dst := fmt.Sprintf("%s:%d", f.DstIP, f.DstPort)
+			t.addRow(
+				truncate(f.FlowID, 12),
+				truncate(src, 22),
+				truncate(dst, 22),
+				firstNonEmpty(f.Transport, "—"),
+				firstNonEmpty(f.Application, "—"),
+				fmtTime(f.FirstSeen),
+				fmtTime(f.LastSeen),
+				fmt.Sprintf("%d", f.EventCount),
+			)
+		}
+		t.render(out)
+		return nil
 	}
 }
 
 func showEvents(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		var events []map[string]any
+		var events []dpevents.Event
 		if err := api.getJSON(ctx, "/api/v1/events", &events); err != nil {
 			return err
 		}
-		return printJSON(out, events)
+		if out == nil {
+			return nil
+		}
+		if len(events) == 0 {
+			fmt.Fprintln(out, "No events.")
+			return nil
+		}
+		t := newTable("ID", "TIME", "FLOW", "PROTO", "KIND", "SRC", "DST", "ATTRS")
+		for _, ev := range events {
+			src := fmt.Sprintf("%s:%d", ev.SrcIP, ev.SrcPort)
+			dst := fmt.Sprintf("%s:%d", ev.DstIP, ev.DstPort)
+			t.addRow(
+				fmt.Sprintf("%d", ev.ID),
+				fmtTime(ev.Timestamp),
+				truncate(ev.FlowID, 12),
+				ev.Proto,
+				ev.Kind,
+				truncate(src, 22),
+				truncate(dst, 22),
+				attrsSummary(ev.Attributes, 60),
+			)
+		}
+		t.render(out)
+		return nil
 	}
 }
 
@@ -333,13 +443,11 @@ func showZones(store config.Store) Command {
 			_, err = fmt.Fprintln(out, "No zones configured")
 			return err
 		}
+		t := newTable("NAME", "DESCRIPTION")
 		for _, z := range cfg.Zones {
-			if z.Description != "" {
-				fmt.Fprintf(out, "%s - %s\n", z.Name, z.Description)
-			} else {
-				fmt.Fprintln(out, z.Name)
-			}
+			t.addRow(z.Name, firstNonEmpty(z.Description, "—"))
 		}
+		t.render(out)
 		return nil
 	}
 }
@@ -354,9 +462,11 @@ func showInterfaces(store config.Store) Command {
 			_, err = fmt.Fprintln(out, "No interfaces configured")
 			return err
 		}
+		t := newTable("NAME", "ZONE", "ADDRESSES")
 		for _, iface := range cfg.Interfaces {
-			fmt.Fprintf(out, "%s zone=%s addrs=%v\n", iface.Name, iface.Zone, iface.Addresses)
+			t.addRow(iface.Name, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
 		}
+		t.render(out)
 		return nil
 	}
 }
@@ -367,13 +477,18 @@ func showZonesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/zones", &zones); err != nil {
 			return err
 		}
-		for _, z := range zones {
-			if z.Description != "" {
-				fmt.Fprintf(out, "%s - %s\n", z.Name, z.Description)
-			} else {
-				fmt.Fprintln(out, z.Name)
-			}
+		if out == nil {
+			return nil
 		}
+		if len(zones) == 0 {
+			fmt.Fprintln(out, "No zones configured")
+			return nil
+		}
+		t := newTable("NAME", "DESCRIPTION")
+		for _, z := range zones {
+			t.addRow(z.Name, firstNonEmpty(z.Description, "—"))
+		}
+		t.render(out)
 		return nil
 	}
 }
@@ -384,9 +499,18 @@ func showInterfacesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/interfaces", &ifaces); err != nil {
 			return err
 		}
-		for _, iface := range ifaces {
-			fmt.Fprintf(out, "%s zone=%s addrs=%v\n", iface.Name, iface.Zone, iface.Addresses)
+		if out == nil {
+			return nil
 		}
+		if len(ifaces) == 0 {
+			fmt.Fprintln(out, "No interfaces configured")
+			return nil
+		}
+		t := newTable("NAME", "ZONE", "ADDRESSES")
+		for _, iface := range ifaces {
+			t.addRow(iface.Name, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
+		}
+		t.render(out)
 		return nil
 	}
 }
@@ -536,8 +660,13 @@ func rollbackAPI(api *API) Command {
 
 func exportConfigAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
+		redacted := len(args) > 0 && (args[0] == "redacted" || args[0] == "--redacted")
 		var cfg config.Config
-		if err := api.getJSON(ctx, "/api/v1/config/export", &cfg); err != nil {
+		path := "/api/v1/config/export"
+		if redacted {
+			path += "?redacted=1"
+		}
+		if err := api.getJSON(ctx, path, &cfg); err != nil {
 			return err
 		}
 		return printJSON(out, cfg)

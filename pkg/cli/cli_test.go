@@ -63,8 +63,8 @@ func TestShowZones(t *testing.T) {
 	if err := reg.Execute(context.Background(), "show zones", &buf, nil); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if got := buf.String(); got == "" || got != "it\n" {
-		t.Fatalf("unexpected output: %q", got)
+	if !bytes.Contains(buf.Bytes(), []byte("NAME")) || !bytes.Contains(buf.Bytes(), []byte("it")) {
+		t.Fatalf("unexpected output: %q", buf.String())
 	}
 }
 
@@ -119,6 +119,35 @@ func TestSetSystemHostnameUsage(t *testing.T) {
 	err := reg.ParseAndExecute(context.Background(), "set system hostname containd", &buf)
 	if err != nil {
 		t.Fatalf("expected set system hostname to execute, got %v", err)
+	}
+}
+
+func TestShowServicesStatusTable(t *testing.T) {
+	body := bytes.NewBufferString(`{
+  "syslog": {"configured_forwarders": 2},
+  "proxy": {
+    "forward_enabled": true,
+    "reverse_enabled": false,
+    "envoy_running": true,
+    "nginx_running": false,
+    "envoy_path": "/usr/bin/envoy",
+    "nginx_path": "/usr/sbin/nginx"
+  }
+}`)
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(body),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	if err := reg.ParseAndExecute(context.Background(), "show services status", &buf); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("SERVICE")) || !bytes.Contains(buf.Bytes(), []byte("envoy-forward")) {
+		t.Fatalf("unexpected output: %s", buf.String())
 	}
 }
 

@@ -13,9 +13,11 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `show health`
   - `show config`
   - `show running-config`
+  - `show running-config redacted`
   - `show candidate-config`
   - `show diff`
   - `show system`
+  - `show services status`
   - `show ids rules`
   - `show audit`
   - `show dataplane`
@@ -33,6 +35,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `confirm`
   - `rollback`
   - `export config`
+  - `export config redacted` / `export config --redacted`
   - `import config <path>`
 - Backed by the config store (uses `pkg/cp/config`); ready to wire into SSH/HTTP transports later.
 

@@ -19,6 +19,16 @@ func showRunningConfig(api *API) Command {
 	}
 }
 
+func showRunningConfigRedacted(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var cfg config.Config
+		if err := api.getJSON(ctx, "/api/v1/config/export?redacted=1", &cfg); err != nil {
+			return err
+		}
+		return printJSON(out, cfg)
+	}
+}
+
 func showCandidateConfig(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var cfg config.Config
@@ -103,7 +113,27 @@ func showIDSRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/ids/rules", &idsCfg); err != nil {
 			return err
 		}
-		return printJSON(out, idsCfg)
+		if out == nil {
+			return nil
+		}
+		fmt.Fprintf(out, "enabled: %s\n\n", yesNoStr(idsCfg.Enabled))
+		if len(idsCfg.Rules) == 0 {
+			fmt.Fprintln(out, "No IDS rules.")
+			return nil
+		}
+		t := newTable("ID", "TITLE", "PROTO", "KIND", "SEV", "MESSAGE")
+		for _, r := range idsCfg.Rules {
+			t.addRow(
+				r.ID,
+				truncate(firstNonEmpty(r.Title, "—"), 30),
+				firstNonEmpty(r.Proto, "*"),
+				firstNonEmpty(r.Kind, "*"),
+				firstNonEmpty(r.Severity, "—"),
+				truncate(firstNonEmpty(r.Message, "—"), 40),
+			)
+		}
+		t.render(out)
+		return nil
 	}
 }
 
@@ -117,4 +147,3 @@ func loadCandidateOrRunning(ctx context.Context, api *API) (*config.Config, erro
 	}
 	return &cfg, nil
 }
-

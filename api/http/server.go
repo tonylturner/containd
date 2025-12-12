@@ -77,9 +77,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		api.POST("/services/proxy/forward", setForwardProxyHandler(store))
 		api.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		api.POST("/services/proxy/reverse", setReverseProxyHandler(store))
-		if services != nil {
-			api.GET("/services/status", getServicesStatusHandler(services))
-		}
+		api.GET("/services/status", getServicesStatusHandler(services))
 		api.GET("/events", listEventsHandler(engine))
 		api.GET("/flows", listFlowsHandler(engine))
 		api.GET("/dataplane", getDataPlaneHandler(store))
@@ -461,6 +459,10 @@ func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
 
 func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if services == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "unavailable"})
+			return
+		}
 		if s, ok := services.(interface{ Status() any }); ok {
 			c.JSON(http.StatusOK, s.Status())
 			return
