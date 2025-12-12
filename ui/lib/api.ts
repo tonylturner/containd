@@ -6,11 +6,47 @@ export type HealthResponse = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
-const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+const TOKEN_KEY = "containd.auth.token";
+
+function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!token) localStorage.removeItem(TOKEN_KEY);
+    else localStorage.setItem(TOKEN_KEY, token);
+  } catch {}
+}
 
 function authHeaders(): Record<string, string> {
-  if (!API_TOKEN) return {};
-  return { Authorization: `Bearer ${API_TOKEN}` };
+  const t = getStoredToken() || ENV_TOKEN;
+  if (!t) return {};
+  return { Authorization: `Bearer ${t}` };
+}
+
+function updateTokenFromResponse(res: Response) {
+  const next = res.headers.get("x-auth-token");
+  if (next) setStoredToken(next);
+}
+
+function handleUnauthorized(res: Response) {
+  if (res.status !== 401 && res.status !== 403) return false;
+  setStoredToken(null);
+  if (typeof window !== "undefined") {
+    const path = window.location.pathname;
+    if (!path.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+  }
+  return true;
 }
 
 export type DataPlaneConfig = {
@@ -88,6 +124,50 @@ export type SyslogForwarder = {
 
 export type SyslogConfig = {
   forwarders: SyslogForwarder[];
+};
+
+export type UserRole = "admin" | "view";
+
+export type User = {
+  id: string;
+  username: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  role: UserRole;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type LoginResponse = {
+  token: string;
+  expiresAt: string;
+  user: User;
+};
+
+export type UpdateMeRequest = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+};
+
+export type ChangePasswordRequest = {
+  currentPassword?: string;
+  newPassword: string;
+};
+
+export type DNSConfig = {
+  enabled?: boolean;
+  listenPort?: number;
+  listenZones?: string[];
+  upstreamServers?: string[];
+  cacheSizeMB?: number;
+};
+
+export type NTPConfig = {
+  enabled?: boolean;
+  servers?: string[];
+  intervalSeconds?: number;
 };
 
 export type TelemetryEvent = {
@@ -238,7 +318,8 @@ async function getJSON<T>(path: string): Promise<T | null> {
       cache: "no-store",
       headers: authHeaders(),
     });
-    if (!res.ok) return null;
+    if (handleUnauthorized(res) || !res.ok) return null;
+    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
@@ -252,7 +333,8 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) return null;
+    if (handleUnauthorized(res) || !res.ok) return null;
+    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
@@ -266,7 +348,8 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) return null;
+    if (handleUnauthorized(res) || !res.ok) return null;
+    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
@@ -279,6 +362,8 @@ async function deleteJSON(path: string): Promise<boolean> {
       method: "DELETE",
       headers: authHeaders(),
     });
+    if (handleUnauthorized(res)) return false;
+    updateTokenFromResponse(res);
     return res.ok;
   } catch {
     return false;
@@ -286,6 +371,41 @@ async function deleteJSON(path: string): Promise<boolean> {
 }
 
 export const api = {
+  // Auth
+  login: async (username: string, password: string) => {
+    const res = await postJSON<LoginResponse>("/api/v1/auth/login", {
+      username,
+      password,
+    });
+    if (res?.token) setStoredToken(res.token);
+    return res;
+  },
+  logout: async () => {
+    const ok = await postJSON<{ status: string }>("/api/v1/auth/logout", {});
+    setStoredToken(null);
+    return ok;
+  },
+  me: () => getJSON<User>("/api/v1/auth/me"),
+  updateMe: (patch: UpdateMeRequest) =>
+    patchJSON<User>("/api/v1/auth/me", patch),
+  changeMyPassword: (currentPassword: string, newPassword: string) =>
+    postJSON<{ status: string }>("/api/v1/auth/me/password", {
+      currentPassword,
+      newPassword,
+    } as ChangePasswordRequest),
+
+  // Users
+  listUsers: () => getJSON<User[]>("/api/v1/users"),
+  createUser: (u: Omit<User, "id"> & { password: string }) =>
+    postJSON<User>("/api/v1/users", u),
+  updateUser: (id: string, patch: Partial<User>) =>
+    patchJSON<User>(`/api/v1/users/${encodeURIComponent(id)}`, patch),
+  setUserPassword: (id: string, password: string) =>
+    postJSON<{ status: string }>(
+      `/api/v1/users/${encodeURIComponent(id)}/password`,
+      { password },
+    ),
+
   listZones: () => getJSON<Zone[]>("/api/v1/zones"),
   createZone: (z: Zone) => postJSON<Zone>("/api/v1/zones", z),
   updateZone: (name: string, z: Partial<Zone>) =>
@@ -361,6 +481,10 @@ export const api = {
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
+  getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
+  setDNS: (cfg: DNSConfig) => postJSON<DNSConfig>("/api/v1/services/dns", cfg),
+  getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
+  setNTP: (cfg: NTPConfig) => postJSON<NTPConfig>("/api/v1/services/ntp", cfg),
 
   // Telemetry
   listEvents: (limit = 500) =>

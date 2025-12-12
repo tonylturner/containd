@@ -20,6 +20,8 @@ type ManagerOptions struct {
 // It is intentionally lightweight in early phases: no process lifecycle yet.
 type Manager struct {
 	Syslog *SyslogManager
+	DNS    *DNSManager
+	NTP    *NTPManager
 	Proxy  *ProxyManager
 }
 
@@ -34,6 +36,8 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 	return &Manager{
 		Syslog: NewSyslogManager(),
+		DNS:    NewDNSManager(opts.BaseDir),
+		NTP:    NewNTPManager(opts.BaseDir),
 		Proxy:  NewProxyManager(ProxyOptions{
 			BaseDir:   opts.BaseDir,
 			Supervise: supervise,
@@ -50,6 +54,16 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 			return err
 		}
 	}
+	if m.DNS != nil {
+		if err := m.DNS.Apply(ctx, cfg.DNS); err != nil {
+			return err
+		}
+	}
+	if m.NTP != nil {
+		if err := m.NTP.Apply(ctx, cfg.NTP); err != nil {
+			return err
+		}
+	}
 	if m.Proxy != nil {
 		if err := m.Proxy.Apply(ctx, cfg.Proxy); err != nil {
 			return err
@@ -63,6 +77,12 @@ func (m *Manager) Status() any {
 	out := map[string]any{}
 	if m.Syslog != nil {
 		out["syslog"] = map[string]any{"configured_forwarders": len(m.Syslog.Current().Forwarders)}
+	}
+	if m.DNS != nil {
+		out["dns"] = m.DNS.Status()
+	}
+	if m.NTP != nil {
+		out["ntp"] = m.NTP.Status()
 	}
 	if m.Proxy != nil {
 		out["proxy"] = m.Proxy.Status()

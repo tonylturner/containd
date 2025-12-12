@@ -4,56 +4,147 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/containd/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type role string
 
 const (
-	roleAdmin   role = "admin"
-	roleAuditor role = "auditor"
+	roleAdmin role = "admin"
+	roleView  role = "view"
 )
 
 const ctxRoleKey = "role"
+const ctxUserKey = "user"
+const ctxSessionKey = "session"
 
-// authMiddleware enforces bearer-token auth unless lab mode is enabled.
-// Tokens are provided via environment:
-// - CONTAIND_LAB_MODE=1 disables auth checks.
-// - CONTAIND_ADMIN_TOKEN required for full access.
-// - CONTAIND_AUDITOR_TOKEN optional read-only access.
-func authMiddleware() gin.HandlerFunc {
+const (
+	idleTTL = 5 * time.Minute
+	maxTTL  = 4 * time.Hour
+)
+
+func jwtSecret() []byte {
+	return []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")))
+}
+
+// authMiddleware enforces JWT bearer auth unless lab mode is enabled.
+// If users store is nil, falls back to legacy env tokens for compatibility.
+func authMiddleware(userStore users.Store) gin.HandlerFunc {
 	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	adminToken := strings.TrimSpace(os.Getenv("CONTAIND_ADMIN_TOKEN"))
 	auditorToken := strings.TrimSpace(os.Getenv("CONTAIND_AUDITOR_TOKEN"))
+	secret := jwtSecret()
 	return func(c *gin.Context) {
 		if lab {
+			// In lab mode we still require a token to keep login/logout semantics,
+			// but we do not validate signatures or sessions.
+			if bearerOrCookie(c) == "" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+				return
+			}
 			c.Set(ctxRoleKey, string(roleAdmin))
+			if userStore != nil {
+				if u, err := userStore.GetByUsername(c.Request.Context(), "containd"); err == nil {
+					c.Set(ctxUserKey, u.ID)
+					c.Set(ctxSessionKey, "lab")
+				}
+			}
 			c.Next()
 			return
 		}
-		if adminToken == "" && auditorToken == "" {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": "auth not configured; set CONTAIND_ADMIN_TOKEN or enable CONTAIND_LAB_MODE=1",
-			})
+
+		// Legacy token mode if users store or secret is not configured.
+		if userStore == nil || len(secret) == 0 {
+			if adminToken == "" && auditorToken == "" {
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+					"error": "auth not configured; set CONTAIND_JWT_SECRET or legacy CONTAIND_ADMIN_TOKEN",
+				})
+				return
+			}
+			h := c.GetHeader("Authorization")
+			if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+				return
+			}
+			tok := strings.TrimSpace(h[len("bearer "):])
+			switch {
+			case adminToken != "" && tok == adminToken:
+				c.Set(ctxRoleKey, string(roleAdmin))
+				c.Next()
+			case auditorToken != "" && tok == auditorToken:
+				c.Set(ctxRoleKey, string(roleView))
+				c.Next()
+			default:
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			}
 			return
 		}
-		h := c.GetHeader("Authorization")
-		if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+
+		raw := bearerOrCookie(c)
+		if raw == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
 		}
-		tok := strings.TrimSpace(h[len("bearer "):])
-		switch {
-		case adminToken != "" && tok == adminToken:
-			c.Set(ctxRoleKey, string(roleAdmin))
-			c.Next()
-		case auditorToken != "" && tok == auditorToken:
-			c.Set(ctxRoleKey, string(roleAuditor))
-			c.Next()
-		default:
+
+		claims := jwt.MapClaims{}
+		parsed, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return secret, nil
+		})
+		if err != nil || !parsed.Valid {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
 		}
+
+		jti, _ := claims["jti"].(string)
+		sub, _ := claims["sub"].(string)
+		if jti == "" || sub == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+			return
+		}
+
+		sess, err := userStore.GetSession(c.Request.Context(), jti)
+		if err != nil || sess.Revoked {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked"})
+			return
+		}
+		if time.Now().UTC().After(sess.ExpiresAt) {
+			_ = userStore.RevokeSession(c.Request.Context(), jti)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired"})
+			return
+		}
+
+		// Sliding expiration with max cap.
+		updated, err := userStore.TouchSession(c.Request.Context(), jti, idleTTL, maxTTL)
+		if err == nil {
+			// If expiration moved, issue fresh JWT.
+			if expFloat, ok := claims["exp"].(float64); ok {
+				tokenExp := time.Unix(int64(expFloat), 0).UTC()
+				if updated.ExpiresAt.Sub(tokenExp) > 10*time.Second || tokenExp.Sub(updated.ExpiresAt) > 10*time.Second {
+					newTok, _ := signJWT(secret, sub, claims["username"], claims["role"], jti, updated.ExpiresAt)
+					if newTok != "" {
+						c.Header("X-Auth-Token", newTok)
+						setAuthCookie(c, newTok, updated.ExpiresAt)
+					}
+				}
+			}
+			sess = updated
+		}
+
+		r, _ := claims["role"].(string)
+		if r == "" {
+			r = string(roleView)
+		}
+		c.Set(ctxRoleKey, r)
+		c.Set(ctxUserKey, sub)
+		c.Set(ctxSessionKey, jti)
+		c.Next()
 	}
 }
 
@@ -68,3 +159,34 @@ func requireAdmin() gin.HandlerFunc {
 	}
 }
 
+func bearerOrCookie(c *gin.Context) string {
+	h := c.GetHeader("Authorization")
+	if strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		return strings.TrimSpace(h[len("bearer "):])
+	}
+	if ck, err := c.Cookie("containd_token"); err == nil {
+		return ck
+	}
+	return ""
+}
+
+func setAuthCookie(c *gin.Context, token string, exp time.Time) {
+	maxAge := int(time.Until(exp).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	c.SetCookie("containd_token", token, maxAge, "/", "", false, true)
+}
+
+func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":      userID,
+		"username": username,
+		"role":     role,
+		"jti":      jti,
+		"iat":      time.Now().UTC().Unix(),
+		"exp":      exp.Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString(secret)
+}

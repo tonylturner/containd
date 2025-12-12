@@ -46,6 +46,17 @@ Canonical JSON configuration for export/import and persistent state.
       "forwarders": [
         { "address": "192.0.2.10", "port": 514, "proto": "udp" }
       ]
+    },
+    "dns": {
+      "enabled": true,
+      "listenPort": 53,
+      "upstreamServers": ["1.1.1.1", "8.8.8.8"],
+      "cacheSizeMB": 64
+    },
+    "ntp": {
+      "enabled": true,
+      "servers": ["pool.ntp.org"],
+      "intervalSeconds": 3600
     }
   },
   "firewall": {
@@ -98,4 +109,9 @@ Notes:
 - `GET/POST/PATCH/DELETE /api/v1/firewall/rules` – list/add/update/delete firewall rules.
 - `GET/POST/PATCH/DELETE /api/v1/assets` – list/add/update/delete assets.
 - `GET/POST /api/v1/services/syslog` – get/set syslog settings.
+- `GET/POST /api/v1/services/dns` – get/set DNS (Unbound) settings.
+- `GET/POST /api/v1/services/ntp` – get/set NTP (OpenNTPD) settings.
+- `GET/POST /api/v1/services/proxy/forward` – get/set forward proxy (Envoy).
+- `GET/POST /api/v1/services/proxy/reverse` – get/set reverse proxy (Nginx).
+- `GET /api/v1/services/status` – summary of embedded service status.
 - `GET /api/v1/audit` – list audit records (write events pending).

@@ -15,6 +15,7 @@ import (
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,6 +34,9 @@ func main() {
 	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
 	auditStore := mustInitAuditStore()
 	defer auditStore.Close()
+	userStore := mustInitUsersStore()
+	defer userStore.Close()
+	_ = userStore.EnsureDefaultAdmin(context.Background())
 
 	addr := addrFromEnv("NGFW_MGMT_ADDR", "")
 	if addr == "" {
@@ -51,7 +55,7 @@ func main() {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	serviceManager := services.NewManager(services.ManagerOptions{})
-	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager)
+	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
 	// Best-effort initial service render on startup.
 	if cfg, err := store.Load(context.Background()); err == nil {
 		_ = serviceManager.Apply(context.Background(), cfg.Services)
@@ -170,6 +174,27 @@ func mustInitAuditStore() audit.Store {
 	store, err := audit.NewSQLiteStore(dbPath)
 	if err != nil {
 		logging.New("[mgmt]").Fatalf("failed to open audit store: %v", err)
+	}
+	return store
+}
+
+func mustInitUsersStore() users.Store {
+	dbPath := addrFromEnv("NGFW_USERS_DB", filepath.Join("data", "users.db"))
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		// If the requested path isn't writable (common in distroless/nonroot),
+		// fall back to a local data dir that should be writable in dev images.
+		fallback := filepath.Join("data", "users.db")
+		if fallback != dbPath {
+			_ = os.MkdirAll(filepath.Dir(fallback), 0o755)
+			logging.New("[mgmt]").Printf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
+			dbPath = fallback
+		} else {
+			logging.New("[mgmt]").Fatalf("failed to create users dir: %v", err)
+		}
+	}
+	store, err := users.NewSQLiteStore(dbPath)
+	if err != nil {
+		logging.New("[mgmt]").Fatalf("failed to open users store: %v", err)
 	}
 	return store
 }

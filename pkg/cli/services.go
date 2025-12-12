@@ -64,10 +64,39 @@ func renderServicesTable(out io.Writer, payload map[string]any) error {
 		})
 	}
 
+	// DNS (unbound)
+	if dns, ok := payload["dns"].(map[string]any); ok {
+		enabled := boolAny(dns["enabled"])
+		upstreams := fmtAny(dns["configured_upstreams"])
+		port := fmtAny(dns["listen_port"])
+		detail := ""
+		if port != "" {
+			detail = "port=" + port
+		}
+		if upstreams != "" {
+			if detail != "" {
+				detail += " "
+			}
+			detail += "upstreams=" + upstreams
+		}
+		rows = append(rows, row{Name: "dns", Enabled: yesNo(enabled), State: runState(enabled, enabled), Detail: detail})
+	}
+
+	// NTP (openntpd)
+	if ntp, ok := payload["ntp"].(map[string]any); ok {
+		enabled := boolAny(ntp["enabled"])
+		servers := fmtAny(ntp["servers_count"])
+		detail := ""
+		if servers != "" {
+			detail = "servers=" + servers
+		}
+		rows = append(rows, row{Name: "ntp", Enabled: yesNo(enabled), State: runState(enabled, enabled), Detail: detail})
+	}
+
 	// Any other services: list keys for now.
 	var extras []string
 	for k := range payload {
-		if k == "syslog" || k == "proxy" {
+		if k == "syslog" || k == "proxy" || k == "dns" || k == "ntp" {
 			continue
 		}
 		extras = append(extras, k)

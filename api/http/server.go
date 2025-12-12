@@ -16,6 +16,7 @@ import (
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
 	cpids "github.com/containd/containd/pkg/cp/ids"
+	"github.com/containd/containd/pkg/cp/users"
 	"github.com/containd/containd/pkg/cli"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
@@ -45,11 +46,11 @@ type ServicesApplier interface {
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
 func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
-	return NewServerWithEngineAndServices(store, auditStore, engine, nil)
+	return NewServerWithEngineAndServices(store, auditStore, engine, nil, nil)
 }
 
-// NewServerWithEngineAndServices builds a Gin engine and optionally wires engine and services commit hooks.
-func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier) *gin.Engine {
+// NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
+func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	if auditStore != nil {
@@ -59,54 +60,70 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api := r.Group("/api/v1")
 	// Health is always unauthenticated for liveness.
 	api.GET("/health", healthHandler)
+	// Login is always unauthenticated (unless JWT not configured).
+	api.POST("/auth/login", loginHandler(userStore))
 	// All other endpoints require auth (unless lab mode).
-	api.Use(authMiddleware())
+	protected := api.Group("")
+	protected.Use(authMiddleware(userStore))
 	{
-		api.GET("/config", getConfigHandler(store))
-		api.POST("/config", requireAdmin(), saveConfigHandler(store))
-		api.POST("/config/validate", requireAdmin(), validateConfigHandler())
-		api.GET("/config/export", exportConfigHandler(store))
-		api.POST("/config/import", requireAdmin(), importConfigHandler(store))
-		api.GET("/config/candidate", getCandidateConfigHandler(store))
-		api.POST("/config/candidate", requireAdmin(), saveCandidateConfigHandler(store))
-		api.GET("/config/diff", diffConfigHandler(store))
-		api.POST("/config/commit", requireAdmin(), commitConfigHandler(store, engine, services))
-		api.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
-		api.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
-		api.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
-		api.GET("/services/syslog", getSyslogHandler(store))
-		api.POST("/services/syslog", requireAdmin(), setSyslogHandler(store))
-		api.GET("/services/proxy/forward", getForwardProxyHandler(store))
-		api.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
-		api.GET("/services/proxy/reverse", getReverseProxyHandler(store))
-		api.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
-		api.GET("/services/status", getServicesStatusHandler(services))
-		api.GET("/events", listEventsHandler(engine))
-		api.GET("/flows", listFlowsHandler(engine))
-		api.GET("/dataplane", getDataPlaneHandler(store))
-		api.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
-		api.GET("/assets", listAssetsHandler(store))
-		api.POST("/assets", requireAdmin(), createAssetHandler(store))
-		api.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
-		api.DELETE("/assets/:id", requireAdmin(), deleteAssetHandler(store))
-		api.GET("/zones", listZonesHandler(store))
-		api.POST("/zones", requireAdmin(), createZoneHandler(store))
-		api.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
-		api.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
-		api.GET("/interfaces", listInterfacesHandler(store))
-		api.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
-		api.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store))
-		api.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store))
-		api.GET("/firewall/rules", listFirewallRulesHandler(store))
-		api.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
-		api.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
-		api.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
-		api.GET("/ids/rules", getIDSHandler(store))
-		api.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
-		api.POST("/ids/convert/sigma", requireAdmin(), convertSigmaHandler())
-		api.POST("/cli/execute", requireAdmin(), cliExecuteHandler(store))
+		protected.POST("/auth/logout", logoutHandler(userStore))
+		protected.GET("/auth/me", meHandler(userStore))
+		protected.PATCH("/auth/me", updateMeHandler(userStore))
+		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
+		protected.GET("/config", getConfigHandler(store))
+		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
+		protected.POST("/config/validate", requireAdmin(), validateConfigHandler())
+		protected.GET("/config/export", exportConfigHandler(store))
+		protected.POST("/config/import", requireAdmin(), importConfigHandler(store))
+		protected.GET("/config/candidate", getCandidateConfigHandler(store))
+		protected.POST("/config/candidate", requireAdmin(), saveCandidateConfigHandler(store))
+		protected.GET("/config/diff", diffConfigHandler(store))
+		protected.POST("/config/commit", requireAdmin(), commitConfigHandler(store, engine, services))
+		protected.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
+		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
+		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
+		protected.GET("/services/syslog", getSyslogHandler(store))
+		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store))
+		protected.GET("/services/dns", getDNSHandler(store))
+		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store))
+		protected.GET("/services/ntp", getNTPHandler(store))
+		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store))
+		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
+		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
+		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
+		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
+		protected.GET("/services/status", getServicesStatusHandler(services))
+		protected.GET("/events", listEventsHandler(engine))
+		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/dataplane", getDataPlaneHandler(store))
+		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+		protected.GET("/assets", listAssetsHandler(store))
+		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
+		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
+		protected.DELETE("/assets/:id", requireAdmin(), deleteAssetHandler(store))
+		protected.GET("/zones", listZonesHandler(store))
+		protected.POST("/zones", requireAdmin(), createZoneHandler(store))
+		protected.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
+		protected.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
+		protected.GET("/interfaces", listInterfacesHandler(store))
+		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
+		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store))
+		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store))
+		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
+		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
+		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
+		protected.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
+		protected.GET("/ids/rules", getIDSHandler(store))
+		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
+		protected.POST("/ids/convert/sigma", requireAdmin(), convertSigmaHandler())
+		protected.POST("/cli/execute", requireAdmin(), cliExecuteHandler(store))
+		// Users (admin only).
+		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
+		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
+		protected.PATCH("/users/:id", requireAdmin(), updateUserHandler(userStore))
+		protected.POST("/users/:id/password", requireAdmin(), setUserPasswordHandler(userStore))
 		if auditStore != nil {
-			auditHandlers(api, auditStore)
+			auditHandlers(protected, auditStore)
 		}
 	}
 
@@ -391,6 +408,72 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
+	}
+}
+
+func getDNSHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.DNS)
+	}
+}
+
+func setDNSHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var dnsCfg config.DNSConfig
+		if err := c.ShouldBindJSON(&dnsCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.DNS = dnsCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.dns.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.DNS)
+	}
+}
+
+func getNTPHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.NTP)
+	}
+}
+
+func setNTPHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ntpCfg config.NTPConfig
+		if err := c.ShouldBindJSON(&ntpCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.NTP = ntpCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.NTP)
 	}
 }
 

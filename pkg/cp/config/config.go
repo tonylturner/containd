@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 )
 
 // Config represents the management-plane persistent configuration.
@@ -61,6 +62,8 @@ type MgmtConfig struct {
 
 type ServicesConfig struct {
 	Syslog SyslogConfig `json:"syslog"`
+	DNS    DNSConfig    `json:"dns,omitempty"`
+	NTP    NTPConfig    `json:"ntp,omitempty"`
 	Proxy  ProxyConfig  `json:"proxy,omitempty"`
 }
 
@@ -72,6 +75,22 @@ type SyslogForwarder struct {
 	Address string `json:"address"` // IP or hostname
 	Port    int    `json:"port"`
 	Proto   string `json:"proto"` // udp|tcp
+}
+
+// DNSConfig defines Unbound resolver behavior managed by containd.
+type DNSConfig struct {
+	Enabled        bool     `json:"enabled"`
+	ListenPort     int      `json:"listenPort,omitempty"`    // default 53
+	ListenZones    []string `json:"listenZones,omitempty"`   // zones to listen on (future L3 binding)
+	UpstreamServers []string `json:"upstreamServers,omitempty"` // forwarders; empty uses root hints
+	CacheSizeMB    int      `json:"cacheSizeMB,omitempty"`   // optional cache size
+}
+
+// NTPConfig defines OpenNTPD client settings managed by containd.
+type NTPConfig struct {
+	Enabled bool     `json:"enabled"`
+	Servers []string `json:"servers,omitempty"` // NTP servers/pools
+	IntervalSeconds int `json:"intervalSeconds,omitempty"` // polling interval hint
 }
 
 // ProxyConfig holds forward/reverse proxy settings managed by containd.
@@ -518,6 +537,30 @@ func validateServices(s ServicesConfig) error {
 		if fwd.Proto != "" && fwd.Proto != "udp" && fwd.Proto != "tcp" {
 			return fmt.Errorf("syslog forwarder %s has invalid proto %q", fwd.Address, fwd.Proto)
 		}
+	}
+	if s.DNS.ListenPort != 0 && (s.DNS.ListenPort < 1 || s.DNS.ListenPort > 65535) {
+		return fmt.Errorf("dns listenPort invalid: %d", s.DNS.ListenPort)
+	}
+	for _, z := range s.DNS.ListenZones {
+		if z == "" {
+			return errors.New("dns listenZones cannot include empty")
+		}
+	}
+	for _, u := range s.DNS.UpstreamServers {
+		if strings.TrimSpace(u) == "" {
+			return errors.New("dns upstreamServers cannot include empty")
+		}
+	}
+	if s.DNS.CacheSizeMB < 0 {
+		return errors.New("dns cacheSizeMB cannot be negative")
+	}
+	for _, srv := range s.NTP.Servers {
+		if strings.TrimSpace(srv) == "" {
+			return errors.New("ntp servers cannot include empty")
+		}
+	}
+	if s.NTP.IntervalSeconds < 0 {
+		return errors.New("ntp intervalSeconds cannot be negative")
 	}
 	if err := validateProxy(s.Proxy); err != nil {
 		return err

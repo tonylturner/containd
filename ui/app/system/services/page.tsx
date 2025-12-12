@@ -41,22 +41,32 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="DNS (planned)">
+        <Card title="DNS">
           <p className="text-sm text-slate-200">
             Unbound resolver managed by containd.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            UI and config model land in a later phase.
+            Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}{" "}
+            {((status?.dns as any)?.configured_upstreams ?? 0) > 0 &&
+              `(upstreams=${(status?.dns as any)?.configured_upstreams ?? 0})`}
           </p>
+          <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+            Configure →
+          </Link>
         </Card>
 
-        <Card title="NTP (planned)">
+        <Card title="NTP">
           <p className="text-sm text-slate-200">
             OpenNTPD client managed by containd.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            UI and config model land in a later phase.
+            Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}{" "}
+            {((status?.ntp as any)?.servers_count ?? 0) > 0 &&
+              `(servers=${(status?.ntp as any)?.servers_count ?? 0})`}
           </p>
+          <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+            Configure →
+          </Link>
         </Card>
       </div>
     </Shell>
@@ -79,4 +89,3 @@ function Card({
     </div>
   );
 }
-

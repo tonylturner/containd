@@ -34,7 +34,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.
   - [~] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
   - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
-  - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings pending).
+  - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings done).
 - [ ] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.
@@ -45,8 +45,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add mutating commands (`set zone`, `set interface`) via API.
   - [x] Add mutating commands for firewall rules (set/delete).
   - [x] Add CLI commands for commit/rollback/export/import/audit/dataplane.
-  - [ ] Add `show services status` once supervisor status endpoint stable.
-  - [ ] Add redacted export variants (`show running-config redacted`, `export config redacted`).
+  - [x] Add `show services status` once supervisor status endpoint stable.
+  - [x] Add redacted export variants (`show running-config redacted`, `export config redacted`).
   - [ ] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
   - [ ] Plan SSH server integration (key auth default, passwords only in lab) and rate limiting.
 - [ ] UI integration
@@ -57,7 +57,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add dataplane settings UI.
   - [x] Add topology view placeholder with React Flow dependency.
   - [~] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
-  - [~] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
+  - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
@@ -74,7 +74,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations
   - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
-  - [ ] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI.
+  - [~] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI (env-token skeleton).
   - [ ] HTTPS defaults with self-signed cert and custom cert install/rotate.
   - [ ] Plan SSH server integration points for Phase 4.
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
@@ -84,7 +84,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] OT policy templates (Purdue baseline, maintenance window, SIS hardening).
   - [ ] Selective DPI steering (NFQUEUE/AF_PACKET) based on ICS predicates.
 - [ ] IDS/IPS
-  - [ ] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack.
+  - [~] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack (IDS done, IPS pending).
 
 - [ ] IT DPI + Proxies (per integrated spec)
   - [~] Service manager inside `containd` to supervise embedded daemons.

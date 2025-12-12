@@ -10,10 +10,16 @@ services:
       - NGFW_MGMT_ADDR=:8080
       # Dev/lab mode disables auth; set CONTAIND_ADMIN_TOKEN instead for secured runs.
       - CONTAIND_LAB_MODE=1
+      # JWT secret for UI/login flows (ignored in lab mode).
+      - CONTAIND_JWT_SECRET=containd-dev-secret-change-me
+      # Users DB; keep on a writable path for nonroot images.
+      - NGFW_USERS_DB=/data/users.db
       # Optional: point mgmt at a separate engine service.
       - NGFW_ENGINE_URL=http://engine:8081
     ports:
       - "8080:8080"
+    volumes:
+      - ./data:/data
     command: ["/usr/bin/ngfw-mgmt"]
     depends_on:
       - engine
