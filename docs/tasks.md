@@ -86,11 +86,13 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Service manager inside `containd` to supervise embedded daemons.
   - [x] Render Envoy/Nginx proxy configs on commit (no daemon reload yet).
   - [~] Add optional daemon supervision (start/stop if binaries present).
+  - [x] Finish proxy config generation (allowDomains, access logging, TLS placeholders).
   - [~] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
   - [~] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
   - [ ] IT DPI minimums: DNS/TLS/HTTP metadata, SSH/RDP/SMB/SNMP/NTP detection.
-  - [ ] Optional embedded Zeek integration for IT DPI/telemetry, native dashboards.
-  - [ ] Unified event normalization across firewall/DPI/IDS/proxies/audit.
+  - [x] Extend native IT DPI beyond minimums (TLS versions/ciphers/JA3, HTTP2, proxy enrichment).
+  - [~] Unified event normalization across firewall/DPI/IDS/proxies/audit.
+  - [x] Add flows/events endpoints and Monitoring UI pages.
 - [ ] eBPF
   - [ ] Plan optional XDP/TC programs for early drop/counters and event streaming; keep fallback functional.
 - [ ] Config lifecycle safety

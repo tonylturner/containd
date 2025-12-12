@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
+	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -25,6 +27,11 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 type EngineClient interface {
 	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+}
+
+type TelemetryClient interface {
+	ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+	ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error)
 }
 
 // ServicesApplier is an optional interface for applying services config
@@ -70,6 +77,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		if services != nil {
 			api.GET("/services/status", getServicesStatusHandler(services))
 		}
+		api.GET("/events", listEventsHandler(engine))
+		api.GET("/flows", listFlowsHandler(engine))
 		api.GET("/dataplane", getDataPlaneHandler(store))
 		api.POST("/dataplane", setDataPlaneHandler(store))
 		api.GET("/assets", listAssetsHandler(store))
@@ -447,6 +456,50 @@ func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "unknown"})
+	}
+}
+
+func listEventsHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tc, ok := engine.(TelemetryClient)
+		if !ok || tc == nil {
+			c.JSON(http.StatusOK, []dpevents.Event{})
+			return
+		}
+		limit := 500
+		if q := c.Query("limit"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		evs, err := tc.ListEvents(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, evs)
+	}
+}
+
+func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tc, ok := engine.(TelemetryClient)
+		if !ok || tc == nil {
+			c.JSON(http.StatusOK, []dpevents.FlowSummary{})
+			return
+		}
+		limit := 200
+		if q := c.Query("limit"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		flows, err := tc.ListFlows(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, flows)
 	}
 }
 

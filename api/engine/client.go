@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"net/http"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
+	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -73,3 +75,52 @@ func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 	return nil
 }
 
+// ListEvents fetches recent normalized events from the engine.
+func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error) {
+	u := c.BaseURL + "/internal/events"
+	if limit > 0 {
+		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine events status %d", resp.StatusCode)
+	}
+	var out []dpevents.Event
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListFlows fetches recent flow summaries derived from events.
+func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error) {
+	u := c.BaseURL + "/internal/flows"
+	if limit > 0 {
+		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine flows status %d", resp.StatusCode)
+	}
+	var out []dpevents.FlowSummary
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

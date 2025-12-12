@@ -25,7 +25,11 @@ const navGroups: NavGroup[] = [
   },
   {
     label: "Monitoring",
-    items: [{ href: "/audit/", label: "Audit Log" }],
+    items: [
+      { href: "/flows/", label: "Flows" },
+      { href: "/events/", label: "Events" },
+      { href: "/audit/", label: "Audit Log" },
+    ],
   },
 ];
 

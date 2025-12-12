@@ -74,6 +74,33 @@ export type AuditRecord = {
   detail?: string;
 };
 
+export type TelemetryEvent = {
+  id: number;
+  flowId: string;
+  proto: string;
+  kind: string;
+  attributes?: Record<string, unknown>;
+  timestamp: string;
+  srcIp?: string;
+  dstIp?: string;
+  srcPort?: number;
+  dstPort?: number;
+  transport?: string;
+};
+
+export type FlowSummary = {
+  flowId: string;
+  firstSeen: string;
+  lastSeen: string;
+  srcIp?: string;
+  dstIp?: string;
+  srcPort?: number;
+  dstPort?: number;
+  transport?: string;
+  application?: string;
+  eventCount: number;
+};
+
 export type ForwardProxyConfig = {
   enabled?: boolean;
   listenPort?: number;
@@ -264,4 +291,10 @@ export const api = {
     getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
   setReverseProxy: (cfg: ReverseProxyConfig) =>
     postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
+
+  // Telemetry
+  listEvents: (limit = 500) =>
+    getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
+  listFlows: (limit = 200) =>
+    getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
 };

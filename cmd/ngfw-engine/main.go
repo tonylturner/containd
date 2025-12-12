@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +65,8 @@ func main() {
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
+	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
+	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 
 	logger.Printf("ngfw-engine starting on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -243,8 +246,43 @@ func mockDPI(logger *log.Logger, dpEngine *engine.Engine) {
 			logger.Printf("mock dpi error: %v", err)
 			continue
 		}
+		dpEngine.RecordDPIEvents(state, &dpi.ParsedPacket{
+			Payload: raw,
+			Proto:   "tcp",
+			SrcPort: 12345,
+			DstPort: 502,
+		}, events)
 		for _, ev := range events {
 			logger.Printf("dpi event proto=%s kind=%s attrs=%v", ev.Proto, ev.Kind, ev.Attributes)
 		}
 	}
+}
+
+func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit := parseLimit(r, 500)
+		list := dpEngine.Events().List(limit)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(list)
+	}
+}
+
+func flowsHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit := parseLimit(r, 200)
+		list := dpEngine.Events().Flows(limit)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(list)
+	}
+}
+
+func parseLimit(r *http.Request, def int) int {
+	q := r.URL.Query().Get("limit")
+	if q == "" {
+		return def
+	}
+	if v, err := strconv.Atoi(q); err == nil && v > 0 {
+		return v
+	}
+	return def
 }

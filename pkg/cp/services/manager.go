@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"github.com/containd/containd/pkg/cp/config"
 )
@@ -22,11 +24,19 @@ type Manager struct {
 }
 
 func NewManager(opts ManagerOptions) *Manager {
+	supervise := opts.SuperviseProxies
+	if !supervise {
+		// Default to supervising proxies when embedded binaries exist.
+		// Operators can disable by setting CONTAIND_SUPERVISE_PROXIES=0.
+		if v := strings.TrimSpace(os.Getenv("CONTAIND_SUPERVISE_PROXIES")); v == "" || v == "1" || strings.EqualFold(v, "true") {
+			supervise = true
+		}
+	}
 	return &Manager{
 		Syslog: NewSyslogManager(),
 		Proxy:  NewProxyManager(ProxyOptions{
 			BaseDir:   opts.BaseDir,
-			Supervise: opts.SuperviseProxies,
+			Supervise: supervise,
 			EnvoyPath: opts.EnvoyPath,
 			NginxPath: opts.NginxPath,
 		}),

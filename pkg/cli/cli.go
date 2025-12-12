@@ -125,6 +125,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("show dataplane", showDataPlane(api))
 		r.Register("show proxy forward", showForwardProxy(api))
 		r.Register("show proxy reverse", showReverseProxy(api))
+		r.Register("show flows", showFlows(api))
+		r.Register("show events", showEvents(api))
 		r.Register("show zones", showZonesAPI(api))
 		r.Register("show interfaces", showInterfacesAPI(api))
 		r.Register("set zone", setZoneAPI(api))
@@ -226,6 +228,26 @@ func showReverseProxy(api *API) Command {
 			return err
 		}
 		return printJSON(out, rp)
+	}
+}
+
+func showFlows(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var flows []map[string]any
+		if err := api.getJSON(ctx, "/api/v1/flows", &flows); err != nil {
+			return err
+		}
+		return printJSON(out, flows)
+	}
+}
+
+func showEvents(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var events []map[string]any
+		if err := api.getJSON(ctx, "/api/v1/events", &events); err != nil {
+			return err
+		}
+		return printJSON(out, events)
 	}
 }
 

@@ -7,7 +7,7 @@ Authoritative, consolidated instructions for building **containd / ICS‑NGFW** 
 ## 0. Product Principles
 
 1) **Single appliance image by default**: users run one container/image in labs and small deployments; split mgmt/engine remains optional.
-2) **Everything feels native**: embedded OSS components (Envoy/Nginx/Zeek/Unbound/OpenNTPD) are configured through containd UI/CLI/API, lifecycle‑managed by containd, and their events are normalized into containd’s event model.
+2) **Everything feels native**: embedded OSS components (Envoy/Nginx/Unbound/OpenNTPD) are configured through containd UI/CLI/API, lifecycle‑managed by containd, and their events are normalized into containd’s event model.
 3) **Kernel‑assisted enforcement baseline**: Linux forwarding + conntrack + nftables are the production fast path; userspace augments via selective DPI/IDS and dynamic nftables sets. eBPF is optional acceleration.
 4) **OT/ICS first‑class, plus strong IT coverage**: assets and ICS policy primitives are core; IT protocol DPI and proxy features are built‑in, not bolt‑ons.
 
@@ -24,7 +24,7 @@ Authoritative, consolidated instructions for building **containd / ICS‑NGFW** 
 **Embedded daemons (optional, native UX):**
 - Forward proxy: **Envoy** explicit forward proxy (Apache‑2.0).
 - Reverse proxy: **Nginx** (BSD‑like).
-- IT DPI/telemetry: **Zeek** (BSD‑3‑Clause, optional).
+- IT DPI/telemetry: native parsers for DNS/TLS/HTTP/SSH/RDP/SMB/SNMP/NTP (no Zeek in current scope).
 - DNS resolver: **Unbound** (BSD‑3‑Clause).
 - NTP client: **OpenNTPD** (ISC).
 
@@ -102,7 +102,7 @@ No raw daemon config editing exposed as the primary UX.
 ## 6. IDS/IPS & Telemetry
 
 - Always‑on lightweight native detection over DPI events/flows, especially ICS.
-- Optional **Zeek** integration for rich IT/ICS telemetry, lifecycle‑managed and logs normalized.
+- Optional third‑party telemetry agents are out of scope for now; focus on native IT/ICS DPI.
 - Unified event schema includes firewall decisions, DPI/ICS events, IDS alerts, proxy logs, audit/system events; bounded local retention + forwarding (syslog required; Prometheus/OTLP later).
 
 ---
@@ -138,7 +138,7 @@ Use as many phases as needed; sequencing priority:
 3) Selective DPI framework + Modbus visibility + ICS primitives in policy.
 4) Commercial UI: dashboard, topology placeholder, policies, alerts/events, config lifecycle UI, web console.
 5) IT DPI minimums + proxy integration (Envoy + Nginx) with native UX and unified events.
-6) Optional Zeek integration with native UX.
+6) Native IT DPI enhancements and dashboards.
 7) eBPF acceleration and performance hardening.
 
 `docs/tasks.md` is the authoritative task tracker aligned to this roadmap.

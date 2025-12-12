@@ -8,7 +8,7 @@ This document tracks the high-level architecture for containd as it evolves.
 - **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit, dashboards.
 
 ## Integrated daemons (per `agents.md`)
-The appliance will optionally embed Envoy (explicit forward proxy), Nginx (reverse proxy), Zeek (IT DPI/telemetry), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI.
+The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. IT DPI/telemetry is implemented natively in Go decoders for current scope.
 
 ## Packaging
 - Containers at repo root (`Dockerfile.engine`, `Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; goal is single `containd` binary with subcommands.

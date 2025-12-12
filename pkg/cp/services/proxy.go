@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -95,11 +96,25 @@ func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
 	if port == 0 {
 		port = 3128
 	}
+	domains := cfg.AllowedDomains
+	if len(domains) == 0 {
+		domains = []string{"*"}
+	}
+	domainsJSON, err := json.Marshal(domains)
+	if err != nil {
+		return err
+	}
+
 	tpl := template.Must(template.New("envoyForward").Parse(envoyForwardTemplate))
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
 		"ListenPort": port,
+		"Domains":    string(domainsJSON),
+		"LogRequests": cfg.LogRequests,
 		"Upstream":   cfg.Upstream,
+		"HasUpstream": cfg.Upstream != "",
+		"ListenZones": cfg.ListenZones,
+		"HasListenZones": len(cfg.ListenZones) > 0,
 	}); err != nil {
 		return err
 	}
@@ -123,6 +138,7 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 			}
 			return out
 		},
+		"hasCert": func(ref string) bool { return ref != "" },
 	}).Parse(nginxReverseTemplate))
 
 	var buf bytes.Buffer
@@ -244,15 +260,27 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: forward_proxy
+          {{- if .LogRequests }}
+          access_log:
+          - name: envoy.access_loggers.stdout
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+          {{- end }}
           route_config:
             name: local_route
             virtual_hosts:
             - name: forward_proxy
-              domains: ["*"]
+              domains: {{.Domains}}
               routes:
               - match: { prefix: "/" }
                 route:
                   cluster: dynamic_forward_proxy_cluster
+          {{- if .HasUpstream }}
+          # upstream proxy chaining is not yet implemented; Upstream={{.Upstream}}
+          {{- end }}
+          {{- if .HasListenZones }}
+          # listenZones are recorded in config but not yet enforced at L3 binding; listenZones={{.ListenZones}}
+          {{- end }}
           http_filters:
           - name: envoy.filters.http.dynamic_forward_proxy
             typed_config:
@@ -289,7 +317,18 @@ upstream {{$site.Name}}_upstream {
 }
 
 server {
+  {{- if $site.TLSEnabled }}
+    {{- if hasCert $site.CertRef }}
+  listen {{ $site.ListenPort }} ssl;
+  ssl_certificate /var/lib/containd/certs/{{ $site.CertRef }}.crt;
+  ssl_certificate_key /var/lib/containd/certs/{{ $site.CertRef }}.key;
+    {{- else }}
+  # TLS enabled but certRef not set; serving plaintext until certificates are configured.
   listen {{ $site.ListenPort }};
+    {{- end }}
+  {{- else }}
+  listen {{ $site.ListenPort }};
+  {{- end }}
   {{- if $site.Hostnames }}
   server_name {{ join $site.Hostnames " " }};
   {{- else }}

@@ -21,7 +21,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Tailwind CSS | UI styling | MIT | Via Next.js build. |
 | Envoy Proxy | Explicit forward proxy | Apache-2.0 | Replaces Squid to avoid copyleft. |
 | Nginx | Reverse proxy / L7 publishing | BSD-2-Clause | Standardize on Nginx for v1. |
-| Zeek | Optional IT/ICS DPI + telemetry | BSD-3-Clause | Optional; must be lifecycle‑managed and normalized. |
+| Zeek | Optional IT/ICS DPI + telemetry (deferred) | BSD-3-Clause | Deferred/out of scope; do not embed unless revisited. |
 | Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Appliance‑friendly resolver choice. |
 | OpenNTPD | NTP client | ISC | Permissive alternative to Chrony. |
 
@@ -44,4 +44,3 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Squid | Forward proxy | GPL-2.0-only | Removed to avoid copyleft obligations. |
 | Suricata | IDS/IPS signatures | GPL-2.0-only | Removed to avoid copyleft obligations. |
 | Chrony | NTP client | GPL-2.0-only | Removed to avoid copyleft obligations. |
-

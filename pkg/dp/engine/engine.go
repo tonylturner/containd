@@ -8,7 +8,9 @@ import (
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
+	"github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/ics/modbus"
+	"github.com/containd/containd/pkg/dp/itdpi"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )
@@ -22,6 +24,7 @@ type Engine struct {
 	applier  enforce.Applier
 	updater  enforce.Updater
 	dpiMgr   *dpi.Manager
+	eventStore *events.Store
 }
 
 type EnforceConfig struct {
@@ -42,7 +45,14 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{capture: capManager}
-	e.dpiMgr = dpi.NewManager(modbus.NewDecoder())
+	e.eventStore = events.NewStore(4096)
+	e.dpiMgr = dpi.NewManager(
+		modbus.NewDecoder(),
+		itdpi.NewDNSDecoder(),
+		itdpi.NewTLSDecoder(),
+		itdpi.NewHTTPDecoder(),
+		itdpi.NewPortDetector(),
+	)
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -109,6 +119,19 @@ func (e *Engine) Interfaces() []string {
 // DPI returns the selective DPI manager.
 func (e *Engine) DPI() *dpi.Manager {
 	return e.dpiMgr
+}
+
+// RecordDPIEvents appends events to the telemetry store.
+func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
+	if e == nil || e.eventStore == nil {
+		return
+	}
+	e.eventStore.Record(state, pkt, evs)
+}
+
+// Events returns the telemetry event store.
+func (e *Engine) Events() *events.Store {
+	return e.eventStore
 }
 
 // Evaluate applies the current rule snapshot to a simple context.
