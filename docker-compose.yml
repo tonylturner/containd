@@ -5,34 +5,41 @@ services:
       dockerfile: Dockerfile.mgmt
     image: containd/containd:dev
     environment:
-      - NGFW_MGMT_ADDR=:8080
-      # HTTPS mgmt listener (self-signed by default; cert/key stored under /data/tls).
-      - NGFW_MGMT_HTTPS_ADDR=:8443
-      # Persist config/audit/users DBs on the /data volume.
-      - NGFW_CONFIG_DB=/data/config.db
-      - NGFW_AUDIT_DB=/data/audit.db
-      - NGFW_SSH_ADDR=:2222
-      - NGFW_SSH_AUTH_KEYS_DIR=/data/ssh/authorized_keys.d
-      - NGFW_SSH_HOST_KEY=/data/ssh/host_key
+      # Management listeners
+      - NGFW_MGMT_ADDR=${CONTAIND_MGMT_HTTP_ADDR:-:8080}
+      - NGFW_MGMT_HTTPS_ADDR=${CONTAIND_MGMT_HTTPS_ADDR:-:8443}
+
+      # Persist config/audit/users DBs on the /data volume
+      - NGFW_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
+      - NGFW_AUDIT_DB=${CONTAIND_AUDIT_DB:-/data/audit.db}
+      - NGFW_USERS_DB=${CONTAIND_USERS_DB:-/data/users.db}
+
+      # SSH
+      - NGFW_SSH_ADDR=${CONTAIND_SSH_ADDR:-:2222}
+      - NGFW_SSH_AUTH_KEYS_DIR=${CONTAIND_SSH_AUTH_KEYS_DIR:-/data/ssh/authorized_keys.d}
+      - NGFW_SSH_HOST_KEY=${CONTAIND_SSH_HOST_KEY:-/data/ssh/host_key}
+
       # Optional: seed initial admin SSH key (avoid chicken/egg in production).
       # Set to a full authorized_keys line, e.g. "ssh-ed25519 AAAA... user@host".
-      # - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=
-      # - NGFW_SSH_BOOTSTRAP_ADMIN_USER=containd
+      - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=${CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY:-}
+      - NGFW_SSH_BOOTSTRAP_ADMIN_USER=${CONTAIND_SSH_BOOTSTRAP_ADMIN_USER:-containd}
       # Optional: override password auth (default enabled only in lab mode).
       # - NGFW_SSH_ALLOW_PASSWORD=0
       # Bootstrap SSH password auth: if no authorized keys exist yet, ssh password auth is enabled automatically.
       # To force-enable or force-disable, set NGFW_SSH_ALLOW_PASSWORD explicitly.
       # - NGFW_SSH_ALLOW_PASSWORD=1
-      # JWT secret for UI/login flows.
-      - CONTAIND_JWT_SECRET=containd-dev-secret-change-me
-      # Users DB; keep on a writable path for nonroot images.
-      - NGFW_USERS_DB=/data/users.db
+
+      # Auth + session cookie behavior
+      - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:-containd-dev-secret-change-me}
+      - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
+      - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
+
       # Optional: point mgmt at a separate engine service.
-      - NGFW_ENGINE_URL=http://engine:8081
+      - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://engine:8081}
     ports:
-      - "8080:8080"
-      - "8443:8443"
-      - "2222:2222"
+      - "${CONTAIND_PUBLISH_HTTP_PORT:-8080}:8080"
+      - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
+      - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
     volumes:
       - ./data:/data
     command: ["/usr/bin/ngfw-mgmt"]
@@ -56,13 +63,13 @@ services:
       dockerfile: Dockerfile.engine
     image: containd/containd-engine:dev
     environment:
-      - NGFW_ENGINE_ADDR=:8081
+      - NGFW_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
       # Comma-separated list of interfaces to capture on (empty is allowed for now).
-      - NGFW_CAPTURE_IFACES=
+      - NGFW_CAPTURE_IFACES=${CONTAIND_CAPTURE_IFACES:-}
       # Enable nftables enforcement when running privileged.
-      - NGFW_ENFORCE_ENABLED=0
+      - NGFW_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-0}
     ports:
-      - "8081:8081"
+      - "${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
     command: ["/usr/bin/ngfw-engine"]
     # Attach engine to all appliance networks; eth0..eth7 correspond to wan/dmz/lan1..lan6.
     networks:
