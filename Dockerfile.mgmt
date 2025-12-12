@@ -8,6 +8,10 @@ COPY ui ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && test -f out/index.html
 
+FROM envoyproxy/envoy:v1.31.2 AS envoy
+
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS nginx
+
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /src
@@ -18,8 +22,17 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/ngfw-mgmt ./cmd/ngfw-mgmt
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Final appliance image: distroless glibc base (public, minimal, nonroot).
+# Envoy (Apache-2.0) and Nginx (BSD-2-Clause) binaries are copied in from public images.
+FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=builder /out/ngfw-mgmt /usr/bin/ngfw-mgmt
+COPY --from=envoy /usr/local/bin/envoy /usr/bin/envoy
+COPY --from=envoy /lib /lib
+COPY --from=envoy /usr/lib /usr/lib
+COPY --from=nginx /usr/sbin/nginx /usr/sbin/nginx
+COPY --from=nginx /etc/nginx /etc/nginx
+COPY --from=nginx /usr/lib /usr/lib
+COPY --from=nginx /lib /lib
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/ngfw-mgmt"]

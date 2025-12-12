@@ -74,6 +74,31 @@ export type AuditRecord = {
   detail?: string;
 };
 
+export type ForwardProxyConfig = {
+  enabled?: boolean;
+  listenPort?: number;
+  listenZones?: string[];
+  allowedClients?: string[];
+  allowedDomains?: string[];
+  upstream?: string;
+  logRequests?: boolean;
+};
+
+export type ReverseProxySite = {
+  name: string;
+  listenPort: number;
+  hostnames?: string[];
+  backends?: string[];
+  tlsEnabled?: boolean;
+  certRef?: string;
+  description?: string;
+};
+
+export type ReverseProxyConfig = {
+  enabled?: boolean;
+  sites?: ReverseProxySite[];
+};
+
 export type ConfigBundle = {
   schema_version?: string;
   version?: string;
@@ -229,4 +254,14 @@ export const api = {
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
+
+  // Proxies
+  getForwardProxy: () =>
+    getJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward"),
+  setForwardProxy: (cfg: ForwardProxyConfig) =>
+    postJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward", cfg),
+  getReverseProxy: () =>
+    getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
+  setReverseProxy: (cfg: ReverseProxyConfig) =>
+    postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
 };

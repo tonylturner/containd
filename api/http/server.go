@@ -27,8 +27,19 @@ type EngineClient interface {
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 }
 
+// ServicesApplier is an optional interface for applying services config
+// (syslog/proxies/etc.) when commits are made.
+type ServicesApplier interface {
+	Apply(ctx context.Context, cfg config.ServicesConfig) error
+}
+
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
 func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
+	return NewServerWithEngineAndServices(store, auditStore, engine, nil)
+}
+
+// NewServerWithEngineAndServices builds a Gin engine and optionally wires engine and services commit hooks.
+func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	if auditStore != nil {
@@ -46,12 +57,19 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 		api.GET("/config/candidate", getCandidateConfigHandler(store))
 		api.POST("/config/candidate", saveCandidateConfigHandler(store))
 		api.GET("/config/diff", diffConfigHandler(store))
-		api.POST("/config/commit", commitConfigHandler(store, engine))
-		api.POST("/config/commit_confirmed", commitConfirmedHandler(store, engine))
+		api.POST("/config/commit", commitConfigHandler(store, engine, services))
+		api.POST("/config/commit_confirmed", commitConfirmedHandler(store, engine, services))
 		api.POST("/config/confirm", confirmCommitHandler(store))
-		api.POST("/config/rollback", rollbackConfigHandler(store, engine))
+		api.POST("/config/rollback", rollbackConfigHandler(store, engine, services))
 		api.GET("/services/syslog", getSyslogHandler(store))
 		api.POST("/services/syslog", setSyslogHandler(store))
+		api.GET("/services/proxy/forward", getForwardProxyHandler(store))
+		api.POST("/services/proxy/forward", setForwardProxyHandler(store))
+		api.GET("/services/proxy/reverse", getReverseProxyHandler(store))
+		api.POST("/services/proxy/reverse", setReverseProxyHandler(store))
+		if services != nil {
+			api.GET("/services/status", getServicesStatusHandler(services))
+		}
 		api.GET("/dataplane", getDataPlaneHandler(store))
 		api.POST("/dataplane", setDataPlaneHandler(store))
 		api.GET("/assets", listAssetsHandler(store))
@@ -206,24 +224,22 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func commitConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := store.Commit(c.Request.Context()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if engine != nil {
-			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
 	}
 }
 
-func commitConfirmedHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func commitConfirmedHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const defaultTTLSeconds = 60
 		body, _ := io.ReadAll(c.Request.Body)
@@ -244,11 +260,9 @@ func commitConfirmedHandler(store config.Store, engine EngineClient) gin.Handler
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if engine != nil {
-			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
@@ -266,37 +280,45 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func rollbackConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func rollbackConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := store.Rollback(c.Request.Context()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if engine != nil {
-			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
 	}
 }
 
-func applyRunningToEngine(ctx context.Context, store config.Store, engine EngineClient) error {
+func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) error {
 	cfg, err := store.Load(ctx)
 	if err != nil {
+		if errors.Is(err, config.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
-	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-		return err
+	if services != nil {
+		if err := services.Apply(ctx, cfg.Services); err != nil {
+			return err
+		}
 	}
-	snap, err := compile.CompileSnapshot(cfg)
-	if err != nil {
-		return err
-	}
-	if err := engine.ApplyRules(ctx, snap); err != nil {
-		return err
+	if engine != nil {
+		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
+			return err
+		}
+		snap, err := compile.CompileSnapshot(cfg)
+		if err != nil {
+			return err
+		}
+		if err := engine.ApplyRules(ctx, snap); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -349,6 +371,82 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
+	}
+}
+
+func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
+	}
+}
+
+func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var forwardCfg config.ForwardProxyConfig
+		if err := c.ShouldBindJSON(&forwardCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.Proxy.Forward = forwardCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
+	}
+}
+
+func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
+	}
+}
+
+func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var reverseCfg config.ReverseProxyConfig
+		if err := c.ShouldBindJSON(&reverseCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.Proxy.Reverse = reverseCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
+	}
+}
+
+func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s, ok := services.(interface{ Status() any }); ok {
+			c.JSON(http.StatusOK, s.Status())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "unknown"})
 	}
 }
 
@@ -745,7 +843,7 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			}
 		}
 		if cfg.Firewall.DefaultAction == "" {
-			cfg.Firewall.DefaultAction = config.ActionAllow
+			cfg.Firewall.DefaultAction = config.ActionDeny
 		}
 		cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
@@ -824,14 +922,12 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 	cfg, err := store.Load(ctx)
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {
-			return &config.Config{
-				Firewall: config.FirewallConfig{DefaultAction: config.ActionAllow},
-			}, nil
+			return config.DefaultConfig(), nil
 		}
 		return nil, err
 	}
 	if cfg.Firewall.DefaultAction == "" {
-		cfg.Firewall.DefaultAction = config.ActionAllow
+		cfg.Firewall.DefaultAction = config.ActionDeny
 	}
 	return cfg, nil
 }

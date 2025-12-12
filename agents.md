@@ -59,6 +59,10 @@ Authoritative, consolidated instructions for building **containd / ICS‑NGFW** 
 - **Candidate/running lifecycle** with diff, commit, commit‑confirmed (auto‑rollback), rollback.
 - Canonical, deterministic JSON export/import with schema versioning and upgrade paths; secrets redacted by default and encrypted at rest.
 - All runtime toggles (capture/enforcement/DPI mock/proxy enablement/etc.) are persisted in config and settable via UI/CLI/API; avoid long container flag lists.
+- Appliance defaults include **8 physical interfaces** pre-seeded in config: `wan`, `dmz`, `lan1`–`lan6`. They appear automatically in UI/CLI in a default/unassigned state and can be configured via UI/CLI/JSON. Future virtual/tunnel interfaces are added dynamically when VPNs/tunnels are defined.
+- Default zones are pre-created: `wan`, `dmz`, `lan`, `mgmt`. By default, interfaces map as: `wan`→`wan`, `dmz`→`dmz`, `lan1`→`mgmt`, `lan2`–`lan6`→`lan`.
+- Management UI/API binds to **all interfaces by default** (`:8080` / 0.0.0.0) so the web UI is reachable on WAN/DMZ/LAN in lab setups. Binding is configurable via persisted `system.mgmt.listenAddr` and can be narrowed to a specific address/interface for production. Localhost access must always remain possible for operators.
+- Fresh appliances provision with a **default‑deny firewall posture** (default action `DENY` for any→any any service/protocol). A built‑in top rule `allow-mgmt-ui` allows TCP/8080 access to the management UI/API from any interface; operators can tighten this later.
 
 ---
 

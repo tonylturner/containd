@@ -15,6 +15,17 @@ services:
     command: ["/usr/bin/ngfw-mgmt"]
     depends_on:
       - engine
+    # Attach mgmt to all appliance networks so UI/API can bind any of them.
+    # Docker will present these as eth0..eth7 in this order.
+    networks:
+      wan: {}
+      dmz: {}
+      lan1: {}
+      lan2: {}
+      lan3: {}
+      lan4: {}
+      lan5: {}
+      lan6: {}
 
   engine:
     build:
@@ -30,3 +41,23 @@ services:
     ports:
       - "8081:8081"
     command: ["/usr/bin/ngfw-engine"]
+    # Attach engine to all appliance networks; eth0..eth7 correspond to wan/dmz/lan1..lan6.
+    networks:
+      wan: {}
+      dmz: {}
+      lan1: {}
+      lan2: {}
+      lan3: {}
+      lan4: {}
+      lan5: {}
+      lan6: {}
+
+networks:
+  wan: {}
+  dmz: {}
+  lan1: {}
+  lan2: {}
+  lan3: {}
+  lan4: {}
+  lan5: {}
+  lan6: {}

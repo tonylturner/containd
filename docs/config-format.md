@@ -10,7 +10,10 @@ Canonical JSON configuration for export/import and persistent state.
   "version": "0.1.0",
   "description": "optional",
   "system": {
-    "hostname": "containd"
+    "hostname": "containd",
+    "mgmt": {
+      "listenAddr": ":8080"
+    }
   },
   "zones": [
     { "name": "it", "description": "IT network" },

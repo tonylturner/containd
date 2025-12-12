@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	engineapi "github.com/containd/containd/api/engine"
 	httpapi "github.com/containd/containd/api/http"
 	"github.com/containd/containd/pkg/cp/audit"
+	"github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
@@ -26,18 +28,34 @@ type mgmtHealthResponse struct {
 
 func main() {
 	logger := logging.New("[mgmt]")
-	addr := addrFromEnv("NGFW_MGMT_ADDR", ":8080")
 	store := mustInitStore()
 	defer store.Close()
 	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
 	auditStore := mustInitAuditStore()
 	defer auditStore.Close()
 
+	addr := addrFromEnv("NGFW_MGMT_ADDR", "")
+	if addr == "" {
+		if cfg, err := store.Load(context.Background()); err == nil {
+			if cfg.System.Mgmt.ListenAddr != "" {
+				addr = cfg.System.Mgmt.ListenAddr
+			}
+		}
+		if addr == "" {
+			addr = ":8080"
+		}
+	}
+
 	var engineClient httpapi.EngineClient
 	if engineURL := os.Getenv("NGFW_ENGINE_URL"); engineURL != "" {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
-	router := httpapi.NewServerWithEngine(store, auditStore, engineClient)
+	serviceManager := services.NewManager(services.ManagerOptions{})
+	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager)
+	// Best-effort initial service render on startup.
+	if cfg, err := store.Load(context.Background()); err == nil {
+		_ = serviceManager.Apply(context.Background(), cfg.Services)
+	}
 	serveStaticUI(router)
 
 	logger.Printf("ngfw-mgmt listening on %s", addr)

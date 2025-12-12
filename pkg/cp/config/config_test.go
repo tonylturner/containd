@@ -14,7 +14,7 @@ func TestValidateHappyPath(t *testing.T) {
 			{Name: "eth1", Zone: "dmz", Addresses: []string{"10.0.0.1/24"}},
 		},
 		Firewall: FirewallConfig{
-			DefaultAction: ActionAllow,
+			DefaultAction: ActionDeny,
 			Rules: []Rule{
 				{
 					ID:           "1",
@@ -102,5 +102,43 @@ func TestValidateDataPlaneConfig(t *testing.T) {
 	cfg.DataPlane.EnforceTable = "bad space"
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("expected invalid enforceTable error")
+	}
+}
+
+func TestValidateProxyConfig(t *testing.T) {
+	cfg := Config{
+		Services: ServicesConfig{
+			Proxy: ProxyConfig{
+				Forward: ForwardProxyConfig{Enabled: true, ListenPort: 3128},
+				Reverse: ReverseProxyConfig{
+					Enabled: true,
+					Sites: []ReverseProxySite{
+						{Name: "app1", ListenPort: 8443, Backends: []string{"10.0.0.5:443"}},
+					},
+				},
+			},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid proxy config, got %v", err)
+	}
+	cfg.Services.Proxy.Reverse.Sites[0].Backends = nil
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected reverse proxy backend validation error")
+	}
+}
+
+func TestValidateMgmtListenAddr(t *testing.T) {
+	cfg := Config{
+		System: SystemConfig{
+			Mgmt: MgmtConfig{ListenAddr: "127.0.0.1:8080"},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid mgmt config, got %v", err)
+	}
+	cfg.System.Mgmt.ListenAddr = string(make([]byte, 200))
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected listenAddr length error")
 	}
 }

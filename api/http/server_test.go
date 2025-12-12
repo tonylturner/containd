@@ -147,7 +147,7 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	m := &mockStore{
 		cfg: &config.Config{
 			Firewall: config.FirewallConfig{
-				DefaultAction: config.ActionAllow,
+				DefaultAction: config.ActionDeny,
 				Rules: []config.Rule{
 					{ID: "1", Action: config.ActionAllow},
 				},
@@ -161,6 +161,21 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for duplicate, got %d", rec.Code)
+	}
+}
+
+func TestDefaultInterfacesSeeded(t *testing.T) {
+	m := &mockStore{}
+	m.load = func() (*config.Config, error) { return nil, config.ErrNotFound }
+	s := NewServer(m, nil)
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/interfaces", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"wan"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`"lan6"`)) {
+		t.Fatalf("expected default interfaces in response, got %s", rec.Body.String())
 	}
 }
 

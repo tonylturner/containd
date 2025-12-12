@@ -123,6 +123,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("show config", showConfig(api))
 		r.Register("show audit", showAudit(api))
 		r.Register("show dataplane", showDataPlane(api))
+		r.Register("show proxy forward", showForwardProxy(api))
+		r.Register("show proxy reverse", showReverseProxy(api))
 		r.Register("show zones", showZonesAPI(api))
 		r.Register("show interfaces", showInterfacesAPI(api))
 		r.Register("set zone", setZoneAPI(api))
@@ -130,6 +132,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.Register("set firewall rule", setFirewallRuleAPI(api))
 		r.Register("delete firewall rule", deleteFirewallRuleAPI(api))
 		r.Register("set dataplane", setDataPlaneAPI(api))
+		r.Register("set proxy forward", setForwardProxyAPI(api))
+		r.Register("set proxy reverse", setReverseProxyAPI(api))
 		r.Register("commit", commitAPI(api))
 		r.Register("commit confirmed", commitConfirmedAPI(api))
 		r.Register("confirm", confirmCommitAPI(api))
@@ -202,6 +206,26 @@ func showDataPlane(api *API) Command {
 			return err
 		}
 		return printJSON(out, dp)
+	}
+}
+
+func showForwardProxy(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var fp config.ForwardProxyConfig
+		if err := api.getJSON(ctx, "/api/v1/services/proxy/forward", &fp); err != nil {
+			return err
+		}
+		return printJSON(out, fp)
+	}
+}
+
+func showReverseProxy(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var rp config.ReverseProxyConfig
+		if err := api.getJSON(ctx, "/api/v1/services/proxy/reverse", &rp); err != nil {
+			return err
+		}
+		return printJSON(out, rp)
 	}
 }
 
@@ -347,6 +371,40 @@ func setDataPlaneAPI(api *API) Command {
 			dp.CaptureInterfaces = args[3:]
 		}
 		return api.postJSON(ctx, "/api/v1/dataplane", dp, out)
+	}
+}
+
+func setForwardProxyAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		// usage: set proxy forward <on|off> [port] [zone...]
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set proxy forward <on|off> [port] [zone...]")
+		}
+		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
+		fp := config.ForwardProxyConfig{Enabled: on}
+		if len(args) > 1 {
+			port, err := strconv.Atoi(args[1])
+			if err != nil || port <= 0 || port > 65535 {
+				return fmt.Errorf("invalid port: %s", args[1])
+			}
+			fp.ListenPort = port
+		}
+		if len(args) > 2 {
+			fp.ListenZones = args[2:]
+		}
+		return api.postJSON(ctx, "/api/v1/services/proxy/forward", fp, out)
+	}
+}
+
+func setReverseProxyAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		// usage: set proxy reverse <on|off>
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set proxy reverse <on|off>")
+		}
+		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
+		rp := config.ReverseProxyConfig{Enabled: on}
+		return api.postJSON(ctx, "/api/v1/services/proxy/reverse", rp, out)
 	}
 }
 

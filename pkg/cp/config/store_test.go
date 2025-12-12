@@ -24,7 +24,7 @@ func TestSQLiteStoreSaveLoad(t *testing.T) {
 			{Name: "eth0", Zone: "it", Addresses: []string{"192.168.1.1/24"}},
 		},
 		Firewall: FirewallConfig{
-			DefaultAction: ActionAllow,
+			DefaultAction: ActionDeny,
 			Rules: []Rule{
 				{ID: "1", SourceZones: []string{"it"}, DestZones: []string{"it"}, Action: ActionAllow},
 			},

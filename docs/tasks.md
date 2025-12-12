@@ -12,6 +12,10 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Expand `docs/config-format.md` with schema outline.
   - [x] Add schema versioning support in config exports/imports.
   - [x] Add schema version negotiation/upgrade handling.
+  - [x] Seed default physical interfaces (wan/dmz/lan1-6) into new configs.
+  - [x] Seed default zones (wan/dmz/lan/mgmt) and assign interfaces (lan1→mgmt, lan2-6→lan).
+  - [x] Add persisted management listen binding (`system.mgmt.listenAddr`) with default bind-all.
+  - [x] Seed default-deny firewall posture and allow-mgmt rule into fresh configs.
 - [ ] Control-plane API
   - [x] Scaffold Gin router in `api/http` with `/api/v1` grouping.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
@@ -79,9 +83,11 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack.
 
 - [ ] IT DPI + Proxies (per integrated spec)
-  - [ ] Service manager inside `containd` to supervise embedded daemons.
-  - [ ] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
-  - [ ] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
+  - [~] Service manager inside `containd` to supervise embedded daemons.
+  - [x] Render Envoy/Nginx proxy configs on commit (no daemon reload yet).
+  - [~] Add optional daemon supervision (start/stop if binaries present).
+  - [~] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
+  - [~] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
   - [ ] IT DPI minimums: DNS/TLS/HTTP metadata, SSH/RDP/SMB/SNMP/NTP detection.
   - [ ] Optional embedded Zeek integration for IT DPI/telemetry, native dashboards.
   - [ ] Unified event normalization across firewall/DPI/IDS/proxies/audit.

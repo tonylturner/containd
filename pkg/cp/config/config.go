@@ -24,10 +24,19 @@ type Config struct {
 type SystemConfig struct {
 	Hostname string `json:"hostname"`
 	// Placeholder for future system settings (NTP/DNS/syslog).
+	Mgmt MgmtConfig `json:"mgmt,omitempty"`
+}
+
+// MgmtConfig controls management plane binding and access.
+// By default, mgmt binds on all interfaces (0.0.0.0) so the UI is reachable
+// on WAN/DMZ/LAN interfaces in lab deployments. Operators can narrow this later.
+type MgmtConfig struct {
+	ListenAddr string `json:"listenAddr,omitempty"` // e.g. ":8080", "127.0.0.1:8080"
 }
 
 type ServicesConfig struct {
 	Syslog SyslogConfig `json:"syslog"`
+	Proxy  ProxyConfig  `json:"proxy,omitempty"`
 }
 
 type SyslogConfig struct {
@@ -40,10 +49,88 @@ type SyslogForwarder struct {
 	Proto   string `json:"proto"` // udp|tcp
 }
 
+// ProxyConfig holds forward/reverse proxy settings managed by containd.
+type ProxyConfig struct {
+	Forward ForwardProxyConfig `json:"forward,omitempty"`
+	Reverse ReverseProxyConfig `json:"reverse,omitempty"`
+}
+
+// ForwardProxyConfig defines explicit forward proxy behavior (Envoy-based).
+type ForwardProxyConfig struct {
+	Enabled        bool     `json:"enabled"`
+	ListenPort     int      `json:"listenPort,omitempty"` // default 3128 if empty
+	ListenZones    []string `json:"listenZones,omitempty"`
+	AllowedClients []string `json:"allowedClients,omitempty"` // object/asset IDs
+	AllowedDomains []string `json:"allowedDomains,omitempty"` // fqdn patterns
+	Upstream       string   `json:"upstream,omitempty"`       // optional upstream proxy URL
+	LogRequests    bool     `json:"logRequests,omitempty"`
+}
+
+// ReverseProxyConfig defines L7 published services (Nginx-based).
+type ReverseProxyConfig struct {
+	Enabled bool               `json:"enabled"`
+	Sites   []ReverseProxySite `json:"sites,omitempty"`
+}
+
+type ReverseProxySite struct {
+	Name        string   `json:"name"`
+	ListenPort  int      `json:"listenPort"`
+	Hostnames   []string `json:"hostnames,omitempty"` // SNI/Host match
+	Backends    []string `json:"backends,omitempty"`  // host:port targets
+	TLSEnabled  bool     `json:"tlsEnabled,omitempty"`
+	CertRef     string   `json:"certRef,omitempty"` // future cert store reference
+	Description string   `json:"description,omitempty"`
+}
+
 type Interface struct {
 	Name      string   `json:"name"`
 	Zone      string   `json:"zone"`
 	Addresses []string `json:"addresses,omitempty"` // CIDR strings
+}
+
+// DefaultPhysicalInterfaces returns the appliance's default physical interface names.
+// These are seeded into a new config so they show up in UI/CLI without extra flags.
+func DefaultPhysicalInterfaces() []string {
+	return []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
+}
+
+// DefaultConfig returns a safe initial config for a fresh appliance.
+func DefaultConfig() *Config {
+	ifaces := make([]Interface, 0, 8)
+	for _, name := range DefaultPhysicalInterfaces() {
+		iface := Interface{Name: name}
+		switch name {
+		case "wan":
+			iface.Zone = "wan"
+		case "dmz":
+			iface.Zone = "dmz"
+		case "lan1":
+			iface.Zone = "mgmt"
+		default:
+			// lan2-6
+			iface.Zone = "lan"
+		}
+		ifaces = append(ifaces, iface)
+	}
+	allowMgmt := Rule{
+		ID:          "allow-mgmt-ui",
+		Description: "Allow access to management UI/API",
+		Protocols:   []Protocol{{Name: "tcp", Port: "8080"}},
+		Action:      ActionAllow,
+	}
+	return &Config{
+		Zones: []Zone{
+			{Name: "wan", Description: "Default WAN zone"},
+			{Name: "dmz", Description: "Default DMZ zone"},
+			{Name: "lan", Description: "Default LAN zone"},
+			{Name: "mgmt", Description: "Default management zone (assign to a dedicated interface if desired)"},
+		},
+		Interfaces: ifaces,
+		Firewall: FirewallConfig{
+			DefaultAction: ActionDeny,
+			Rules:         []Rule{allowMgmt},
+		},
+	}
 }
 
 // DataPlaneConfig controls runtime dataplane behavior; persisted in DB/exports.
@@ -147,6 +234,9 @@ func (c *Config) Validate() error {
 	if err := validateHostname(c.System.Hostname); err != nil {
 		return err
 	}
+	if err := validateMgmt(c.System.Mgmt); err != nil {
+		return err
+	}
 	if err := validateZones(c.Zones); err != nil {
 		return err
 	}
@@ -175,6 +265,17 @@ func validateHostname(h string) error {
 	if len(h) > 253 {
 		return fmt.Errorf("hostname too long: %d", len(h))
 	}
+	return nil
+}
+
+func validateMgmt(m MgmtConfig) error {
+	if m.ListenAddr == "" {
+		return nil
+	}
+	if len(m.ListenAddr) > 128 {
+		return fmt.Errorf("mgmt.listenAddr too long")
+	}
+	// We accept anything net/http can listen on; detailed parsing later.
 	return nil
 }
 
@@ -360,6 +461,37 @@ func validateServices(s ServicesConfig) error {
 		}
 		if fwd.Proto != "" && fwd.Proto != "udp" && fwd.Proto != "tcp" {
 			return fmt.Errorf("syslog forwarder %s has invalid proto %q", fwd.Address, fwd.Proto)
+		}
+	}
+	if err := validateProxy(s.Proxy); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateProxy(p ProxyConfig) error {
+	if p.Forward.ListenPort != 0 && (p.Forward.ListenPort < 1 || p.Forward.ListenPort > 65535) {
+		return fmt.Errorf("forward proxy listenPort invalid: %d", p.Forward.ListenPort)
+	}
+	for _, z := range p.Forward.ListenZones {
+		if z == "" {
+			return errors.New("forward proxy listenZones cannot include empty")
+		}
+	}
+	for _, d := range p.Forward.AllowedDomains {
+		if d == "" {
+			return errors.New("forward proxy allowedDomains cannot include empty")
+		}
+	}
+	for _, s := range p.Reverse.Sites {
+		if s.Name == "" {
+			return errors.New("reverse proxy site name required")
+		}
+		if s.ListenPort < 1 || s.ListenPort > 65535 {
+			return fmt.Errorf("reverse proxy site %s listenPort invalid: %d", s.Name, s.ListenPort)
+		}
+		if len(s.Backends) == 0 {
+			return fmt.Errorf("reverse proxy site %s must have at least one backend", s.Name)
 		}
 	}
 	return nil
