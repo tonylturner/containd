@@ -10,13 +10,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/config"
 )
 
 // NewServer builds a Gin engine with versioned routes for management APIs.
-func NewServer(store config.Store) *gin.Engine {
+func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	if auditStore != nil {
+		r.Use(withAuditStore(auditStore))
+	}
 
 	api := r.Group("/api/v1")
 	{
@@ -26,6 +30,13 @@ func NewServer(store config.Store) *gin.Engine {
 		api.POST("/config/validate", validateConfigHandler())
 		api.GET("/config/export", exportConfigHandler(store))
 		api.POST("/config/import", importConfigHandler(store))
+		api.GET("/config/candidate", getCandidateConfigHandler(store))
+		api.POST("/config/candidate", saveCandidateConfigHandler(store))
+		api.GET("/config/diff", diffConfigHandler(store))
+		api.POST("/config/commit", commitConfigHandler(store))
+		api.POST("/config/commit_confirmed", commitConfirmedHandler(store))
+		api.POST("/config/confirm", confirmCommitHandler(store))
+		api.POST("/config/rollback", rollbackConfigHandler(store))
 		api.GET("/services/syslog", getSyslogHandler(store))
 		api.POST("/services/syslog", setSyslogHandler(store))
 		api.GET("/zones", listZonesHandler(store))
@@ -40,6 +51,9 @@ func NewServer(store config.Store) *gin.Engine {
 		api.POST("/firewall/rules", createFirewallRuleHandler(store))
 		api.PATCH("/firewall/rules/:id", updateFirewallRuleHandler(store))
 		api.DELETE("/firewall/rules/:id", deleteFirewallRuleHandler(store))
+		if auditStore != nil {
+			auditHandlers(api, auditStore)
+		}
 	}
 
 	return r
@@ -82,6 +96,7 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		auditLog(c, audit.Record{Action: "config.save", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "saved"})
 	}
 }
@@ -136,7 +151,117 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		auditLog(c, audit.Record{Action: "config.import", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "imported"})
+	}
+}
+
+func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := store.LoadCandidate(c.Request.Context())
+		if err != nil {
+			if errors.Is(err, config.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "candidate config not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg)
+	}
+}
+
+func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var cfg config.Config
+		if err := c.ShouldBindJSON(&cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		if err := store.SaveCandidate(c.Request.Context(), &cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.save_candidate", Target: "candidate"})
+		c.JSON(http.StatusOK, gin.H{"status": "saved"})
+	}
+}
+
+func commitConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := store.Commit(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+	}
+}
+
+func commitConfirmedHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		const defaultTTLSeconds = 60
+		body, _ := io.ReadAll(c.Request.Body)
+		ttlSeconds := int64(defaultTTLSeconds)
+		if len(body) > 0 {
+			var req struct {
+				TTLSeconds int64 `json:"ttl_seconds"`
+			}
+			if err := json.Unmarshal(body, &req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+				return
+			}
+			if req.TTLSeconds > 0 {
+				ttlSeconds = req.TTLSeconds
+			}
+		}
+		if err := store.CommitConfirmed(c.Request.Context(), time.Duration(ttlSeconds)*time.Second); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+	}
+}
+
+func confirmCommitHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := store.ConfirmCommit(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "confirmed"})
+	}
+}
+
+func rollbackConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := store.Rollback(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
+	}
+}
+
+func diffConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		running, err := store.Load(c.Request.Context())
+		if err != nil && !errors.Is(err, config.ErrNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		candidate, err := store.LoadCandidate(c.Request.Context())
+		if err != nil && !errors.Is(err, config.ErrNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"running":   running,
+			"candidate": candidate,
+		})
 	}
 }
 
@@ -508,4 +633,55 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 		cfg.Firewall.DefaultAction = config.ActionAllow
 	}
 	return cfg, nil
+}
+
+func withAuditStore(store audit.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if store != nil {
+			c.Set("auditStore", store)
+			if actor := c.GetHeader("X-User"); actor != "" {
+				c.Set("actor", actor)
+			}
+			if source := c.GetHeader("X-Source"); source != "" {
+				c.Set("source", source)
+			}
+		}
+		c.Next()
+	}
+}
+
+func auditLog(c *gin.Context, rec audit.Record) {
+	if c == nil {
+		return
+	}
+	storeVal, ok := c.Get("auditStore")
+	if !ok || storeVal == nil {
+		return
+	}
+	store, ok := storeVal.(audit.Store)
+	if !ok || store == nil {
+		return
+	}
+	if rec.Actor == "" {
+		if actor := c.GetString("actor"); actor != "" {
+			rec.Actor = actor
+		} else if actor := c.GetHeader("X-User"); actor != "" {
+			rec.Actor = actor
+		} else {
+			rec.Actor = "unknown"
+		}
+	}
+	if rec.Source == "" {
+		if src := c.GetString("source"); src != "" {
+			rec.Source = src
+		} else if src := c.GetHeader("X-Source"); src != "" {
+			rec.Source = src
+		} else {
+			rec.Source = "api"
+		}
+	}
+	if rec.Result == "" {
+		rec.Result = "success"
+	}
+	_ = store.Add(c.Request.Context(), rec)
 }

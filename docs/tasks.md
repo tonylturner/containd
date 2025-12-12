@@ -5,16 +5,20 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] Phase 0 polish
   - [x] Ensure health endpoints are documented in README/docs.
   - [x] Serve built Next.js UI from `ngfw-mgmt` when available (fallback to static placeholder).
-  - [ ] Add minimal CI job (lint + build) for Go and UI.
+  - [x] Add minimal CI job (lint + build) for Go and UI.
 - [ ] Config model foundation
   - [x] Define interface, zone, and firewall rule structs in `pkg/cp/config` with validation.
   - [x] Add SQLite-backed persistence abstraction.
   - [x] Expand `docs/config-format.md` with schema outline.
+  - [x] Add schema versioning support in config exports/imports.
+  - [ ] Add schema version negotiation/upgrade handling.
 - [ ] Control-plane API
   - [x] Scaffold Gin router in `api/http` with `/api/v1` grouping.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
   - [x] Add request validation and basic unit tests.
   - [x] Add config export/import endpoints.
+  - [ ] Add objects/assets/identity/services/audit endpoints.
+  - [x] Add config lifecycle endpoints (candidate/running, commit/rollback, diff); commit-confirmed still pending.
 - [ ] Data-plane capture stub
   - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
@@ -22,6 +26,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.
   - [ ] Add ICS/identity predicates to evaluator (placeholders added in rule structs).
+  - [ ] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
+  - [ ] Add nftables compile/apply path for rules and verdict updates (sets/maps, conntrack kill).
 - [ ] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.
@@ -30,11 +36,15 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add `show version`, `show interfaces`, `show zones` stubs wired to control-plane config store (API wiring TBD).
   - [x] Add API-backed commands (`show health`, `show config`) using management HTTP endpoints.
   - [x] Add mutating commands (`set zone`, `set interface`) via API.
-  - [ ] Add mutating commands for firewall rules (set/delete).
+  - [x] Add mutating commands for firewall rules (set/delete).
+  - [ ] Add CLI commands for commit/rollback/export/import/audit.
+  - [ ] Plan SSH server integration (key auth default, passwords only in lab) and rate limiting.
 - [ ] UI integration
-  - [ ] Add dashboard fetching `/api/v1/health`.
-  - [ ] Set up API client layer.
+  - [x] Add dashboard fetching `/api/v1/health`.
+  - [x] Set up API client layer.
   - [ ] Add topology view placeholder with React Flow dependency.
+  - [ ] Add config diff/commit/rollback UI and audit log view.
+  - [ ] Add services pages (syslog/NTP/DNS) and policy/alerts views (FW/IDS/ICS).
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -46,9 +56,24 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Use helper in both binaries.
   - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
   - [ ] Implement syslog forwarding pipeline (UDP/TCP) and hook to events.
+  - [ ] Add Prometheus metrics endpoint and telemetry sampling controls.
 - [ ] Security/auth foundations
-  - [ ] Draft admin user/auth config model hooks (even if unauthenticated initially).
+  - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
+  - [ ] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI.
+  - [ ] HTTPS defaults with self-signed cert and custom cert install/rotate.
   - [ ] Plan SSH server integration points for Phase 4.
+  - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
+- [ ] ICS/OT features
+  - [ ] Asset model (ICS assets/groups, criticality, tags) and policy references.
+  - [ ] ICS policy primitives (Modbus read/write/function codes/register ranges; later DNP3/IEC104/S7/CIP/OPC UA visibility/control).
+  - [ ] OT policy templates (Purdue baseline, maintenance window, SIS hardening).
+- [ ] IDS/IPS
+  - [ ] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack.
+- [ ] eBPF
+  - [ ] Plan optional XDP/TC programs for early drop/counters and event streaming; keep fallback functional.
+- [ ] Config lifecycle safety
+  - [ ] Implement candidate/running configs with commit/commit-confirmed/rollback and deterministic export/import.
+  - [~] Implement audit logging (who/when/source/what/result) with API hooks in place; UI/CLI views and syslog forwarding pending.
 - [ ] Documentation
   - [x] Expand `docs/architecture.md` with module boundaries and data/control/management plane flows.
   - [x] Update `docs/dataplane.md` with policy compilation → engine flow.

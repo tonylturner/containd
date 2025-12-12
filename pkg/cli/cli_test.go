@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
 )
@@ -25,6 +26,21 @@ func (m *memStore) Load(ctx context.Context) (*config.Config, error) {
 	}
 	return m.cfg, nil
 }
+
+func (m *memStore) SaveCandidate(ctx context.Context, cfg *config.Config) error {
+	return m.Save(ctx, cfg)
+}
+
+func (m *memStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
+	return m.Load(ctx)
+}
+
+func (m *memStore) Commit(ctx context.Context) error   { return nil }
+func (m *memStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
+	return nil
+}
+func (m *memStore) ConfirmCommit(ctx context.Context) error { return nil }
+func (m *memStore) Rollback(ctx context.Context) error { return nil }
 
 func (m *memStore) Close() error { return nil }
 
@@ -124,5 +140,20 @@ func TestSetZoneViaAPI(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("ok")) {
 		t.Fatalf("expected ok response, got %s", buf.String())
+	}
+}
+
+func TestDeleteFirewallRuleViaAPI(t *testing.T) {
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusNoContent,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	if err := reg.Execute(context.Background(), "delete firewall rule", &buf, []string{"10"}); err != nil {
+		t.Fatalf("execute: %v", err)
 	}
 }

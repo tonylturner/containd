@@ -15,6 +15,8 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 - Mutating commands (API):
   - `set zone <name> [description]`
   - `set interface <name> <zone> [cidr...]`
+  - `set firewall rule <id> <action> [src_zone] [dst_zone]`
+  - `delete firewall rule <id>`
 - Backed by the config store (uses `pkg/cp/config`); ready to wire into SSH/HTTP transports later.
 
 ## Future

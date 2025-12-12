@@ -4,9 +4,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	httpapi "github.com/containd/containd/api/http"
+	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
@@ -27,8 +29,10 @@ func main() {
 	store := mustInitStore()
 	defer store.Close()
 	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
+	auditStore := mustInitAuditStore()
+	defer auditStore.Close()
 
-	router := httpapi.NewServer(store)
+	router := httpapi.NewServer(store, auditStore)
 	serveStaticUI(router)
 
 	logger.Printf("ngfw-mgmt listening on %s", addr)
@@ -56,7 +60,36 @@ func health(c *gin.Context) {
 func serveStaticUI(router *gin.Engine) {
 	uiDir := pickUIDir()
 	if uiDir != "" {
-		router.Static("/", uiDir)
+		indexPath := filepath.Join(uiDir, "index.html")
+		// Serve index at root.
+		router.GET("/", func(c *gin.Context) {
+			c.File(indexPath)
+		})
+		// For all other non-API paths, try to serve a static file or fall back to index.
+		router.NoRoute(func(c *gin.Context) {
+			reqPath := c.Request.URL.Path
+			if reqPath == "/api" || strings.HasPrefix(reqPath, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+
+			clean := filepath.Clean(reqPath)
+			candidate := filepath.Join(uiDir, clean)
+			if info, err := os.Stat(candidate); err == nil {
+				if info.IsDir() {
+					dirIndex := filepath.Join(candidate, "index.html")
+					if _, err := os.Stat(dirIndex); err == nil {
+						c.File(dirIndex)
+						return
+					}
+				} else {
+					c.File(candidate)
+					return
+				}
+			}
+
+			c.File(indexPath)
+		})
 		return
 	}
 
@@ -102,6 +135,18 @@ func mustInitStore() config.Store {
 	store, err := config.NewSQLiteStore(dbPath)
 	if err != nil {
 		logging.New("[mgmt]").Fatalf("failed to open config store: %v", err)
+	}
+	return store
+}
+
+func mustInitAuditStore() audit.Store {
+	dbPath := addrFromEnv("NGFW_AUDIT_DB", filepath.Join("data", "audit.db"))
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		logging.New("[mgmt]").Fatalf("failed to create audit dir: %v", err)
+	}
+	store, err := audit.NewSQLiteStore(dbPath)
+	if err != nil {
+		logging.New("[mgmt]").Fatalf("failed to open audit store: %v", err)
 	}
 	return store
 }

@@ -9,13 +9,14 @@ import (
 // Config represents the management-plane persistent configuration.
 // It intentionally stays narrow until broader models are added.
 type Config struct {
-	System      SystemConfig   `json:"system"`
-	Interfaces  []Interface    `json:"interfaces"`
-	Zones       []Zone         `json:"zones"`
-	Firewall    FirewallConfig `json:"firewall"`
-	Services    ServicesConfig `json:"services"`
-	Description string         `json:"description,omitempty"`
-	Version     string         `json:"version,omitempty"`
+	SchemaVersion string         `json:"schema_version,omitempty"`
+	System        SystemConfig   `json:"system"`
+	Interfaces    []Interface    `json:"interfaces"`
+	Zones         []Zone         `json:"zones"`
+	Firewall      FirewallConfig `json:"firewall"`
+	Services      ServicesConfig `json:"services"`
+	Description   string         `json:"description,omitempty"`
+	Version       string         `json:"version,omitempty"`
 }
 
 type SystemConfig struct {
@@ -80,6 +81,9 @@ type Protocol struct {
 func (c *Config) Validate() error {
 	if c == nil {
 		return errors.New("config is nil")
+	}
+	if err := UpgradeInPlace(c); err != nil {
+		return err
 	}
 	if err := validateHostname(c.System.Hostname); err != nil {
 		return err

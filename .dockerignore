@@ -1,0 +1,16 @@
+**/.git
+**/.DS_Store
+
+# Go build artifacts
+**/bin
+**/dist
+**/*.exe
+**/*.test
+
+# UI artifacts
+ui/node_modules
+ui/.next
+ui/out
+
+# Local data volumes
+data

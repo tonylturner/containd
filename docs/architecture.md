@@ -3,28 +3,29 @@
 This document tracks the high-level architecture for containd as it evolves.
 
 ## Planes
-- **Data plane (`ngfw-engine`)**: capture, flow tracking, rule enforcement, DPI/IDS.
-- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog, NTP/DNS later), policy compilation → rule snapshots.
-- **Management plane (`ngfw-mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config import/export.
+- **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), capture, flow tracking, rule evaluator, DPI/IDS (selective).
+- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/NTP/DNS), policy compilation → rule snapshots/nftables sets, audit, identity (placeholder).
+- **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit.
 
 ## Packaging
-- Containers at repo root (`Dockerfile.engine`, `Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default.
-- Host deployment to run `ngfw-mgmt`/`ngfw-engine` as services; config DB default `data/config.db` (env `NGFW_CONFIG_DB`).
+- Containers at repo root (`Dockerfile.engine`, `Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; goal is single `containd` binary with subcommands.
+- Host deployment to run `containd all` (or split commands); config DB default `data/config.db` (env `NGFW_CONFIG_DB`).
 
 ## Module boundaries (current)
-- `api/http`: `/api/v1` health, config load/save/validate/export/import, CRUD (zones/interfaces/rules), syslog settings.
-- `pkg/cp/config`: config model + validation + SQLite store.
-- `pkg/cp/services`: syslog manager stub (forwarding pending).
+- `api/http`: `/api/v1` health, config load/save/validate/export/import, CRUD (zones/interfaces/rules), syslog settings (more to add: objects/assets, policies, identity, audit, services).
+- `pkg/cp/config`: config model + validation + SQLite store (candidate/commit/rollback not yet implemented).
+- `pkg/cp/services`: syslog manager stub; NTP/DNS pending; audit/identity placeholders.
 - `pkg/common/logging`: prefixed UTC loggers.
-- `pkg/cli`: command registry with initial `show` commands (to be exposed via SSH/HTTP).
-- `pkg/dp/capture`: capture manager placeholder.
-- `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port, ranges).
+- `pkg/cli`: command registry with API-backed show/set/delete for zones/interfaces/rules; more to add (commit/rollback/audit).
+- `pkg/dp/capture`: capture manager placeholder (NFQUEUE/AF_PACKET planned).
+- `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity placeholders).
 - `pkg/dp/engine`: harness to start capture, swap rule snapshots, evaluate contexts.
+-, placeholders for `pkg/dp/enforce`, `pkg/dp/dpi`, `pkg/dp/ics`, `pkg/dp/ids`, `pkg/dp/verdict`, `ebpf/` are not yet implemented.
 
-## Flow of control (current)
-1) Management plane receives config via API; persisted in SQLite (`pkg/cp/config`).
-2) Engine loads compiled rule snapshot (future: control-plane compiler) and hot-swaps pointer.
-3) Capture workers (stub) feed flows → rule evaluator → actions (allow/deny; future: reset/mirror/tag/rate-limit).
+## Flow of control (current/target)
+1) Management plane receives config via API; persisted in SQLite; candidate/commit/rollback model to be added; audit every change.
+2) Control plane compiles policies to nftables rulesets/sets and DP rule snapshots; engine hot-swaps snapshots.
+3) Kernel enforces fast path; selective capture feeds userspace for DPI/IDS; IPS verdicts update nftables sets/conntrack.
 4) Services (syslog/NTP/DNS) managed via control-plane services package (syslog stub now).
 
 ## Upcoming work

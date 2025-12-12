@@ -6,6 +6,7 @@ Canonical JSON configuration for export/import and persistent state.
 
 ```jsonc
 {
+  "schema_version": "0.1.0",
   "version": "0.1.0",
   "description": "optional",
   "system": {
@@ -57,6 +58,12 @@ Notes:
 - `POST /api/v1/config/validate` – validate JSON without saving.
 - `GET /api/v1/config/export` – export current config.
 - `POST /api/v1/config/import` – import+save config (validates).
+- `GET/POST /api/v1/config/candidate` – fetch/save candidate config.
+- `GET /api/v1/config/diff` – view running vs candidate.
+- `POST /api/v1/config/commit` – promote candidate to running.
+- `POST /api/v1/config/rollback` – restore previous running config.
 - `GET/POST/PATCH/DELETE /api/v1/zones` – list/add/update/delete zones.
 - `GET/POST/PATCH/DELETE /api/v1/interfaces` – list/add/update/delete interfaces.
 - `GET/POST/PATCH/DELETE /api/v1/firewall/rules` – list/add/update/delete firewall rules.
+- `GET/POST /api/v1/services/syslog` – get/set syslog settings.
+- `GET /api/v1/audit` – list audit records (write events pending).

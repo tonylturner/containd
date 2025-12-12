@@ -1,3 +1,9 @@
+ "use client";
+
+import { useEffect, useState } from "react";
+
+import { fetchHealth, type HealthResponse } from "../lib/api";
+
 const phases = [
   {
     title: "Phase 0",
@@ -17,6 +23,18 @@ const phases = [
 ];
 
 export default function Home() {
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchHealth().then((res) => {
+      if (alive) setHealth(res);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   return (
     <div className="relative min-h-screen overflow-hidden text-slate-100">
       <div className="pointer-events-none absolute inset-0 opacity-30">
@@ -34,6 +52,40 @@ export default function Home() {
           Management plane ships with an API, modern UI, and SSH CLI; the data
           plane focuses on deterministic performance, DPI, and ICS-aware rules.
         </p>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+              API health
+            </p>
+            {health ? (
+              <div className="mt-2 space-y-1 text-sm">
+                <div className="flex items-center justify-between">
+                  <span>Status</span>
+                  <span className="rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint">
+                    {health.status}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Component</span>
+                  <span className="text-slate-200">{health.component}</span>
+                </div>
+                {health.time && (
+                  <div className="flex items-center justify-between">
+                    <span>Updated</span>
+                    <span className="text-slate-200">
+                      {new Date(health.time).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-amber">
+                Unable to reach management API.
+              </p>
+            )}
+          </div>
+        </div>
 
         <div className="mt-10 grid gap-6 md:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">

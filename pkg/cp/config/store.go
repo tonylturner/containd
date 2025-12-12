@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -15,16 +18,31 @@ var (
 	ErrNotFound = errors.New("config not found")
 )
 
+const (
+	configKeyRunning   = "running"
+	configKeyCandidate = "candidate"
+	configKeyPrevious  = "previous"
+	configKeyPending   = "commit_confirmed_pending"
+)
+
 // Store defines persistence operations for the control-plane config.
 type Store interface {
 	Save(ctx context.Context, cfg *Config) error
 	Load(ctx context.Context) (*Config, error)
+	SaveCandidate(ctx context.Context, cfg *Config) error
+	LoadCandidate(ctx context.Context) (*Config, error)
+	Commit(ctx context.Context) error
+	CommitConfirmed(ctx context.Context, ttl time.Duration) error
+	ConfirmCommit(ctx context.Context) error
+	Rollback(ctx context.Context) error
 	Close() error
 }
 
 // SQLiteStore persists configuration in a SQLite database file.
 type SQLiteStore struct {
-	db *sql.DB
+	db           *sql.DB
+	mu           sync.Mutex
+	pendingTimer *time.Timer
 }
 
 // NewSQLiteStore opens or creates a SQLite database at the given path.
@@ -37,14 +55,20 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
-	return &SQLiteStore{db: db}, nil
+	store := &SQLiteStore{db: db}
+	if err := store.checkAndSchedulePending(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func bootstrapSchema(db *sql.DB) error {
 	schema := `
 CREATE TABLE IF NOT EXISTS configs (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  data TEXT NOT NULL
+  key TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
 );`
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create schema: %w", err)
@@ -52,8 +76,17 @@ CREATE TABLE IF NOT EXISTS configs (
 	return nil
 }
 
-// Save validates and writes the config as a JSON blob.
+// Save validates and writes the config as the running config.
 func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
+	return s.saveKind(ctx, configKeyRunning, cfg)
+}
+
+// SaveCandidate stores a candidate config (staged).
+func (s *SQLiteStore) SaveCandidate(ctx context.Context, cfg *Config) error {
+	return s.saveKind(ctx, configKeyCandidate, cfg)
+}
+
+func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
@@ -64,16 +97,25 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `REPLACE INTO configs (id, data) VALUES (1, ?)`, string(blob))
+	_, err = s.db.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, kind, string(blob), time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("persist config: %w", err)
 	}
 	return nil
 }
 
-// Load returns the persisted config or ErrNotFound if none exists.
+// Load returns the running config or ErrNotFound if none exists.
 func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE id = 1`)
+	return s.loadKind(ctx, configKeyRunning)
+}
+
+// LoadCandidate returns the candidate config or ErrNotFound if none exists.
+func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
+	return s.loadKind(ctx, configKeyCandidate)
+}
+
+func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, kind)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -85,7 +127,89 @@ func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := UpgradeInPlace(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// Commit promotes candidate to running and stores previous running for rollback.
+func (s *SQLiteStore) Commit(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	candidate, err := s.LoadCandidate(ctx)
+	if err != nil {
+		return fmt.Errorf("load candidate: %w", err)
+	}
+	if running, err := s.Load(ctx); err == nil {
+		if err := s.saveKind(ctx, configKeyPrevious, running); err != nil {
+			return fmt.Errorf("save previous: %w", err)
+		}
+	}
+	if err := s.saveKind(ctx, configKeyRunning, candidate); err != nil {
+		return fmt.Errorf("promote candidate: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
+	_ = s.clearPendingLocked(ctx)
+	return nil
+}
+
+type pendingCommit struct {
+	DeadlineUnix int64 `json:"deadline_unix"`
+}
+
+// CommitConfirmed commits candidate to running and schedules auto-rollback unless confirmed.
+func (s *SQLiteStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
+	if ttl <= 0 {
+		return errors.New("ttl must be > 0")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidate, err := s.LoadCandidate(ctx)
+	if err != nil {
+		return fmt.Errorf("load candidate: %w", err)
+	}
+	if running, err := s.Load(ctx); err == nil {
+		if err := s.saveKind(ctx, configKeyPrevious, running); err != nil {
+			return fmt.Errorf("save previous: %w", err)
+		}
+	}
+	if err := s.saveKind(ctx, configKeyRunning, candidate); err != nil {
+		return fmt.Errorf("promote candidate: %w", err)
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
+
+	pending := pendingCommit{DeadlineUnix: time.Now().Add(ttl).UnixNano()}
+	blob, _ := json.Marshal(pending)
+	if _, err := s.db.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyPending, string(blob), time.Now().Unix()); err != nil {
+		return fmt.Errorf("persist pending commit: %w", err)
+	}
+	s.schedulePendingLocked(ttl)
+	return nil
+}
+
+// ConfirmCommit cancels any pending auto-rollback from CommitConfirmed.
+func (s *SQLiteStore) ConfirmCommit(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.clearPendingLocked(ctx)
+	return nil
+}
+
+// Rollback restores the previous running config if available.
+func (s *SQLiteStore) Rollback(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev, err := s.loadKind(ctx, configKeyPrevious)
+	if err != nil {
+		return fmt.Errorf("load previous: %w", err)
+	}
+	if err := s.saveKind(ctx, configKeyRunning, prev); err != nil {
+		return fmt.Errorf("restore previous: %w", err)
+	}
+	_ = s.clearPendingLocked(ctx)
+	return nil
 }
 
 // Close releases database resources.
@@ -93,5 +217,89 @@ func (s *SQLiteStore) Close() error {
 	if s.db != nil {
 		return s.db.Close()
 	}
+	return nil
+}
+
+func (s *SQLiteStore) loadPending(ctx context.Context) (*pendingCommit, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, configKeyPending)
+	var raw string
+	if err := row.Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var pending pendingCommit
+	if err := json.Unmarshal([]byte(raw), &pending); err != nil {
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func (s *SQLiteStore) clearPendingLocked(ctx context.Context) error {
+	if s.pendingTimer != nil {
+		s.pendingTimer.Stop()
+		s.pendingTimer = nil
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
+	if s.pendingTimer != nil {
+		s.pendingTimer.Stop()
+	}
+	s.pendingTimer = time.AfterFunc(after, func() {
+		// Re-check pending state before rollback.
+		bg := context.Background()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		pending, err := s.loadPending(bg)
+		if err != nil || pending == nil {
+			return
+		}
+		if time.Now().UnixNano() < pending.DeadlineUnix {
+			remain := time.Until(time.Unix(0, pending.DeadlineUnix))
+			s.schedulePendingLocked(remain)
+			return
+		}
+		if err := s.rollbackLocked(bg); err != nil {
+			log.Printf("auto-rollback failed: %v", err)
+			return
+		}
+		_ = s.clearPendingLocked(bg)
+	})
+}
+
+func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
+	prev, err := s.loadKind(ctx, configKeyPrevious)
+	if err != nil {
+		return err
+	}
+	return s.saveKind(ctx, configKeyRunning, prev)
+}
+
+func (s *SQLiteStore) checkAndSchedulePending() error {
+	ctx := context.Background()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, err := s.loadPending(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	deadline := time.Unix(0, pending.DeadlineUnix)
+	if time.Now().After(deadline) {
+		if err := s.rollbackLocked(ctx); err != nil {
+			return err
+		}
+		return s.clearPendingLocked(ctx)
+	}
+	s.schedulePendingLocked(time.Until(deadline))
 	return nil
 }

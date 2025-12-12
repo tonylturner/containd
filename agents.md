@@ -1,588 +1,171 @@
-# ICS‑NGFW – Single‑Image Appliance Spec (Agent Instructions)
+# containd (ICS‑NGFW) – Agent & Project Specification
 
-You are an AI coding agent building **containd**, an open‑source next‑generation firewall designed for **ICS/OT environments**, implemented as a **single Docker image / appliance** by default.
-
-Use this document as your primary reference for architecture, features, tech stack, and coding style when creating and evolving this project. It is intended to be dropped into tools like Cursor/Cortex as an agent configuration / project spec.
+Authoritative instructions for building **containd / ICS‑NGFW**, a single-image, ICS/OT-aware NGFW appliance. Use this file as the primary reference for architecture, features, tech stack, coding style, and delivery milestones.
 
 ---
 
-## 0. Purpose & Vision
+## 0. Product Goals
 
-**Goal:** Build a high‑performance, open‑source NGFW that:
+- Commercial-grade operator experience: Web GUI + SSH/CLI, strong defaults, auditability, backups/export/import, safe upgrades.
+- OT/ICS-aware: first-class assets (PLC/HMI/SIS/RTU/etc.), ICS DPI + policy primitives, ICS-centric dashboards/alerts.
+- Deployable anywhere: single appliance container by default; host mode on Linux NICs; future K8s-ready architecture.
 
-- Runs primarily as a **single-container appliance**:
-  - Drop‑in firewall node for OT/ICS labs (docker‑compose).
-  - Can bind to **real NICs** on bare metal.
-  - Can be used as a **Kubernetes** workload later.
-- Provides **commercial‑grade NGFW capabilities**, with a special focus on **industrial control systems (ICS)** / **operational technology (OT)** networks.
-- Includes **native IDS/IPS and DPI** as **first‑class components**, not external add‑on containers.
-- Offers:
-  - A modern **web GUI** for management,
-  - A **network‑style CLI over SSH**,
-  - REST/JSON APIs,
-  - JSON config export/import for backup and migration.
-
-This project will be used as the firewall/IDS core inside a larger OT lab platform, but must also be usable as a standalone NGFW appliance.
+Non-goals (initially): full TLS MITM; full SIEM replacement; extensive L2 switch features beyond routing/segmentation.
 
 ---
 
-## 1. Tech Stack & Packaging
+## 1. Stack, Runtime Model, Packaging
 
-### 1.1 Languages & Frameworks
-
-- **Backend / Engine / Control Plane:** Go (latest stable)
-- **HTTP API:** Gin (`github.com/gin-gonic/gin`)
-- **Frontend UI:** Next.js (TypeScript)
-  - App Router
-  - TailwindCSS
-  - shadcn/ui for components
-  - React Flow for topology / graphs
-  - A charting library (e.g. Recharts or D3‑based)
-
-### 1.2 Single Binary, Multiple Roles
-
-Build **one Go binary** named `ics-ngfw` with subcommands:
-
-- `ics-ngfw engine` – runs **data plane** only.
-- `ics-ngfw mgmt` – runs **control plane + APIs + web UI + SSH/CLI** only.
-- `ics-ngfw all` – runs **both engine and management** in a single process/container.
-  - This is the **default mode** for appliance / lab deployments.
-
-Internally these can share packages, but externally there is **one binary** and **one image**.
-
-### 1.3 Single Docker Image
-
-Produce a **single Docker image**, e.g. `ghcr.io/you/ics-ngfw:latest`, that contains:
-
-- The `ics-ngfw` binary.
-- The built Next.js UI assets for the mgmt HTTP server.
-
-The container entrypoint should default to `ics-ngfw all`, so the typical runtime is **one container that does everything**.
-
-The same image can also be run with explicit subcommands if needed (e.g. separate engine/mgmt containers in advanced deployments), but other projects only ever reference **one image name**.
+- Go (latest), Gin REST API (`/api/v1`); Next.js (TypeScript) with Tailwind, shadcn/ui, React Flow, charts.
+- **Single Go binary** `containd` with subcommands: `engine`, `mgmt`, `all` (default, runs both).
+- **Single Docker image** (`containd` tag) containing the binary and built UI; entrypoint `containd all`.
+- Capabilities: needs NET_ADMIN/NET_RAW for enforcement; avoid SYS_ADMIN. Run mgmt/UI/SSH as non-root; isolate engine privilege in code.
 
 ---
 
-## 2. Repository Layout
+## 2. Enforcement Strategy
 
-Create a monorepo structured like:
+- Baseline enforcement via Linux kernel: routing/forwarding in kernel; conntrack state; **nftables** for firewall/NAT; dynamic sets/maps for speed.
+- Userspace compiles/install nftables rules, performs selective DPI/IDS, updates dynamic sets, exports telemetry.
+- Verdict actions include allow/deny/reset, alert, temp block (flow/host), rate-limit, tag.
+- Selective DPI path using NFQUEUE/AF_PACKET mirror; IPS verdicts update nftables sets and optionally kill conntrack.
+- eBPF plan (optional): XDP early drop/counters, TC hooks, ring buffer events; versioned/optional with compatibility checks.
 
-```text
-ics-ngfw/
+---
+
+## 3. Repository Layout (target)
+
+```
+containd/
   cmd/
-    ics-ngfw/          # main() with subcommands: engine, mgmt, all
+    containd/           # main with subcommands engine/mgmt/all
   pkg/
-    dp/                # data-plane core
-      capture/         # packet I/O (AF_PACKET, raw sockets, XDP later)
-      flow/            # flow/session tracking
-      rules/           # compiled rule engine for enforcement
-      dpi/             # DPI framework
-      ics/             # ICS protocol parsers (Modbus, DNP3, etc.)
-      ids/             # IDS/IPS rule evaluation
-      engine/          # coordination (load rules, run workers)
-    cp/                # control-plane & config logic (mgmt plane)
-      config/          # persistent config model, DB access
-      policy/          # high-level policy objects (firewall, IDS)
-      compile/         # compile policies -> DP rule bundles
-      identity/        # user/device/session mapping
-      services/        # syslog, NTP, DNS config logic
-    cli/               # CLI command engine (shared by SSH/local)
-    common/            # shared types, logging, errors, metrics
+    dp/
+      enforce/          # nftables/netlink programming + conntrack
+      capture/          # NFQUEUE/AF_PACKET mirrors, pcap hooks
+      flow/             # flow/session model + enrichment
+      rules/            # compiled policy structures + evaluator
+      dpi/              # generic DPI framework
+      ics/              # ICS protocol decoders
+      ids/              # IDS/IPS rules & evaluation
+      verdict/          # verdict types/actions
+      engine/           # orchestrates dp subsystems
+    cp/
+      store/            # DB access (SQLite default)
+      config/           # config model + schema versioning
+      policy/           # high-level policies/objects
+      compile/          # compile policies -> dp bundles (nft + dpi + ids)
+      identity/         # users/groups/sessions mapping
+      services/         # syslog, ntp, dns config mgmt
+      audit/            # audit log subsystem
+    cli/                # CLI command framework (shared)
+    common/             # logging, metrics, errors, types
   api/
-    http/              # Gin handlers, routers, DTOs
-    internal/          # engine control RPC / internal APIs
-  ui/                  # Next.js app
-  # Deployment assets at repo root (single-container workflow)
-  Dockerfile.mgmt      # builds single ics-ngfw image (appliance)
-  Dockerfile.engine    # optional engine-only image
-  docker-compose.yml   # single-container compose
-  docs/
-    architecture.md
-    dataplane.md
-    ics-dpi.md
-    cli.md
-    services.md
-    config-format.md
-    deploy-host.md
+    http/               # Gin handlers, routers, DTOs
+    internal/           # internal RPC between mgmt<->engine
+  ui/                   # Next.js app
+  ebpf/                 # XDP/TC programs (future)
+  Dockerfile.mgmt       # single appliance image (current)
+  Dockerfile.engine     # optional engine-only image (current)
+  docker-compose.yml    # single-container compose
+  docs/                 # architecture, dataplane-enforcement, ebpf, policy-model, etc.
 ```
 
-Keep the repo clean, modular, and idiomatic for Go and TypeScript.
+Note: current repo uses `cmd/ngfw-engine` and `cmd/ngfw-mgmt`; migrate toward single `containd` binary/subcommands over time.
 
 ---
 
-## 3. Architecture Overview
+## 4. Config, Persistence, Safety
 
-Even though runtime uses **one container**, keep a logical split into three planes:
-
-### 3.1 Planes
-
-1. **Data Plane (DP)** – inside `ics-ngfw engine`
-   - High‑speed packet capture / injection.
-   - Flow tracking & stateful firewall.
-   - DPI & ICS protocol decoding.
-   - IDS/IPS rule evaluation.
-   - Enforcement actions (allow/drop/reset/mirror/rate-limit).
-
-2. **Control Plane (CP)** – inside `ics-ngfw mgmt`
-   - Stores full configuration & policies.
-   - Compiles high‑level policies into DP‑friendly rule bundles.
-   - Pushes rule bundles and runtime parameters to data plane (via internal APIs).
-   - Manages system services (syslog, NTP, DNS, etc.).
-   - Handles config export/import.
-
-3. **Management Plane (MP)** – inside `ics-ngfw mgmt`
-   - Gin REST API for UI & external automation.
-   - Next.js web GUI (served as static assets).
-   - SSH server exposing network‑style CLI.
-   - Auth, RBAC, and admin functions.
-
-In `ics-ngfw all` mode, both DP and CP/MP run in the same process/container and communicate via in‑process interfaces or localhost HTTP/internal API.
-
-### 3.2 Operating Modes (Data Plane)
-
-Support these modes via configuration:
-
-- **Router/Firewall (L3)**  
-  Multiple interfaces, each mapped to a **zone** (`it`, `dmz`, `ot_control`, `ot_safety`, etc.). IP forwarding with policy enforcement on flows.
-
-- **Transparent/Bump‑in‑Wire (L2/L3)**  
-  Bridged deployment between two or more interfaces; firewall operates on bridged traffic.
-
-- **Monitor/IDS‑Only**  
-  Sniff traffic on one or more interfaces; generate alerts but do not block.
-
-In **Docker lab mode**:
-
-- Attach container to multiple Docker networks (one per zone).
-- Treat each attached network as an NGFW interface/zone.
-- Optionally, act as default gateway per network.
-
-In **host mode**:
-
-- Bind to physical NICs by name (e.g. `eth0`, `enp3s0f1`, etc.).
+- Default DB: SQLite (persistent volume). Later Postgres optional.
+- Stores interfaces/zones, objects, ICS assets, policies (FW/IDS), identity, services (syslog/NTP/DNS), audit log, short-retention telemetry indexes.
+- Config lifecycle: **candidate/running/commit/rollback**, commit-confirmed with auto-rollback, diff, safe apply to avoid lockout.
+- Export/import: canonical JSON (schema_version, objects/assets/policies/services/identity/admin), deterministic ordering, dry-run validate, full overwrite; later partial merge. Redact secrets unless explicitly requested; secrets encrypted at rest with master key (file/env).
+- Audit logging: record who/when/source/what/result for every mutation; viewable/exportable/forwardable via syslog.
 
 ---
 
-## 4. Data Plane Details
+## 5. Data Plane & DPI/IDS
 
-### 4.1 Packet I/O & Flow Tracking
-
-- Use AF_PACKET or raw sockets (via `gopacket` or similar) for initial capture.
-- Design for:
-  - Multi‑queue RX (one goroutine per RX queue).
-  - Batching and lock‑free queues between capture and worker goroutines.
-
-Flow model:
-
-- 5‑tuple key: `{srcIP, dstIP, srcPort, dstPort, protocol}` + direction.
-- State: TCP state (SYN, ESTABLISHED, FIN, etc.), timestamps, timers.
-- Enriched metadata:
-  - `srcZone`, `dstZone`.
-  - L7 protocol (e.g. `http`, `dns`, `modbus`).
-  - ICS metadata (function codes, addresses, etc.).
-  - Identity attributes (userId, groupIds, deviceId) if known.
-
-### 4.2 Rule Engine (Enforcement)
-
-Implement a compiled, read‑only rule structure used in the fast path:
-
-- Conditions (match fields):
-  - Zones (source/dest).
-  - IP/networks, address groups.
-  - L4 protocol, ports.
-  - L7 protocol / app classification.
-  - ICS protocol fields (e.g. `modbus.function_code`, `modbus.address_range`).
-  - Identity (user, group, role, device type).
-  - Time schedules.
-
-- Actions:
-  - `ALLOW`.
-  - `DENY` (drop/reset).
-  - `ALERT`.
-  - `MIRROR` (to interface/collector).
-  - `RATE_LIMIT`.
-  - `TAG` (apply labels for subsequent rules).
-
-Treat enforcement rule sets as **immutable snapshots**. CP builds and pushes new versions; DP swaps them atomically (no locking in the fast path).
+- Multi-stage pipeline:
+  1) Kernel fast path (nftables, conntrack, NAT) for zone rules.
+  2) Selective DPI path (NFQUEUE/AF_PACKET) for L7/ICS inspection.
+  3) IDS/IPS path (native) triggering dynamic nftables updates + conntrack kill as needed.
+  4) Telemetry export (flows/events/alerts), bounded local retention + forwarding.
+- Flow model for enrichment (asset/identity), DPI state, IDS, telemetry; kernel remains forwarding authority.
+- Verdicts: ALLOW_CONTINUE, DENY_DROP/RESET, ALERT_ONLY, BLOCK_FLOW_TEMP, BLOCK_HOST_TEMP, RATE_LIMIT_FLOW, TAG_FLOW.
+- DPI safeguards: per-flow/global memory caps, timeouts, backpressure (fail-open default for lab, configurable).
+- ICS DPI plan: Modbus first (function codes, unit ID, register ranges), then DNP3/IEC104/S7/CIP/OPC UA.
 
 ---
 
-## 5. DPI & IDS/IPS (Native, Built‑In)
+## 6. ICS/OT Capabilities
 
-### 5.1 DPI Framework
-
-In `pkg/dp/dpi` (generic) and `pkg/dp/ics` (ICS‑specific):
-
-Define a decoder interface:
-
-```go
-type Decoder interface {
-    Supports(flow *Flow) bool
-    OnPacket(flow *Flow, pkt *ParsedPacket) ([]Event, error)
-    OnFlowEnd(flow *Flow) ([]Event, error)
-}
-
-type Event struct {
-    FlowID     string
-    Proto      string            // e.g. "http", "modbus", "dnp3"
-    Kind       string            // e.g. "request", "response", "command"
-    Attributes map[string]any    // protocol-specific fields
-    Timestamp  time.Time
-}
-```
-
-Implement decoders for:
-
-- Generic protocols:
-  - HTTP (methods, paths, headers).
-  - TLS metadata (SNI, ALPN).
-  - DNS queries/responses.
-
-- ICS protocols (phased):
-  - Modbus/TCP.
-  - DNP3.
-  - IEC‑60870‑5‑104.
-  - S7comm / Profinet.
-  - CIP/EtherNet/IP.
-  - OPC UA (basic node/service information).
-
-DPI decoders emit `Event`s to:
-
-- Rule engine (for ICS‑aware policy decisions).
-- IDS engine.
-- Telemetry/logging.
-
-### 5.2 IDS/IPS Engine
-
-Implement IDS/IPS **within the same project** (no external Suricata/Zeek container for core functionality):
-
-- Signature‑based rules (YAML/JSON):
-  - Match on L3/L4 attributes, DPI attributes and ICS‑specific fields.
-  - e.g. “Modbus write_multiple_registers to specific registers on SIS PLC”.
-- Behavioral/anomaly rules (phased):
-  - Unusual ICS behavior, frequency‑based rules, time‑of‑day anomalies.
-
-Each IDS rule may generate:
-
-- `alert` (log only).
-- `drop/reset` (IPS).
-- `tag` for further rule chaining.
-
-Alerts are:
-
-- Stored locally.
-- Exposed via REST.
-- Forwardable via syslog.
+- Asset model: first-class assets (PLC, SIS, HMI, Historian, EWS, RTU, Gateway, Vendor laptop, etc.) with zone, IPs/hostnames, criticality, allowed services, tags.
+- ICS policy primitives: Modbus read/write classes, function codes, unit ID, register ranges; later DNP3/IEC104 command categories; S7/CIP/OPC UA visibility then control.
+- OT policy templates: Purdue baseline; maintenance window; SIS hardening (ship defaults).
 
 ---
 
-## 6. Control Plane & Config
+## 7. Identity-Aware Policy
 
-### 6.1 Persistent Config Model
-
-Use a DB (SQLite or Postgres) to store:
-
-- System & network:
-  - Interfaces, zones, IP config.
-- Objects:
-  - Hosts, subnets, address groups.
-  - ICS assets (PLC, HMI, SIS, Historian, RTU, etc.), with zone, IPs, roles, criticality.
-- Identity:
-  - Users, groups, roles.
-  - Session mappings (user ↔ device ↔ IP).
-- Policies:
-  - Firewall policies (ordered rule sets).
-  - IDS rule sets.
-- System services:
-  - Syslog & forwarding targets.
-  - NTP servers.
-  - DNS settings (local resolver, forwarders, zones).
-- Admin & auth:
-  - Admin users & roles.
-  - Auth methods & settings.
-
-### 6.2 Config Export/Import (JSON)
-
-Define a canonical JSON config format:
-
-- Contains system/network settings, objects, identity, policies, services, admin/auth.
-- Include schema/version metadata.
-
-Expose:
-
-- `GET /api/v1/config/export` → full JSON.
-- `POST /api/v1/config/import` → apply JSON.
-  - Support dry‑run/validation.
-  - Start with full overwrite; partial merge can come later.
-
-CLI should provide wrapper commands to export/import the same JSON.
+- Identity sources: local users/groups (v1); later OIDC/LDAP.
+- Session mappings from VPN/jump host/lab console.
+- Rule matching: user/group/role/device/time schedule; identity-aware ICS rules (e.g., engineering writes during maintenance).
 
 ---
 
-## 7. SSH Server & CLI
+## 8. Management (API/UI/CLI/SSH)
 
-### 7.1 SSH Server
-
-`ics-ngfw mgmt` (and thus `ics-ngfw all`) runs an embedded SSH server:
-
-- Configurable port (e.g. 22 or 2222).
-- Auth:
-  - Local username/password.
-  - SSH keys (authorized_keys).
-  - Later, optional external auth (RADIUS/LDAP/OIDC).
-
-Use a stable Go SSH library.
-
-### 7.2 CLI Design
-
-Implement a network‑appliance style CLI in `pkg/cli`, shared across:
-
-- SSH sessions.
-- Optional local console.
-
-Command style:
-
-- `show version`
-- `show interfaces`
-- `show zones`
-- `show running-config`
-- `show config json`
-- `configure terminal`
-- `set interface eth0 zone dmz`
-- `set firewall rule <id> ...`
-- `delete firewall rule <id>`
-- `set syslog server <ip> [port] [proto]`
-- `set ntp server <ip-or-hostname>`
-- `set dns forwarder <ip>`
-- `backup config <name>`
-- `restore config <name>`
-
-CLI behavior:
-
-- All commands operate through the control‑plane configuration layer (no direct DB hacks).
-- `show running-config` renders current config in CLI syntax.
-- `show config json` prints JSON config.
-- `backup` / `restore` tie into JSON export/import.
+- REST API `/api/v1`: health/version/time; interfaces/zones; objects/assets; identity; policies (FW/IDS/ICS); config lifecycle (running/candidate/diff/commit/rollback/commit-confirmed); telemetry (flows/events/alerts); services (syslog/DNS/NTP); audit log.
+- Web UI (Next.js): dashboard (health/throughput/alerts), topology (React Flow), policies (FW/ICS/IDS), alerts/events, config diff/commit/rollback, export/import, services, audit, identity.
+- SSH CLI: network-device style; configure terminal, show running/candidate, diff, commit/rollback/commit-confirmed, audit, export/import. CLI uses same control-plane APIs.
 
 ---
 
-## 8. System Services: Syslog, NTP, DNS
+## 9. System Services
 
-### 8.1 Syslog
-
-Implement:
-
-- Local structured logging of events.
-- Syslog forwarding:
-  - One or more remote syslog targets.
-  - Configurable protocol (UDP/TCP) and port.
-  - Optionally configurable format.
-
-Manage via:
-
-- Web UI: Syslog settings page (targets, test message).
-- CLI: `set syslog server`, `show syslog`.
-
-### 8.2 NTP
-
-Implement NTP client:
-
-- Appliance syncs time to configured NTP servers.
-
-Manage via:
-
-- Web UI: Time & NTP settings.
-- CLI: `set ntp server`, `show ntp status`.
-
-Optional later: offer NTP server for downstream lab hosts.
-
-### 8.3 DNS
-
-Implement local DNS service:
-
-- Caching resolver with configurable upstream forwarders.
-- Optional local zones/records.
-
-Manage via:
-
-- Web UI: DNS settings, forwarders, local records.
-- CLI: `set dns forwarder`, `set dns search-domain`, `set dns record` (if local zones supported).
+- Syslog: local structured logs; forwarders (UDP/TCP); format options; forward IDS alerts, policy denies, audit events.
+- NTP: client config + status.
+- DNS: caching resolver, upstream forwarders, optional local zones.
 
 ---
 
-## 9. Identity & Policy
+## 10. Security & Hardening
 
-Design an identity layer in `pkg/cp/identity`:
-
-- Support:
-  - Local users & groups.
-  - Future external IdP (OIDC, LDAP, etc.).
-- Store mappings from identities to sessions (user ↔ device ↔ IP).
-
-Policy model should allow matching on identity:
-
-- Example rules:
-  - “Engineering group can perform Modbus writes on plant PLC group.”
-  - “Contractors group read‑only access to specific HMIs.”
-  - “Only OT admins can reach SIS PLCs.”
-
-Identity info should be available to the data plane via rule bundles or runtime updates.
+- Auth/RBAC: admin/operator/auditor/lab roles; auth required by default for UI/API; SSH key auth default (passwords only in lab); rate-limit logins.
+- HTTPS default with self-signed cert; support custom cert install/rotate.
+- Least privilege: mgmt services non-root; engine isolated for net admin tasks.
 
 ---
 
-## 10. Web UI (Next.js)
+## 11. Observability
 
-The web UI (in `ui/`) must surface all major configuration and monitoring features that CLI has.
-
-Sections:
-
-1. **Dashboard**
-   - System health (CPU, RAM, throughput).
-   - Top alerts (IDS).
-   - ICS summary (top PLCs, function codes, etc.).
-
-2. **Topology / Network View**
-   - React Flow-based visualization:
-     - Zones, firewall appliance, interfaces, ICS assets.
-   - Clicking a node shows:
-     - Properties.
-     - Policies.
-     - Recent alerts/flows involving that node.
-
-3. **Firewall Policies**
-   - Table + editor UI.
-   - ICS-aware inputs (protocol, function codes, register ranges, etc.).
-
-4. **IDS & Alerts**
-   - Alert list with filters (time, severity, asset, user).
-   - Drilldown into ICS events.
-
-5. **Objects & Identity**
-   - Hosts, networks, ICS assets.
-   - Users, groups, identity mappings.
-
-6. **System Services**
-   - Syslog configuration.
-   - NTP configuration.
-   - DNS configuration.
-
-7. **Config & Administration**
-   - Export/import config (JSON).
-   - Admin users and auth settings.
+- Prometheus metrics endpoint (optional recommended); optional OpenTelemetry later.
+- Log level controls/sampling; packet capture hooks for debugging (explicit operator action).
 
 ---
 
-## 11. Deployment Scenarios
+## 12. Deployment
 
-### 11.1 Default: Single Appliance Container (Recommended)
-
-In lab and many real deployments, run as a **single container appliance**:
-
-```yaml
-services:
-  ics_ngfw:
-    image: ghcr.io/you/ics-ngfw:latest
-    command: ["ics-ngfw", "all"]   # or omit; 'all' is default
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    networks:
-      - it_net
-      - dmz_net
-      - ot_control_net
-      - ot_safety_net
-    ports:
-      - "8443:8443"    # HTTPS UI/API
-      - "2222:22"      # SSH CLI
-```
-
-- Container attaches to multiple networks (zones).
-- Internally runs both data plane and management.
-
-### 11.2 Optional: Split Roles Using the Same Image
-
-For advanced setups, run two containers from the **same image**:
-
-- One with `ics-ngfw engine`.
-- One with `ics-ngfw mgmt`.
-
-This allows separation of concerns without publishing multiple images.
-
-### 11.3 Bare Metal Host
-
-- Install `ics-ngfw` binary on a Linux host.
-- Run:
-  - `ics-ngfw engine` bound to physical NICs.
-  - `ics-ngfw mgmt` for config, UI, and CLI.
-- Manage via web UI and SSH CLI.
-
-### 11.4 Kubernetes (Future)
-
-- DaemonSet or privileged pod for data plane.
-- Deployment + Service + Ingress for mgmt plane.
-- Still using **one image** and different commands.
+- Docker compose lab: single service with NET_ADMIN/NET_RAW, persistent volume for DB/certs/keys; multi-homed networks.
+- Host mode: bind engine to NICs; systemd unit for `containd all` or split subcommands; mgmt on mgmt interface only.
+- Kubernetes (future): privileged daemonset + policy distribution; same image.
 
 ---
 
-## 12. Implementation Phases
+## 13. Implementation Phases (updated)
 
-Implement incrementally. Each phase should result in working code + basic tests.
-
-1. **Phase 0 – Scaffolding**
-   - Create repo structure.
-   - Initialize Go modules and Next.js app.
-   - Implement `cmd/ics-ngfw` with subcommands:
-     - `ics-ngfw engine` (stub).
-     - `ics-ngfw mgmt` (stub).
-     - `ics-ngfw all` (runs both stubs).
-   - Simple health endpoints for engine and mgmt.
-   - Add `Dockerfile` + `docker-compose.lab.yml` to run single appliance container.
-
-2. **Phase 1 – L3/L4 Stateful Firewall (Single Interface)**
-   - Implement packet capture, flow tracking, basic L3/L4 rules.
-   - Implement minimal config model (interfaces, zones, rules).
-   - Expose basic policy APIs and minimal UI + CLI commands.
-
-3. **Phase 2 – Multi‑Interface, Multi‑Zone Firewall**
-   - Support multiple interfaces/networks and zone‑based policy.
-   - Improved rule model and enforcement.
-   - Topology view in UI.
-
-4. **Phase 3 – DPI & ICS (Modbus First) + IDS**
-   - TCP reassembly and Modbus/TCP decoder.
-   - ICS DPI events and ICS rule matching.
-   - IDS engine for Modbus.
-   - ICS rules editor + alerts UI.
-
-5. **Phase 4 – SSH/CLI, Config Export/Import, Syslog/NTP/DNS**
-   - SSH server and network‑style CLI.
-   - JSON config export/import.
-   - Syslog forwarding, NTP, DNS settings via API/UI/CLI.
-
-6. **Phase 5 – Additional ICS Protocols, Identity, Hardening**
-   - Add DNP3, IEC‑104, S7, etc.
-   - Identity mapping and identity‑aware policies.
-   - Authn/Authz for UI/CLI.
-   - Performance tuning (multi‑queue, batching, optional XDP).
+- **Phase 0**: scaffold repo; `containd` subcommands; mgmt API/UI skeleton; SQLite store; nftables programming skeleton; health.
+- **Phase 1**: zone firewall + NAT via nftables; candidate/commit/rollback + audit; UI/CLI basics; syslog forwarding + NTP status.
+- **Phase 2**: selective DPI (NFQUEUE/mirror) + Modbus visibility; ICS read/write primitives in policy.
+- **Phase 3**: native IDS/IPS + ICS enforcement; nftables set updates + conntrack kill; policy templates (Purdue, SIS).
+- **Phase 4**: eBPF acceleration (XDP/TC) optional; kernel→userspace events.
+- **Phase 5**: identity + additional ICS protocols (DNP3/IEC104); expand policy primitives.
+- **Phase 6**: hardening + K8s packaging; RBAC/auth, secrets management.
 
 ---
 
-## 13. Coding Style & Constraints
+## 14. Coding Style & Constraints
 
-- Prefer **clear, idiomatic Go and TypeScript** over cleverness.
-- Keep packages small and focused. Avoid giant “god” packages.
-- Data plane:
-  - Minimize locks in hot paths.
-  - Use immutable rule sets with atomic swaps.
-- Control plane:
-  - Single source of truth for config.
-  - Validation and consistent defaults.
-- Management:
-  - All functionality must be accessible via:
-    - REST API.
-    - Web UI.
-    - CLI over SSH.
-- Core IDS and DPI are **native** to this project:
-  - Do not rely on external IDS/IPS containers for primary features.
-
-Use this document as the authoritative guide when scaffolding the project, creating files, and making architectural decisions. In other projects, this NGFW should appear as a **single appliance container** by default, referenced by a single image name.
+- Clear, idiomatic Go/TS; modular boundaries between DP/CP/MP; immutable rulesets and atomic swaps; native DPI/IDS; kernel-assisted enforcement baseline with optional eBPF acceleration; all functionality exposed via REST, UI, and SSH CLI.

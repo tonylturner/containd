@@ -21,6 +21,7 @@ type HTTPClient interface {
 type API struct {
 	BaseURL string
 	Client  HTTPClient
+	Token   string
 }
 
 func (a *API) getJSON(ctx context.Context, path string, into any) error {
@@ -30,6 +31,9 @@ func (a *API) getJSON(ctx context.Context, path string, into any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL+path, nil)
 	if err != nil {
 		return err
+	}
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
 	}
 	resp, err := a.Client.Do(req)
 	if err != nil {
@@ -55,6 +59,35 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+	}
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	if out != nil {
+		_, _ = out.Write([]byte("ok\n"))
+	}
+	return nil
+}
+
+func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
+	if a.Client == nil {
+		a.Client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+	}
 	resp, err := a.Client.Do(req)
 	if err != nil {
 		return err
@@ -232,6 +265,35 @@ func setInterfaceAPI(api *API) Command {
 			Addresses: args[2:],
 		}
 		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
+	}
+}
+
+func setFirewallRuleAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: set firewall rule <id> <action> [src_zone] [dst_zone]")
+		}
+		rule := config.Rule{
+			ID:     args[0],
+			Action: config.Action(args[1]),
+		}
+		if len(args) > 2 {
+			rule.SourceZones = []string{args[2]}
+		}
+		if len(args) > 3 {
+			rule.DestZones = []string{args[3]}
+		}
+		return api.postJSON(ctx, "/api/v1/firewall/rules", rule, out)
+	}
+}
+
+func deleteFirewallRuleAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: delete firewall rule <id>")
+		}
+		path := "/api/v1/firewall/rules/" + args[0]
+		return api.delete(ctx, path, out)
 	}
 }
 
