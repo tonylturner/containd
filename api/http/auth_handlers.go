@@ -137,6 +137,35 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 	}
 }
 
+func authSessionHandler(userStore users.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		resp := gin.H{
+			"role":            c.GetString(ctxRoleKey),
+			"sessionId":       c.GetString(ctxSessionKey),
+			"idleTTLSeconds":  int(idleTTL.Seconds()),
+			"maxTTLSeconds":   int(maxTTL.Seconds()),
+			"clientIP":        c.ClientIP(),
+			"authenticatedAs": c.GetString("actor"),
+		}
+
+		if userStore != nil {
+			if uid := c.GetString(ctxUserKey); uid != "" {
+				if u, err := userStore.GetByID(c.Request.Context(), uid); err == nil && u != nil {
+					resp["user"] = u.User
+				}
+			}
+			if sid := c.GetString(ctxSessionKey); sid != "" && sid != "lab" {
+				if s, err := userStore.GetSession(c.Request.Context(), sid); err == nil && s != nil {
+					resp["expiresAt"] = s.ExpiresAt.Format(time.RFC3339Nano)
+					resp["issuedAt"] = s.IssuedAt.Format(time.RFC3339Nano)
+					resp["lastSeen"] = s.LastSeen.Format(time.RFC3339Nano)
+				}
+			}
+		}
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
 type updateMeRequest struct {
 	FirstName string `json:"firstName,omitempty"`
 	LastName  string `json:"lastName,omitempty"`

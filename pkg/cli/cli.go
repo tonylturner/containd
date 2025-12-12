@@ -183,6 +183,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show running-config redacted", RoleView, showRunningConfigRedacted(api))
 		r.RegisterRole("show candidate-config", RoleView, showCandidateConfig(api))
 		r.RegisterRole("show diff", RoleView, showDiff(api))
+		r.RegisterRole("show auth", RoleView, showAuth(api))
 		r.RegisterRole("show system", RoleView, showSystem(api))
 		r.RegisterRole("show services status", RoleView, showServicesStatus(api))
 		r.RegisterRole("show audit", RoleView, showAudit(api))
@@ -214,6 +215,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set system ssh authorized-keys-dir", RoleAdmin, setSystemSSHAuthorizedKeysDirAPI(api))
 		r.RegisterRole("set proxy forward", RoleAdmin, setForwardProxyAPI(api))
 		r.RegisterRole("set proxy reverse", RoleAdmin, setReverseProxyAPI(api))
+		r.RegisterRole("factory reset", RoleAdmin, factoryResetAPI(api))
 		r.RegisterRole("commit", RoleAdmin, commitAPI(api))
 		r.RegisterRole("commit confirmed", RoleAdmin, commitConfirmedAPI(api))
 		r.RegisterRole("confirm", RoleAdmin, confirmCommitAPI(api))
@@ -225,6 +227,16 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show interfaces", RoleView, showInterfaces(store))
 	}
 	return r
+}
+
+func factoryResetAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) != 1 || strings.TrimSpace(args[0]) != "NUCLEAR" {
+			return fmt.Errorf("usage: factory reset NUCLEAR")
+		}
+		payload := map[string]string{"confirm": "NUCLEAR"}
+		return api.postJSON(ctx, "/api/v1/system/factory-reset", payload, out)
+	}
 }
 
 func convertSigma(ctx context.Context, out io.Writer, args []string) error {
@@ -354,6 +366,38 @@ func showConfig(api *API) Command {
 			return err
 		}
 		return printJSON(out, cfg)
+	}
+}
+
+func showAuth(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var payload map[string]any
+		if err := api.getJSON(ctx, "/api/v1/auth/session", &payload); err != nil {
+			return err
+		}
+		kv := map[string]string{}
+		for k, v := range payload {
+			switch k {
+			case "user":
+				// skip; render key parts below
+				continue
+			default:
+				kv[k] = fmtAny(v)
+			}
+		}
+		if u, ok := payload["user"].(map[string]any); ok {
+			if v, ok := u["username"]; ok {
+				kv["username"] = fmtAny(v)
+			}
+			if v, ok := u["role"]; ok {
+				kv["user.role"] = fmtAny(v)
+			}
+			if v, ok := u["id"]; ok {
+				kv["user.id"] = fmtAny(v)
+			}
+		}
+		kvTable(out, kv)
+		return nil
 	}
 }
 

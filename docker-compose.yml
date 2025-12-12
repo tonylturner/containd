@@ -8,6 +8,9 @@ services:
       - NGFW_MGMT_ADDR=:8080
       # HTTPS mgmt listener (self-signed by default; cert/key stored under /data/tls).
       - NGFW_MGMT_HTTPS_ADDR=:8443
+      # Persist config/audit/users DBs on the /data volume.
+      - NGFW_CONFIG_DB=/data/config.db
+      - NGFW_AUDIT_DB=/data/audit.db
       - NGFW_SSH_ADDR=:2222
       - NGFW_SSH_AUTH_KEYS_DIR=/data/ssh/authorized_keys.d
       - NGFW_SSH_HOST_KEY=/data/ssh/host_key

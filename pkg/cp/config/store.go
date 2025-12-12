@@ -45,6 +45,24 @@ type SQLiteStore struct {
 	pendingTimer *time.Timer
 }
 
+// WipeAll deletes all persisted config state (running/candidate/previous/pending).
+// It does not close the DB or change schema.
+func (s *SQLiteStore) WipeAll(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("config store unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingTimer != nil {
+		s.pendingTimer.Stop()
+		s.pendingTimer = nil
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM configs`); err != nil {
+		return fmt.Errorf("wipe configs: %w", err)
+	}
+	return nil
+}
+
 // NewSQLiteStore opens or creates a SQLite database at the given path.
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)

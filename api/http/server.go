@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,24 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	// Avoid trusting all proxies by default; this prevents spoofed ClientIP via X-Forwarded-For.
+	// Override via CONTAIND_TRUSTED_PROXIES="127.0.0.1,::1" (comma-separated CIDRs/IPs).
+	proxiesEnv := strings.TrimSpace(os.Getenv("CONTAIND_TRUSTED_PROXIES"))
+	proxies := []string{"127.0.0.1", "::1"}
+	if proxiesEnv != "" {
+		parts := strings.Split(proxiesEnv, ",")
+		var cleaned []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				cleaned = append(cleaned, p)
+			}
+		}
+		if len(cleaned) > 0 {
+			proxies = cleaned
+		}
+	}
+	_ = r.SetTrustedProxies(proxies)
 	if auditStore != nil {
 		r.Use(withAuditStore(auditStore))
 	}
@@ -71,11 +90,13 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	protected.Use(authMiddleware(userStore))
 	{
 		protected.GET("/auth/me", meHandler(userStore))
+		protected.GET("/auth/session", authSessionHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
+		protected.POST("/system/factory-reset", requireAdmin(), factoryResetHandler(store, userStore))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler())

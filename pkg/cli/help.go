@@ -42,6 +42,15 @@ func helpCommand(r *Registry) Command {
 			}
 		}
 		fmt.Fprintln(out, "")
+		// Danger zone.
+		for _, c := range other {
+			if c == "factory reset" {
+				fmt.Fprintln(out, "Danger:")
+				fmt.Fprintln(out, "  - factory reset NUCLEAR  (wipes config/users/audit and re-seeds default admin)")
+				fmt.Fprintln(out, "")
+				break
+			}
+		}
 		fmt.Fprintln(out, "Tips:")
 		fmt.Fprintln(out, "  - Commands are appliance-style and match longest prefix.")
 		fmt.Fprintln(out, "  - Use quotes for arguments with spaces.")

@@ -55,6 +55,21 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+// WipeAll deletes all users and sessions (factory reset). Caller may re-seed defaults.
+func (s *SQLiteStore) WipeAll(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("users store unavailable")
+	}
+	// Clear sessions first to avoid FK complaints in some SQLite configurations.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+		return fmt.Errorf("wipe sessions: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM users`); err != nil {
+		return fmt.Errorf("wipe users: %w", err)
+	}
+	return nil
+}
+
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {

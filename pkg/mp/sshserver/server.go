@@ -373,9 +373,10 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 		writeLn("7)  Show interfaces")
 		writeLn("8)  Show ip route")
 		writeLn("9)  Help")
+		writeLn("10) Factory reset (NUCLEAR)")
 		writeLn("")
 
-		choice, ok := ask("Select option (0-9): ")
+		choice, ok := ask("Select option (0-10): ")
 		if !ok {
 			return
 		}
@@ -466,6 +467,18 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 			_ = exec("show ip route")
 		case "9":
 			_ = exec("help")
+		case "10":
+			confirm, ok := ask("Type NUCLEAR to confirm factory reset: ")
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(confirm) != "NUCLEAR" {
+				writeLn("Cancelled.")
+				continue
+			}
+			_ = exec("factory reset NUCLEAR")
+			writeLn("Factory reset complete. You will be logged out.")
+			return
 		default:
 			writeLn("Unknown option.")
 		}

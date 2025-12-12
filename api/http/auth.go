@@ -192,12 +192,24 @@ func setAuthCookie(c *gin.Context, token string, exp time.Time) {
 		maxAge = 0
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("containd_token", token, maxAge, "/", "", false, true)
+	secure := false
+	if strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" || strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true") {
+		secure = true
+	} else if c != nil && c.Request != nil && c.Request.TLS != nil {
+		secure = true
+	}
+	c.SetCookie("containd_token", token, maxAge, "/", "", secure, true)
 }
 
 func clearAuthCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("containd_token", "", -1, "/", "", false, true)
+	secure := false
+	if strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" || strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true") {
+		secure = true
+	} else if c != nil && c.Request != nil && c.Request.TLS != nil {
+		secure = true
+	}
+	c.SetCookie("containd_token", "", -1, "/", "", secure, true)
 }
 
 func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {

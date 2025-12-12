@@ -20,6 +20,17 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+// WipeAll deletes all persisted audit records.
+func (s *SQLiteStore) WipeAll(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("audit store unavailable")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_records`); err != nil {
+		return fmt.Errorf("wipe audit records: %w", err)
+	}
+	return nil
+}
+
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
