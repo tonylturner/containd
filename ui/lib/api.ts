@@ -178,6 +178,20 @@ export type LoginResponse = {
   user: User;
 };
 
+export type TLSInfo = {
+  httpListenAddr?: string;
+  httpsListenAddr?: string;
+  httpEnabled: boolean;
+  httpsEnabled: boolean;
+  certFile?: string;
+  keyFile?: string;
+  certSubject?: string;
+  certIssuer?: string;
+  certNotAfter?: string;
+  certDnsNames?: string[];
+  certIps?: string[];
+};
+
 export type UpdateMeRequest = {
   firstName?: string;
   lastName?: string;
@@ -512,6 +526,13 @@ export const api = {
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
+
+  // System TLS
+  getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
+  setTLSCert: (certPEM: string, keyPEM: string) =>
+    postJSON<{ status: string }>("/api/v1/system/tls/cert", { certPEM, keyPEM }),
+  setTrustedCA: (pem: string) =>
+    postJSON<{ status: string }>("/api/v1/system/tls/trusted-ca", { pem }),
 
   // Proxies
   getForwardProxy: () =>

@@ -122,7 +122,11 @@ func main() {
 		listeners = append(listeners, lns...)
 	}
 	if enableHTTPS {
-		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		reloader := newCertReloader(tlsCert, tlsKey)
+		tlsCfg := &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: reloader.GetCertificate,
+		}
 		srv, lns, err := buildHTTPSServers(handler, httpsAddr, httpsLoopbackAddr, tlsCfg)
 		if err != nil {
 			logger.Fatalf("https disabled: %v", err)
@@ -140,10 +144,10 @@ func main() {
 		ln := listeners[i]
 		go func() {
 			if s.TLSConfig != nil {
-				errCh <- s.ServeTLS(ln, tlsCert, tlsKey)
-			} else {
-				errCh <- s.Serve(ln)
+				errCh <- s.Serve(tls.NewListener(ln, s.TLSConfig))
+				return
 			}
+			errCh <- s.Serve(ln)
 		}()
 	}
 
@@ -463,6 +467,53 @@ func resolveTLSFiles(cfg *config.Config) (certFile, keyFile string) {
 		keyFile = "/data/tls/server.key"
 	}
 	return certFile, keyFile
+}
+
+type certReloader struct {
+	certFile string
+	keyFile  string
+
+	mu      sync.Mutex
+	cert    *tls.Certificate
+	certM   time.Time
+	keyM    time.Time
+	lastErr error
+}
+
+func newCertReloader(certFile, keyFile string) *certReloader {
+	return &certReloader{certFile: certFile, keyFile: keyFile}
+}
+
+func (r *certReloader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cm := modTime(r.certFile)
+	km := modTime(r.keyFile)
+
+	// Load on first use, or when files change.
+	if r.cert == nil || !cm.Equal(r.certM) || !km.Equal(r.keyM) {
+		c, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+		if err != nil {
+			r.lastErr = err
+			return nil, err
+		}
+		r.cert = &c
+		r.certM = cm
+		r.keyM = km
+		r.lastErr = nil
+	}
+	return r.cert, nil
+}
+
+func modTime(path string) time.Time {
+	if path == "" {
+		return time.Time{}
+	}
+	if st, err := os.Stat(path); err == nil {
+		return st.ModTime()
+	}
+	return time.Time{}
 }
 
 func ensureSelfSignedTLSFiles(certFile, keyFile string, extraIPs []string) (string, string, error) {

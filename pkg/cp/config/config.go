@@ -71,6 +71,10 @@ type MgmtConfig struct {
 	// TLS certificate and key (PEM). If empty, a self-signed cert is generated on first start.
 	TLSCertFile string `json:"tlsCertFile,omitempty"` // e.g. "/data/tls/server.crt"
 	TLSKeyFile  string `json:"tlsKeyFile,omitempty"`  // e.g. "/data/tls/server.key"
+
+	// TrustedCAFile is an optional PEM bundle of additional trusted CAs for outbound TLS clients.
+	// If empty, the OS trust store is used.
+	TrustedCAFile string `json:"trustedCAFile,omitempty"` // e.g. "/data/tls/trusted_ca.pem"
 }
 
 // SSHConfig controls the embedded SSH server (interactive CLI).
@@ -396,6 +400,9 @@ func validateMgmt(m MgmtConfig) error {
 	}
 	if m.TLSKeyFile != "" && len(m.TLSKeyFile) > 256 {
 		return fmt.Errorf("mgmt.tlsKeyFile too long")
+	}
+	if m.TrustedCAFile != "" && len(m.TrustedCAFile) > 256 {
+		return fmt.Errorf("mgmt.trustedCAFile too long")
 	}
 	// We accept anything net/http can listen on; detailed parsing later.
 	return nil

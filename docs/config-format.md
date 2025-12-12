@@ -12,7 +12,14 @@ Canonical JSON configuration for export/import and persistent state.
   "system": {
     "hostname": "containd",
     "mgmt": {
-      "listenAddr": ":8080"
+      "listenAddr": ":8080",
+      "enableHTTP": true,
+      "enableHTTPS": true,
+      "httpListenAddr": ":8080",
+      "httpsListenAddr": ":8443",
+      "tlsCertFile": "/data/tls/server.crt",
+      "tlsKeyFile": "/data/tls/server.key",
+      "trustedCAFile": "/data/tls/trusted_ca.pem"
     },
     "ssh": {
       "listenAddr": ":2222",
@@ -25,8 +32,18 @@ Canonical JSON configuration for export/import and persistent state.
     { "name": "dmz", "description": "DMZ" }
   ],
   "interfaces": [
-    { "name": "eth0", "zone": "it", "addresses": ["192.168.1.1/24"] },
-    { "name": "eth1", "zone": "dmz", "addresses": ["10.0.0.1/24"] }
+    {
+      "name": "eth0",
+      "zone": "it",
+      "addresses": ["192.168.1.1/24"],
+      "access": { "mgmt": true, "http": true, "https": true, "ssh": false }
+    },
+    {
+      "name": "eth1",
+      "zone": "dmz",
+      "addresses": ["10.0.0.1/24"],
+      "access": { "mgmt": false, "http": false, "https": false, "ssh": false }
+    }
   ],
   "dataplane": {
     "captureInterfaces": ["eth0", "eth1"],
@@ -93,6 +110,7 @@ Canonical JSON configuration for export/import and persistent state.
 Notes:
 - `zones` must be unique.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
+- `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.

@@ -13,12 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
 	cpids "github.com/containd/containd/pkg/cp/ids"
 	"github.com/containd/containd/pkg/cp/users"
-	"github.com/containd/containd/pkg/cli"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -73,6 +73,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/auth/me", meHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
+		protected.GET("/system/tls", getTLSHandler(store))
+		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
+		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler())
