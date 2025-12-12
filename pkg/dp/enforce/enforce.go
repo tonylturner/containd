@@ -39,6 +39,32 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	var buf bytes.Buffer
 	buf.WriteString("flush ruleset\n")
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
+	// Zone interface sets for iifname/oifname binding.
+	if len(snap.ZoneIfaces) > 0 {
+		zones := make([]string, 0, len(snap.ZoneIfaces))
+		for z := range snap.ZoneIfaces {
+			zones = append(zones, z)
+		}
+		sort.Strings(zones)
+		for _, z := range zones {
+			ifaces := snap.ZoneIfaces[z]
+			if len(ifaces) == 0 {
+				continue
+			}
+			setName := "zone_" + sanitizeIdent(z) + "_ifaces"
+			buf.WriteString(fmt.Sprintf("  set %s {\n", setName))
+			buf.WriteString("    type ifname;\n")
+			buf.WriteString("    elements = { ")
+			for i, iface := range ifaces {
+				if i > 0 {
+					buf.WriteString(", ")
+				}
+				buf.WriteString(fmt.Sprintf("\"%s\"", iface))
+			}
+			buf.WriteString(" }\n")
+			buf.WriteString("  }\n")
+		}
+	}
 	buf.WriteString("  set block_hosts {\n")
 	buf.WriteString("    type ipv4_addr;\n")
 	buf.WriteString("    flags timeout;\n")
@@ -58,7 +84,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		line, err := compileEntry(e)
+		line, err := compileEntry(e, snap.ZoneIfaces)
 		if err != nil {
 			return "", err
 		}
@@ -76,9 +102,27 @@ func defaultPolicy(a rules.Action) string {
 	return "drop"
 }
 
-func compileEntry(e rules.Entry) (string, error) {
+func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error) {
 	parts := []string{}
 	parts = append(parts, fmt.Sprintf("comment \"%s\"", e.ID))
+
+	if len(e.SourceZones) > 0 {
+		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
+		if len(ifs) > 0 {
+			parts = append(parts, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
+		} else {
+			// No interfaces for these zones -> rule never matches.
+			parts = append(parts, "iifname { }")
+		}
+	}
+	if len(e.DestZones) > 0 {
+		ifs := collectZoneIfaces(e.DestZones, zoneIfaces)
+		if len(ifs) > 0 {
+			parts = append(parts, fmt.Sprintf("oifname { %s }", strings.Join(ifs, ", ")))
+		} else {
+			parts = append(parts, "oifname { }")
+		}
+	}
 
 	if len(e.Protocols) > 0 {
 		// Only first protocol supported in skeleton.
@@ -108,6 +152,44 @@ func compileEntry(e rules.Entry) (string, error) {
 		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 	}
 	return strings.Join(parts, " "), nil
+}
+
+func collectZoneIfaces(zones []string, zoneIfaces map[string][]string) []string {
+	if len(zones) == 0 || len(zoneIfaces) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, z := range zones {
+		ifs := zoneIfaces[z]
+		for _, iface := range ifs {
+			if _, ok := seen[iface]; ok {
+				continue
+			}
+			seen[iface] = struct{}{}
+			out = append(out, fmt.Sprintf("\"%s\"", iface))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sanitizeIdent(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	out := strings.Builder{}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			out.WriteRune(r)
+			continue
+		}
+		if r == '-' || r == ' ' {
+			out.WriteRune('_')
+		}
+	}
+	if out.Len() == 0 {
+		return "zone"
+	}
+	return out.String()
 }
 
 // Applier installs an nftables ruleset.

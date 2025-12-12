@@ -39,6 +39,36 @@ func TestCompileFirewallBasic(t *testing.T) {
 	}
 }
 
+func TestCompileFirewallZoneBindings(t *testing.T) {
+	compiler := NewCompiler()
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		ZoneIfaces: map[string][]string{
+			"wan": {"wan"},
+			"lan": {"lan2", "lan3"},
+		},
+		Firewall: []rules.Entry{
+			{
+				ID:          "z1",
+				SourceZones: []string{"lan"},
+				DestZones:   []string{"wan"},
+				Protocols:   []rules.Protocol{{Name: "tcp", Port: "80"}},
+				Action:      rules.ActionAllow,
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(ruleset, "set zone_lan_ifaces") || !strings.Contains(ruleset, "type ifname") {
+		t.Fatalf("missing zone iface sets: %s", ruleset)
+	}
+	if !strings.Contains(ruleset, "iifname { \"lan2\", \"lan3\" }") || !strings.Contains(ruleset, "oifname { \"wan\" }") {
+		t.Fatalf("missing iif/oif bindings: %s", ruleset)
+	}
+}
+
 func TestNftUpdaterArgsFormatting(t *testing.T) {
 	u := NewNftUpdater("containd")
 	ip := net.ParseIP("10.1.2.3")

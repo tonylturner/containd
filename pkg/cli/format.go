@@ -89,6 +89,15 @@ func yesNoStr(b bool) string {
 	return "no"
 }
 
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func fmtTime(t time.Time) string {
 	if t.IsZero() {
 		return "—"
@@ -126,4 +135,3 @@ func attrsSummary(attrs map[string]any, max int) string {
 	}
 	return truncate(strings.Join(parts, " "), max)
 }
-

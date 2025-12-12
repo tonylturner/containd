@@ -2,6 +2,7 @@ package compile
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/containd/containd/pkg/cp/config"
 	dprules "github.com/containd/containd/pkg/dp/rules"
@@ -21,6 +22,11 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		Version:  cfg.Version,
 		Firewall: make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		Default:  dprules.Action(cfg.Firewall.DefaultAction),
+		IDS: dprules.IDSConfig{
+			Enabled: cfg.IDS.Enabled,
+			Rules:   make([]dprules.IDSRule, 0, len(cfg.IDS.Rules)),
+		},
+		ZoneIfaces: make(map[string][]string),
 	}
 	if snap.Version == "" {
 		snap.Version = "compiled-" + cfg.SchemaVersion
@@ -50,5 +56,71 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		snap.Firewall = append(snap.Firewall, entry)
 	}
 
+	// Build deterministic zone->interfaces mapping for nftables bindings.
+	for _, iface := range cfg.Interfaces {
+		z := iface.Zone
+		if z == "" {
+			continue
+		}
+		snap.ZoneIfaces[z] = append(snap.ZoneIfaces[z], iface.Name)
+	}
+	for z, ifs := range snap.ZoneIfaces {
+		sort.Strings(ifs)
+		snap.ZoneIfaces[z] = ifs
+	}
+
+	for _, r := range cfg.IDS.Rules {
+		snap.IDS.Rules = append(snap.IDS.Rules, dprules.IDSRule{
+			ID:          r.ID,
+			Title:       r.Title,
+			Description: r.Description,
+			Proto:       r.Proto,
+			Kind:        r.Kind,
+			When: dprules.IDSCondition{
+				All:   compileIDSConds(r.When.All),
+				Any:   compileIDSConds(r.When.Any),
+				Not:   compileIDSNot(r.When.Not),
+				Field: r.When.Field,
+				Op:    r.When.Op,
+				Value: r.When.Value,
+			},
+			Severity: r.Severity,
+			Message:  r.Message,
+			Labels:   r.Labels,
+		})
+	}
+
 	return snap, nil
+}
+
+func compileIDSConds(in []config.IDSCondition) []dprules.IDSCondition {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]dprules.IDSCondition, 0, len(in))
+	for _, c := range in {
+		out = append(out, dprules.IDSCondition{
+			All:   compileIDSConds(c.All),
+			Any:   compileIDSConds(c.Any),
+			Not:   compileIDSNot(c.Not),
+			Field: c.Field,
+			Op:    c.Op,
+			Value: c.Value,
+		})
+	}
+	return out
+}
+
+func compileIDSNot(in *config.IDSCondition) *dprules.IDSCondition {
+	if in == nil {
+		return nil
+	}
+	return &dprules.IDSCondition{
+		All:   compileIDSConds(in.All),
+		Any:   compileIDSConds(in.Any),
+		Not:   compileIDSNot(in.Not),
+		Field: in.Field,
+		Op:    in.Op,
+		Value: in.Value,
+	}
 }

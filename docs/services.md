@@ -22,8 +22,8 @@ Tracks syslog, NTP, and DNS service configuration and status handling managed by
   - `show proxy forward|reverse`
   - `set proxy forward <on|off> [port] [zone...]`
   - `set proxy reverse <on|off>`
-- On commit/rollback, `ngfw-mgmt` renders daemon configs to the services directory (`CONTAIND_SERVICES_DIR` or `/var/lib/containd/services`): `envoy-forward.yaml` and `nginx-reverse.conf`. Process supervision/reload lands in a later phase.
-- `pkg/cp/services/proxy` includes an **optional supervision stub** that will start/stop Envoy/Nginx if their binaries are present. Current distroless images do not ship these binaries yet, so supervision is a no‑op until the image base is updated.
+- On commit/rollback, `ngfw-mgmt` renders daemon configs to the services directory (`CONTAIND_SERVICES_DIR` or `/var/lib/containd/services`): `envoy-forward.yaml` and `nginx-reverse.conf`.
+- `pkg/cp/services/proxy` includes an **optional supervision stub** that starts/stops Envoy/Nginx if binaries are present. It validates the generated Nginx config with `nginx -t` before restart, tracks last start/error timestamps, and exposes a richer `/api/v1/services/status` view consumed by `show services status`.
 
 ## Auth/SSH (future)
 - Identity placeholders live in `pkg/cp/identity` (users, devices, sessions).

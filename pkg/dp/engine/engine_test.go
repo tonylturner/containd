@@ -184,3 +184,96 @@ func TestApplyVerdictUsesUpdater(t *testing.T) {
 		t.Fatalf("expected updater to be called, got key=%q ttl=%s", up.flowKey, up.ttl)
 	}
 }
+
+func TestRecordDPIEventsEmitsIDSAlert(t *testing.T) {
+	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo"}}})
+	if err != nil {
+		e, err = New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
+	}
+	if err != nil {
+		t.Skipf("loopback interface not found or unavailable: %v", err)
+	}
+	snap := rules.Snapshot{
+		Version: "v1",
+		IDS: rules.IDSConfig{
+			Enabled: true,
+			Rules: []rules.IDSRule{
+				{
+					ID:    "mb-write",
+					Proto: "modbus",
+					When: rules.IDSCondition{
+						Field: "attr.is_write",
+						Op:    "equals",
+						Value: true,
+					},
+					Severity: "high",
+				},
+			},
+		},
+	}
+	e.LoadRules(snap)
+	state := flow.NewState(flow.Key{
+		SrcIP:   net.ParseIP("10.0.0.1"),
+		DstIP:   net.ParseIP("10.0.0.2"),
+		SrcPort: 12345,
+		DstPort: 502,
+		Proto:   6,
+		Dir:     flow.DirForward,
+	}, time.Now())
+	evs := []dpi.Event{{
+		FlowID: "f1",
+		Proto:  "modbus",
+		Kind:   "request",
+		Attributes: map[string]any{
+			"is_write": true,
+		},
+	}}
+	e.RecordDPIEvents(state, &dpi.ParsedPacket{Proto: "tcp"}, evs)
+	list := e.Events().List(10)
+	foundAlert := false
+	for _, ev := range list {
+		if ev.Proto == "ids" && ev.Kind == "alert" {
+			foundAlert = true
+		}
+	}
+	if !foundAlert {
+		t.Fatalf("expected ids alert in events, got %+v", list)
+	}
+}
+
+func TestShouldInspectICSHeuristics(t *testing.T) {
+	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo"}}})
+	if err != nil {
+		e, err = New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
+	}
+	if err != nil {
+		t.Skipf("loopback interface not found or unavailable: %v", err)
+	}
+	snap := rules.Snapshot{
+		Version: "v1",
+		Firewall: []rules.Entry{
+			{
+				ID: "ics1",
+				Protocols: []rules.Protocol{
+					{Name: "tcp", Port: "502"},
+				},
+				ICS: rules.ICSPredicate{Protocol: "modbus"},
+			},
+		},
+	}
+	e.LoadRules(snap)
+	state := flow.NewState(flow.Key{
+		SrcIP:   net.ParseIP("10.0.0.1"),
+		DstIP:   net.ParseIP("10.0.0.2"),
+		SrcPort: 12345,
+		DstPort: 502,
+		Proto:   6,
+		Dir:     flow.DirForward,
+	}, time.Now())
+	if !e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 502}) {
+		t.Fatal("expected inspect for modbus port")
+	}
+	if e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 80}) {
+		t.Fatal("expected no inspect for non-ICS port")
+	}
+}

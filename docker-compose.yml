@@ -8,6 +8,8 @@ services:
     image: containd/containd:dev
     environment:
       - NGFW_MGMT_ADDR=:8080
+      # Dev/lab mode disables auth; set CONTAIND_ADMIN_TOKEN instead for secured runs.
+      - CONTAIND_LAB_MODE=1
       # Optional: point mgmt at a separate engine service.
       - NGFW_ENGINE_URL=http://engine:8081
     ports:

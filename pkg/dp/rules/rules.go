@@ -5,6 +5,9 @@ package rules
 type Snapshot struct {
 	Version   string  // compiled rule version
 	Firewall  []Entry // firewall rules
+	IDS       IDSConfig
+	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
+	ZoneIfaces map[string][]string
 	Default   Action
 }
 

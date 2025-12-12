@@ -234,24 +234,23 @@ func mockDPI(logger *log.Logger, dpEngine *engine.Engine) {
 	}
 	state := flow.NewState(key, time.Now())
 	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for range t.C {
-		events, err := dpEngine.DPI().OnPacket(state, &dpi.ParsedPacket{
-			Payload: raw,
-			Proto:   "tcp",
-			SrcPort: 12345,
-			DstPort: 502,
-		})
-		if err != nil {
-			logger.Printf("mock dpi error: %v", err)
-			continue
-		}
-		dpEngine.RecordDPIEvents(state, &dpi.ParsedPacket{
-			Payload: raw,
-			Proto:   "tcp",
-			SrcPort: 12345,
-			DstPort: 502,
-		}, events)
+		defer t.Stop()
+		for range t.C {
+			pkt := &dpi.ParsedPacket{
+				Payload: raw,
+				Proto:   "tcp",
+				SrcPort: 12345,
+				DstPort: 502,
+			}
+			if !dpEngine.ShouldInspect(state, pkt) {
+				continue
+			}
+			events, err := dpEngine.DPI().OnPacket(state, pkt)
+			if err != nil {
+				logger.Printf("mock dpi error: %v", err)
+				continue
+			}
+		dpEngine.RecordDPIEvents(state, pkt, events)
 		for _, ev := range events {
 			logger.Printf("dpi event proto=%s kind=%s attrs=%v", ev.Proto, ev.Kind, ev.Attributes)
 		}

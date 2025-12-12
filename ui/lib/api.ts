@@ -6,6 +6,12 @@ export type HealthResponse = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+
+function authHeaders(): Record<string, string> {
+  if (!API_TOKEN) return {};
+  return { Authorization: `Bearer ${API_TOKEN}` };
+}
 
 export type DataPlaneConfig = {
   captureInterfaces?: string[];
@@ -188,6 +194,7 @@ export async function fetchHealth(): Promise<HealthResponse | null> {
 export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/dataplane`, {
+      headers: authHeaders(),
       cache: "no-store",
     });
     if (!res.ok) return null;
@@ -203,7 +210,7 @@ export async function setDataPlane(
   try {
     const res = await fetch(`${API_BASE}/api/v1/dataplane`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(cfg),
     });
     if (!res.ok) return null;
@@ -215,7 +222,10 @@ export async function setDataPlane(
 
 async function getJSON<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}${path}`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -227,7 +237,7 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
     if (!res.ok) return null;
@@ -241,7 +251,7 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
     if (!res.ok) return null;
@@ -253,7 +263,10 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
 
 async function deleteJSON(path: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
     return res.ok;
   } catch {
     return false;

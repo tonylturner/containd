@@ -4,8 +4,8 @@ This document tracks the data-plane design and current scaffolding.
 
 ## Current scaffolding
 - Capture manager (`pkg/dp/capture`): placeholder that validates interfaces and will host RX workers (NFQUEUE/AF_PACKET planned).
-- Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, and exposes evaluation hook.
-- Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS/identity predicates stubbed.
+- Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, and exposes `ShouldInspect` for selective DPI steering.
+- Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS/identity predicates stubbed.
 
 ## Pipeline (planned)
 1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.

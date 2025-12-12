@@ -39,6 +39,17 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `import config <path>`
 - Backed by the config store (uses `pkg/cp/config`); ready to wire into SSH/HTTP transports later.
 
+## Auth (current)
+
+Management APIs and the in-app CLI require bearer-token auth by default.
+
+Environment variables:
+- `CONTAIND_LAB_MODE=1` disables auth checks (lab/dev only).
+- `CONTAIND_ADMIN_TOKEN=<secret>` enables full access.
+- `CONTAIND_AUDITOR_TOKEN=<secret>` enables read-only access.
+
+When not in lab mode, at least one token must be set or the API will return `503` with an auth configuration error.
+
 ## Future
 
 - Add `show running-config`, `set`/`delete` commands for interfaces/zones/rules.

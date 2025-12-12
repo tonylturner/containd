@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
@@ -38,6 +39,11 @@ type ProxyManager struct {
 	lastCfg  config.ProxyConfig
 	envoyCmd *exec.Cmd
 	nginxCmd *exec.Cmd
+	lastEnvoyError string
+	lastNginxError string
+	lastEnvoyStart time.Time
+	lastNginxStart time.Time
+	lastRender     time.Time
 	logger   *log.Logger
 }
 
@@ -80,6 +86,9 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	if err := m.renderReverse(cfg.Reverse); err != nil {
 		return err
 	}
+	m.mu.Lock()
+	m.lastRender = time.Now().UTC()
+	m.mu.Unlock()
 	if m.Supervise {
 		m.ensureProcesses(ctx, cfg)
 	}
@@ -165,10 +174,16 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.EnvoyPath); err != nil {
-		m.logger.Printf("envoy binary not found at %s; supervision skipped", m.EnvoyPath)
+		m.lastEnvoyError = fmt.Sprintf("envoy binary not found at %s", m.EnvoyPath)
+		m.logger.Printf("%s; supervision skipped", m.lastEnvoyError)
 		return
 	}
 	configPath := filepath.Join(m.BaseDir, "envoy-forward.yaml")
+	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
+		m.lastEnvoyError = fmt.Sprintf("envoy config missing or empty at %s", configPath)
+		m.logger.Printf("%s; skipping start", m.lastEnvoyError)
+		return
+	}
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
 		_ = m.envoyCmd.Process.Signal(os.Interrupt)
 		time.Sleep(50 * time.Millisecond)
@@ -177,10 +192,13 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
+		m.lastEnvoyError = err.Error()
 		m.logger.Printf("failed to start envoy: %v", err)
 		return
 	}
 	m.envoyCmd = cmd
+	m.lastEnvoyError = ""
+	m.lastEnvoyStart = time.Now().UTC()
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -197,10 +215,23 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.NginxPath); err != nil {
-		m.logger.Printf("nginx binary not found at %s; supervision skipped", m.NginxPath)
+		m.lastNginxError = fmt.Sprintf("nginx binary not found at %s", m.NginxPath)
+		m.logger.Printf("%s; supervision skipped", m.lastNginxError)
 		return
 	}
 	configPath := filepath.Join(m.BaseDir, "nginx-reverse.conf")
+	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
+		m.lastNginxError = fmt.Sprintf("nginx config missing or empty at %s", configPath)
+		m.logger.Printf("%s; skipping start", m.lastNginxError)
+		return
+	}
+	// Validate config before restart.
+	testCmd := exec.CommandContext(ctx, m.NginxPath, "-t", "-c", configPath)
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		m.lastNginxError = fmt.Sprintf("nginx config test failed: %v: %s", err, strings.TrimSpace(string(out)))
+		m.logger.Printf("%s", m.lastNginxError)
+		return
+	}
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		_ = m.nginxCmd.Process.Signal(os.Interrupt)
 		time.Sleep(50 * time.Millisecond)
@@ -209,10 +240,13 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
+		m.lastNginxError = err.Error()
 		m.logger.Printf("failed to start nginx: %v", err)
 		return
 	}
 	m.nginxCmd = cmd
+	m.lastNginxError = ""
+	m.lastNginxStart = time.Now().UTC()
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -228,13 +262,31 @@ func (m *ProxyManager) stopNginx() {
 func (m *ProxyManager) Status() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	envoyRunning := m.envoyCmd != nil && m.envoyCmd.Process != nil
+	nginxRunning := m.nginxCmd != nil && m.nginxCmd.Process != nil
+	envoyPID := 0
+	nginxPID := 0
+	if envoyRunning {
+		envoyPID = m.envoyCmd.Process.Pid
+	}
+	if nginxRunning {
+		nginxPID = m.nginxCmd.Process.Pid
+	}
 	return map[string]any{
 		"forward_enabled": m.lastCfg.Forward.Enabled,
 		"reverse_enabled": m.lastCfg.Reverse.Enabled,
 		"envoy_path":      m.EnvoyPath,
 		"nginx_path":      m.NginxPath,
-		"envoy_running":   m.envoyCmd != nil && m.envoyCmd.Process != nil,
-		"nginx_running":   m.nginxCmd != nil && m.nginxCmd.Process != nil,
+		"envoy_running":   envoyRunning,
+		"nginx_running":   nginxRunning,
+		"envoy_pid":       envoyPID,
+		"nginx_pid":       nginxPID,
+		"envoy_last_start": m.lastEnvoyStart,
+		"nginx_last_start": m.lastNginxStart,
+		"envoy_last_error": m.lastEnvoyError,
+		"nginx_last_error": m.lastNginxError,
+		"last_render":      m.lastRender,
+		"rendered_files":   m.DescribeRendered(),
 	}
 }
 
