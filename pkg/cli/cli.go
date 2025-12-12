@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 
 	"encoding/json"
 
 	"bytes"
 
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/cp/audit"
 )
 
 type HTTPClient interface {
@@ -118,12 +121,21 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	if api != nil {
 		r.Register("show health", showHealth(api))
 		r.Register("show config", showConfig(api))
+		r.Register("show audit", showAudit(api))
+		r.Register("show dataplane", showDataPlane(api))
 		r.Register("show zones", showZonesAPI(api))
 		r.Register("show interfaces", showInterfacesAPI(api))
 		r.Register("set zone", setZoneAPI(api))
 		r.Register("set interface", setInterfaceAPI(api))
 		r.Register("set firewall rule", setFirewallRuleAPI(api))
 		r.Register("delete firewall rule", deleteFirewallRuleAPI(api))
+		r.Register("set dataplane", setDataPlaneAPI(api))
+		r.Register("commit", commitAPI(api))
+		r.Register("commit confirmed", commitConfirmedAPI(api))
+		r.Register("confirm", confirmCommitAPI(api))
+		r.Register("rollback", rollbackAPI(api))
+		r.Register("export config", exportConfigAPI(api))
+		r.Register("import config", importConfigAPI(api))
 	} else if store != nil {
 		r.Register("show zones", showZones(store))
 		r.Register("show interfaces", showInterfaces(store))
@@ -170,6 +182,26 @@ func showConfig(api *API) Command {
 			return err
 		}
 		return printJSON(out, cfg)
+	}
+}
+
+func showAudit(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var records []audit.Record
+		if err := api.getJSON(ctx, "/api/v1/audit", &records); err != nil {
+			return err
+		}
+		return printJSON(out, records)
+	}
+}
+
+func showDataPlane(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var dp config.DataPlaneConfig
+		if err := api.getJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
+			return err
+		}
+		return printJSON(out, dp)
 	}
 }
 
@@ -294,6 +326,86 @@ func deleteFirewallRuleAPI(api *API) Command {
 		}
 		path := "/api/v1/firewall/rules/" + args[0]
 		return api.delete(ctx, path, out)
+	}
+}
+
+func setDataPlaneAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		// usage: set dataplane enforcement on|off [table] [ifaces...]
+		if len(args) < 2 {
+			return fmt.Errorf("usage: set dataplane enforcement <on|off> [table] [iface...]")
+		}
+		if args[0] != "enforcement" {
+			return fmt.Errorf("usage: set dataplane enforcement <on|off> [table] [iface...]")
+		}
+		on := args[1] == "on" || args[1] == "true" || args[1] == "1"
+		dp := config.DataPlaneConfig{Enforcement: on}
+		if len(args) > 2 {
+			dp.EnforceTable = args[2]
+		}
+		if len(args) > 3 {
+			dp.CaptureInterfaces = args[3:]
+		}
+		return api.postJSON(ctx, "/api/v1/dataplane", dp, out)
+	}
+}
+
+func commitAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		return api.postJSON(ctx, "/api/v1/config/commit", map[string]any{}, out)
+	}
+}
+
+func commitConfirmedAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		payload := map[string]any{}
+		if len(args) > 0 {
+			ttl, err := strconv.Atoi(args[0])
+			if err != nil || ttl <= 0 {
+				return fmt.Errorf("usage: commit confirmed <ttl_seconds>")
+			}
+			payload["ttl_seconds"] = ttl
+		}
+		return api.postJSON(ctx, "/api/v1/config/commit_confirmed", payload, out)
+	}
+}
+
+func confirmCommitAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		return api.postJSON(ctx, "/api/v1/config/confirm", map[string]any{}, out)
+	}
+}
+
+func rollbackAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		return api.postJSON(ctx, "/api/v1/config/rollback", map[string]any{}, out)
+	}
+}
+
+func exportConfigAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var cfg config.Config
+		if err := api.getJSON(ctx, "/api/v1/config/export", &cfg); err != nil {
+			return err
+		}
+		return printJSON(out, cfg)
+	}
+}
+
+func importConfigAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: import config <path>")
+		}
+		raw, err := os.ReadFile(args[0])
+		if err != nil {
+			return err
+		}
+		var cfg config.Config
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return fmt.Errorf("invalid JSON: %w", err)
+		}
+		return api.postJSON(ctx, "/api/v1/config/import", cfg, out)
 	}
 }
 

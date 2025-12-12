@@ -4,6 +4,7 @@ This document tracks the plan for ICS protocol decoding, DPI events, and how DPI
 
 ## Decoders (phased)
 - Phase 3: Modbus/TCP decoder (unit ID, function code, address, quantity, payload length).
+  - Skeleton decoder now lives in `pkg/dp/ics/modbus` and is ready to be wired into capture.
 - Phase 4+: DNP3, IEC-60870-5-104, S7comm/Profinet, CIP/EtherNet/IP, OPC UA (basic node/service info).
 
 ## Interfaces

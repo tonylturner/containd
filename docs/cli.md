@@ -11,12 +11,21 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 - API-backed commands:
   - `show health`
   - `show config`
+  - `show audit`
+  - `show dataplane`
   - `show zones` / `show interfaces` (HTTP GET if API provided)
 - Mutating commands (API):
   - `set zone <name> [description]`
   - `set interface <name> <zone> [cidr...]`
   - `set firewall rule <id> <action> [src_zone] [dst_zone]`
   - `delete firewall rule <id>`
+  - `set dataplane enforcement <on|off> [table] [iface...]`
+  - `commit`
+  - `commit confirmed [ttl_seconds]`
+  - `confirm`
+  - `rollback`
+  - `export config`
+  - `import config <path>`
 - Backed by the config store (uses `pkg/cp/config`); ready to wire into SSH/HTTP transports later.
 
 ## Future

@@ -7,19 +7,25 @@ import (
 	"time"
 
 	"github.com/containd/containd/pkg/dp/capture"
-	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )
 
 func TestEngineStartAndRules(t *testing.T) {
-	// Use loopback for validation (may exist in most environments).
-	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
-	if err != nil {
-		t.Skipf("loopback interface not found or unavailable: %v", err)
+	// Use a platform loopback name, but skip if unavailable.
+	loopbacks := []string{"lo", "lo0"}
+	var e *Engine
+	var err error
+	for _, name := range loopbacks {
+		e, err = New(Config{Capture: capture.Config{Interfaces: []string{name}}})
+		if err == nil {
+			if startErr := e.Start(context.Background()); startErr == nil {
+				break
+			}
+		}
 	}
-	if err := e.Start(context.Background()); err != nil {
-		t.Fatalf("start: %v", err)
+	if e == nil || err != nil {
+		t.Skipf("no loopback interface available: %v", err)
 	}
 	snap := rules.Snapshot{Version: "1"}
 	e.LoadRules(snap)
@@ -34,7 +40,10 @@ func TestEngineStartAndRules(t *testing.T) {
 }
 
 func TestEvaluateVerdictMapsActions(t *testing.T) {
-	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
+	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo"}}})
+	if err != nil {
+		e, err = New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
+	}
 	if err != nil {
 		t.Skipf("loopback interface not found or unavailable: %v", err)
 	}
@@ -58,12 +67,21 @@ func (r *recordingApplier) Apply(ctx context.Context, ruleset string) error {
 func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	applier := &recordingApplier{}
 	e, err := New(Config{
-		Capture: capture.Config{Interfaces: []string{"lo0"}},
+		Capture: capture.Config{Interfaces: []string{"lo"}},
 		Enforce: EnforceConfig{
 			Enabled: true,
 			Applier: applier,
 		},
 	})
+	if err != nil {
+		e, err = New(Config{
+			Capture: capture.Config{Interfaces: []string{"lo0"}},
+			Enforce: EnforceConfig{
+				Enabled: true,
+				Applier: applier,
+			},
+		})
+	}
 	if err != nil {
 		t.Skipf("loopback interface not found or unavailable: %v", err)
 	}
@@ -83,12 +101,21 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 func TestApplyRulesDoesNotSwapOnFailure(t *testing.T) {
 	applier := &recordingApplier{err: context.DeadlineExceeded}
 	e, err := New(Config{
-		Capture: capture.Config{Interfaces: []string{"lo0"}},
+		Capture: capture.Config{Interfaces: []string{"lo"}},
 		Enforce: EnforceConfig{
 			Enabled: true,
 			Applier: applier,
 		},
 	})
+	if err != nil {
+		e, err = New(Config{
+			Capture: capture.Config{Interfaces: []string{"lo0"}},
+			Enforce: EnforceConfig{
+				Enabled: true,
+				Applier: applier,
+			},
+		})
+	}
 	if err != nil {
 		t.Skipf("loopback interface not found or unavailable: %v", err)
 	}
@@ -125,12 +152,21 @@ func (r *recordingUpdater) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.I
 func TestApplyVerdictUsesUpdater(t *testing.T) {
 	up := &recordingUpdater{}
 	e, err := New(Config{
-		Capture: capture.Config{Interfaces: []string{"lo0"}},
+		Capture: capture.Config{Interfaces: []string{"lo"}},
 		Enforce: EnforceConfig{
 			Enabled: true,
 			Updater: up,
 		},
 	})
+	if err != nil {
+		e, err = New(Config{
+			Capture: capture.Config{Interfaces: []string{"lo0"}},
+			Enforce: EnforceConfig{
+				Enabled: true,
+				Updater: up,
+			},
+		})
+	}
 	if err != nil {
 		t.Skipf("loopback interface not found or unavailable: %v", err)
 	}

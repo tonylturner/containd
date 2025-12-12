@@ -2,7 +2,6 @@ package capture
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 )
@@ -18,14 +17,19 @@ type Config struct {
 }
 
 func NewManager(cfg Config) (*Manager, error) {
+	// Allow empty capture config for early phases and mgmt-only runs.
+	// Capture start will be a no-op in this case.
 	if len(cfg.Interfaces) == 0 {
-		return nil, errors.New("no interfaces configured for capture")
+		return &Manager{interfaces: nil}, nil
 	}
 	return &Manager{interfaces: cfg.Interfaces}, nil
 }
 
 // Start begins capture on configured interfaces (placeholder).
 func (m *Manager) Start(ctx context.Context) error {
+	if len(m.interfaces) == 0 {
+		return nil
+	}
 	// Placeholder: validate interfaces exist locally.
 	for _, iface := range m.interfaces {
 		if _, err := net.InterfaceByName(iface); err != nil {

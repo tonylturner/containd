@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/dp/rules"
 )
 
 type mockStore struct {
@@ -58,6 +59,24 @@ func (m *mockStore) CommitConfirmed(ctx context.Context, ttl time.Duration) erro
 func (m *mockStore) ConfirmCommit(ctx context.Context) error { return nil }
 func (m *mockStore) Rollback(ctx context.Context) error { return nil }
 func (m *mockStore) Close() error { return nil }
+
+type mockEngine struct {
+	applied bool
+	snap    rules.Snapshot
+	err     error
+	lastDP  config.DataPlaneConfig
+}
+
+func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
+	m.lastDP = cfg
+	return nil
+}
+
+func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+	m.applied = true
+	m.snap = snap
+	return m.err
+}
 
 func TestGetConfigNotFound(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
@@ -145,6 +164,22 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	}
 }
 
+func TestCreateFirewallRuleWithICSPredicate(t *testing.T) {
+	m := &mockStore{cfg: &config.Config{Zones: []config.Zone{{Name: "ot"}}}}
+	s := NewServer(m, nil)
+	rec := httptest.NewRecorder()
+	body := `{"id":"mb1","sourceZones":["ot"],"protocols":[{"name":"tcp","port":"502"}],"ics":{"protocol":"modbus","functionCode":[3,16],"addresses":["0-10"]},"action":"ALLOW"}`
+	req, _ := http.NewRequest("POST", "/api/v1/firewall/rules", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(m.cfg.Firewall.Rules) != 1 || m.cfg.Firewall.Rules[0].ICS.Protocol != "modbus" {
+		t.Fatalf("ics predicate not persisted: %+v", m.cfg.Firewall.Rules)
+	}
+}
+
 func TestUpdateZone(t *testing.T) {
 	m := &mockStore{
 		cfg: &config.Config{
@@ -178,7 +213,8 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 
 func TestCandidateCommitRollback(t *testing.T) {
 	m := &mockStore{}
-	s := NewServer(m, nil)
+	eng := &mockEngine{}
+	s := NewServerWithEngine(m, nil, eng)
 
 	// Save candidate
 	rec := httptest.NewRecorder()
@@ -195,6 +231,9 @@ func TestCandidateCommitRollback(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 committing, got %d", rec.Code)
+	}
+	if !eng.applied {
+		t.Fatalf("expected engine apply on commit")
 	}
 
 	// Rollback
@@ -299,6 +338,29 @@ func TestSyslogHandlers(t *testing.T) {
 	}
 }
 
+func TestDataPlaneHandlers(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	// Set dataplane config.
+	body := `{"captureInterfaces":["eth0"],"enforcement":true,"enforceTable":"containd","dpiMock":false}`
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/dataplane", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Get dataplane config.
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/dataplane", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"enforcement":true`)) {
+		t.Fatalf("unexpected dataplane payload: %s", rec.Body.String())
+	}
+}
+
 func TestSaveConfigValidationError(t *testing.T) {
 	m := &mockStore{
 		save: func(cfg *config.Config) error {
@@ -312,5 +374,53 @@ func TestSaveConfigValidationError(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestAssetCRUD(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	// Create zone for asset binding.
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/zones", bytes.NewBufferString(`{"name":"ot"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("zone create expected 200, got %d", rec.Code)
+	}
+
+	// Create asset.
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/assets", bytes.NewBufferString(`{"id":"a1","name":"plc-1","type":"PLC","zone":"ot","ips":["10.0.0.10"],"criticality":"HIGH"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset create expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// List assets.
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/assets", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"a1"`)) {
+		t.Fatalf("asset list missing asset: %s", rec.Body.String())
+	}
+
+	// Update asset.
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("PATCH", "/api/v1/assets/a1", bytes.NewBufferString(`{"description":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset update expected 200, got %d", rec.Code)
+	}
+
+	// Delete asset.
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/v1/assets/a1", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("asset delete expected 204, got %d", rec.Code)
 	}
 }

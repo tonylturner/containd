@@ -37,5 +37,8 @@ type Protocol struct {
 type ICSPredicate struct {
 	Protocol     string   // modbus, dnp3, etc.
 	FunctionCode []uint8  // e.g., modbus function codes
+	UnitID       *uint8   // optional Modbus unit id
 	Addresses    []string // address/register ranges as strings
+	ReadOnly     bool     // Modbus read-only class
+	WriteOnly    bool     // Modbus write-only class
 }

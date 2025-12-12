@@ -29,8 +29,8 @@ UI serving:
 
 Containers:
 - Build appliance image (single container, default): `docker build -f Dockerfile.mgmt -t containd/containd:dev .`
-- (Optional) Build engine-only image: `docker build -f Dockerfile.engine -t containd/ngfw-engine:dev .`
-- Compose (single container): `docker compose up --build`
+- Build engine-only image: `docker build -f Dockerfile.engine -t containd/containd-engine:dev .`
+- Compose (mgmt + engine): `docker compose up --build`
 - Publish (example): `docker tag containd/containd:dev ghcr.io/you/containd:dev && docker push ghcr.io/you/containd:dev`
 
 Consume published image:

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -78,9 +79,11 @@ func TestUnknownCommand(t *testing.T) {
 type mockHTTPClient struct {
 	resp *http.Response
 	err  error
+	reqs []*http.Request
 }
 
 func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	m.reqs = append(m.reqs, req)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -155,5 +158,28 @@ func TestDeleteFirewallRuleViaAPI(t *testing.T) {
 	var buf bytes.Buffer
 	if err := reg.Execute(context.Background(), "delete firewall rule", &buf, []string{"10"}); err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+}
+
+func TestCommitConfirmedViaAPI(t *testing.T) {
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBuffer(nil)),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	if err := reg.Execute(context.Background(), "commit confirmed", &buf, []string{"5"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("expected one request")
+	}
+	var body map[string]any
+	_ = json.NewDecoder(client.reqs[0].Body).Decode(&body)
+	if body["ttl_seconds"] != float64(5) {
+		t.Fatalf("expected ttl_seconds=5, got %#v", body)
 	}
 }

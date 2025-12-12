@@ -11,11 +11,24 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/containd/containd/pkg/cp/audit"
+	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/dp/rules"
 )
 
 // NewServer builds a Gin engine with versioned routes for management APIs.
 func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
+	return NewServerWithEngine(store, auditStore, nil)
+}
+
+// EngineClient is an optional interface for pushing compiled snapshots to the data plane.
+type EngineClient interface {
+	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
+	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+}
+
+// NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
+func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	if auditStore != nil {
@@ -33,12 +46,18 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 		api.GET("/config/candidate", getCandidateConfigHandler(store))
 		api.POST("/config/candidate", saveCandidateConfigHandler(store))
 		api.GET("/config/diff", diffConfigHandler(store))
-		api.POST("/config/commit", commitConfigHandler(store))
-		api.POST("/config/commit_confirmed", commitConfirmedHandler(store))
+		api.POST("/config/commit", commitConfigHandler(store, engine))
+		api.POST("/config/commit_confirmed", commitConfirmedHandler(store, engine))
 		api.POST("/config/confirm", confirmCommitHandler(store))
-		api.POST("/config/rollback", rollbackConfigHandler(store))
+		api.POST("/config/rollback", rollbackConfigHandler(store, engine))
 		api.GET("/services/syslog", getSyslogHandler(store))
 		api.POST("/services/syslog", setSyslogHandler(store))
+		api.GET("/dataplane", getDataPlaneHandler(store))
+		api.POST("/dataplane", setDataPlaneHandler(store))
+		api.GET("/assets", listAssetsHandler(store))
+		api.POST("/assets", createAssetHandler(store))
+		api.PATCH("/assets/:id", updateAssetHandler(store))
+		api.DELETE("/assets/:id", deleteAssetHandler(store))
 		api.GET("/zones", listZonesHandler(store))
 		api.POST("/zones", createZoneHandler(store))
 		api.PATCH("/zones/:name", updateZoneHandler(store))
@@ -187,18 +206,24 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func commitConfigHandler(store config.Store) gin.HandlerFunc {
+func commitConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := store.Commit(c.Request.Context()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if engine != nil {
+			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
 	}
 }
 
-func commitConfirmedHandler(store config.Store) gin.HandlerFunc {
+func commitConfirmedHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const defaultTTLSeconds = 60
 		body, _ := io.ReadAll(c.Request.Body)
@@ -219,6 +244,12 @@ func commitConfirmedHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
 	}
@@ -235,15 +266,39 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func rollbackConfigHandler(store config.Store) gin.HandlerFunc {
+func rollbackConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := store.Rollback(c.Request.Context()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningToEngine(c.Request.Context(), store, engine); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
 	}
+}
+
+func applyRunningToEngine(ctx context.Context, store config.Store, engine EngineClient) error {
+	cfg, err := store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
+		return err
+	}
+	snap, err := compile.CompileSnapshot(cfg)
+	if err != nil {
+		return err
+	}
+	if err := engine.ApplyRules(ctx, snap); err != nil {
+		return err
+	}
+	return nil
 }
 
 func diffConfigHandler(store config.Store) gin.HandlerFunc {
@@ -296,6 +351,152 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
+
+func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func setDataPlaneHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var dp config.DataPlaneConfig
+		if err := c.ShouldBindJSON(&dp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.DataPlane = dp
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "dataplane.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func listAssetsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Assets)
+	}
+}
+
+func createAssetHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var a config.Asset
+		if err := c.ShouldBindJSON(&a); err != nil || a.ID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, existing := range cfg.Assets {
+			if existing.ID == a.ID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "asset already exists"})
+				return
+			}
+			if existing.Name != "" && existing.Name == a.Name {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "asset name already exists"})
+				return
+			}
+		}
+		cfg.Assets = append(cfg.Assets, a)
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "assets.create", Target: a.ID})
+		c.JSON(http.StatusOK, a)
+	}
+}
+
+func updateAssetHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var a config.Asset
+		if err := c.ShouldBindJSON(&a); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Assets {
+			if existing.ID == id {
+				if a.ID == "" {
+					a.ID = existing.ID
+				}
+				if a.Name == "" {
+					a.Name = existing.Name
+				}
+				cfg.Assets[i] = a
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "assets.update", Target: id})
+		c.JSON(http.StatusOK, a)
+	}
+}
+
+func deleteAssetHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		original := len(cfg.Assets)
+		filtered := make([]config.Asset, 0, len(cfg.Assets))
+		for _, a := range cfg.Assets {
+			if a.ID != id {
+				filtered = append(filtered, a)
+			}
+		}
+		if len(filtered) == original {
+			c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+			return
+		}
+		cfg.Assets = filtered
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "assets.delete", Target: id})
+		c.Status(http.StatusNoContent)
+	}
+}
+
 func listZonesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)

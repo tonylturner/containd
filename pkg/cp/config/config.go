@@ -13,6 +13,8 @@ type Config struct {
 	System        SystemConfig   `json:"system"`
 	Interfaces    []Interface    `json:"interfaces"`
 	Zones         []Zone         `json:"zones"`
+	Assets        []Asset        `json:"assets,omitempty"`
+	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
 	Firewall      FirewallConfig `json:"firewall"`
 	Services      ServicesConfig `json:"services"`
 	Description   string         `json:"description,omitempty"`
@@ -44,9 +46,54 @@ type Interface struct {
 	Addresses []string `json:"addresses,omitempty"` // CIDR strings
 }
 
+// DataPlaneConfig controls runtime dataplane behavior; persisted in DB/exports.
+type DataPlaneConfig struct {
+	CaptureInterfaces []string `json:"captureInterfaces,omitempty"` // interface names for capture
+	Enforcement       bool     `json:"enforcement,omitempty"`       // enable nftables apply
+	EnforceTable      string   `json:"enforceTable,omitempty"`      // nftables table name
+	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only mock DPI loop
+}
+
 type Zone struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// AssetType enumerates common OT/ICS asset categories.
+type AssetType string
+
+const (
+	AssetPLC       AssetType = "PLC"
+	AssetHMI       AssetType = "HMI"
+	AssetSIS       AssetType = "SIS"
+	AssetRTU       AssetType = "RTU"
+	AssetHistorian AssetType = "HISTORIAN"
+	AssetEWS       AssetType = "EWS"
+	AssetGateway   AssetType = "GATEWAY"
+	AssetLaptop    AssetType = "LAPTOP"
+	AssetOther     AssetType = "OTHER"
+)
+
+type Criticality string
+
+const (
+	CriticalityLow      Criticality = "LOW"
+	CriticalityMedium   Criticality = "MEDIUM"
+	CriticalityHigh     Criticality = "HIGH"
+	CriticalityCritical Criticality = "CRITICAL"
+)
+
+// Asset is a first-class OT/ICS device record.
+type Asset struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Type        AssetType    `json:"type"`
+	Zone        string       `json:"zone,omitempty"`
+	IPs         []string     `json:"ips,omitempty"`
+	Hostnames   []string     `json:"hostnames,omitempty"`
+	Criticality Criticality `json:"criticality,omitempty"`
+	Tags        []string     `json:"tags,omitempty"`
+	Description string       `json:"description,omitempty"`
 }
 
 type FirewallConfig struct {
@@ -69,12 +116,24 @@ type Rule struct {
 	Sources      []string   `json:"sources,omitempty"`      // CIDR strings
 	Destinations []string   `json:"destinations,omitempty"` // CIDR strings
 	Protocols    []Protocol `json:"protocols,omitempty"`
+	ICS          ICSPredicate `json:"ics,omitempty"`
 	Action       Action     `json:"action"`
 }
 
 type Protocol struct {
 	Name string `json:"name"`           // e.g. tcp, udp, icmp
 	Port string `json:"port,omitempty"` // single or range "80", "443", "1000-2000"
+}
+
+// ICSPredicate captures ICS-specific primitives for rules (placeholder).
+// For Phase 2, Modbus fields are supported.
+type ICSPredicate struct {
+	Protocol     string  `json:"protocol,omitempty"`      // modbus, dnp3, iec104, etc.
+	FunctionCode []uint8 `json:"functionCode,omitempty"`  // e.g., Modbus function codes
+	UnitID       *uint8  `json:"unitId,omitempty"`        // optional Modbus unit id
+	Addresses    []string `json:"addresses,omitempty"`    // register/address ranges as strings
+	ReadOnly     bool    `json:"readOnly,omitempty"`      // Modbus read-only class
+	WriteOnly    bool    `json:"writeOnly,omitempty"`     // Modbus write-only class
 }
 
 // Validate performs basic consistency checks on the config.
@@ -95,6 +154,12 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateFirewall(c.Firewall, c.Zones); err != nil {
+		return err
+	}
+	if err := validateAssets(c.Assets, c.Zones); err != nil {
+		return err
+	}
+	if err := validateDataPlane(c.DataPlane); err != nil {
 		return err
 	}
 	if err := validateServices(c.Services); err != nil {
@@ -189,6 +254,97 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 			if p.Name == "" {
 				return fmt.Errorf("rule %s has protocol with empty name", r.ID)
 			}
+		}
+		if err := validateICSPredicate(r.ICS, r.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateICSPredicate(p ICSPredicate, ruleID string) error {
+	if p.Protocol == "" {
+		return nil
+	}
+	// Placeholder validation: enforce mutual exclusivity for read/write classes.
+	if p.ReadOnly && p.WriteOnly {
+		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)
+	}
+	// If function codes are set, ensure protocol is modbus for now.
+	if len(p.FunctionCode) > 0 && p.Protocol != "modbus" {
+		return fmt.Errorf("rule %s ics functionCode only supported for modbus currently", ruleID)
+	}
+	return nil
+}
+
+func validateAssets(assets []Asset, zones []Zone) error {
+	zoneSet := map[string]struct{}{}
+	for _, z := range zones {
+		zoneSet[z.Name] = struct{}{}
+	}
+	ids := map[string]struct{}{}
+	names := map[string]struct{}{}
+	for _, a := range assets {
+		if a.ID == "" {
+			return errors.New("asset id cannot be empty")
+		}
+		if _, ok := ids[a.ID]; ok {
+			return fmt.Errorf("duplicate asset id: %s", a.ID)
+		}
+		ids[a.ID] = struct{}{}
+		if a.Name == "" {
+			return fmt.Errorf("asset %s name cannot be empty", a.ID)
+		}
+		if _, ok := names[a.Name]; ok {
+			return fmt.Errorf("duplicate asset name: %s", a.Name)
+		}
+		names[a.Name] = struct{}{}
+		if a.Zone != "" {
+			if _, ok := zoneSet[a.Zone]; !ok {
+				return fmt.Errorf("asset %s references unknown zone %s", a.ID, a.Zone)
+			}
+		}
+		for _, ipStr := range a.IPs {
+			if net.ParseIP(ipStr) == nil {
+				return fmt.Errorf("asset %s has invalid ip %q", a.ID, ipStr)
+			}
+		}
+		if a.Criticality != "" &&
+			a.Criticality != CriticalityLow &&
+			a.Criticality != CriticalityMedium &&
+			a.Criticality != CriticalityHigh &&
+			a.Criticality != CriticalityCritical {
+			return fmt.Errorf("asset %s has invalid criticality %q", a.ID, a.Criticality)
+		}
+		if a.Type != "" &&
+			a.Type != AssetPLC &&
+			a.Type != AssetHMI &&
+			a.Type != AssetSIS &&
+			a.Type != AssetRTU &&
+			a.Type != AssetHistorian &&
+			a.Type != AssetEWS &&
+			a.Type != AssetGateway &&
+			a.Type != AssetLaptop &&
+			a.Type != AssetOther {
+			return fmt.Errorf("asset %s has invalid type %q", a.ID, a.Type)
+		}
+	}
+	return nil
+}
+
+func validateDataPlane(dp DataPlaneConfig) error {
+	for _, name := range dp.CaptureInterfaces {
+		if name == "" {
+			return errors.New("dataplane.captureInterfaces cannot include empty name")
+		}
+	}
+	if dp.EnforceTable == "" {
+		return nil
+	}
+	// nftables table names are simple identifiers.
+	for _, r := range dp.EnforceTable {
+		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return fmt.Errorf("dataplane.enforceTable has invalid char %q", r)
 		}
 	}
 	return nil

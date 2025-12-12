@@ -1,7 +1,7 @@
 # containd (ICS‑NGFW) – Single‑Image Appliance Spec (Agent Instructions)
 
 You are an AI coding agent building **containd**, an open‑source next‑generation firewall designed for **ICS/OT environments**.
-The product name is **ICS‑NGFW**; the repository/container name is **containd**. (Use **containd** for module names, binaries, and Docker image tags unless a file already uses a different name.)
+The product name is **containd**; the repository/container name is **containd**. (Use **containd** for module names, binaries, and Docker image tags unless a file already uses a different name.)
 
 This project is implemented as a **single Docker image / appliance** by default, suitable for:
 - Drop‑in use in a docker‑compose OT lab, and

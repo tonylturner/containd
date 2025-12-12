@@ -19,8 +19,12 @@ This document tracks the high-level architecture for containd as it evolves.
 - `pkg/cli`: command registry with API-backed show/set/delete for zones/interfaces/rules; more to add (commit/rollback/audit).
 - `pkg/dp/capture`: capture manager placeholder (NFQUEUE/AF_PACKET planned).
 - `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity placeholders).
-- `pkg/dp/engine`: harness to start capture, swap rule snapshots, evaluate contexts.
--, placeholders for `pkg/dp/enforce`, `pkg/dp/dpi`, `pkg/dp/ics`, `pkg/dp/ids`, `pkg/dp/verdict`, `ebpf/` are not yet implemented.
+- `pkg/dp/engine`: harness to start capture, swap/apply rule snapshots, evaluate contexts, and apply verdict-driven updates.
+- `pkg/dp/enforce`: nftables compile/apply skeleton with dynamic block sets.
+- `pkg/dp/dpi`: selective DPI framework and decoder manager.
+- `pkg/dp/ics`: ICS protocol decoders (Modbus/TCP skeleton added).
+- `pkg/dp/verdict`: verdict types/actions used by enforcement paths.
+- Placeholders remain for `pkg/dp/ids` and `ebpf/`.
 
 ## Flow of control (current/target)
 1) Management plane receives config via API; persisted in SQLite; candidate/commit/rollback model to be added; audit every change.

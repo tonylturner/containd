@@ -71,3 +71,36 @@ func TestValidateRuleCIDR(t *testing.T) {
 		t.Fatalf("expected CIDR validation error")
 	}
 }
+
+func TestValidateAssets(t *testing.T) {
+	cfg := Config{
+		Zones: []Zone{{Name: "ot"}},
+		Assets: []Asset{
+			{ID: "a1", Name: "plc-1", Type: AssetPLC, Zone: "ot", IPs: []string{"10.0.0.10"}, Criticality: CriticalityHigh},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid assets, got %v", err)
+	}
+	cfg.Assets = append(cfg.Assets, Asset{ID: "a1", Name: "dup"})
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected duplicate asset id error")
+	}
+}
+
+func TestValidateDataPlaneConfig(t *testing.T) {
+	cfg := Config{
+		DataPlane: DataPlaneConfig{
+			CaptureInterfaces: []string{"eth0"},
+			Enforcement:       true,
+			EnforceTable:      "containd",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid dataplane config, got %v", err)
+	}
+	cfg.DataPlane.EnforceTable = "bad space"
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid enforceTable error")
+	}
+}

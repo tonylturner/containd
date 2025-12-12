@@ -16,8 +16,12 @@ func TestManagerInterfaces(t *testing.T) {
 }
 
 func TestManagerRejectsEmpty(t *testing.T) {
-	if _, err := NewManager(Config{}); err == nil {
-		t.Fatalf("expected error for empty config")
+	m, err := NewManager(Config{})
+	if err != nil {
+		t.Fatalf("expected no error for empty config, got %v", err)
+	}
+	if got := m.Interfaces(); len(got) != 0 {
+		t.Fatalf("expected no interfaces, got %+v", got)
 	}
 }
 

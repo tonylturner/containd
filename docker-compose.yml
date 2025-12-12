@@ -8,6 +8,25 @@ services:
     image: containd/containd:dev
     environment:
       - NGFW_MGMT_ADDR=:8080
+      # Optional: point mgmt at a separate engine service.
+      - NGFW_ENGINE_URL=http://engine:8081
     ports:
       - "8080:8080"
     command: ["/usr/bin/ngfw-mgmt"]
+    depends_on:
+      - engine
+
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    image: containd/containd-engine:dev
+    environment:
+      - NGFW_ENGINE_ADDR=:8081
+      # Comma-separated list of interfaces to capture on (empty is allowed for now).
+      - NGFW_CAPTURE_IFACES=
+      # Enable nftables enforcement when running privileged.
+      - NGFW_ENFORCE_ENABLED=0
+    ports:
+      - "8081:8081"
+    command: ["/usr/bin/ngfw-engine"]

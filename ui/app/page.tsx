@@ -121,6 +121,14 @@ export default function Home() {
               Stub server ready to host capture workers, flow tracking, and
               enforcement. Ships with a simple health endpoint for now.
             </p>
+            <div className="mt-4">
+              <a
+                href="/dataplane/"
+                className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+              >
+                Configure dataplane
+              </a>
+            </div>
             <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-slate-100">
               <p className="font-mono text-xs uppercase tracking-wide text-amber">
                 Health endpoints

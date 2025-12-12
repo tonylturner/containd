@@ -6,7 +6,9 @@ import (
 	"sync/atomic"
 
 	"github.com/containd/containd/pkg/dp/capture"
+	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
+	"github.com/containd/containd/pkg/dp/ics/modbus"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )
@@ -19,6 +21,7 @@ type Engine struct {
 	compiler *enforce.Compiler
 	applier  enforce.Applier
 	updater  enforce.Updater
+	dpiMgr   *dpi.Manager
 }
 
 type EnforceConfig struct {
@@ -39,6 +42,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{capture: capManager}
+	e.dpiMgr = dpi.NewManager(modbus.NewDecoder())
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -100,6 +104,11 @@ func (e *Engine) CurrentRules() *rules.Snapshot {
 
 func (e *Engine) Interfaces() []string {
 	return e.capture.Interfaces()
+}
+
+// DPI returns the selective DPI manager.
+func (e *Engine) DPI() *dpi.Manager {
+	return e.dpiMgr
 }
 
 // Evaluate applies the current rule snapshot to a simple context.

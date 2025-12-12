@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	engineapi "github.com/containd/containd/api/engine"
 	httpapi "github.com/containd/containd/api/http"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cli"
@@ -32,7 +33,11 @@ func main() {
 	auditStore := mustInitAuditStore()
 	defer auditStore.Close()
 
-	router := httpapi.NewServer(store, auditStore)
+	var engineClient httpapi.EngineClient
+	if engineURL := os.Getenv("NGFW_ENGINE_URL"); engineURL != "" {
+		engineClient = engineapi.NewHTTPClient(engineURL)
+	}
+	router := httpapi.NewServerWithEngine(store, auditStore, engineClient)
 	serveStaticUI(router)
 
 	logger.Printf("ngfw-mgmt listening on %s", addr)
