@@ -4,8 +4,11 @@ This document tracks the high-level architecture for containd as it evolves.
 
 ## Planes
 - **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), capture, flow tracking, rule evaluator, DPI/IDS (selective).
-- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/NTP/DNS), policy compilation → rule snapshots/nftables sets, audit, identity (placeholder).
-- **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit.
+- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/NTP/DNS/proxies), policy compilation → rule snapshots/nftables sets, audit, identity (placeholder), embedded-daemon config generation.
+- **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit, dashboards.
+
+## Integrated daemons (per `agents.md`)
+The appliance will optionally embed Envoy (explicit forward proxy), Nginx (reverse proxy), Zeek (IT DPI/telemetry), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI.
 
 ## Packaging
 - Containers at repo root (`Dockerfile.engine`, `Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; goal is single `containd` binary with subcommands.

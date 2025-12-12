@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Zone } from "../../lib/api";
+import { api, type Interface, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
-export default function ZonesPage() {
+export default function InterfacesPage() {
+  const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [zone, setZone] = useState("");
+  const [addresses, setAddresses] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function refresh() {
-    const list = await api.listZones();
-    setZones(list ?? []);
+    const [i, z] = await Promise.all([api.listInterfaces(), api.listZones()]);
+    setIfaces(i ?? []);
+    setZones(z ?? []);
   }
 
   useEffect(() => {
@@ -24,39 +27,45 @@ export default function ZonesPage() {
   async function onCreate() {
     setError(null);
     if (!name.trim()) {
-      setError("Zone name is required.");
+      setError("Interface name is required.");
       return;
     }
     setSaving(true);
-    const created = await api.createZone({
+    const payload: Interface = {
       name: name.trim(),
-      description: description.trim() || undefined,
-    });
+      zone: zone || undefined,
+      addresses: addresses
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    const created = await api.createInterface(payload);
     setSaving(false);
     if (!created) {
-      setError("Failed to create zone.");
+      setError("Failed to create interface.");
       return;
     }
     setName("");
-    setDescription("");
+    setZone("");
+    setAddresses("");
     refresh();
   }
 
-  async function onDelete(zoneName: string) {
+  async function onDelete(ifaceName: string) {
     setError(null);
-    const ok = await api.deleteZone(zoneName);
+    const ok = await api.deleteInterface(ifaceName);
     if (!ok) {
-      setError("Failed to delete zone (may be in use).");
+      setError("Failed to delete interface.");
       return;
     }
     refresh();
   }
 
-  async function onUpdate(zoneName: string, patch: Partial<Zone>) {
+  async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
     setError(null);
-    const updated = await api.updateZone(zoneName, patch);
+    const updated = await api.updateInterface(ifaceName, patch);
     if (!updated) {
-      setError("Failed to update zone.");
+      setError("Failed to update interface.");
       return;
     }
     refresh();
@@ -64,7 +73,7 @@ export default function ZonesPage() {
 
   return (
     <Shell
-      title="Zones"
+      title="Interfaces"
       actions={
         <button
           onClick={refresh}
@@ -75,18 +84,30 @@ export default function ZonesPage() {
       }
     >
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-        <h2 className="text-sm font-semibold text-white">Create zone</h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <h2 className="text-sm font-semibold text-white">Create interface</h2>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="name (e.g. ot)"
+            placeholder="name (e.g. eth0)"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
+          <select
+            value={zone}
+            onChange={(e) => setZone(e.target.value)}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          >
+            <option value="">(no zone)</option>
+            {zones.map((z) => (
+              <option key={z.name} value={z.name}>
+                {z.name}
+              </option>
+            ))}
+          </select>
           <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="description"
+            value={addresses}
+            onChange={(e) => setAddresses(e.target.value)}
+            placeholder="addresses (CIDR, comma-separated)"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
           />
         </div>
@@ -107,20 +128,27 @@ export default function ZonesPage() {
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
               <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Description</th>
+              <th className="px-4 py-3">Zone</th>
+              <th className="px-4 py-3">Addresses</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {zones.length === 0 && (
+            {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={3}>
-                  No zones configured.
+                <td className="px-4 py-4 text-slate-400" colSpan={4}>
+                  No interfaces configured.
                 </td>
               </tr>
             )}
-            {zones.map((z) => (
-              <ZoneRow key={z.name} zone={z} onDelete={onDelete} onUpdate={onUpdate} />
+            {ifaces.map((i) => (
+              <InterfaceRow
+                key={i.name}
+                iface={i}
+                zones={zones}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+              />
             ))}
           </tbody>
         </table>
@@ -129,30 +157,55 @@ export default function ZonesPage() {
   );
 }
 
-function ZoneRow({
-  zone,
+function InterfaceRow({
+  iface,
+  zones,
   onDelete,
   onUpdate,
 }: {
-  zone: Zone;
+  iface: Interface;
+  zones: Zone[];
   onDelete: (name: string) => void;
-  onUpdate: (name: string, patch: Partial<Zone>) => void;
+  onUpdate: (name: string, patch: Partial<Interface>) => void;
 }) {
-  const [desc, setDesc] = useState(zone.description ?? "");
   const [editing, setEditing] = useState(false);
+  const [zone, setZone] = useState(iface.zone ?? "");
+  const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
 
   return (
     <tr className="border-t border-white/5">
-      <td className="px-4 py-3 font-medium text-white">{zone.name}</td>
+      <td className="px-4 py-3 font-medium text-white">{iface.name}</td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <select
+            value={zone}
+            onChange={(e) => setZone(e.target.value)}
+            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+          >
+            <option value="">(no zone)</option>
+            {zones.map((z) => (
+              <option key={z.name} value={z.name}>
+                {z.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="text-slate-200">{iface.zone || "—"}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {editing ? (
           <input
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
+            value={addresses}
+            onChange={(e) => setAddresses(e.target.value)}
             className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
           />
         ) : (
-          <span className="text-slate-200">{zone.description || "—"}</span>
+          <span className="text-slate-200">
+            {(iface.addresses ?? []).length > 0
+              ? (iface.addresses ?? []).join(", ")
+              : "—"}
+          </span>
         )}
       </td>
       <td className="px-4 py-3 text-right">
@@ -160,7 +213,13 @@ function ZoneRow({
           <div className="inline-flex gap-2">
             <button
               onClick={() => {
-                onUpdate(zone.name, { description: desc.trim() || undefined });
+                onUpdate(iface.name, {
+                  zone: zone || undefined,
+                  addresses: addresses
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                });
                 setEditing(false);
               }}
               className="rounded-md bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
@@ -169,7 +228,8 @@ function ZoneRow({
             </button>
             <button
               onClick={() => {
-                setDesc(zone.description ?? "");
+                setZone(iface.zone ?? "");
+                setAddresses((iface.addresses ?? []).join(", "));
                 setEditing(false);
               }}
               className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
@@ -186,7 +246,7 @@ function ZoneRow({
               Edit
             </button>
             <button
-              onClick={() => onDelete(zone.name)}
+              onClick={() => onDelete(iface.name)}
               className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
             >
               Delete

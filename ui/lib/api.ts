@@ -51,6 +51,45 @@ export type FirewallRule = {
   action: "ALLOW" | "DENY";
 };
 
+export type Asset = {
+  id: string;
+  name: string;
+  type?: string;
+  zone?: string;
+  ips?: string[];
+  hostnames?: string[];
+  criticality?: string;
+  tags?: string[];
+  description?: string;
+};
+
+export type AuditRecord = {
+  id: number;
+  timestamp: string;
+  actor: string;
+  source: string;
+  action: string;
+  target: string;
+  result: string;
+  detail?: string;
+};
+
+export type ConfigBundle = {
+  schema_version?: string;
+  version?: string;
+  description?: string;
+  system?: { hostname?: string };
+  zones?: Zone[];
+  interfaces?: Interface[];
+  assets?: Asset[];
+  dataplane?: DataPlaneConfig;
+  firewall?: {
+    defaultAction?: "ALLOW" | "DENY";
+    rules?: FirewallRule[];
+  };
+  services?: unknown;
+};
+
 export async function fetchHealth(): Promise<HealthResponse | null> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/health`, {
@@ -161,4 +200,33 @@ export const api = {
     patchJSON<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
   deleteFirewallRule: (id: string) =>
     deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+
+  listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
+  createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),
+  updateAsset: (id: string, a: Partial<Asset>) =>
+    patchJSON<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
+  deleteAsset: (id: string) =>
+    deleteJSON(`/api/v1/assets/${encodeURIComponent(id)}`),
+
+  // Config lifecycle
+  getRunningConfig: () => getJSON<ConfigBundle>("/api/v1/config"),
+  getCandidateConfig: () => getJSON<ConfigBundle>("/api/v1/config/candidate"),
+  setCandidateConfig: (cfg: ConfigBundle) =>
+    postJSON<{ status: string }>("/api/v1/config/candidate", cfg),
+  diffConfig: () =>
+    getJSON<{ running: ConfigBundle | null; candidate: ConfigBundle | null }>(
+      "/api/v1/config/diff",
+    ),
+  commit: () => postJSON<{ status: string }>("/api/v1/config/commit", {}),
+  commitConfirmed: (ttlSeconds?: number) =>
+    postJSON<{ status: string }>(
+      "/api/v1/config/commit_confirmed",
+      ttlSeconds ? { ttl_seconds: ttlSeconds } : {},
+    ),
+  confirmCommit: () =>
+    postJSON<{ status: string }>("/api/v1/config/confirm", {}),
+  rollback: () => postJSON<{ status: string }>("/api/v1/config/rollback", {}),
+
+  // Audit
+  listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
 };

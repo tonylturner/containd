@@ -11,23 +11,26 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add SQLite-backed persistence abstraction.
   - [x] Expand `docs/config-format.md` with schema outline.
   - [x] Add schema versioning support in config exports/imports.
-  - [ ] Add schema version negotiation/upgrade handling.
+  - [x] Add schema version negotiation/upgrade handling.
 - [ ] Control-plane API
   - [x] Scaffold Gin router in `api/http` with `/api/v1` grouping.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
   - [x] Add request validation and basic unit tests.
   - [x] Add config export/import endpoints.
-  - [ ] Add objects/assets/identity/services/audit endpoints.
-  - [x] Add config lifecycle endpoints (candidate/running, commit/rollback, diff); commit-confirmed still pending.
+  - [~] Add objects/assets/identity/services/audit endpoints.
+  - [x] Add assets endpoints.
+  - [x] Add dataplane runtime config endpoints.
+  - [x] Add config lifecycle endpoints (candidate/running, commit/rollback, diff, commit-confirmed).
+  - [x] Wire commits to push compiled snapshots + runtime config to engine.
 - [ ] Data-plane capture stub
   - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
 - [ ] Rule engine skeleton
   - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.
-  - [ ] Add ICS/identity predicates to evaluator (placeholders added in rule structs).
-  - [ ] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
-  - [ ] Add nftables compile/apply path for rules and verdict updates (sets/maps, conntrack kill).
+  - [~] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
+  - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
+  - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings pending).
 - [ ] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.
@@ -37,14 +40,17 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add API-backed commands (`show health`, `show config`) using management HTTP endpoints.
   - [x] Add mutating commands (`set zone`, `set interface`) via API.
   - [x] Add mutating commands for firewall rules (set/delete).
-  - [ ] Add CLI commands for commit/rollback/export/import/audit.
+  - [x] Add CLI commands for commit/rollback/export/import/audit/dataplane.
   - [ ] Plan SSH server integration (key auth default, passwords only in lab) and rate limiting.
 - [ ] UI integration
   - [x] Add dashboard fetching `/api/v1/health`.
   - [x] Set up API client layer.
+  - [x] Add zones/interfaces/firewall/assets CRUD screens.
+  - [x] Add config diff/commit/rollback/commit-confirmed UI and audit log view.
+  - [x] Add dataplane settings UI.
   - [ ] Add topology view placeholder with React Flow dependency.
-  - [ ] Add config diff/commit/rollback UI and audit log view.
-  - [ ] Add services pages (syslog/NTP/DNS) and policy/alerts views (FW/IDS/ICS).
+  - [ ] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
+  - [ ] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -55,8 +61,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add structured logging helper in `pkg/common`.
   - [x] Use helper in both binaries.
   - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
-  - [ ] Implement syslog forwarding pipeline (UDP/TCP) and hook to events.
+  - [ ] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events.
   - [ ] Add Prometheus metrics endpoint and telemetry sampling controls.
+  - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations
   - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
   - [ ] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI.
@@ -64,11 +71,20 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Plan SSH server integration points for Phase 4.
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
 - [ ] ICS/OT features
-  - [ ] Asset model (ICS assets/groups, criticality, tags) and policy references.
-  - [ ] ICS policy primitives (Modbus read/write/function codes/register ranges; later DNP3/IEC104/S7/CIP/OPC UA visibility/control).
+  - [x] Asset model (ICS assets, criticality, tags) and policy references.
+  - [~] ICS policy primitives (Modbus fields in policy; enforcement/matching pending).
   - [ ] OT policy templates (Purdue baseline, maintenance window, SIS hardening).
+  - [ ] Selective DPI steering (NFQUEUE/AF_PACKET) based on ICS predicates.
 - [ ] IDS/IPS
   - [ ] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack.
+
+- [ ] IT DPI + Proxies (per integrated spec)
+  - [ ] Service manager inside `containd` to supervise embedded daemons.
+  - [ ] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
+  - [ ] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
+  - [ ] IT DPI minimums: DNS/TLS/HTTP metadata, SSH/RDP/SMB/SNMP/NTP detection.
+  - [ ] Optional embedded Zeek integration for IT DPI/telemetry, native dashboards.
+  - [ ] Unified event normalization across firewall/DPI/IDS/proxies/audit.
 - [ ] eBPF
   - [ ] Plan optional XDP/TC programs for early drop/counters and event streaming; keep fallback functional.
 - [ ] Config lifecycle safety

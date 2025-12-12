@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchHealth, type HealthResponse } from "../lib/api";
+import { fetchHealth, type HealthResponse, api } from "../lib/api";
+import { Shell } from "../components/Shell";
 
 const phases = [
   {
@@ -24,11 +25,25 @@ const phases = [
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [assetCount, setAssetCount] = useState<number | null>(null);
+  const [zoneCount, setZoneCount] = useState<number | null>(null);
+  const [ifaceCount, setIfaceCount] = useState<number | null>(null);
+  const [ruleCount, setRuleCount] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    fetchHealth().then((res) => {
-      if (alive) setHealth(res);
+    fetchHealth().then((res) => alive && setHealth(res));
+    Promise.all([
+      api.listAssets(),
+      api.listZones(),
+      api.listInterfaces(),
+      api.listFirewallRules(),
+    ]).then(([assets, zones, ifaces, rules]) => {
+      if (!alive) return;
+      setAssetCount(assets?.length ?? 0);
+      setZoneCount(zones?.length ?? 0);
+      setIfaceCount(ifaces?.length ?? 0);
+      setRuleCount(rules?.length ?? 0);
     });
     return () => {
       alive = false;
@@ -36,143 +51,180 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-slate-100">
-      <div className="pointer-events-none absolute inset-0 opacity-30">
-        <div className="grid-overlay h-full w-full" />
-      </div>
-      <main className="relative mx-auto max-w-5xl px-6 py-16">
-        <p className="text-sm uppercase tracking-[0.3em] text-mint">
-          ICS-native firewall
-        </p>
-        <h1 className="mt-4 text-5xl font-bold leading-tight text-white">
-          containd
-        </h1>
-        <p className="mt-4 max-w-2xl text-lg text-slate-200">
-          Open-source NGFW and IDS/IPS built for industrial control systems.
-          Management plane ships with an API, modern UI, and SSH CLI; the data
-          plane focuses on deterministic performance, DPI, and ICS-aware rules.
-        </p>
+    <Shell title="Dashboard">
+      <div className="grid gap-4 md:grid-cols-3">
+        <DashboardCard title="System information">
+          <div className="space-y-1 text-sm">
+            <KeyValue label="Hostname" value="containd" />
+            <KeyValue label="Build" value={health?.build ?? "dev"} />
+            <KeyValue label="Component" value={health?.component ?? "mgmt"} />
+            <KeyValue
+              label="Updated"
+              value={
+                health?.time
+                  ? new Date(health.time).toLocaleString()
+                  : "—"
+              }
+            />
+          </div>
+        </DashboardCard>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
-              API health
-            </p>
-            {health ? (
-              <div className="mt-2 space-y-1 text-sm">
-                <div className="flex items-center justify-between">
-                  <span>Status</span>
-                  <span className="rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint">
-                    {health.status}
-                  </span>
+        <DashboardCard title="Licenses / Services">
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            {["IPS", "Web Filter", "AV", "Support", "Updates", "Proxy"].map(
+              (label) => (
+                <div
+                  key={label}
+                  className="rounded-lg bg-mint/10 px-2 py-2 text-center text-mint"
+                >
+                  {label}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Component</span>
-                  <span className="text-slate-200">{health.component}</span>
-                </div>
-                {health.time && (
-                  <div className="flex items-center justify-between">
-                    <span>Updated</span>
-                    <span className="text-slate-200">
-                      {new Date(health.time).toLocaleString()}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-amber">
-                Unable to reach management API.
-              </p>
+              ),
             )}
           </div>
-        </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Placeholders until service manager lands.
+          </p>
+        </DashboardCard>
 
-        <div className="mt-10 grid gap-6 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Management Plane</h3>
-              <span className="rounded-full bg-mint/20 px-3 py-1 text-sm text-mint">
-                API / UI / SSH
-              </span>
-            </div>
-            <p className="mt-3 text-sm text-slate-200">
-              Gin-based API exposed at <code>/api/v1</code>; serves the Next.js
-              UI build and will host the appliance-style CLI over SSH.
-            </p>
-            <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-slate-100">
-              <p className="font-mono text-xs uppercase tracking-wide text-amber">
-                Health endpoints
-              </p>
-              <ul className="mt-2 space-y-1 font-mono text-xs text-slate-200">
-                <li>GET http://localhost:8080/api/v1/health</li>
-                <li>Default addr: env <code>NGFW_MGMT_ADDR</code></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-semibold">Data Plane</h3>
-              <span className="rounded-full bg-amber/20 px-3 py-1 text-sm text-amber">
-                Engine
-              </span>
-            </div>
-            <p className="mt-3 text-sm text-slate-200">
-              Stub server ready to host capture workers, flow tracking, and
-              enforcement. Ships with a simple health endpoint for now.
-            </p>
-            <div className="mt-4">
-              <a
-                href="/dataplane/"
-                className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-              >
-                Configure dataplane
-              </a>
-            </div>
-            <div className="mt-4 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-slate-100">
-              <p className="font-mono text-xs uppercase tracking-wide text-amber">
-                Health endpoints
-              </p>
-              <ul className="mt-2 space-y-1 font-mono text-xs text-slate-200">
-                <li>GET http://localhost:8081/health</li>
-                <li>Default addr: env <code>NGFW_ENGINE_ADDR</code></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <section className="mt-12 rounded-2xl border border-white/10 bg-gradient-to-r from-white/5 via-white/0 to-mint/10 p-6 shadow-inner">
-          <header className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-300">
-                Delivery roadmap
-              </p>
-              <h2 className="text-2xl font-semibold text-white">
-                Implementation phases
-              </h2>
-            </div>
-            <span className="rounded-full bg-white/10 px-3 py-1 text-xs uppercase tracking-wide text-slate-200">
-              Based on agents.md
-            </span>
-          </header>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {phases.map((phase) => (
-              <div
-                key={phase.title}
-                className="rounded-xl border border-white/10 bg-black/30 p-4"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold text-white">{phase.title}</span>
-                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs uppercase tracking-wide text-slate-200">
-                    {phase.status}
-                  </span>
-                </div>
-                <p className="mt-2 text-sm text-slate-200">{phase.summary}</p>
+        <DashboardCard title="Assets">
+          <div className="flex items-center justify-center py-6">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-white">
+                {assetCount ?? "—"}
               </div>
-            ))}
+              <div className="text-xs uppercase tracking-wide text-slate-300">
+                Devices
+              </div>
+            </div>
           </div>
-        </section>
-      </main>
+          <a href="/assets/" className="text-xs text-slate-300 hover:text-white">
+            View assets →
+          </a>
+        </DashboardCard>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <DashboardCard title="Policy summary">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <Stat label="Zones" value={zoneCount} href="/zones/" />
+            <Stat label="Interfaces" value={ifaceCount} href="/interfaces/" />
+            <Stat label="FW rules" value={ruleCount} href="/firewall/" />
+            <Stat label="ICS rules" value={0} href="/firewall/" />
+          </div>
+        </DashboardCard>
+
+        <DashboardCard title="DPI / IDS">
+          <div className="space-y-2 text-sm text-slate-200">
+            <KeyValue label="Modbus events (lab)" value="streaming" />
+            <KeyValue label="IT DPI" value="pending" />
+            <KeyValue label="IDS engine" value="pending" />
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Populates once selective DPI + IDS land.
+          </p>
+        </DashboardCard>
+
+        <DashboardCard title="Operations">
+          <div className="flex flex-col gap-2 text-sm">
+            <a
+              href="/config/"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
+            >
+              Candidate / Commit
+            </a>
+            <a
+              href="/dataplane/"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
+            >
+              Dataplane settings
+            </a>
+            <a
+              href="/audit/"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 hover:bg-white/10"
+            >
+              Audit log
+            </a>
+          </div>
+        </DashboardCard>
+      </div>
+
+      <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner backdrop-blur">
+        <header className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+              Delivery roadmap
+            </p>
+            <h2 className="text-xl font-semibold text-white">
+              Implementation phases
+            </h2>
+          </div>
+        </header>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {phases.map((phase) => (
+            <div
+              key={phase.title}
+              className="rounded-xl border border-white/10 bg-black/30 p-4"
+            >
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-white">{phase.title}</span>
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs uppercase tracking-wide text-slate-200">
+                  {phase.status}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-200">{phase.summary}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </Shell>
+  );
+}
+
+function DashboardCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+      <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+        {title}
+      </p>
+      <div className="mt-3">{children}</div>
     </div>
+  );
+}
+
+function KeyValue({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-slate-300">{label}</span>
+      <span className="text-slate-100">{value}</span>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: number | null;
+  href: string;
+}) {
+  return (
+    <a
+      href={href}
+      className="rounded-lg border border-white/10 bg-black/30 p-3 hover:bg-black/40"
+    >
+      <div className="text-2xl font-bold text-white">{value ?? "—"}</div>
+      <div className="text-xs uppercase tracking-wide text-slate-300">
+        {label}
+      </div>
+    </a>
   );
 }

@@ -1,3 +1,4 @@
+# [ARCHIVED] Consolidated into agents.md. Do not edit.
 # containd (ICS‑NGFW) – Single‑Image Appliance Spec (Agent Instructions)
 
 You are an AI coding agent building **containd**, an open‑source next‑generation firewall designed for **ICS/OT environments**.
