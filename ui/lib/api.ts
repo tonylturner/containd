@@ -80,6 +80,16 @@ export type AuditRecord = {
   detail?: string;
 };
 
+export type SyslogForwarder = {
+  address: string;
+  port: number;
+  proto?: "udp" | "tcp";
+};
+
+export type SyslogConfig = {
+  forwarders: SyslogForwarder[];
+};
+
 export type TelemetryEvent = {
   id: number;
   flowId: string;
@@ -131,6 +141,8 @@ export type ReverseProxyConfig = {
   enabled?: boolean;
   sites?: ReverseProxySite[];
 };
+
+export type ServicesStatus = Record<string, unknown>;
 
 export type IDSCondition = {
   all?: IDSCondition[];
@@ -344,6 +356,11 @@ export const api = {
     getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
   setReverseProxy: (cfg: ReverseProxyConfig) =>
     postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
+  getServicesStatus: () =>
+    getJSON<ServicesStatus>("/api/v1/services/status"),
+  getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
+  setSyslog: (cfg: SyslogConfig) =>
+    postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
 
   // Telemetry
   listEvents: (limit = 500) =>

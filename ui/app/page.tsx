@@ -13,6 +13,13 @@ export default function Home() {
   const [zoneCount, setZoneCount] = useState<number | null>(null);
   const [ifaceCount, setIfaceCount] = useState<number | null>(null);
   const [ruleCount, setRuleCount] = useState<number | null>(null);
+  const [flowCount, setFlowCount] = useState<number | null>(null);
+  const [eventStats, setEventStats] = useState<{
+    idsAlerts: number;
+    modbusWrites: number;
+    totalEvents: number;
+  } | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -22,12 +29,26 @@ export default function Home() {
       api.listZones(),
       api.listInterfaces(),
       api.listFirewallRules(),
-    ]).then(([assets, zones, ifaces, rules]) => {
+      api.listFlows(200),
+      api.listEvents(500),
+      api.getServicesStatus(),
+    ]).then(([assets, zones, ifaces, rules, flows, events, services]) => {
       if (!alive) return;
       setAssetCount(assets?.length ?? 0);
       setZoneCount(zones?.length ?? 0);
       setIfaceCount(ifaces?.length ?? 0);
       setRuleCount(rules?.length ?? 0);
+      setFlowCount(flows?.length ?? 0);
+      const evs = events ?? [];
+      const idsAlerts = evs.filter((e) => e.proto === "ids" && e.kind === "alert").length;
+      const modbusWrites = evs.filter(
+        (e) =>
+          e.proto === "modbus" &&
+          e.kind === "request" &&
+          (e.attributes as any)?.is_write === true,
+      ).length;
+      setEventStats({ idsAlerts, modbusWrites, totalEvents: evs.length });
+      setServicesStatus(services);
     });
     return () => {
       alive = false;
@@ -53,38 +74,12 @@ export default function Home() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Licenses / Services">
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            {["IPS", "Web Filter", "AV", "Support", "Updates", "Proxy"].map(
-              (label) => (
-                <div
-                  key={label}
-                  className="rounded-lg bg-mint/10 px-2 py-2 text-center text-mint"
-                >
-                  {label}
-                </div>
-              ),
-            )}
-          </div>
-          <p className="mt-2 text-xs text-slate-400">
-            Placeholders until service manager lands.
-          </p>
+        <DashboardCard title="Services">
+          <ServicesWidget status={servicesStatus} />
         </DashboardCard>
 
-        <DashboardCard title="Assets">
-          <div className="flex items-center justify-center py-6">
-            <div className="text-center">
-              <div className="text-4xl font-bold text-white">
-                {assetCount ?? "—"}
-              </div>
-              <div className="text-xs uppercase tracking-wide text-slate-300">
-                Devices
-              </div>
-            </div>
-          </div>
-          <Link href="/assets/" className="text-xs text-slate-300 hover:text-white">
-            View assets →
-          </Link>
+        <DashboardCard title="Traffic">
+          <TrafficWidget flowCount={flowCount} totalEvents={eventStats?.totalEvents ?? 0} />
         </DashboardCard>
       </div>
 
@@ -98,15 +93,8 @@ export default function Home() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="DPI / IDS">
-          <div className="space-y-2 text-sm text-slate-200">
-            <KeyValue label="Modbus events (lab)" value="streaming" />
-            <KeyValue label="IT DPI" value="pending" />
-            <KeyValue label="IDS engine" value="pending" />
-          </div>
-          <p className="mt-2 text-xs text-slate-400">
-            Populates once selective DPI + IDS land.
-          </p>
+        <DashboardCard title="Rule Violations">
+          <ViolationsWidget stats={eventStats} />
         </DashboardCard>
 
         <DashboardCard title="Operations">
@@ -185,5 +173,110 @@ function Stat({
         {label}
       </div>
     </Link>
+  );
+}
+
+function ServicesWidget({ status }: { status: Record<string, unknown> | null }) {
+  const syslogConfigured =
+    (status?.["syslog"] as any)?.configured_forwarders > 0;
+  const proxy = status?.["proxy"] as any;
+  const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
+  const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
+  const chips: Array<{ label: string; ok: boolean; hint?: string }> = [
+    { label: "IPS", ok: true, hint: "native IDS/IPS" },
+    { label: "Web Filter", ok: false },
+    { label: "AV", ok: false },
+    { label: "VPN", ok: false },
+    { label: "Updates", ok: true },
+    { label: "Proxy", ok: envoyActive || nginxActive },
+    { label: "Syslog", ok: !!syslogConfigured },
+  ];
+  return (
+    <div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        {chips.map((c) => (
+          <div
+            key={c.label}
+            className={
+              c.ok
+                ? "rounded-lg bg-mint/15 px-2 py-2 text-center text-mint"
+                : "rounded-lg bg-amber/15 px-2 py-2 text-center text-amber"
+            }
+            title={c.hint}
+          >
+            {c.label}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        Green = configured/active, red = off/unconfigured.
+      </p>
+    </div>
+  );
+}
+
+function TrafficWidget({
+  flowCount,
+  totalEvents,
+}: {
+  flowCount: number | null;
+  totalEvents: number;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl bg-black/30 p-4">
+      <div>
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          Active flows
+        </div>
+        <div className="text-4xl font-bold text-white">
+          {flowCount ?? "—"}
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          Recent events
+        </div>
+        <div className="text-2xl font-semibold text-slate-100">
+          {totalEvents}
+        </div>
+        <Link
+          href="/monitoring/"
+          className="mt-1 block text-xs text-slate-300 hover:text-white"
+        >
+          Monitoring →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function ViolationsWidget({
+  stats,
+}: {
+  stats: { idsAlerts: number; modbusWrites: number; totalEvents: number } | null;
+}) {
+  const idsAlerts = stats?.idsAlerts ?? 0;
+  const modbusWrites = stats?.modbusWrites ?? 0;
+  return (
+    <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="rounded-xl bg-black/30 p-4">
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          IDS alerts
+        </div>
+        <div className="text-3xl font-bold text-amber">{idsAlerts}</div>
+        <Link href="/alerts/" className="text-xs text-slate-300 hover:text-white">
+          View →
+        </Link>
+      </div>
+      <div className="rounded-xl bg-black/30 p-4">
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          Modbus writes
+        </div>
+        <div className="text-3xl font-bold text-white">{modbusWrites}</div>
+        <Link href="/events/" className="text-xs text-slate-300 hover:text-white">
+          Events →
+        </Link>
+      </div>
+    </div>
   );
 }

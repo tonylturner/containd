@@ -55,9 +55,10 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add zones/interfaces/firewall/assets CRUD screens.
   - [x] Add config diff/commit/rollback/commit-confirmed UI and audit log view.
   - [x] Add dataplane settings UI.
-  - [ ] Add topology view placeholder with React Flow dependency.
-  - [ ] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
-  - [ ] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
+  - [x] Add topology view placeholder with React Flow dependency.
+  - [~] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
+  - [~] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
+    - [x] Add ICS policy view page.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.

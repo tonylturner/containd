@@ -103,6 +103,7 @@ export default function IDSPage() {
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Title</th>
               <th className="px-4 py-3">Proto/Kind</th>
+              <th className="px-4 py-3">When</th>
               <th className="px-4 py-3">Severity</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -110,7 +111,7 @@ export default function IDSPage() {
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                <td className="px-4 py-4 text-slate-400" colSpan={6}>
                   No IDS rules configured.
                 </td>
               </tr>
@@ -127,7 +128,22 @@ export default function IDSPage() {
                   {(r.proto || "*") + " / " + (r.kind || "*")}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  {r.severity || "—"}
+                  <span title={conditionSummary(r.when)}>
+                    {conditionSummary(r.when) || "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  <span
+                    className={
+                      r.severity === "critical" || r.severity === "high"
+                        ? "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+                        : r.severity === "medium"
+                          ? "rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
+                          : "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
+                    }
+                  >
+                    {r.severity || "low"}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
@@ -165,6 +181,25 @@ export default function IDSPage() {
       )}
     </Shell>
   );
+}
+
+function conditionSummary(when: IDSRule["when"]): string {
+  if (!when) return "";
+  if (when.field) {
+    const v =
+      typeof when.value === "string"
+        ? when.value
+        : Array.isArray(when.value)
+          ? when.value.join(",")
+          : when.value !== undefined
+            ? String(when.value)
+            : "";
+    return `${when.field} ${when.op || "equals"} ${v}`.trim();
+  }
+  if (when.all?.length) return `all(${when.all.length})`;
+  if (when.any?.length) return `any(${when.any.length})`;
+  if (when.not) return `not(${conditionSummary(when.not)})`;
+  return "";
 }
 
 function SigmaImportCard({
@@ -283,4 +318,3 @@ function EditRuleModal({
     </div>
   );
 }
-
