@@ -6,6 +6,8 @@ services:
     image: containd/containd:dev
     environment:
       - NGFW_MGMT_ADDR=:8080
+      # HTTPS mgmt listener (self-signed by default; cert/key stored under /data/tls).
+      - NGFW_MGMT_HTTPS_ADDR=:8443
       - NGFW_SSH_ADDR=:2222
       - NGFW_SSH_AUTH_KEYS_DIR=/data/ssh/authorized_keys.d
       - NGFW_SSH_HOST_KEY=/data/ssh/host_key
@@ -15,9 +17,10 @@ services:
       # - NGFW_SSH_BOOTSTRAP_ADMIN_USER=containd
       # Optional: override password auth (default enabled only in lab mode).
       # - NGFW_SSH_ALLOW_PASSWORD=0
-      # Dev/lab mode disables auth; set CONTAIND_ADMIN_TOKEN instead for secured runs.
-      - CONTAIND_LAB_MODE=1
-      # JWT secret for UI/login flows (ignored in lab mode).
+      # Bootstrap SSH password auth: if no authorized keys exist yet, ssh password auth is enabled automatically.
+      # To force-enable or force-disable, set NGFW_SSH_ALLOW_PASSWORD explicitly.
+      # - NGFW_SSH_ALLOW_PASSWORD=1
+      # JWT secret for UI/login flows.
       - CONTAIND_JWT_SECRET=containd-dev-secret-change-me
       # Users DB; keep on a writable path for nonroot images.
       - NGFW_USERS_DB=/data/users.db
@@ -25,6 +28,7 @@ services:
       - NGFW_ENGINE_URL=http://engine:8081
     ports:
       - "8080:8080"
+      - "8443:8443"
       - "2222:2222"
     volumes:
       - ./data:/data

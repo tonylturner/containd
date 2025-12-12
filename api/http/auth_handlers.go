@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/containd/containd/pkg/common/ratelimit"
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -17,10 +19,12 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token     string      `json:"token"`
-	ExpiresAt string      `json:"expiresAt"`
-	User      users.User  `json:"user"`
+	Token     string     `json:"token"`
+	ExpiresAt string     `json:"expiresAt"`
+	User      users.User `json:"user"`
 }
+
+var loginLimiter = ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute)
 
 func loginHandler(userStore users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -38,15 +42,27 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "username and password required"})
 			return
 		}
+
+		ip := c.ClientIP()
+		key := ip + "|" + strings.ToLower(req.Username)
+		if ok, retry := loginLimiter.Allow(key); !ok {
+			c.Header("Retry-After", strconv.Itoa(int(retry.Seconds())))
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts; retry later"})
+			return
+		}
+
 		u, err := userStore.GetByUsername(c.Request.Context(), req.Username)
 		if err != nil {
+			loginLimiter.Fail(key)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
+			loginLimiter.Fail(key)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
+		loginLimiter.Success(key)
 		sess, err := userStore.CreateSession(c.Request.Context(), u.ID, idleTTL, maxTTL)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

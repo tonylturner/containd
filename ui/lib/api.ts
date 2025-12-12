@@ -92,6 +92,12 @@ export type Interface = {
   name: string;
   zone?: string;
   addresses?: string[];
+  access?: {
+    mgmt?: boolean;
+    http?: boolean;
+    https?: boolean;
+    ssh?: boolean;
+  };
 };
 
 export type Protocol = {

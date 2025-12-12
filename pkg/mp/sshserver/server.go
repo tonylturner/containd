@@ -21,6 +21,7 @@ import (
 
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
+	"github.com/containd/containd/pkg/common/ratelimit"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/golang-jwt/jwt/v5"
@@ -36,6 +37,9 @@ type Options struct {
 	AllowPassword     bool
 	LabMode           bool
 	JWTSecret         []byte
+	// AllowLocalIP can reject connections based on the destination/local IP.
+	// When nil, all destination IPs are allowed.
+	AllowLocalIP func(ip net.IP) bool
 
 	UserStore  users.Store
 	AuditStore audit.Store
@@ -47,6 +51,8 @@ type Server struct {
 
 	ln net.Listener
 	wg sync.WaitGroup
+
+	pwLimiter *ratelimit.AttemptLimiter
 }
 
 func New(opts Options) (*Server, error) {
@@ -68,7 +74,11 @@ func New(opts Options) (*Server, error) {
 	if opts.AuthorizedKeysDir == "" {
 		return nil, errors.New("authorized keys dir required")
 	}
-	return &Server{opts: opts, logger: logging.New("[ssh]")}, nil
+	return &Server{
+		opts:      opts,
+		logger:    logging.New("[ssh]"),
+		pwLimiter: ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
+	}, nil
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -123,6 +133,17 @@ func (s *Server) Close() error {
 
 func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	defer nc.Close()
+
+	if s.opts.AllowLocalIP != nil {
+		host, _, err := net.SplitHostPort(nc.LocalAddr().String())
+		if err == nil {
+			if ip := net.ParseIP(host); ip != nil {
+				if !s.opts.AllowLocalIP(ip) {
+					return
+				}
+			}
+		}
+	}
 
 	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
 	if err != nil {
@@ -647,26 +668,24 @@ func (s *Server) runWizard(ctx context.Context, username string, rw io.ReadWrite
 		return
 	}
 
-	if s.opts.LabMode {
-		if v, ok := ask("Enable SSH password auth? (yes/no, blank to keep): "); ok && v != "" {
-			v = strings.ToLower(v)
-			if v == "y" || v == "yes" {
-				if !exec("set system ssh allow-password true") {
-					writeLn("Wizard cancelled.")
-					return
-				}
-				writeLn("ok")
-			} else if v == "n" || v == "no" {
-				if !exec("set system ssh allow-password false") {
-					writeLn("Wizard cancelled.")
-					return
-				}
-				writeLn("ok")
+	if v, ok := ask("Enable SSH password auth? (yes/no, blank to keep): "); ok && v != "" {
+		v = strings.ToLower(v)
+		if v == "y" || v == "yes" {
+			if !exec("set system ssh allow-password true") {
+				writeLn("Wizard cancelled.")
+				return
 			}
-		} else if !ok {
-			writeLn("Wizard cancelled.")
-			return
+			writeLn("ok")
+		} else if v == "n" || v == "no" {
+			if !exec("set system ssh allow-password false") {
+				writeLn("Wizard cancelled.")
+				return
+			}
+			writeLn("ok")
 		}
+	} else if !ok {
+		writeLn("Wizard cancelled.")
+		return
 	}
 
 	// Password change (direct store) - optional.
@@ -841,15 +860,33 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 		if !s.opts.AllowPassword && !s.opts.LabMode {
 			return nil, errors.New("password auth disabled")
 		}
+		key := conn.RemoteAddr().String() + "|" + strings.ToLower(conn.User())
+		if s.pwLimiter != nil {
+			if ok, _ := s.pwLimiter.Allow(key); !ok {
+				return nil, errors.New("too many login attempts; retry later")
+			}
+		}
 		u, err := s.opts.UserStore.GetByUsername(context.Background(), conn.User())
 		if err != nil || u == nil {
+			if s.pwLimiter != nil {
+				s.pwLimiter.Fail(key)
+			}
 			return nil, errors.New("invalid credentials")
 		}
 		if strings.ToLower(strings.TrimSpace(u.Role)) != "admin" {
+			if s.pwLimiter != nil {
+				s.pwLimiter.Fail(key)
+			}
 			return nil, errors.New("ssh requires admin role")
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), password) != nil {
+			if s.pwLimiter != nil {
+				s.pwLimiter.Fail(key)
+			}
 			return nil, errors.New("invalid credentials")
+		}
+		if s.pwLimiter != nil {
+			s.pwLimiter.Success(key)
 		}
 		return &ssh.Permissions{Extensions: map[string]string{"user_id": u.ID}}, nil
 	}

@@ -2,24 +2,33 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"log"
+	"math/big"
 	"net"
 	"net/http"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	engineapi "github.com/containd/containd/api/engine"
 	httpapi "github.com/containd/containd/api/http"
-	"github.com/containd/containd/pkg/mp/sshserver"
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
+	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cp/users"
+	"github.com/containd/containd/pkg/mp/sshserver"
 	"github.com/gin-gonic/gin"
 )
 
@@ -43,17 +52,28 @@ func main() {
 	defer userStore.Close()
 	_ = userStore.EnsureDefaultAdmin(context.Background())
 
-	addr := addrFromEnv("NGFW_MGMT_ADDR", "")
-	if addr == "" {
-		if cfg, err := store.Load(context.Background()); err == nil {
-			if cfg.System.Mgmt.ListenAddr != "" {
-				addr = cfg.System.Mgmt.ListenAddr
-			}
-		}
-		if addr == "" {
-			addr = ":8080"
-		}
+	cfg, _ := store.Load(context.Background())
+
+	httpAddr := addrFromEnv("NGFW_MGMT_ADDR", "")
+	if httpAddr == "" && cfg != nil {
+		httpAddr = firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
 	}
+	if httpAddr == "" {
+		httpAddr = ":8080"
+	}
+	httpsAddr := ""
+	if v := strings.TrimSpace(os.Getenv("NGFW_MGMT_HTTPS_ADDR")); v != "" {
+		httpsAddr = v
+	}
+	if cfg != nil {
+		httpsAddr = cfg.System.Mgmt.HTTPSListenAddr
+	}
+	if httpsAddr == "" {
+		httpsAddr = ":8443"
+	}
+
+	enableHTTP := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true)
+	enableHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true)
 
 	var engineClient httpapi.EngineClient
 	if engineURL := os.Getenv("NGFW_ENGINE_URL"); engineURL != "" {
@@ -67,18 +87,71 @@ func main() {
 	}
 	serveStaticUI(router)
 
-	loopbackAddr := ensureLoopbackHTTPAddr(addr)
+	httpLoopbackAddr := ensureLoopbackHTTPAddr(httpAddr)
+	httpsLoopbackAddr := ensureLoopbackHTTPAddr(httpsAddr)
+
+	// Enforce per-interface access toggles based on the destination IP.
+	ipIndex := newIPInterfaceIndex()
+	handler := mgmtAccessHandler(store, ipIndex, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(logger, store, userStore, auditStore, addr, loopbackAddr)
+	sshAddr, sshEnabled := startSSH(logger, store, userStore, auditStore, httpAddr, httpLoopbackAddr, ipIndex)
 
-	printStartupHints(logger, addr, loopbackAddr, sshAddr, sshEnabled)
-
-	logger.Printf("ngfw-mgmt listening on %s", addr)
-	if loopbackAddr != "" && loopbackAddr != addr {
-		logger.Printf("ngfw-mgmt also listening on %s (localhost)", loopbackAddr)
+	tlsCert, tlsKey := resolveTLSFiles(cfg)
+	if enableHTTPS {
+		var err error
+		tlsCert, tlsKey, err = ensureSelfSignedTLSFiles(tlsCert, tlsKey, detectIPs())
+		if err != nil {
+			logger.Printf("https disabled: failed to ensure TLS cert: %v", err)
+			enableHTTPS = false
+		}
 	}
-	if err := serveHTTPDual(router, addr, loopbackAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+	printStartupHints(logger, httpAddr, httpLoopbackAddr, httpsAddr, httpsLoopbackAddr, enableHTTP, enableHTTPS, sshAddr, sshEnabled)
+
+	errCh := make(chan error, 8)
+	var servers []*http.Server
+	var listeners []net.Listener
+
+	if enableHTTP {
+		srv, lns, err := buildHTTPServers(handler, httpAddr, httpLoopbackAddr)
+		if err != nil {
+			logger.Fatalf("http disabled: %v", err)
+		}
+		servers = append(servers, srv...)
+		listeners = append(listeners, lns...)
+	}
+	if enableHTTPS {
+		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		srv, lns, err := buildHTTPSServers(handler, httpsAddr, httpsLoopbackAddr, tlsCfg)
+		if err != nil {
+			logger.Fatalf("https disabled: %v", err)
+		}
+		servers = append(servers, srv...)
+		listeners = append(listeners, lns...)
+	}
+
+	if len(servers) == 0 {
+		logger.Fatalf("no management listeners enabled")
+	}
+
+	for i := range servers {
+		s := servers[i]
+		ln := listeners[i]
+		go func() {
+			if s.TLSConfig != nil {
+				errCh <- s.ServeTLS(ln, tlsCert, tlsKey)
+			} else {
+				errCh <- s.Serve(ln)
+			}
+		}()
+	}
+
+	err := <-errCh
+	for _, s := range servers {
+		_ = s.Close()
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatalf("ngfw-mgmt server exited: %v", err)
 	}
 }
@@ -88,6 +161,15 @@ func addrFromEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func health(c *gin.Context) {
@@ -184,6 +266,12 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 	def := config.DefaultConfig()
 	def.System.Hostname = "containd"
 	def.System.Mgmt.ListenAddr = ":8080"
+	def.System.Mgmt.HTTPListenAddr = ":8080"
+	def.System.Mgmt.HTTPSListenAddr = ":8443"
+	def.System.Mgmt.EnableHTTP = boolPtr(true)
+	def.System.Mgmt.EnableHTTPS = boolPtr(true)
+	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 	if err := store.Save(context.Background(), def); err != nil {
 		logger.Printf("failed to initialize default config: %v", err)
 		return
@@ -206,22 +294,320 @@ func ensureLoopbackHTTPAddr(addr string) string {
 	}
 }
 
-func serveHTTPDual(handler http.Handler, addr string, loopbackAddr string) error {
-	srv := &http.Server{Addr: addr, Handler: handler}
-	if loopbackAddr == "" || loopbackAddr == addr {
-		return srv.ListenAndServe()
+type ctxKey int
+
+const localIPKey ctxKey = 1
+
+func connContextWithLocalIP(ctx context.Context, c net.Conn) context.Context {
+	if c == nil {
+		return ctx
 	}
-	loop := &http.Server{Addr: loopbackAddr, Handler: handler}
-	errCh := make(chan error, 2)
-	go func() { errCh <- loop.ListenAndServe() }()
-	go func() { errCh <- srv.ListenAndServe() }()
-	err := <-errCh
-	_ = srv.Close()
-	_ = loop.Close()
-	return err
+	host, _, err := net.SplitHostPort(c.LocalAddr().String())
+	if err != nil {
+		return ctx
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, localIPKey, ip)
 }
 
-func startSSH(logger *log.Logger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string) (string, bool) {
+func localIPFromRequest(r *http.Request) net.IP {
+	if r == nil {
+		return nil
+	}
+	if v := r.Context().Value(localIPKey); v != nil {
+		if ip, ok := v.(net.IP); ok {
+			return ip
+		}
+	}
+	return nil
+}
+
+func buildHTTPServers(handler http.Handler, addr string, loopbackAddr string) ([]*http.Server, []net.Listener, error) {
+	var servers []*http.Server
+	var listeners []net.Listener
+	addrs := []string{addr}
+	if loopbackAddr != "" && loopbackAddr != addr {
+		addrs = append(addrs, loopbackAddr)
+	}
+	for _, a := range addrs {
+		ln, err := net.Listen("tcp", a)
+		if err != nil {
+			return nil, nil, err
+		}
+		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP}
+		servers = append(servers, srv)
+		listeners = append(listeners, ln)
+	}
+	return servers, listeners, nil
+}
+
+func buildHTTPSServers(handler http.Handler, addr string, loopbackAddr string, tlsCfg *tls.Config) ([]*http.Server, []net.Listener, error) {
+	var servers []*http.Server
+	var listeners []net.Listener
+	addrs := []string{addr}
+	if loopbackAddr != "" && loopbackAddr != addr {
+		addrs = append(addrs, loopbackAddr)
+	}
+	for _, a := range addrs {
+		ln, err := net.Listen("tcp", a)
+		if err != nil {
+			return nil, nil, err
+		}
+		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP, TLSConfig: tlsCfg}
+		servers = append(servers, srv)
+		listeners = append(listeners, ln)
+	}
+	return servers, listeners, nil
+}
+
+type ipInterfaceIndex struct {
+	mu         sync.RWMutex
+	lastLoaded time.Time
+	byIP       map[string]string
+}
+
+func newIPInterfaceIndex() *ipInterfaceIndex {
+	return &ipInterfaceIndex{byIP: map[string]string{}}
+}
+
+func (idx *ipInterfaceIndex) lookup(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return ""
+	}
+	key := ip4.String()
+
+	idx.mu.RLock()
+	if time.Since(idx.lastLoaded) < 30*time.Second {
+		if v := idx.byIP[key]; v != "" {
+			idx.mu.RUnlock()
+			return v
+		}
+	}
+	idx.mu.RUnlock()
+
+	idx.refresh()
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.byIP[key]
+}
+
+func (idx *ipInterfaceIndex) refresh() {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	if time.Since(idx.lastLoaded) < 30*time.Second {
+		return
+	}
+	m := map[string]string{}
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				ip := ipFromAddr(a)
+				if ip == nil {
+					continue
+				}
+				if ip4 := ip.To4(); ip4 != nil {
+					m[ip4.String()] = iface.Name
+				}
+			}
+		}
+	}
+	idx.byIP = m
+	idx.lastLoaded = time.Now()
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func boolDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+func cfgGetBool(cfg *config.Config, f func(*config.Config) *bool) *bool {
+	if cfg == nil {
+		return nil
+	}
+	return f(cfg)
+}
+
+func resolveTLSFiles(cfg *config.Config) (certFile, keyFile string) {
+	certFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_CERT_FILE"))
+	keyFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_KEY_FILE"))
+	if certFile == "" && cfg != nil {
+		certFile = cfg.System.Mgmt.TLSCertFile
+	}
+	if keyFile == "" && cfg != nil {
+		keyFile = cfg.System.Mgmt.TLSKeyFile
+	}
+	if certFile == "" {
+		certFile = "/data/tls/server.crt"
+	}
+	if keyFile == "" {
+		keyFile = "/data/tls/server.key"
+	}
+	return certFile, keyFile
+}
+
+func ensureSelfSignedTLSFiles(certFile, keyFile string, extraIPs []string) (string, string, error) {
+	if certFile == "" || keyFile == "" {
+		return "", "", errors.New("tls cert/key file required")
+	}
+	if _, err := os.Stat(certFile); err == nil {
+		if _, err := os.Stat(keyFile); err == nil {
+			return certFile, keyFile, nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(keyFile), 0o755); err != nil {
+		return "", "", err
+	}
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return "", "", err
+	}
+
+	now := time.Now().UTC()
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName: "containd",
+		},
+		NotBefore: now.Add(-5 * time.Minute),
+		NotAfter:  now.Add(365 * 24 * time.Hour),
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		DNSNames: []string{"localhost"},
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+		},
+	}
+	for _, s := range extraIPs {
+		if ip := net.ParseIP(strings.TrimSpace(s)); ip != nil {
+			if ip.To4() != nil {
+				template.IPAddresses = append(template.IPAddresses, ip)
+			}
+		}
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return "", "", err
+	}
+	certOut := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	keyOut := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	if err := os.WriteFile(certFile, certOut, 0o644); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(keyFile, keyOut, 0o600); err != nil {
+		return "", "", err
+	}
+	return certFile, keyFile, nil
+}
+
+func mgmtAccessHandler(store config.Store, idx *ipInterfaceIndex, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := localIPFromRequest(r)
+		if ip == nil || ip.IsLoopback() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if store == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cfg, err := store.Load(r.Context())
+		if err != nil || cfg == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ifaceName := ""
+		if idx != nil {
+			ifaceName = idx.lookup(ip)
+		}
+		allowed := mgmtAllowedOnInterface(cfg, ifaceName, r.TLS != nil)
+		if !allowed {
+			http.Error(w, "management access disabled on this interface", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func mgmtAllowedOnInterface(cfg *config.Config, ifaceName string, isTLS bool) bool {
+	if cfg == nil {
+		return true
+	}
+	// Always allow loopback/unknown; operators must always be able to reach localhost.
+	if ifaceName == "" {
+		return true
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.Name != ifaceName {
+			continue
+		}
+		mgmt := boolDefault(iface.Access.Mgmt, true)
+		if !mgmt {
+			return false
+		}
+		if isTLS {
+			return boolDefault(iface.Access.HTTPS, true)
+		}
+		return boolDefault(iface.Access.HTTP, true)
+	}
+	// If we can't map the interface, default allow (backward compatible).
+	return true
+}
+
+func sshAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
+	if cfg == nil {
+		return true
+	}
+	if ifaceName == "" {
+		return true
+	}
+	for _, iface := range cfg.Interfaces {
+		if iface.Name != ifaceName {
+			continue
+		}
+		return boolDefault(iface.Access.SSH, true)
+	}
+	return true
+}
+
+func startSSH(logger *log.Logger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
 	ctx := context.Background()
 	sshAddr := addrFromEnv("NGFW_SSH_ADDR", "")
 	authKeysDir := os.Getenv("NGFW_SSH_AUTH_KEYS_DIR")
@@ -252,6 +638,16 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 	if cfg != nil && cfg.System.SSH.AllowPassword {
 		allowPassword = true
 	}
+	// Bootstrap: if no authorized keys exist yet, allow password auth so an admin can get in.
+	if !allowPassword && !lab {
+		if entries, err := os.ReadDir(authKeysDir); err == nil {
+			if len(entries) == 0 {
+				allowPassword = true
+			}
+		} else {
+			allowPassword = true
+		}
+	}
 	if allowPasswordEnv != "" {
 		allowPassword = allowPasswordEnv == "1" || strings.EqualFold(allowPasswordEnv, "true") || strings.EqualFold(allowPasswordEnv, "yes")
 	}
@@ -277,6 +673,17 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 		JWTSecret:         []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
 		UserStore:         userStore,
 		AuditStore:        auditStore,
+		AllowLocalIP: func(ip net.IP) bool {
+			if ip == nil || ip.IsLoopback() {
+				return true
+			}
+			cfg, _ := store.Load(context.Background())
+			ifaceName := ""
+			if idx != nil {
+				ifaceName = idx.lookup(ip)
+			}
+			return sshAllowedOnInterface(cfg, ifaceName)
+		},
 	}
 	srv, err := sshserver.New(opts)
 	if err != nil {
@@ -305,45 +712,44 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 	return sshAddr, true
 }
 
-func printStartupHints(logger *log.Logger, httpAddr string, loopbackAddr string, sshAddr string, sshEnabled bool) {
-	mgmtPort := portOf(httpAddr)
+func printStartupHints(logger *log.Logger, httpAddr string, httpLoopbackAddr string, httpsAddr string, httpsLoopbackAddr string, enableHTTP bool, enableHTTPS bool, sshAddr string, sshEnabled bool) {
+	httpPort := portOf(httpAddr)
+	httpsPort := portOf(httpsAddr)
 	sshPort := portOf(sshAddr)
 
 	logger.Println("------------------------------------------------------------")
 	logger.Println("containd access")
 
-	if mgmtPort != "" {
-		logger.Printf("UI/API:  http://localhost:%s", mgmtPort)
-	} else {
-		logger.Printf("UI/API:  http://localhost (port from %q)", httpAddr)
+	if enableHTTP && httpPort != "" {
+		logger.Printf("UI/API (HTTP):  http://localhost:%s", httpPort)
+	}
+	if enableHTTPS && httpsPort != "" {
+		logger.Printf("UI/API (HTTPS): https://localhost:%s (self-signed by default)", httpsPort)
 	}
 
 	if sshEnabled && sshPort != "" {
 		logger.Printf("SSH CLI: ssh -p %s containd@localhost", sshPort)
-		logger.Println("         then type: wizard")
+		logger.Println("         then type: wizard or menu")
 	}
 
 	ips := detectIPs()
-	if len(ips) > 0 && mgmtPort != "" {
+	if len(ips) > 0 && httpPort != "" {
 		logger.Printf("Container IPs: %s", strings.Join(ips, ", "))
-		if bindsAll(httpAddr) {
+		if enableHTTP && bindsAll(httpAddr) {
 			for _, ip := range ips {
-				logger.Printf("UI/API via IP: http://%s:%s", ip, mgmtPort)
+				logger.Printf("UI/API via IP (HTTP):  http://%s:%s", ip, httpPort)
 				if sshEnabled && sshPort != "" {
 					logger.Printf("SSH via IP:    ssh -p %s containd@%s", sshPort, ip)
 				}
 			}
-		} else if hostOnly(httpAddr) {
+		} else if enableHTTP && hostOnly(httpAddr) {
 			logger.Printf("UI/API bind is restricted to %s; use localhost or reconfigure.", httpAddr)
 		}
 	}
 
-	if os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true") {
-		logger.Println("Lab defaults: username=containd password=containd")
-	} else {
-		logger.Println("Production note: provide SSH key or bootstrap key env var.")
-		logger.Println("  - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
-	}
+	logger.Println("Initial login: username=containd password=containd (change immediately)")
+	logger.Println("Production note: add SSH key and disable password auth after provisioning.")
+	logger.Println("  - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
 	logger.Println("Tip: docker compose logs -f containd")
 	logger.Println("------------------------------------------------------------")
 }

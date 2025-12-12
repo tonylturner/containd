@@ -10,17 +10,17 @@ import (
 // Config represents the management-plane persistent configuration.
 // It intentionally stays narrow until broader models are added.
 type Config struct {
-	SchemaVersion string         `json:"schema_version,omitempty"`
-	System        SystemConfig   `json:"system"`
-	Interfaces    []Interface    `json:"interfaces"`
-	Zones         []Zone         `json:"zones"`
-	Assets        []Asset        `json:"assets,omitempty"`
+	SchemaVersion string          `json:"schema_version,omitempty"`
+	System        SystemConfig    `json:"system"`
+	Interfaces    []Interface     `json:"interfaces"`
+	Zones         []Zone          `json:"zones"`
+	Assets        []Asset         `json:"assets,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
-	Firewall      FirewallConfig `json:"firewall"`
-	IDS           IDSConfig      `json:"ids,omitempty"`
-	Services      ServicesConfig `json:"services"`
-	Description   string         `json:"description,omitempty"`
-	Version       string         `json:"version,omitempty"`
+	Firewall      FirewallConfig  `json:"firewall"`
+	IDS           IDSConfig       `json:"ids,omitempty"`
+	Services      ServicesConfig  `json:"services"`
+	Description   string          `json:"description,omitempty"`
+	Version       string          `json:"version,omitempty"`
 }
 
 // RedactedCopy returns a copy of c with secrets removed.
@@ -58,7 +58,19 @@ type SystemConfig struct {
 // By default, mgmt binds on all interfaces (0.0.0.0) so the UI is reachable
 // on WAN/DMZ/LAN interfaces in lab deployments. Operators can narrow this later.
 type MgmtConfig struct {
+	// ListenAddr is the legacy HTTP listen address for management UI/API.
+	// Prefer HTTPListenAddr/HTTPSListenAddr for new configs.
 	ListenAddr string `json:"listenAddr,omitempty"` // e.g. ":8080", "127.0.0.1:8080"
+
+	EnableHTTP  *bool `json:"enableHTTP,omitempty"`
+	EnableHTTPS *bool `json:"enableHTTPS,omitempty"`
+
+	HTTPListenAddr  string `json:"httpListenAddr,omitempty"`  // default ":8080"
+	HTTPSListenAddr string `json:"httpsListenAddr,omitempty"` // default ":8443"
+
+	// TLS certificate and key (PEM). If empty, a self-signed cert is generated on first start.
+	TLSCertFile string `json:"tlsCertFile,omitempty"` // e.g. "/data/tls/server.crt"
+	TLSKeyFile  string `json:"tlsKeyFile,omitempty"`  // e.g. "/data/tls/server.key"
 }
 
 // SSHConfig controls the embedded SSH server (interactive CLI).
@@ -92,18 +104,18 @@ type SyslogForwarder struct {
 
 // DNSConfig defines Unbound resolver behavior managed by containd.
 type DNSConfig struct {
-	Enabled        bool     `json:"enabled"`
-	ListenPort     int      `json:"listenPort,omitempty"`    // default 53
-	ListenZones    []string `json:"listenZones,omitempty"`   // zones to listen on (future L3 binding)
+	Enabled         bool     `json:"enabled"`
+	ListenPort      int      `json:"listenPort,omitempty"`      // default 53
+	ListenZones     []string `json:"listenZones,omitempty"`     // zones to listen on (future L3 binding)
 	UpstreamServers []string `json:"upstreamServers,omitempty"` // forwarders; empty uses root hints
-	CacheSizeMB    int      `json:"cacheSizeMB,omitempty"`   // optional cache size
+	CacheSizeMB     int      `json:"cacheSizeMB,omitempty"`     // optional cache size
 }
 
 // NTPConfig defines OpenNTPD client settings managed by containd.
 type NTPConfig struct {
-	Enabled bool     `json:"enabled"`
-	Servers []string `json:"servers,omitempty"` // NTP servers/pools
-	IntervalSeconds int `json:"intervalSeconds,omitempty"` // polling interval hint
+	Enabled         bool     `json:"enabled"`
+	Servers         []string `json:"servers,omitempty"`         // NTP servers/pools
+	IntervalSeconds int      `json:"intervalSeconds,omitempty"` // polling interval hint
 }
 
 // ProxyConfig holds forward/reverse proxy settings managed by containd.
@@ -140,9 +152,19 @@ type ReverseProxySite struct {
 }
 
 type Interface struct {
-	Name      string   `json:"name"`
-	Zone      string   `json:"zone"`
-	Addresses []string `json:"addresses,omitempty"` // CIDR strings
+	Name      string          `json:"name"`
+	Zone      string          `json:"zone"`
+	Addresses []string        `json:"addresses,omitempty"` // CIDR strings
+	Access    InterfaceAccess `json:"access,omitempty"`
+}
+
+// InterfaceAccess controls which plane endpoints are reachable on a given interface.
+// Nil values mean "unspecified" and are treated as enabled by default for backward compatibility.
+type InterfaceAccess struct {
+	Mgmt  *bool `json:"mgmt,omitempty"`  // overall mgmt plane access (HTTP/HTTPS)
+	HTTP  *bool `json:"http,omitempty"`  // allow mgmt over HTTP
+	HTTPS *bool `json:"https,omitempty"` // allow mgmt over HTTPS
+	SSH   *bool `json:"ssh,omitempty"`   // allow SSH CLI
 }
 
 // DefaultPhysicalInterfaces returns the appliance's default physical interface names.
@@ -229,15 +251,15 @@ const (
 
 // Asset is a first-class OT/ICS device record.
 type Asset struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Type        AssetType    `json:"type"`
-	Zone        string       `json:"zone,omitempty"`
-	IPs         []string     `json:"ips,omitempty"`
-	Hostnames   []string     `json:"hostnames,omitempty"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Type        AssetType   `json:"type"`
+	Zone        string      `json:"zone,omitempty"`
+	IPs         []string    `json:"ips,omitempty"`
+	Hostnames   []string    `json:"hostnames,omitempty"`
 	Criticality Criticality `json:"criticality,omitempty"`
-	Tags        []string     `json:"tags,omitempty"`
-	Description string       `json:"description,omitempty"`
+	Tags        []string    `json:"tags,omitempty"`
+	Description string      `json:"description,omitempty"`
 }
 
 type FirewallConfig struct {
@@ -281,15 +303,15 @@ const (
 )
 
 type Rule struct {
-	ID           string     `json:"id"`
-	Description  string     `json:"description,omitempty"`
-	SourceZones  []string   `json:"sourceZones,omitempty"`
-	DestZones    []string   `json:"destZones,omitempty"`
-	Sources      []string   `json:"sources,omitempty"`      // CIDR strings
-	Destinations []string   `json:"destinations,omitempty"` // CIDR strings
-	Protocols    []Protocol `json:"protocols,omitempty"`
+	ID           string       `json:"id"`
+	Description  string       `json:"description,omitempty"`
+	SourceZones  []string     `json:"sourceZones,omitempty"`
+	DestZones    []string     `json:"destZones,omitempty"`
+	Sources      []string     `json:"sources,omitempty"`      // CIDR strings
+	Destinations []string     `json:"destinations,omitempty"` // CIDR strings
+	Protocols    []Protocol   `json:"protocols,omitempty"`
 	ICS          ICSPredicate `json:"ics,omitempty"`
-	Action       Action     `json:"action"`
+	Action       Action       `json:"action"`
 }
 
 type Protocol struct {
@@ -300,12 +322,12 @@ type Protocol struct {
 // ICSPredicate captures ICS-specific primitives for rules (placeholder).
 // For Phase 2, Modbus fields are supported.
 type ICSPredicate struct {
-	Protocol     string  `json:"protocol,omitempty"`      // modbus, dnp3, iec104, etc.
-	FunctionCode []uint8 `json:"functionCode,omitempty"`  // e.g., Modbus function codes
-	UnitID       *uint8  `json:"unitId,omitempty"`        // optional Modbus unit id
+	Protocol     string   `json:"protocol,omitempty"`     // modbus, dnp3, iec104, etc.
+	FunctionCode []uint8  `json:"functionCode,omitempty"` // e.g., Modbus function codes
+	UnitID       *uint8   `json:"unitId,omitempty"`       // optional Modbus unit id
 	Addresses    []string `json:"addresses,omitempty"`    // register/address ranges as strings
-	ReadOnly     bool    `json:"readOnly,omitempty"`      // Modbus read-only class
-	WriteOnly    bool    `json:"writeOnly,omitempty"`     // Modbus write-only class
+	ReadOnly     bool     `json:"readOnly,omitempty"`     // Modbus read-only class
+	WriteOnly    bool     `json:"writeOnly,omitempty"`    // Modbus write-only class
 }
 
 // Validate performs basic consistency checks on the config.
@@ -360,11 +382,20 @@ func validateHostname(h string) error {
 }
 
 func validateMgmt(m MgmtConfig) error {
-	if m.ListenAddr == "" {
-		return nil
-	}
-	if len(m.ListenAddr) > 128 {
+	if m.ListenAddr != "" && len(m.ListenAddr) > 128 {
 		return fmt.Errorf("mgmt.listenAddr too long")
+	}
+	if m.HTTPListenAddr != "" && len(m.HTTPListenAddr) > 128 {
+		return fmt.Errorf("mgmt.httpListenAddr too long")
+	}
+	if m.HTTPSListenAddr != "" && len(m.HTTPSListenAddr) > 128 {
+		return fmt.Errorf("mgmt.httpsListenAddr too long")
+	}
+	if m.TLSCertFile != "" && len(m.TLSCertFile) > 256 {
+		return fmt.Errorf("mgmt.tlsCertFile too long")
+	}
+	if m.TLSKeyFile != "" && len(m.TLSKeyFile) > 256 {
+		return fmt.Errorf("mgmt.tlsKeyFile too long")
 	}
 	// We accept anything net/http can listen on; detailed parsing later.
 	return nil

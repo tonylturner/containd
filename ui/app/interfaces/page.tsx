@@ -140,13 +140,14 @@ export default function InterfacesPage() {
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">Addresses</th>
+              <th className="px-4 py-3">Access</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={4}>
+                <td className="px-4 py-4 text-slate-400" colSpan={5}>
                   No interfaces configured.
                 </td>
               </tr>
@@ -184,6 +185,10 @@ function InterfaceRow({
   const [editing, setEditing] = useState(false);
   const [zone, setZone] = useState(iface.zone ?? "");
   const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
+  const [mgmt, setMgmt] = useState(iface.access?.mgmt ?? true);
+  const [http, setHTTP] = useState(iface.access?.http ?? true);
+  const [https, setHTTPS] = useState(iface.access?.https ?? true);
+  const [ssh, setSSH] = useState(iface.access?.ssh ?? true);
 
   return (
     <tr className="border-t border-white/5">
@@ -223,6 +228,55 @@ function InterfaceRow({
           </span>
         )}
       </td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <div className="grid grid-cols-2 gap-2 text-xs text-slate-200">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={mgmt}
+                disabled={!canEdit}
+                onChange={(e) => setMgmt(e.target.checked)}
+              />
+              mgmt
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={ssh}
+                disabled={!canEdit}
+                onChange={(e) => setSSH(e.target.checked)}
+              />
+              ssh
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={http}
+                disabled={!canEdit || !mgmt}
+                onChange={(e) => setHTTP(e.target.checked)}
+              />
+              http
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={https}
+                disabled={!canEdit || !mgmt}
+                onChange={(e) => setHTTPS(e.target.checked)}
+              />
+              https
+            </label>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1 text-xs">
+            <span className={chipClass(iface.access?.mgmt ?? true)}>mgmt</span>
+            <span className={chipClass(iface.access?.ssh ?? true)}>ssh</span>
+            <span className={chipClass(iface.access?.http ?? true)}>http</span>
+            <span className={chipClass(iface.access?.https ?? true)}>https</span>
+          </div>
+        )}
+      </td>
       <td className="px-4 py-3 text-right">
         {editing ? (
           <div className="inline-flex gap-2">
@@ -234,6 +288,12 @@ function InterfaceRow({
                     .split(",")
                     .map((s) => s.trim())
                     .filter(Boolean),
+                  access: {
+                    mgmt,
+                    ssh,
+                    http,
+                    https,
+                  },
                 });
                 setEditing(false);
               }}
@@ -245,6 +305,10 @@ function InterfaceRow({
               onClick={() => {
                 setZone(iface.zone ?? "");
                 setAddresses((iface.addresses ?? []).join(", "));
+                setMgmt(iface.access?.mgmt ?? true);
+                setSSH(iface.access?.ssh ?? true);
+                setHTTP(iface.access?.http ?? true);
+                setHTTPS(iface.access?.https ?? true);
                 setEditing(false);
               }}
               className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
@@ -275,4 +339,10 @@ function InterfaceRow({
       </td>
     </tr>
   );
+}
+
+function chipClass(ok: boolean) {
+  return ok
+    ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+    : "rounded-md bg-amber/15 px-2 py-1 text-amber";
 }

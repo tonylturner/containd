@@ -18,6 +18,7 @@ if [[ -z "${cid}" ]]; then
 fi
 
 http_map="$(docker compose port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+https_map="$(docker compose port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 ssh_map="$(docker compose port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
 
@@ -37,6 +38,17 @@ else
 fi
 
 echo ""
+if [[ -n "${https_map}" ]]; then
+  echo "UI/API (HTTPS, host published):"
+  if [[ "${https_map%:*}" == "0.0.0.0" ]]; then
+    https_map="localhost:${https_map##*:}"
+  fi
+  echo "  https://${https_map} (self-signed by default)"
+else
+  echo "UI/API (HTTPS, host published): not published (no 8443/tcp mapping)"
+fi
+
+echo ""
 if [[ -n "${ssh_map}" ]]; then
   echo "SSH CLI (host published):"
   # docker compose port prints host:port; assume host is localhost-like.
@@ -46,7 +58,7 @@ if [[ -n "${ssh_map}" ]]; then
     host="localhost"
   fi
   echo "  ssh -p ${port} containd@${host}"
-  echo "  then type: wizard"
+  echo "  then type: wizard or menu"
 else
   echo "SSH CLI (host published): not published (no 2222/tcp mapping)"
 fi
