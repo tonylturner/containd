@@ -1,5 +1,7 @@
 # CLI Design
 
+This document is rendered from `docs/mkdocs/`.
+
 The CLI mirrors appliance-style workflows. Commands will call control-plane APIs/config store for configuration and show operations.
 
 ## Current skeleton
@@ -49,14 +51,16 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 
 ## Auth (current)
 
-Management APIs and the in-app CLI require bearer-token auth by default.
+Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
-Environment variables:
+Environment variables (common):
 - `CONTAIND_LAB_MODE=1` disables auth checks (lab/dev only).
-- `CONTAIND_ADMIN_TOKEN=<secret>` enables full access.
-- `CONTAIND_AUDITOR_TOKEN=<secret>` enables read-only access.
+- `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification (required when not in lab mode).
+- `CONTAIND_COOKIE_SECURE=1` forces the `Secure` flag on the auth cookie (use when serving over HTTPS).
 
-When not in lab mode, at least one token must be set or the API will return `503` with an auth configuration error.
+Roles (current):
+- `admin` (full access)
+- `view` (read-only)
 
 ## SSH console (appliance-style)
 
@@ -78,3 +82,4 @@ Notes:
 - Add an interactive `wizard` command over SSH for initial provisioning.
 - Hook command execution to HTTP client layer (or direct store) depending on deployment topology.
 - Add service commands (syslog/NTP/DNS) as system services land.
+- Add `show ip rule`, `set route`, and `set pbr` commands as routing/PBR support is surfaced via UI/CLI/API.

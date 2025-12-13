@@ -1,5 +1,7 @@
 # containd Architecture
 
+This document is rendered from `docs/mkdocs/`.
+
 This document tracks the high-level architecture for containd as it evolves.
 
 ## Planes
@@ -7,7 +9,7 @@ This document tracks the high-level architecture for containd as it evolves.
 - **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/NTP/DNS/proxies), policy compilation → rule snapshots/nftables sets, audit, identity (placeholder), embedded-daemon config generation.
 - **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit, dashboards.
 
-## Integrated daemons (per `agents.md`)
+## Integrated daemons (per `AGENTS.md`)
 The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. IT DPI/telemetry is implemented natively in Go decoders for current scope.
 
 ## Packaging

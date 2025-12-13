@@ -1,11 +1,17 @@
 # Data Plane Overview
 
+This document is rendered from `docs/mkdocs/`.
+
 This document tracks the data-plane design and current scaffolding.
 
 ## Current scaffolding
 - Capture manager (`pkg/dp/capture`): placeholder that validates interfaces and will host RX workers (NFQUEUE/AF_PACKET planned).
 - Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, and exposes `ShouldInspect` for selective DPI steering.
 - Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS/identity predicates stubbed.
+- Kernel programming (Linux):
+  - Interface addressing + default routes applied via netlink (`pkg/dp/netcfg`).
+  - Static routes + basic policy routing rules (PBR) applied via netlink (`routing` config).
+  - nftables rules compiled/applied for zone firewall and basic NAT (masquerade).
 
 ## Pipeline (planned)
 1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.
@@ -24,7 +30,8 @@ This document tracks the data-plane design and current scaffolding.
 
 ## Next steps
 - Implement capture workers and flow tracking.
-- Compile policies to nftables rules/sets; add verdict integration (IPS updates).
+- Expand nftables compilation (DNAT/port-forwards, richer input policy, per-zone defaults).
+- Add routing reconcile/replace semantics and `show ip rule` support in CLI/UI.
 - Extend evaluator for ICS/identity-aware predicates.
 - Integrate DPI decoders into flow processing and rule context enrichment.
 - Surface metrics/telemetry for throughput and drop counters; optional eBPF probes.

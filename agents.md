@@ -2,6 +2,8 @@
 
 Authoritative, consolidated instructions for building **containd / ICS‑NGFW** as a **single‑image appliance**. This file supersedes all other root‑level specs; historical drafts are archived under `docs/spec-archive/`.
 
+Note: `AGENTS.md` is canonical; `agents.md` is a short pointer for convenience.
+
 ---
 
 ## 0. Product Principles

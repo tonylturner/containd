@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"syscall"
 	"strings"
 	"sync/atomic"
 	"unsafe"
@@ -18,6 +20,14 @@ import (
 )
 
 func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyOptions) error {
+	// In appliance mode, we want the kernel to forward traffic between interfaces.
+	// Enable per-netns forwarding when there are multiple configured interfaces.
+	if shouldEnableForwarding(ifaces) {
+		if err := enableForwarding(); err != nil {
+			return err
+		}
+	}
+
 	for _, iface := range ifaces {
 		select {
 		case <-ctx.Done():
@@ -97,6 +107,48 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 	return nil
 }
 
+func shouldEnableForwarding(ifaces []config.Interface) bool {
+	seen := map[string]struct{}{}
+	for _, iface := range ifaces {
+		if strings.TrimSpace(iface.Zone) == "" {
+			continue
+		}
+		dev := strings.TrimSpace(iface.Device)
+		if dev == "" {
+			dev = strings.TrimSpace(iface.Name)
+		}
+		if dev == "" {
+			continue
+		}
+		seen[dev] = struct{}{}
+		if len(seen) >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+func enableForwarding() error {
+	// These sysctls are per-netns on Linux.
+	if err := writeSysctl("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+		return fmt.Errorf("enable ipv4 forwarding: %w", err)
+	}
+	// Best-effort: enable v6 forwarding for future dual-stack. Not all kernels expose this.
+	_ = writeSysctl("/proc/sys/net/ipv6/conf/all/forwarding", "1")
+	return nil
+}
+
+func writeSysctl(path, val string) error {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return fmt.Errorf("empty sysctl value")
+	}
+	if !strings.HasSuffix(val, "\n") {
+		val += "\n"
+	}
+	return os.WriteFile(path, []byte(val), 0o644)
+}
+
 func addDefaultRoute(ifIndex int, gateway string) error {
 	ip := net.ParseIP(strings.TrimSpace(gateway))
 	if ip == nil {
@@ -154,7 +206,7 @@ func addDefaultRoute(ifIndex int, gateway string) error {
 	if err != nil {
 		return err
 	}
-	msgs, err := unix.ParseNetlinkMessage(buf[:n])
+	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 	if err != nil {
 		return err
 	}
@@ -181,24 +233,42 @@ func addDefaultRoute(ifIndex int, gateway string) error {
 }
 
 func setLinkUp(name string) error {
-	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	nic, err := net.InterfaceByName(name)
+	if err != nil {
+		return err
+	}
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return err
 	}
 	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
 
-	var ifr unix.Ifreq
-	copy(ifr.Name[:], name)
-	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, &ifr); err != nil {
+	seq := atomic.AddUint32(&nlSeq, 1)
+	var req bytes.Buffer
+	hdr := unix.NlMsghdr{
+		Type:  unix.RTM_NEWLINK,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	ifi := unix.IfInfomsg{
+		Family: unix.AF_UNSPEC,
+		Index:  int32(nic.Index),
+		Flags:  unix.IFF_UP,
+		Change: unix.IFF_UP,
+	}
+	_ = binary.Write(&req, binary.LittleEndian, ifi)
+
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return err
 	}
-	flags := ifr.Uint16()
-	flags |= unix.IFF_UP
-	ifr.SetUint16(flags)
-	if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, &ifr); err != nil {
-		return err
-	}
-	return nil
+	return readNetlinkAck(fd, seq)
 }
 
 var nlSeq uint32
@@ -274,7 +344,7 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-	msgs, err := unix.ParseNetlinkMessage(buf[:n])
+	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 	if err != nil {
 		return err
 	}
@@ -363,7 +433,7 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-	msgs, err := unix.ParseNetlinkMessage(buf[:n])
+	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 	if err != nil {
 		return err
 	}
@@ -423,7 +493,7 @@ func listAddrs(ifIndex int, family int) ([]*net.IPNet, error) {
 		if err != nil {
 			return nil, err
 		}
-		msgs, err := unix.ParseNetlinkMessage(buf[:n])
+		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 		if err != nil {
 			return nil, err
 		}
@@ -451,13 +521,9 @@ func listAddrs(ifIndex int, family int) ([]*net.IPNet, error) {
 				if int(am.Index) != ifIndex {
 					continue
 				}
-				attrs, err := unix.ParseNetlinkRouteAttr(m.Data[unix.SizeofIfAddrmsg:])
-				if err != nil {
-					continue
-				}
 				var ip net.IP
-				for _, a := range attrs {
-					switch a.Attr.Type {
+				for _, a := range parseNetlinkAttrs(m.Data[unix.SizeofIfAddrmsg:]) {
+					switch a.Type {
 					case unix.IFA_LOCAL:
 						ip = net.IP(append([]byte(nil), a.Value...))
 					case unix.IFA_ADDRESS:
@@ -485,6 +551,31 @@ func listAddrs(ifIndex int, family int) ([]*net.IPNet, error) {
 			}
 		}
 	}
+}
+
+type netlinkAttr struct {
+	Type  uint16
+	Value []byte
+}
+
+func parseNetlinkAttrs(b []byte) []netlinkAttr {
+	attrs := []netlinkAttr{}
+	for len(b) >= 4 {
+		l := int(binary.LittleEndian.Uint16(b[0:2]))
+		t := binary.LittleEndian.Uint16(b[2:4])
+		if l < 4 || l > len(b) {
+			break
+		}
+		val := append([]byte(nil), b[4:l]...)
+		attrs = append(attrs, netlinkAttr{Type: t, Value: val})
+		// Align to 4.
+		adv := (l + 3) &^ 3
+		if adv > len(b) {
+			break
+		}
+		b = b[adv:]
+	}
+	return attrs
 }
 
 func addRtAttr(b *bytes.Buffer, attrType uint16, data []byte) {

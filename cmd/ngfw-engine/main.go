@@ -68,6 +68,7 @@ func main() {
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger))
+	mux.HandleFunc("/internal/routing", routingHandler(logger))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
@@ -265,6 +266,35 @@ func interfacesStateHandler() http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
+	}
+}
+
+func routingHandler(logger *log.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		var routing config.RoutingConfig
+		if err := json.Unmarshal(body, &routing); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		// Replace semantics are provided for future reconcile; for now we do additive apply.
+		if err := netcfg.ApplyRouting(ctx, routing); err != nil {
+			logger.Printf("apply routing failed: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
 	}
 }
 

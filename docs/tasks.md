@@ -2,14 +2,14 @@
 
 Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 
-- [ ] Phase 0 polish
+- [x] Phase 0 polish
   - [x] Ensure health endpoints are documented in README/docs.
   - [x] Serve built Next.js UI from `ngfw-mgmt` when available (fallback to static placeholder).
   - [x] Add minimal CI job (lint + build) for Go and UI.
-- [ ] Config model foundation
+- [x] Config model foundation
   - [x] Define interface, zone, and firewall rule structs in `pkg/cp/config` with validation.
   - [x] Add SQLite-backed persistence abstraction.
-  - [x] Expand `docs/config-format.md` with schema outline.
+  - [x] Expand `docs/mkdocs/config-format.md` with schema outline.
   - [x] Add schema versioning support in config exports/imports.
   - [x] Add schema version negotiation/upgrade handling.
   - [x] Seed default physical interfaces (wan/dmz/lan1-6) into new configs.
@@ -21,12 +21,16 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
   - [x] Add request validation and basic unit tests.
   - [x] Add config export/import endpoints.
-  - [~] Add objects/assets/identity/services/audit endpoints.
+  - [~] Add objects endpoints.
+  - [x] Add services endpoints (syslog/NTP/DNS/proxies) and status endpoint.
+  - [x] Add audit endpoints and UI/CLI views (forwarding pending).
+  - [x] Add users endpoints (admin-only).
+  - [~] Add identity endpoints (beyond users/sessions) as phased work.
   - [x] Add assets endpoints.
   - [x] Add dataplane runtime config endpoints.
   - [x] Add config lifecycle endpoints (candidate/running, commit/rollback, diff, commit-confirmed).
   - [x] Wire commits to push compiled snapshots + runtime config to engine.
-- [ ] Data-plane capture stub
+- [x] Data-plane capture stub
   - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
 - [ ] Rule engine skeleton
@@ -35,7 +39,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
   - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
   - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings done).
-- [ ] Flow tracking scaffold
+    - [~] Add NAT masquerade via nftables postrouting (config + compile done; CLI/UI surface pending).
+- [x] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.
 - [ ] CLI shell
@@ -49,6 +54,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add redacted export variants (`show running-config redacted`, `export config redacted`).
   - [x] Add SSH console (admin-only) with `menu` + `wizard`.
   - [x] Add diagnostics commands (`diag ping`, `diag traceroute`, `diag capture`, `show ip route`).
+    - [x] Make `diag ping` work without raw ICMP (TCP fallback).
+    - [x] Improve Linux traceroute accuracy (UDP + error queue).
   - [ ] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
   - [ ] Add SSH hardening (rate limiting, banners, host key persistence review).
 - [ ] UI integration
@@ -61,12 +68,14 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
   - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
+  - [~] Add in-app console/CLI (dashboard console replacing roadmap; uses mgmt `/api/v1/cli/execute`).
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
   - [ ] Validate Dockerfiles with runtime smoke scripts.
-  - [x] Document compose usage in README and `docs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
+  - [x] Document compose usage in README and `docs/mkdocs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
+  - [x] Add compose UX helpers (checked-in `.env.example`, ignore `.env`, `scripts/containd` connection helper).
 - [ ] Observability/logging
   - [x] Add structured logging helper in `pkg/common`.
   - [x] Use helper in both binaries.
@@ -76,8 +85,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations
   - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
-  - [~] Add auth/RBAC (admin/operator/auditor/lab) for API/UI/CLI (env-token skeleton).
-  - [ ] HTTPS defaults with self-signed cert and custom cert install/rotate.
+  - [~] Add auth/RBAC (JWT cookie sessions, admin + view-only; enforce admin-only APIs).
+    - [~] Ensure logout invalidates session server-side (session store + denylist) and UI always redirects on expiry.
+  - [~] HTTPS defaults with self-signed cert and custom cert install/rotate (self-signed + TLS config endpoints wired; CA trust management WIP).
   - [x] Add SSH server integration points (admin-only console).
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
 - [ ] ICS/OT features
@@ -102,9 +112,25 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] eBPF
   - [ ] Plan optional XDP/TC programs for early drop/counters and event streaming; keep fallback functional.
 - [ ] Config lifecycle safety
-  - [ ] Implement candidate/running configs with commit/commit-confirmed/rollback and deterministic export/import.
+  - [x] Implement candidate/running configs with commit/commit-confirmed/rollback and deterministic export/import.
   - [~] Implement audit logging (who/when/source/what/result) with API hooks in place; UI/CLI views and syslog forwarding pending.
 - [ ] Documentation
-  - [x] Expand `docs/architecture.md` with module boundaries and data/control/management plane flows.
-  - [x] Update `docs/dataplane.md` with policy compilation → engine flow.
-  - [x] Flesh out `docs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
+  - [x] Expand `docs/mkdocs/architecture.md` with module boundaries and data/control/management plane flows.
+  - [x] Update `docs/mkdocs/dataplane.md` with policy compilation → engine flow.
+  - [x] Flesh out `docs/mkdocs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
+
+- [ ] Firewall core networking
+  - [~] Routing + policy routing (config model + engine netlink apply; replace/reconcile semantics pending).
+  - [ ] VLAN subinterfaces (config + netlink link creation + UI/CLI inputs).
+  - [ ] Policy-based routing UX (CLI/UI/API to edit rules, plus `show ip rule`).
+  - [ ] NAT UX (CLI/UI/API) for SNAT/DNAT and validation.
+
+- [ ] Appliance-grade networking & performance
+  - [ ] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).
+  - [ ] Interface discovery + assignment UX (map physical NICs → `wan/dmz/lan1-6`, show link state/addresses).
+  - [ ] Linux routing reconcile (remove stale routes/rules managed by containd).
+  - [ ] Linux neighbor visibility + tooling (`show neighbors`, ARP/ND tables).
+  - [ ] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.
+  - [ ] NAT performance + conntrack tuning defaults (sysctls, table sizing) with persisted config knobs.
+  - [ ] NIC performance baseline: RSS/RPS/XPS guidance + optional auto-tuning (documented and gated).
+  - [ ] eBPF/XDP optional acceleration plan (counters/early drop) aligned with enforcement design.

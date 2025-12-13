@@ -18,6 +18,22 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+var tracerouteImpl = tracerouteICMPv4
+
+func isRawSocketDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && (errors.Is(opErr.Err, syscall.EPERM) || errors.Is(opErr.Err, syscall.EACCES)) {
+		return true
+	}
+	return false
+}
+
 func showIPRoute() Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if out == nil {
@@ -135,15 +151,18 @@ func diagPing() Command {
 			}
 		}
 		ip, err := resolveIPv4(host)
-		if err != nil {
-			return err
-		}
+			if err != nil {
+				return err
+			}
 
-		c, err := listenICMPv4("0.0.0.0")
-		if err != nil {
-			return err
-		}
-		defer c.Close()
+			c, err := listenICMPv4("0.0.0.0")
+			if err != nil {
+				if isRawSocketDenied(err) {
+					return tcpPingFallback(ctx, out, host, ip, count)
+				}
+				return err
+			}
+			defer c.Close()
 
 		id := os.Getpid() & 0xffff
 		dstAddr := icmpV4DstAddr(c, ip, id)
@@ -153,13 +172,13 @@ func diagPing() Command {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			default:
-			}
-			seq := i + 1
-			msg := icmp.Message{
-				Type: ipv4.ICMPTypeEcho,
-				Code: 0,
-				Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
+				default:
+				}
+				seq := i + 1
+				msg := icmp.Message{
+					Type: ipv4.ICMPTypeEcho,
+					Code: 0,
+					Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
 				}
 				b, _ := msg.Marshal(nil)
 				start := time.Now()
@@ -169,10 +188,10 @@ func diagPing() Command {
 					continue
 				}
 				buf := make([]byte, 1500)
-			n, peer, err := c.ReadFrom(buf)
-			if err != nil {
-				fmt.Fprintf(out, "seq=%d timeout\n", seq)
-				continue
+				n, peer, err := c.ReadFrom(buf)
+				if err != nil {
+					fmt.Fprintf(out, "seq=%d timeout\n", seq)
+					continue
 			}
 			rtt := time.Since(start)
 			rm, err := icmp.ParseMessage(1, buf[:n])
@@ -230,101 +249,171 @@ func diagTraceroute() Command {
 		if err != nil {
 			return err
 		}
+		return tracerouteImpl(ctx, out, host, dst, maxHops)
+	}
+}
 
-		pc, err := listenICMPv4("0.0.0.0")
-		if err != nil {
-			return err
+func tracerouteICMPv4(ctx context.Context, out io.Writer, host string, dst net.IP, maxHops int) error {
+	pc, err := listenICMPv4("0.0.0.0")
+	if err != nil {
+		if isRawSocketDenied(err) {
+			return fmt.Errorf("%w\n%s", err, "traceroute requires raw sockets for ICMP (or use Linux UDP traceroute where available)")
 		}
-		defer pc.Close()
+		return err
+	}
+	defer pc.Close()
 
-		id := os.Getpid() & 0xffff
-		dstAddr := icmpV4DstAddr(pc, dst, id)
-		ipc := pc.IPv4PacketConn()
-		if ipc == nil {
-			return fmt.Errorf("traceroute unavailable: IPv4 packet conn not supported")
+	id := os.Getpid() & 0xffff
+	dstAddr := icmpV4DstAddr(pc, dst, id)
+	ipc := pc.IPv4PacketConn()
+	if ipc == nil {
+		return fmt.Errorf("traceroute unavailable: IPv4 packet conn not supported")
+	}
+	mode := "raw"
+	if _, ok := pc.LocalAddr().(*net.UDPAddr); ok {
+		mode = "udp4"
+	}
+	limitNote := ""
+	if mode == "udp4" {
+		limitNote = " (limited: intermediate hops may be hidden)"
+	}
+	fmt.Fprintf(out, "traceroute to %s (%s), %d hops max (icmp/%s)%s\n", host, dst.String(), maxHops, mode, limitNote)
+	for ttl := 1; ttl <= maxHops; ttl++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
-		mode := "raw"
-		if _, ok := pc.LocalAddr().(*net.UDPAddr); ok {
-			mode = "udp4"
+		if err := ipc.SetTTL(ttl); err != nil {
+			return fmt.Errorf("set TTL=%d: %w", ttl, err)
 		}
-		limitNote := ""
-		if mode == "udp4" {
-			limitNote = " (limited: intermediate hops may be hidden)"
-		}
-		fmt.Fprintf(out, "traceroute to %s (%s), %d hops max (icmp/%s)%s\n", host, dst.String(), maxHops, mode, limitNote)
-		for ttl := 1; ttl <= maxHops; ttl++ {
+		peerIP := ""
+		reached := false
+
+		fmt.Fprintf(out, "%2d  ", ttl)
+		for probe := 0; probe < 3; probe++ {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			if err := ipc.SetTTL(ttl); err != nil {
-				return fmt.Errorf("set TTL=%d: %w", ttl, err)
+			seq := ttl*10 + probe
+			msg := icmp.Message{
+				Type: ipv4.ICMPTypeEcho,
+				Code: 0,
+				Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd-trace")},
 			}
-			peerIP := ""
-			reached := false
+			b, _ := msg.Marshal(nil)
+			start := time.Now()
+			_ = pc.SetDeadline(time.Now().Add(2 * time.Second))
+			if _, err := pc.WriteTo(b, dstAddr); err != nil {
+				fmt.Fprintf(out, "send=%v ", err)
+				continue
+			}
 
-			fmt.Fprintf(out, "%2d  ", ttl)
-			for probe := 0; probe < 3; probe++ {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
+			buf := make([]byte, 1500)
+			n, peer, err := pc.ReadFrom(buf)
+			if err != nil {
+				fmt.Fprint(out, "* ")
+				continue
+			}
+			rtt := time.Since(start).Round(time.Millisecond)
+			rm, err := icmp.ParseMessage(1, buf[:n])
+			if err != nil {
+				fmt.Fprint(out, "? ")
+				continue
+			}
+
+			if peerIP == "" {
+				switch p := peer.(type) {
+				case *net.IPAddr:
+					peerIP = p.IP.String()
+				case *net.UDPAddr:
+					peerIP = p.IP.String()
 				default:
+					peerIP = peer.String()
 				}
-				seq := ttl*10 + probe
-				msg := icmp.Message{
-					Type: ipv4.ICMPTypeEcho,
-					Code: 0,
-					Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd-trace")},
-				}
-				b, _ := msg.Marshal(nil)
-				start := time.Now()
-				_ = pc.SetDeadline(time.Now().Add(2 * time.Second))
-				if _, err := pc.WriteTo(b, dstAddr); err != nil {
-					fmt.Fprintf(out, "send=%v ", err)
-					continue
-				}
-
-				buf := make([]byte, 1500)
-				n, peer, err := pc.ReadFrom(buf)
-				if err != nil {
-					fmt.Fprint(out, "* ")
-					continue
-				}
-				rtt := time.Since(start).Round(time.Millisecond)
-				rm, err := icmp.ParseMessage(1, buf[:n])
-				if err != nil {
-					fmt.Fprint(out, "? ")
-					continue
-				}
-
 				if peerIP == "" {
-					switch p := peer.(type) {
-					case *net.IPAddr:
-						peerIP = p.IP.String()
-					case *net.UDPAddr:
-						peerIP = p.IP.String()
-					default:
-						peerIP = peer.String()
-					}
-					if peerIP == "" {
-						peerIP = peer.String()
-					}
-					fmt.Fprintf(out, "%s  ", peerIP)
+					peerIP = peer.String()
 				}
-				fmt.Fprintf(out, "%s ", rtt)
-
-				if rm.Type == ipv4.ICMPTypeEchoReply {
-					reached = true
-				}
+				fmt.Fprintf(out, "%s  ", peerIP)
 			}
-			fmt.Fprintln(out)
-			if reached {
-				break
+			fmt.Fprintf(out, "%s ", rtt)
+
+			if rm.Type == ipv4.ICMPTypeEchoReply {
+				reached = true
 			}
 		}
+		fmt.Fprintln(out)
+		if reached {
+			break
+		}
+	}
+	return nil
+}
+
+func tcpPingFallback(ctx context.Context, out io.Writer, host string, ip net.IP, count int) error {
+	ports := []int{443, 80, 22}
+	fmt.Fprintf(out, "PING %s (%s):\n", host, ip.String())
+	fmt.Fprintf(out, "note: ICMP not permitted; using TCP connect probes to %v\n", ports)
+	var rtts []time.Duration
+	for i := 0; i < count; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		seq := i + 1
+		var (
+			ok  bool
+			rtt time.Duration
+		)
+		for _, port := range ports {
+			target := net.JoinHostPort(ip.String(), strconv.Itoa(port))
+			start := time.Now()
+			d := net.Dialer{Timeout: 2 * time.Second}
+			conn, err := d.DialContext(ctx, "tcp4", target)
+			rtt = time.Since(start)
+			if err == nil {
+				_ = conn.Close()
+				ok = true
+				break
+			}
+			var nerr net.Error
+			if errors.As(err, &nerr) && nerr.Timeout() {
+				continue
+			}
+			// Connection refused or other immediate errors still indicate reachability.
+			ok = true
+			break
+		}
+		if !ok {
+			fmt.Fprintf(out, "seq=%d timeout\n", seq)
+		} else {
+			rtts = append(rtts, rtt)
+			fmt.Fprintf(out, "seq=%d time=%s\n", seq, rtt.Round(time.Millisecond))
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if len(rtts) == 0 {
+		fmt.Fprintln(out, "no replies")
 		return nil
 	}
+	var sum time.Duration
+	min := rtts[0]
+	max := rtts[0]
+	for _, d := range rtts {
+		sum += d
+		if d < min {
+			min = d
+		}
+		if d > max {
+			max = d
+		}
+	}
+	avg := sum / time.Duration(len(rtts))
+	fmt.Fprintf(out, "min/avg/max = %s/%s/%s\n", min.Round(time.Millisecond), avg.Round(time.Millisecond), max.Round(time.Millisecond))
+	return nil
 }
 
 func diagTCPTraceroute() Command {

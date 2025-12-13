@@ -1,5 +1,7 @@
 # System Services
 
+This document is rendered from `docs/mkdocs/`.
+
 Tracks syslog, NTP, and DNS service configuration and status handling managed by `ngfw-mgmt`.
 
 ## Syslog

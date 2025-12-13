@@ -5,10 +5,17 @@ package rules
 type Snapshot struct {
 	Version   string  // compiled rule version
 	Firewall  []Entry // firewall rules
+	NAT       NATConfig
 	IDS       IDSConfig
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
 	Default   Action
+}
+
+type NATConfig struct {
+	Enabled     bool
+	EgressZone  string
+	SourceZones []string
 }
 
 type Entry struct {

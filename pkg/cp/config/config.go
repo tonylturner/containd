@@ -15,6 +15,7 @@ type Config struct {
 	Interfaces    []Interface     `json:"interfaces"`
 	Zones         []Zone          `json:"zones"`
 	Assets        []Asset         `json:"assets,omitempty"`
+	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
 	Firewall      FirewallConfig  `json:"firewall"`
 	IDS           IDSConfig       `json:"ids,omitempty"`
@@ -294,6 +295,40 @@ type Asset struct {
 type FirewallConfig struct {
 	DefaultAction Action `json:"defaultAction"`
 	Rules         []Rule `json:"rules"`
+	NAT           NATConfig `json:"nat,omitempty"`
+}
+
+// NATConfig defines minimal source NAT behavior.
+// This is a Phase-1 baseline: MASQUERADE for selected source zones egressing a zone.
+type NATConfig struct {
+	Enabled     bool     `json:"enabled"`
+	EgressZone  string   `json:"egressZone,omitempty"`  // default "wan"
+	SourceZones []string `json:"sourceZones,omitempty"` // default ["lan","dmz"] when enabled
+}
+
+// RoutingConfig defines static routes and basic policy routing rules.
+// In early phases we support IPv4 only.
+type RoutingConfig struct {
+	Routes []StaticRoute `json:"routes,omitempty"`
+	Rules  []PolicyRule  `json:"rules,omitempty"`
+}
+
+// StaticRoute is a route entry for a given table (0 means main).
+// Dst accepts CIDR or "default".
+type StaticRoute struct {
+	Dst     string `json:"dst"`               // CIDR or "default"
+	Gateway string `json:"gateway,omitempty"` // next hop IP
+	Iface   string `json:"iface,omitempty"`   // logical interface name or kernel device
+	Table   int    `json:"table,omitempty"`   // 0=main
+	Metric  int    `json:"metric,omitempty"`
+}
+
+// PolicyRule selects a routing table based on L3 selectors (Phase-1: src/dst CIDR).
+type PolicyRule struct {
+	Priority int    `json:"priority,omitempty"` // 0 => auto
+	Src      string `json:"src,omitempty"`      // CIDR
+	Dst      string `json:"dst,omitempty"`      // CIDR
+	Table    int    `json:"table"`              // 1..252 recommended; 0 invalid for rules
 }
 
 // IDSConfig holds native IDS rules that match on normalized DPI events.
@@ -386,6 +421,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateAssets(c.Assets, c.Zones); err != nil {
+		return err
+	}
+	if err := validateRouting(c.Routing, c.Interfaces, c.Zones); err != nil {
 		return err
 	}
 	if err := validateDataPlane(c.DataPlane); err != nil {
@@ -514,6 +552,9 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 	for _, z := range zones {
 		zoneSet[z.Name] = struct{}{}
 	}
+	if err := validateNAT(f.NAT, zoneSet); err != nil {
+		return err
+	}
 	ruleIDs := map[string]struct{}{}
 	for _, r := range f.Rules {
 		if r.ID == "" {
@@ -546,6 +587,33 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 		}
 		if err := validateICSPredicate(r.ICS, r.ID); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {
+	if !n.Enabled {
+		return nil
+	}
+	egress := strings.TrimSpace(n.EgressZone)
+	if egress == "" {
+		egress = "wan"
+	}
+	if _, ok := zoneSet[egress]; !ok {
+		return fmt.Errorf("nat.egressZone references unknown zone %s", egress)
+	}
+	srcZones := n.SourceZones
+	if len(srcZones) == 0 {
+		srcZones = []string{"lan", "dmz"}
+	}
+	for _, z := range srcZones {
+		z = strings.TrimSpace(z)
+		if z == "" {
+			continue
+		}
+		if _, ok := zoneSet[z]; !ok {
+			return fmt.Errorf("nat.sourceZones references unknown zone %s", z)
 		}
 	}
 	return nil
@@ -616,6 +684,82 @@ func validateAssets(assets []Asset, zones []Zone) error {
 			a.Type != AssetLaptop &&
 			a.Type != AssetOther {
 			return fmt.Errorf("asset %s has invalid type %q", a.ID, a.Type)
+		}
+	}
+	return nil
+}
+
+func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
+	if len(r.Routes) == 0 && len(r.Rules) == 0 {
+		return nil
+	}
+	ifaceSet := map[string]struct{}{}
+	for _, iface := range ifaces {
+		if strings.TrimSpace(iface.Name) != "" {
+			ifaceSet[iface.Name] = struct{}{}
+		}
+		if strings.TrimSpace(iface.Device) != "" {
+			ifaceSet[iface.Device] = struct{}{}
+		}
+	}
+	zoneSet := map[string]struct{}{}
+	for _, z := range zones {
+		zoneSet[z.Name] = struct{}{}
+	}
+	_ = zoneSet
+
+	for _, rt := range r.Routes {
+		dst := strings.TrimSpace(rt.Dst)
+		if dst == "" {
+			return errors.New("routing.routes dst cannot be empty")
+		}
+		if strings.EqualFold(dst, "default") {
+			dst = "0.0.0.0/0"
+		}
+		if _, _, err := net.ParseCIDR(dst); err != nil {
+			return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
+		}
+		if gw := strings.TrimSpace(rt.Gateway); gw != "" {
+			if net.ParseIP(gw) == nil {
+				return fmt.Errorf("routing.routes gateway invalid %q", rt.Gateway)
+			}
+		}
+		if ifn := strings.TrimSpace(rt.Iface); ifn != "" {
+			if _, ok := ifaceSet[ifn]; !ok {
+				return fmt.Errorf("routing.routes iface unknown %q", rt.Iface)
+			}
+		}
+		if rt.Table < 0 || rt.Table > 252 {
+			return fmt.Errorf("routing.routes table out of range: %d", rt.Table)
+		}
+		if rt.Metric < 0 || rt.Metric > 999999 {
+			return fmt.Errorf("routing.routes metric out of range: %d", rt.Metric)
+		}
+	}
+
+	seenPrio := map[int]struct{}{}
+	for _, rule := range r.Rules {
+		if rule.Table <= 0 || rule.Table > 252 {
+			return fmt.Errorf("routing.rules table out of range: %d", rule.Table)
+		}
+		if rule.Priority < 0 || rule.Priority > 65535 {
+			return fmt.Errorf("routing.rules priority out of range: %d", rule.Priority)
+		}
+		if rule.Priority != 0 {
+			if _, ok := seenPrio[rule.Priority]; ok {
+				return fmt.Errorf("routing.rules duplicate priority %d", rule.Priority)
+			}
+			seenPrio[rule.Priority] = struct{}{}
+		}
+		if src := strings.TrimSpace(rule.Src); src != "" {
+			if _, _, err := net.ParseCIDR(src); err != nil {
+				return fmt.Errorf("routing.rules src invalid %q: %v", rule.Src, err)
+			}
+		}
+		if dst := strings.TrimSpace(rule.Dst); dst != "" {
+			if _, _, err := net.ParseCIDR(dst); err != nil {
+				return fmt.Errorf("routing.rules dst invalid %q: %v", rule.Dst, err)
+			}
 		}
 	}
 	return nil

@@ -123,6 +123,30 @@ func (c *HTTPClient) ConfigureInterfacesReplace(ctx context.Context, ifaces []co
 	return nil
 }
 
+func (c *HTTPClient) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(routing)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/routing", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine routing status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("engine BaseURL is empty")

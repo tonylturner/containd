@@ -1,5 +1,7 @@
 # SPDX – External Components
 
+This document is rendered from `docs/mkdocs/`.
+
 This file tracks third‑party/external components that containd embeds, vendors, or relies on at runtime **as part of the appliance**, along with their SPDX license identifiers.
 
 **Process**

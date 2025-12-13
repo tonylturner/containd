@@ -1,5 +1,7 @@
 # Docker Compose
 
+This document is rendered from `docs/mkdocs/`.
+
 This repo ships a `docker-compose.yml` for running the management plane (`containd`) and engine (`engine`) together, with a `.env`-driven configuration.
 
 ## Quickstart
@@ -53,4 +55,3 @@ To avoid “chicken/egg” provisioning, you can seed an admin SSH key (authoriz
 - Validate compose: `docker compose config -q`
 - Follow logs: `docker compose logs -f containd`
 - Factory reset (CLI): `factory reset NUCLEAR` (admin only; wipes config/users/audit and re-seeds defaults)
-

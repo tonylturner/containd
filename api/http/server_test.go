@@ -90,6 +90,7 @@ type mockEngine struct {
 	err     error
 	lastDP  config.DataPlaneConfig
 	lastIf  []config.Interface
+	lastRT  config.RoutingConfig
 	state   []config.InterfaceState
 }
 
@@ -105,6 +106,11 @@ func (m *mockEngine) ConfigureInterfaces(ctx context.Context, ifaces []config.In
 
 func (m *mockEngine) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
 	m.lastIf = append([]config.Interface(nil), ifaces...)
+	return nil
+}
+
+func (m *mockEngine) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
+	m.lastRT = routing
 	return nil
 }
 

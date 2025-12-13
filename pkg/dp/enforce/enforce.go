@@ -73,9 +73,20 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_service;\n")
 	buf.WriteString("    flags timeout;\n")
 	buf.WriteString("  }\n")
+	// INPUT: traffic destined to the appliance itself.
+	// Keep this minimal for now; mgmt/UI runs in a separate container in dev.
+	buf.WriteString("  chain input {\n")
+	buf.WriteString("    type filter hook input priority 0;\n")
+	buf.WriteString("    policy drop;\n")
+	buf.WriteString("    iifname \"lo\" accept\n")
+	buf.WriteString("    ct state { established, related } accept\n")
+	// Allow management-plane to talk to engine internal API.
+	buf.WriteString("    tcp dport 8081 accept\n")
+	buf.WriteString("  }\n")
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
+	buf.WriteString("    ct state { established, related } accept\n")
 	// Dynamic blocks first (verdict-driven).
 	buf.WriteString("    ip saddr @block_hosts drop\n")
 	buf.WriteString("    ip daddr @block_hosts drop\n")
@@ -91,6 +102,32 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		buf.WriteString("    " + line + "\n")
 	}
 	buf.WriteString("  }\n")
+
+	// POSTROUTING NAT: source NAT (masquerade) for common lab/appliance setups.
+	if snap.NAT.Enabled && len(snap.ZoneIfaces) > 0 {
+		egress := strings.TrimSpace(snap.NAT.EgressZone)
+		if egress == "" {
+			egress = "wan"
+		}
+		srcZones := snap.NAT.SourceZones
+		if len(srcZones) == 0 {
+			srcZones = []string{"lan", "dmz"}
+		}
+		buf.WriteString("  chain postrouting {\n")
+		buf.WriteString("    type nat hook postrouting priority srcnat;\n")
+		buf.WriteString("    policy accept;\n")
+		for _, z := range srcZones {
+			z = strings.TrimSpace(z)
+			if z == "" {
+				continue
+			}
+			srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
+			egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
+			buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade\n", srcSet, egSet))
+		}
+		buf.WriteString("  }\n")
+	}
+
 	buf.WriteString("}\n")
 	return buf.String(), nil
 }

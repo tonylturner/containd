@@ -34,13 +34,14 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 }
 
 // EngineClient is an optional interface for pushing compiled snapshots to the data plane.
-type EngineClient interface {
-	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
-	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
-	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
-	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
-	ApplyRules(ctx context.Context, snap rules.Snapshot) error
-}
+	type EngineClient interface {
+		Configure(ctx context.Context, cfg config.DataPlaneConfig) error
+		ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
+		ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
+		ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
+		ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
+		ApplyRules(ctx context.Context, snap rules.Snapshot) error
+	}
 
 type TelemetryClient interface {
 	ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
@@ -397,6 +398,9 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 	}
 	if engine != nil {
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
+			return err
+		}
+		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
 			return err
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {

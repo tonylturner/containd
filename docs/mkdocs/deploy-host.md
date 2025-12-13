@@ -1,5 +1,7 @@
 # Host Deployment
 
+This document is rendered from `docs/mkdocs/`.
+
 Outlines installation and systemd service setup for running `ngfw-engine` and `ngfw-mgmt` on a host. To be completed in future phases.
 
 Container builds:

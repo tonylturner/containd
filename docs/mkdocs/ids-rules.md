@@ -1,5 +1,7 @@
 # IDS Rules (Sigma-like)
 
+This document is rendered from `docs/mkdocs/`.
+
 containd supports a small, Sigma-inspired IDS rule format that matches on normalized DPI events.
 
 ## Storage
@@ -53,4 +55,3 @@ Supported Sigma subset:
 - `condition` expressions with `and`, `or`, `not`, parentheses, and `selection*` wildcards
 
 Tags may include `containd.proto.<proto>` or `containd.kind.<kind>` to set fast filters.
-

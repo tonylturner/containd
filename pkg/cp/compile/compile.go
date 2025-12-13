@@ -23,11 +23,24 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		Version:  cfg.Version,
 		Firewall: make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		Default:  dprules.Action(cfg.Firewall.DefaultAction),
+		NAT: dprules.NATConfig{
+			Enabled:     cfg.Firewall.NAT.Enabled,
+			EgressZone:  cfg.Firewall.NAT.EgressZone,
+			SourceZones: append([]string(nil), cfg.Firewall.NAT.SourceZones...),
+		},
 		IDS: dprules.IDSConfig{
 			Enabled: cfg.IDS.Enabled,
 			Rules:   make([]dprules.IDSRule, 0, len(cfg.IDS.Rules)),
 		},
 		ZoneIfaces: make(map[string][]string),
+	}
+	if snap.NAT.Enabled {
+		if strings.TrimSpace(snap.NAT.EgressZone) == "" {
+			snap.NAT.EgressZone = "wan"
+		}
+		if len(snap.NAT.SourceZones) == 0 {
+			snap.NAT.SourceZones = []string{"lan", "dmz"}
+		}
 	}
 	if snap.Version == "" {
 		snap.Version = "compiled-" + cfg.SchemaVersion

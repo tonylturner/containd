@@ -1,5 +1,7 @@
 # Config Format
 
+This document is rendered from `docs/mkdocs/`.
+
 Canonical JSON configuration for export/import and persistent state.
 
 ## Schema (initial)
@@ -51,6 +53,24 @@ Canonical JSON configuration for export/import and persistent state.
     "enforceTable": "containd",
     "dpiMock": false
   },
+  "routing": {
+    "staticRoutes": [
+      {
+        "dst": "203.0.113.0/24",
+        "via": "192.168.1.254",
+        "dev": "wan",
+        "table": 254,
+        "metric": 100
+      }
+    ],
+    "policyRules": [
+      {
+        "priority": 10010,
+        "src": "192.168.1.0/24",
+        "table": 100
+      }
+    ]
+  },
   "assets": [
     {
       "id": "plc-1",
@@ -83,6 +103,11 @@ Canonical JSON configuration for export/import and persistent state.
   },
   "firewall": {
     "defaultAction": "ALLOW",
+    "nat": {
+      "enabled": true,
+      "egressZone": "wan",
+      "sourceZones": ["lan", "dmz"]
+    },
     "rules": [
       {
         "id": "1",
@@ -113,9 +138,17 @@ Notes:
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
+- `routing` configures kernel routing when applying running config:
+  - `staticRoutes` are installed via netlink (Linux only today; IPv4 only).
+  - `policyRules` are installed via netlink as basic policy-based routing (Linux only today; src/dst CIDR selection, `table` selection).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
+- `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
+
+Limitations (current):
+- Routing/PBR is applied as “additive” changes; full reconcile/replace semantics are still in progress.
+- NAT is currently postrouting masquerade only (no DNAT/port-forward yet).
 
 ## API endpoints (initial)
 - `GET /api/v1/config` – fetch current config (404 if none).
