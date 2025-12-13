@@ -5,25 +5,32 @@ export type HealthResponse = {
   time?: string;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+// In the browser we always use same-origin relative URLs so cookies/localStorage
+// are scoped consistently (localhost vs 127.0.0.1 vs 0.0.0.0 can otherwise break auth).
+const API_BASE = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+// Deprecated: we no longer rely on localStorage JWTs for browser auth (cookie-only),
+// but we still clear this key for users upgrading from older builds.
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
+const SESSION_TOKEN_KEY = "containd.session.token";
+let redirectingToLogin = false;
+let authExpiredEmitted = false;
 
-function getStoredToken(): string | null {
+function getSessionToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return sessionStorage.getItem(SESSION_TOKEN_KEY);
   } catch {
     return null;
   }
 }
 
-function setStoredToken(token: string | null) {
+function setSessionToken(token: string | null) {
   if (typeof window === "undefined") return;
   try {
-    if (!token) localStorage.removeItem(TOKEN_KEY);
-    else localStorage.setItem(TOKEN_KEY, token);
+    if (!token) sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    else sessionStorage.setItem(SESSION_TOKEN_KEY, token);
   } catch {}
 }
 
@@ -33,6 +40,17 @@ function setStoredRole(role: string | null) {
     if (!role) localStorage.removeItem(ROLE_KEY);
     else localStorage.setItem(ROLE_KEY, role);
   } catch {}
+}
+
+export function clearLocalAuth() {
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {}
+  }
+  setSessionToken(null);
+  setStoredRole(null);
+  authExpiredEmitted = false;
 }
 
 export function getStoredRole(): UserRole | null {
@@ -51,26 +69,68 @@ export function isAdmin(): boolean {
 }
 
 function authHeaders(): Record<string, string> {
-  const t = getStoredToken() || ENV_TOKEN;
-  if (!t) return {};
-  return { Authorization: `Bearer ${t}` };
+  // Browser sessions are cookie-only. Only attach a bearer token when explicitly configured
+  // (e.g. local dev tooling or external API clients).
+  if (!ENV_TOKEN) return {};
+  return { Authorization: `Bearer ${ENV_TOKEN}` };
 }
 
-function updateTokenFromResponse(res: Response) {
+function updateSessionTokenFromResponse(res: Response) {
+  // When sliding expiration extends a session, the server may return a refreshed JWT.
+  // Persist it in sessionStorage (tab-scoped) as a fallback for environments where cookies
+  // are blocked or unreliable.
+  if (typeof window === "undefined") return;
   const next = res.headers.get("x-auth-token");
-  if (next) setStoredToken(next);
+  if (next) setSessionToken(next);
+}
+
+async function fetchWithSession(path: string, init: RequestInit): Promise<Response> {
+  const url = `${API_BASE}${path}`;
+
+  // Attempt cookie-first (no Authorization) unless an explicit env token is configured.
+  // If the cookie is blocked, retry once with a tab-scoped bearer token from sessionStorage.
+  const res = await fetch(url, {
+    ...init,
+    credentials: "include",
+  });
+
+  if (res.status === 401 && !ENV_TOKEN) {
+    const fallback = getSessionToken();
+    if (fallback) {
+      const h = (init.headers ?? {}) as Record<string, string>;
+      const hasAuth = Object.keys(h).some((k) => k.toLowerCase() === "authorization");
+      if (!hasAuth) {
+        const retry = await fetch(url, {
+          ...init,
+          headers: { ...h, Authorization: `Bearer ${fallback}` },
+          credentials: "include",
+        });
+        updateSessionTokenFromResponse(retry);
+        return retry;
+      }
+    }
+  }
+
+  updateSessionTokenFromResponse(res);
+  return res;
 }
 
 function handleUnauthorized(res: Response) {
   if (res.status !== 401) return false;
   // 401 means the session is not valid anymore; clear local state and force re-auth.
-  setStoredToken(null);
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {}
+  }
+  setSessionToken(null);
   setStoredRole(null);
   if (typeof window !== "undefined") {
-    const path = window.location.pathname;
-    if (!path.startsWith("/login")) {
-      const next = encodeURIComponent(path || "/");
-      window.location.href = `/login?reason=expired&next=${next}`;
+    // Centralize redirects in the Shell to avoid multiple simultaneous navigation events
+    // (which causes visible flicker when many parallel API calls 401).
+    if (!authExpiredEmitted) {
+      authExpiredEmitted = true;
+      window.dispatchEvent(new CustomEvent("containd:auth:expired"));
     }
   }
   return true;
@@ -364,29 +424,39 @@ export async function setDataPlane(
 
 async function getJSON<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithSession(path, {
       cache: "no-store",
       headers: authHeaders(),
-      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
-    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
   }
 }
 
+async function getJSONWithStatus<T>(path: string): Promise<{ status: number; data: T | null }> {
+  try {
+    const res = await fetchWithSession(path, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (handleUnauthorized(res)) return { status: 401, data: null };
+    if (!res.ok) return { status: res.status, data: null };
+    return { status: res.status, data: (await res.json()) as T };
+  } catch {
+    return { status: 0, data: null };
+  }
+}
+
 async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithSession(path, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
-      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
-    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
@@ -395,14 +465,12 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
 
 async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithSession(path, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
-      credentials: "include",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
-    updateTokenFromResponse(res);
     return (await res.json()) as T;
   } catch {
     return null;
@@ -411,13 +479,11 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
 
 async function deleteJSON(path: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetchWithSession(path, {
       method: "DELETE",
       headers: authHeaders(),
-      credentials: "include",
     });
     if (handleUnauthorized(res)) return false;
-    updateTokenFromResponse(res);
     return res.ok;
   } catch {
     return false;
@@ -431,20 +497,32 @@ export const api = {
       username,
       password,
     });
-    if (res?.token) setStoredToken(res.token);
+    // Store token tab-scoped as a fallback if cookies are blocked; cookie remains primary.
+    if (res?.token) setSessionToken(res.token);
     if (res?.user?.role) setStoredRole(res.user.role);
+    if (res) {
+      // Allow future session-expired notifications after a successful login.
+      authExpiredEmitted = false;
+    }
     return res;
   },
   logout: async () => {
     const ok = await postJSON<{ status: string }>("/api/v1/auth/logout", {});
-    setStoredToken(null);
-    setStoredRole(null);
+    clearLocalAuth();
+    // If we logged out, allow future session-expired notifications too.
     return ok;
   },
   me: async () => {
     const u = await getJSON<User>("/api/v1/auth/me");
     if (u?.role) setStoredRole(u.role);
+    if (u) authExpiredEmitted = false;
     return u;
+  },
+  meStatus: async () => {
+    const res = await getJSONWithStatus<User>("/api/v1/auth/me");
+    if (res.data?.role) setStoredRole(res.data.role);
+    if (res.status === 200) authExpiredEmitted = false;
+    return res;
   },
   updateMe: (patch: UpdateMeRequest) =>
     patchJSON<User>("/api/v1/auth/me", patch),

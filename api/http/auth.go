@@ -192,23 +192,17 @@ func setAuthCookie(c *gin.Context, token string, exp time.Time) {
 		maxAge = 0
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	secure := false
-	if strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" || strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true") {
-		secure = true
-	} else if c != nil && c.Request != nil && c.Request.TLS != nil {
-		secure = true
-	}
+	// Default is non-Secure so local HTTPS with self-signed certs works reliably in browsers.
+	// Production deployments should set CONTAIND_COOKIE_SECURE=1 (or terminate TLS in front).
+	secure := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true")
 	c.SetCookie("containd_token", token, maxAge, "/", "", secure, true)
 }
 
 func clearAuthCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	secure := false
-	if strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" || strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true") {
-		secure = true
-	} else if c != nil && c.Request != nil && c.Request.TLS != nil {
-		secure = true
-	}
+	secure := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true")
 	c.SetCookie("containd_token", "", -1, "/", "", secure, true)
 }
 

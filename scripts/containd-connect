@@ -25,6 +25,10 @@ ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "
 echo "------------------------------------------------------------"
 echo "containd connection helper"
 echo "Service: ${service} (container: ${cid:0:12})"
+echo ""
+echo "Tip: configuration is driven by .env"
+echo "  - Start from: .env.example"
+echo "  - Edit:       .env (ignored by git)"
 
 echo ""
 if [[ -n "${http_map}" ]]; then

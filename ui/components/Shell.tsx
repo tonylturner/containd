@@ -74,13 +74,28 @@ export function Shell({
   const pathname = usePathname() || "/";
   const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
   const [authChecked, setAuthChecked] = React.useState(false);
+  const [authError, setAuthError] = React.useState<string | null>(null);
   const [me, setMe] = React.useState<any>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<"profile" | "password">("profile");
+  const redirectingRef = React.useRef(false);
 
   const isAdmin = (me?.role ?? "") === "admin";
   const navGroups = React.useMemo(() => buildNavGroups(isAdmin), [isAdmin]);
+
+  const redirectToLogin = React.useCallback(
+    (reason: "expired" | "logout" | "forbidden" | "unauthenticated" = "unauthenticated") => {
+      if (typeof window === "undefined") return;
+      if (pathname.startsWith("/login")) return;
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      const next = pathname.startsWith("/") ? pathname : "/";
+      const url = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      window.location.href = url;
+    },
+    [pathname],
+  );
 
   React.useEffect(() => {
     try {
@@ -96,19 +111,35 @@ export function Shell({
   }, [navGroups]);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onExpired = () => redirectToLogin("expired");
+    window.addEventListener("containd:auth:expired", onExpired as EventListener);
+    return () => window.removeEventListener("containd:auth:expired", onExpired as EventListener);
+  }, [redirectToLogin]);
+
+  React.useEffect(() => {
     if (pathname.startsWith("/login")) {
       setAuthChecked(true);
+      setAuthError(null);
       return;
     }
     let canceled = false;
-    api.me().then((user) => {
+    setAuthChecked(false);
+    setAuthError(null);
+    api.meStatus().then(({ status, data }) => {
       if (canceled) return;
-      if (!user && typeof window !== "undefined") {
-        window.location.href = "/login";
+      if (status === 401) {
+        // Actual navigation is centralized to avoid redirect storms.
+        redirectToLogin("expired");
         return;
       }
-      setMe(user);
-      if ((user?.role ?? "") !== "admin" && pathname.startsWith("/system/") && typeof window !== "undefined") {
+      if (!data) {
+        setAuthError("Unable to verify session (API unavailable).");
+        setAuthChecked(false);
+        return;
+      }
+      setMe(data);
+      if ((data?.role ?? "") !== "admin" && pathname.startsWith("/system/") && typeof window !== "undefined") {
         window.location.href = "/forbidden";
         return;
       }
@@ -117,7 +148,7 @@ export function Shell({
     return () => {
       canceled = true;
     };
-  }, [pathname]);
+  }, [pathname, redirectToLogin]);
 
   function toggle(label: string) {
     setCollapsed((prev) => {
@@ -240,7 +271,22 @@ export function Shell({
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
-                Checking session…
+                {authError ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>{authError}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof window !== "undefined") window.location.reload();
+                      }}
+                      className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20"
+                    >
+                      Reload
+                    </button>
+                  </div>
+                ) : (
+                  "Checking session…"
+                )}
               </div>
             )}
             {authChecked && (

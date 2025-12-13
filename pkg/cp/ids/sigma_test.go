@@ -1,6 +1,7 @@
 package ids
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/containd/containd/pkg/cp/config"
@@ -24,16 +25,21 @@ detection:
 	if r.ID != "sigma-mb-1" || r.Proto != "modbus" || r.Kind != "request" {
 		t.Fatalf("bad rule header: %+v", r)
 	}
-	if len(r.When.All) != 1 || r.When.All[0].Field != "attr.function_code" || r.When.All[0].Op != "in" {
+	// Single selection can be represented as a leaf (preferred) or as a 1-element AND.
+	cond := r.When
+	if len(cond.All) == 1 {
+		cond = cond.All[0]
+	}
+	if cond.Field != "attr.function_code" || cond.Op != "in" {
 		t.Fatalf("bad condition: %+v", r.When)
 	}
 }
 
 func TestConditionExpressionAndOrNot(t *testing.T) {
 	det := map[string]any{
-		"sel1": map[string]any{"a": 1},
-		"sel2": map[string]any{"b|contains": "x"},
-		"sel3": map[string]any{"c": []any{1, 2}},
+		"sel1":      map[string]any{"a": 1},
+		"sel2":      map[string]any{"b|contains": "x"},
+		"sel3":      map[string]any{"c": []any{1, 2}},
 		"condition": "sel1 and (sel2 or not sel3)",
 	}
 	c, err := buildDetectionConditions(det)
@@ -116,8 +122,7 @@ func TestConvertSigmaEmptyDetectionsOk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.When != (config.IDSCondition{}) {
+	if !reflect.DeepEqual(r.When, config.IDSCondition{}) {
 		t.Fatalf("expected empty condition: %+v", r.When)
 	}
 }
-

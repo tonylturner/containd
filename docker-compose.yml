@@ -33,6 +33,9 @@ services:
       - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:-containd-dev-secret-change-me}
       - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
       - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
+      # Default admin provisioned on fresh installs (users DB empty).
+      - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
+      - CONTAIND_DEFAULT_ADMIN_PASSWORD=${CONTAIND_DEFAULT_ADMIN_PASSWORD:-}
 
       # Optional: point mgmt at a separate engine service.
       - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://engine:8081}

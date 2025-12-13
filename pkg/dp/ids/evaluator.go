@@ -40,9 +40,9 @@ func (e *Evaluator) Evaluate(ev dpi.Event) []dpi.Event {
 			continue
 		}
 		attrs := map[string]any{
-			"rule_id":   r.ID,
-			"severity":  r.Severity,
-			"message":   firstNonEmpty(r.Message, r.Title, "IDS alert"),
+			"rule_id":     r.ID,
+			"severity":    r.Severity,
+			"message":     firstNonEmpty(r.Message, r.Title, "IDS alert"),
 			"event_proto": ev.Proto,
 			"event_kind":  ev.Kind,
 		}
@@ -170,6 +170,11 @@ func evalOp(op string, actual any, expected any) bool {
 }
 
 func eq(a any, b any) bool {
+	ab, okA := toBool(a)
+	bb, okB := toBool(b)
+	if okA && okB {
+		return ab == bb
+	}
 	as, okA := toString(a)
 	bs, okB := toString(b)
 	if okA && okB {
@@ -181,6 +186,24 @@ func eq(a any, b any) bool {
 		return af == bf
 	}
 	return false
+}
+
+func toBool(v any) (bool, bool) {
+	switch t := v.(type) {
+	case bool:
+		return t, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "1", "true", "yes", "y", "on", "enabled", "enable":
+			return true, true
+		case "0", "false", "no", "n", "off", "disabled", "disable":
+			return false, true
+		default:
+			return false, false
+		}
+	default:
+		return false, false
+	}
 }
 
 func inList(actual any, expected any) bool {

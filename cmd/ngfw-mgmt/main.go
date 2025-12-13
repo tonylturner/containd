@@ -43,6 +43,10 @@ type mgmtHealthResponse struct {
 
 func main() {
 	logger := logging.New("[mgmt]")
+	if strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")) == "containd-dev-secret-change-me" {
+		logger.Println("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
+		logger.Println("         Change it in `.env` before any real deployment.")
+	}
 	store := mustInitStore()
 	defer store.Close()
 	ensureDefaultConfig(logger, store)
@@ -52,6 +56,7 @@ func main() {
 	userStore := mustInitUsersStore()
 	defer userStore.Close()
 	_ = userStore.EnsureDefaultAdmin(context.Background())
+	ensureDevCompatUsers(logger, userStore)
 
 	cfg, _ := store.Load(context.Background())
 
@@ -182,6 +187,32 @@ func addrFromEnv(key, fallback string) string {
 	return fallback
 }
 
+func ensureDevCompatUsers(logger *log.Logger, userStore users.Store) {
+	// Dev convenience only: if the operator is using the example JWT secret, we provision
+	// an additional admin user "containerd"/"containerd" so early demos don't get stuck
+	// on mismatched credentials. This is intentionally NOT enabled once the secret is changed.
+	if userStore == nil {
+		return
+	}
+	if strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")) != "containd-dev-secret-change-me" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := userStore.GetByUsername(ctx, "containerd"); err == nil {
+		return
+	}
+	if _, err := userStore.Create(ctx, users.User{
+		Username:  "containerd",
+		FirstName: "Dev",
+		LastName:  "Admin",
+		Role:      "admin",
+	}, "containerd"); err == nil {
+		logger.Println("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -206,6 +237,7 @@ func serveStaticUI(router *gin.Engine) {
 		indexPath := filepath.Join(uiDir, "index.html")
 		// Serve index at root.
 		router.GET("/", func(c *gin.Context) {
+			c.Header("Cache-Control", "no-store")
 			c.File(indexPath)
 		})
 		// For all other non-API paths, try to serve a static file or fall back to index.
@@ -222,15 +254,22 @@ func serveStaticUI(router *gin.Engine) {
 				if info.IsDir() {
 					dirIndex := filepath.Join(candidate, "index.html")
 					if _, err := os.Stat(dirIndex); err == nil {
+						// Never cache HTML shells; they reference hashed asset filenames and must
+						// update immediately after upgrades.
+						c.Header("Cache-Control", "no-store")
 						c.File(dirIndex)
 						return
 					}
 				} else {
+					// Appliance UX: always serve fresh assets so upgrades don't get stuck behind
+					// browser caches (especially important for auth/session flows).
+					c.Header("Cache-Control", "no-store")
 					c.File(candidate)
 					return
 				}
 			}
 
+			c.Header("Cache-Control", "no-store")
 			c.File(indexPath)
 		})
 		return

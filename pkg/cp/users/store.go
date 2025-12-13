@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -111,20 +112,48 @@ CREATE TABLE IF NOT EXISTS sessions (
 }
 
 func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
+	username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
+	password := os.Getenv("CONTAIND_DEFAULT_ADMIN_PASSWORD")
+	if username == "" {
+		username = "containd"
+	}
+	if password == "" {
+		password = "containd"
+	}
+
+	// If there are already users, do not silently create additional admins unless the operator
+	// explicitly set CONTAIND_DEFAULT_ADMIN_USERNAME/PASSWORD and that user doesn't exist yet.
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users`).Scan(&count); err != nil {
 		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
-		return nil
+		if strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME")) == "" {
+			return nil
+		}
+		// If the user already exists, do nothing.
+		if _, err := s.GetByUsername(ctx, username); err == nil {
+			return nil
+		}
+		// Otherwise create it (explicit operator intent).
+		_, err := s.Create(ctx, User{
+			Username:  username,
+			FirstName: "Default",
+			LastName:  "Admin",
+			Role:      "admin",
+			Email:     "",
+		}, password)
+		return err
 	}
+
+	// Fresh DB: always seed the default admin.
 	_, err := s.Create(ctx, User{
-		Username:  "containd",
+		Username:  username,
 		FirstName: "Default",
 		LastName:  "Admin",
 		Role:      "admin",
 		Email:     "",
-	}, "containd")
+	}, password)
 	return err
 }
 

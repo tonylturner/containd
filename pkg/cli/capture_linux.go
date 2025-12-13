@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,12 +35,12 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 		return 0, err
 	}
 
-	iface, err := unix.IfNametoindex(ifaceName)
+	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return 0, fmt.Errorf("unknown interface %q: %w", ifaceName, err)
 	}
 
-	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, htons(unix.ETH_P_ALL))
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons16(unix.ETH_P_ALL)))
 	if err != nil {
 		return 0, err
 	}
@@ -48,7 +49,7 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 	if err := unix.SetNonblock(fd, true); err != nil {
 		return 0, err
 	}
-	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons(unix.ETH_P_ALL), Ifindex: iface}); err != nil {
+	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons16(unix.ETH_P_ALL), Ifindex: iface.Index}); err != nil {
 		return 0, err
 	}
 
@@ -105,6 +106,6 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 	return pkts, nil
 }
 
-func htons(v uint16) int {
-	return int((v<<8)&0xff00 | (v>>8)&0x00ff)
+func htons16(v uint16) uint16 {
+	return (v<<8)&0xff00 | (v>>8)&0x00ff
 }

@@ -36,4 +36,19 @@ Containers:
 Consume published image:
 - `docker run --rm -p 8080:8080 ghcr.io/you/containd:dev`
 
+## Docker Compose quickstart
+
+```bash
+cp .env.example .env
+# Edit .env and set a real CONTAIND_JWT_SECRET
+docker compose up -d --build
+
+# Print connection info (UI/HTTPS/SSH + container IPs)
+bash scripts/containd-connect
+```
+
+Defaults:
+- UI/API: `http://localhost:${CONTAIND_PUBLISH_HTTP_PORT:-8080}` and `https://localhost:${CONTAIND_PUBLISH_HTTPS_PORT:-8443}`
+- SSH: `ssh -p ${CONTAIND_PUBLISH_SSH_PORT:-2222} containd@localhost` (password `containd` until you enroll a key)
+
 Next steps: flesh out control plane models, data plane capture/flow tracking, and the full UI/CLI experience per `agents.md`.
