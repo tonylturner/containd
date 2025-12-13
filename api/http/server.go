@@ -3,9 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -736,11 +738,68 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing line"})
 			return
 		}
-		baseURL := "http://" + c.Request.Host
-		if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-			baseURL = proto + "://" + c.Request.Host
+		loopbackHostPort := func(addr string, defaultPort string) string {
+			addr = strings.TrimSpace(addr)
+			port := defaultPort
+			if addr == "" {
+				return "127.0.0.1:" + port
+			}
+			if strings.HasPrefix(addr, ":") {
+				if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
+					port = p
+				}
+				return "127.0.0.1:" + port
+			}
+			if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
+				port = strings.TrimSpace(p)
+			}
+			return "127.0.0.1:" + port
+		}
+
+		// Prefer an in-process loopback URL rather than reusing the incoming
+		// request Host/scheme. This avoids:
+		// - HTTPS self-signed verification errors for internal calls
+		// - SSRF-style token exfiltration via crafted Host headers
+		baseURL := ""
+		var httpClient cli.HTTPClient
+		if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
+			enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
+			enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
+
+			httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+			httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+
+			// Always prefer HTTP for internal calls when enabled.
+			if enableHTTP {
+				baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
+			} else if enableHTTPS {
+				baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
+				httpClient = &http.Client{
+					Timeout: 10 * time.Second,
+					Transport: &http.Transport{
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+					},
+				}
+			}
+		}
+		if baseURL == "" {
+			// Fallback (should be rare): infer from the request and keep the current Host.
+			scheme := "http"
+			if c.Request.TLS != nil {
+				scheme = "https"
+			}
+			if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
+				proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+				if proto == "http" || proto == "https" {
+					scheme = proto
+				}
+			}
+			baseURL = scheme + "://" + c.Request.Host
 		}
 		apiClient := &cli.API{BaseURL: baseURL}
+		if httpClient != nil {
+			apiClient.Client = httpClient
+		}
 		// Pass through the caller's bearer token so in-app console commands
 		// can access the same protected endpoints as the UI session.
 		if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {

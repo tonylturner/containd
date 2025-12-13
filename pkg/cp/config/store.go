@@ -151,7 +151,29 @@ func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
 
 // LoadCandidate returns the candidate config or ErrNotFound if none exists.
 func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
-	return s.loadKind(ctx, configKeyCandidate)
+	cfg, err := s.loadKind(ctx, configKeyCandidate)
+	if err == nil {
+		return cfg, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+
+	// Appliance UX: treat "candidate missing" as "candidate == running" and
+	// lazily seed candidate so operations like `diff` and `commit` behave
+	// predictably on fresh installs.
+	running, rerr := s.Load(ctx)
+	if rerr != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Double-check after acquiring the lock.
+	if existing, eerr := s.loadKind(ctx, configKeyCandidate); eerr == nil {
+		return existing, nil
+	}
+	_ = s.saveKind(ctx, configKeyCandidate, running)
+	return running, nil
 }
 
 func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
