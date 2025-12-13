@@ -4,6 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile.mgmt
     image: containd/containd:dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       # Management listeners
       - NGFW_MGMT_ADDR=${CONTAIND_MGMT_HTTP_ADDR:-:8080}
@@ -65,6 +68,9 @@ services:
       context: .
       dockerfile: Dockerfile.engine
     image: containd/containd-engine:dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       - NGFW_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
       # Comma-separated list of interfaces to capture on (empty is allowed for now).

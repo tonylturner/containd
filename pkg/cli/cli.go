@@ -185,6 +185,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show diff", RoleView, showDiff(api))
 		r.RegisterRole("show auth", RoleView, showAuth(api))
 		r.RegisterRole("show system", RoleView, showSystem(api))
+		r.RegisterRole("show services", RoleView, showServicesStatus(api))
 		r.RegisterRole("show services status", RoleView, showServicesStatus(api))
 		r.RegisterRole("show audit", RoleView, showAudit(api))
 		r.RegisterRole("show dataplane", RoleView, showDataPlane(api))
@@ -194,6 +195,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show events", RoleView, showEvents(api))
 		r.RegisterRole("show zones", RoleView, showZonesAPI(api))
 		r.RegisterRole("show interfaces", RoleView, showInterfacesAPI(api))
+		r.RegisterRole("show assets", RoleView, showAssetsAPI(api))
+		r.RegisterRole("show firewall rules", RoleView, showFirewallRulesAPI(api))
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
 		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
 		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
@@ -640,6 +643,66 @@ func showInterfacesAPI(api *API) Command {
 		t := newTable("NAME", "ZONE", "ADDRESSES")
 		for _, iface := range ifaces {
 			t.addRow(iface.Name, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
+		}
+		t.render(out)
+		return nil
+	}
+}
+
+func showAssetsAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var assets []config.Asset
+		if err := api.getJSON(ctx, "/api/v1/assets", &assets); err != nil {
+			return err
+		}
+		t := newTable("ID", "NAME", "TYPE", "ZONE", "IPS", "HOSTNAMES", "CRIT", "TAGS")
+		for _, a := range assets {
+			t.addRow(
+				a.ID,
+				a.Name,
+				string(a.Type),
+				firstNonEmpty(a.Zone, "—"),
+				joinCSV(a.IPs),
+				joinCSV(a.Hostnames),
+				firstNonEmpty(string(a.Criticality), "—"),
+				joinCSV(a.Tags),
+			)
+		}
+		t.render(out)
+		return nil
+	}
+}
+
+func showFirewallRulesAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var rules []config.Rule
+		if err := api.getJSON(ctx, "/api/v1/firewall/rules", &rules); err != nil {
+			return err
+		}
+		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "SRC", "DST", "PROTO", "ICS")
+		for _, r := range rules {
+			protos := make([]string, 0, len(r.Protocols))
+			for _, p := range r.Protocols {
+				if strings.TrimSpace(p.Port) != "" {
+					protos = append(protos, p.Name+"/"+p.Port)
+				} else {
+					protos = append(protos, p.Name)
+				}
+			}
+			ics := "—"
+			if strings.TrimSpace(r.ICS.Protocol) != "" {
+				ics = r.ICS.Protocol
+			}
+			t.addRow(
+				r.ID,
+				string(r.Action),
+				joinCSV(r.SourceZones),
+				joinCSV(r.DestZones),
+				joinCSV(r.Sources),
+				joinCSV(r.Destinations),
+				joinCSV(protos),
+				ics,
+			)
 		}
 		t.render(out)
 		return nil
