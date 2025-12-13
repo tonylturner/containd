@@ -189,6 +189,7 @@ export type Zone = {
 
 export type Interface = {
   name: string;
+  device?: string;
   zone?: string;
   addresses?: string[];
   access?: {

@@ -18,6 +18,7 @@ import (
 	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/enforce"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/flow"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -65,6 +66,7 @@ func main() {
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
+	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 
@@ -188,6 +190,34 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+	}
+}
+
+func interfacesHandler(logger *log.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		var ifaces []config.Interface
+		if err := json.Unmarshal(body, &ifaces); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := netcfg.ApplyInterfaces(ctx, ifaces); err != nil {
+			logger.Printf("apply interfaces failed: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
 	}
 }
 

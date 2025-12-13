@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 // EngineClient is an optional interface for pushing compiled snapshots to the data plane.
 type EngineClient interface {
 	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
+	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 }
 
@@ -170,26 +172,8 @@ func healthHandler(c *gin.Context) {
 
 func getConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			if errors.Is(err, config.ErrNotFound) {
-				def := config.DefaultConfig()
-				def.System.Hostname = "containd"
-				def.System.Mgmt.ListenAddr = ":8080"
-				def.System.Mgmt.HTTPListenAddr = ":8080"
-				def.System.Mgmt.HTTPSListenAddr = ":8443"
-				t := true
-				def.System.Mgmt.EnableHTTP = &t
-				def.System.Mgmt.EnableHTTPS = &t
-				def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-				def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-				def.System.SSH.ListenAddr = ":2222"
-				def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
-				// NOTE: password auth is controlled by runtime bootstrap logic; don't force it in config here.
-				_ = store.Save(c.Request.Context(), def)
-				c.JSON(http.StatusOK, def)
-				return
-			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -406,6 +390,9 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 	}
 	if engine != nil {
+		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
+			return err
+		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			return err
 		}
@@ -1163,6 +1150,9 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 				if iface.Name == "" {
 					iface.Name = existing.Name
 				}
+				if strings.TrimSpace(iface.Device) == "" {
+					iface.Device = existing.Device
+				}
 				if strings.TrimSpace(iface.Zone) == "" {
 					iface.Zone = existing.Zone
 				}
@@ -1314,6 +1304,9 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 			def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 			def.System.SSH.ListenAddr = ":2222"
 			def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
+			autoBindDefaultInterfaceDevices(def)
+			// NOTE: password auth is controlled by runtime bootstrap logic; don't force it in config here.
+			_ = store.Save(ctx, def)
 			return def, nil
 		}
 		return nil, err
@@ -1321,7 +1314,82 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 	if cfg.Firewall.DefaultAction == "" {
 		cfg.Firewall.DefaultAction = config.ActionDeny
 	}
+	// If this is a pre-bind config using default interface names, opportunistically bind.
+	// This helps keep config and OS reality aligned in appliance-style setups.
+	hadAnyDevice := false
+	for _, iface := range cfg.Interfaces {
+		if strings.TrimSpace(iface.Device) != "" {
+			hadAnyDevice = true
+			break
+		}
+	}
+	if !hadAnyDevice {
+		autoBindDefaultInterfaceDevices(cfg)
+		hasAnyDevice := false
+		for _, iface := range cfg.Interfaces {
+			if strings.TrimSpace(iface.Device) != "" {
+				hasAnyDevice = true
+				break
+			}
+		}
+		if hasAnyDevice {
+			_ = store.Save(ctx, cfg)
+		}
+	}
 	return cfg, nil
+}
+
+func autoBindDefaultInterfaceDevices(cfg *config.Config) {
+	if cfg == nil || len(cfg.Interfaces) == 0 {
+		return
+	}
+	// Only auto-bind for the default appliance interface names, and only if not already bound.
+	defaultNames := config.DefaultPhysicalInterfaces()
+	defaultSet := map[string]struct{}{}
+	for _, n := range defaultNames {
+		defaultSet[n] = struct{}{}
+	}
+	for _, iface := range cfg.Interfaces {
+		if _, ok := defaultSet[iface.Name]; !ok {
+			return
+		}
+		if strings.TrimSpace(iface.Device) != "" {
+			return
+		}
+	}
+
+	sysIfaces, err := net.Interfaces()
+	if err != nil {
+		return
+	}
+	type sysIface struct {
+		idx  int
+		name string
+	}
+	candidates := make([]sysIface, 0, len(sysIfaces))
+	for _, si := range sysIfaces {
+		if si.Name == "lo" {
+			continue
+		}
+		if len(si.HardwareAddr) == 0 {
+			continue
+		}
+		candidates = append(candidates, sysIface{idx: si.Index, name: si.Name})
+	}
+	if len(candidates) < len(defaultNames) {
+		return
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].idx < candidates[j].idx })
+
+	nameToDev := map[string]string{}
+	for i, n := range defaultNames {
+		nameToDev[n] = candidates[i].name
+	}
+	for i := range cfg.Interfaces {
+		if dev, ok := nameToDev[cfg.Interfaces[i].Name]; ok {
+			cfg.Interfaces[i].Device = dev
+		}
+	}
 }
 
 func withAuditStore(store audit.Store) gin.HandlerFunc {

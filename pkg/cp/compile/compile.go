@@ -3,6 +3,7 @@ package compile
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/containd/containd/pkg/cp/config"
 	dprules "github.com/containd/containd/pkg/dp/rules"
@@ -62,7 +63,11 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		if z == "" {
 			continue
 		}
-		snap.ZoneIfaces[z] = append(snap.ZoneIfaces[z], iface.Name)
+		name := iface.Name
+		if strings.TrimSpace(iface.Device) != "" {
+			name = iface.Device
+		}
+		snap.ZoneIfaces[z] = append(snap.ZoneIfaces[z], name)
 	}
 	for z, ifs := range snap.ZoneIfaces {
 		sort.Strings(ifs)

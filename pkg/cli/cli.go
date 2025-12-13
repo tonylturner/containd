@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"encoding/json"
 
@@ -23,6 +24,8 @@ import (
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
+
+var defaultHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // API wraps HTTP interactions with the management plane.
 type API struct {
@@ -42,7 +45,7 @@ func (a *API) updateTokenFromResponse(resp *http.Response) {
 
 func (a *API) getJSON(ctx context.Context, path string, into any) error {
 	if a.Client == nil {
-		a.Client = http.DefaultClient
+		a.Client = defaultHTTPClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL+path, nil)
 	if err != nil {
@@ -65,7 +68,7 @@ func (a *API) getJSON(ctx context.Context, path string, into any) error {
 
 func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Writer) error {
 	if a.Client == nil {
-		a.Client = http.DefaultClient
+		a.Client = defaultHTTPClient
 	}
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(payload); err != nil {
@@ -97,7 +100,7 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 
 func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Writer) error {
 	if a.Client == nil {
-		a.Client = http.DefaultClient
+		a.Client = defaultHTTPClient
 	}
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(payload); err != nil {
@@ -129,7 +132,7 @@ func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Wr
 
 func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
 	if a.Client == nil {
-		a.Client = http.DefaultClient
+		a.Client = defaultHTTPClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.BaseURL+path, nil)
 	if err != nil {
@@ -173,6 +176,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("set help", RoleView, setHelpCommand(r))
 	// Local diagnostics (available in SSH; may require CAP_NET_RAW for some features).
 	r.RegisterRole("show ip route", RoleView, showIPRoute())
+	r.RegisterRole("show interfaces os", RoleView, showInterfacesOS())
 	r.RegisterRole("diag ping", RoleView, diagPing())
 	r.RegisterRole("diag traceroute", RoleView, diagTraceroute())
 	r.RegisterRole("diag tcptraceroute", RoleView, diagTCPTraceroute())
@@ -201,6 +205,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
 		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
 		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
+		r.RegisterRole("set interface bind", RoleAdmin, setInterfaceBindAPI(api))
 		r.RegisterRole("set interface zone", RoleAdmin, setInterfaceZoneAPI(api))
 		r.RegisterRole("set interface ip", RoleAdmin, setInterfaceIPAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
@@ -597,11 +602,23 @@ func showInterfaces(store config.Store) Command {
 			_, err = fmt.Fprintln(out, "No interfaces configured")
 			return err
 		}
-		t := newTable("NAME", "ZONE", "ADDRESSES")
+		t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS", "OS_ADDRS")
 		for _, iface := range cfg.Interfaces {
-			t.addRow(iface.Name, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
+			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
+			dev := firstNonEmpty(iface.Device, "—")
+			osAddrs := "—"
+			if effectiveDev != "" {
+				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
+					osAddrs = strings.Join(a, ",")
+				}
+			}
+			t.addRow(iface.Name, dev, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses), osAddrs)
 		}
 		t.render(out)
+		if allInterfaceAddrsEmpty(cfg.Interfaces) {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the bound kernel interface (DEVICE).")
+		}
 		return nil
 	}
 }
@@ -641,13 +658,34 @@ func showInterfacesAPI(api *API) Command {
 			fmt.Fprintln(out, "No interfaces configured")
 			return nil
 		}
-		t := newTable("NAME", "ZONE", "ADDRESSES")
+		t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS", "OS_ADDRS")
 		for _, iface := range ifaces {
-			t.addRow(iface.Name, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
+			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
+			dev := firstNonEmpty(iface.Device, "—")
+			osAddrs := "—"
+			if effectiveDev != "" {
+				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
+					osAddrs = strings.Join(a, ",")
+				}
+			}
+			t.addRow(iface.Name, dev, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses), osAddrs)
 		}
 		t.render(out)
+		if allInterfaceAddrsEmpty(ifaces) {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the bound kernel interface (DEVICE).")
+		}
 		return nil
 	}
+}
+
+func allInterfaceAddrsEmpty(ifaces []config.Interface) bool {
+	for _, iface := range ifaces {
+		if len(iface.Addresses) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func showAssetsAPI(api *API) Command {
@@ -737,6 +775,16 @@ func setInterfaceAPI(api *API) Command {
 	}
 }
 
+func setInterfaceBindAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: set interface bind <name> <os_iface>")
+		}
+		payload := map[string]any{"device": args[1]}
+		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
+	}
+}
+
 func setInterfaceZoneAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 2 {
@@ -759,7 +807,7 @@ func setInterfaceIPAPI(api *API) Command {
 				addrs = []string{}
 			}
 		}
-		payload := config.Interface{Addresses: addrs}
+		payload := map[string]any{"addresses": addrs}
 		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
 	}
 }

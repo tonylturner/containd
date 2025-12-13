@@ -94,7 +94,7 @@ export default function InterfacesPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="name (e.g. eth0)"
+            placeholder="name (e.g. tunnel1)"
             disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
@@ -138,6 +138,7 @@ export default function InterfacesPage() {
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Device</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">Addresses</th>
               <th className="px-4 py-3">Access</th>
@@ -147,7 +148,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                <td className="px-4 py-4 text-slate-400" colSpan={6}>
                   No interfaces configured.
                 </td>
               </tr>
@@ -183,6 +184,7 @@ function InterfaceRow({
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const [device, setDevice] = useState(iface.device ?? "");
   const [zone, setZone] = useState(iface.zone ?? "");
   const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
   const [mgmt, setMgmt] = useState(iface.access?.mgmt ?? true);
@@ -193,6 +195,19 @@ function InterfaceRow({
   return (
     <tr className="border-t border-white/5">
       <td className="px-4 py-3 font-medium text-white">{iface.name}</td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <input
+            value={device}
+            onChange={(e) => setDevice(e.target.value)}
+            disabled={!canEdit}
+            placeholder="os iface (e.g. eth0)"
+            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+          />
+        ) : (
+          <span className="text-slate-200">{iface.device || "—"}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {editing ? (
           <select
@@ -283,6 +298,7 @@ function InterfaceRow({
             <button
               onClick={() => {
                 onUpdate(iface.name, {
+                  device: device.trim() || undefined,
                   zone: zone || undefined,
                   addresses: addresses
                     .split(",")
@@ -303,6 +319,7 @@ function InterfaceRow({
             </button>
             <button
               onClick={() => {
+                setDevice(iface.device ?? "");
                 setZone(iface.zone ?? "");
                 setAddresses((iface.addresses ?? []).join(", "));
                 setMgmt(iface.access?.mgmt ?? true);

@@ -71,6 +71,10 @@ if [[ -n "${ips}" ]]; then
   echo ""
   echo "Container IPs (per Docker network):"
   printf "  %s\n" ${ips}
+  echo ""
+  echo "Note:"
+  echo "  - These are Docker-assigned container IPs (OS/kernel level)."
+  echo "  - containd interface addresses are configured separately (UI: Interfaces / CLI: set interface ip)."
 fi
 
 echo ""

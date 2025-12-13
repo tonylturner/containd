@@ -105,6 +105,17 @@ func TestHelpCommands(t *testing.T) {
 	}
 }
 
+func TestShowInterfacesOS(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	if err := reg.ParseAndExecute(context.Background(), "show interfaces os", &buf); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("IFACE")) || !bytes.Contains(buf.Bytes(), []byte("ADDRS")) {
+		t.Fatalf("unexpected output: %s", buf.String())
+	}
+}
+
 func TestSetSystemHostnameUsage(t *testing.T) {
 	// API-backed command exists only when API is provided.
 	client := &mockHTTPClient{

@@ -164,6 +164,9 @@ type ReverseProxySite struct {
 
 type Interface struct {
 	Name      string          `json:"name"`
+	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
+	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
+	Device    string          `json:"device,omitempty"`
 	Zone      string          `json:"zone"`
 	Addresses []string        `json:"addresses,omitempty"` // CIDR strings
 	Access    InterfaceAccess `json:"access,omitempty"`
@@ -448,6 +451,7 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 		zoneSet[z.Name] = struct{}{}
 	}
 	seen := map[string]struct{}{}
+	seenDevices := map[string]struct{}{}
 	for _, iface := range ifaces {
 		if iface.Name == "" {
 			return errors.New("interface name cannot be empty")
@@ -456,6 +460,15 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 			return fmt.Errorf("duplicate interface: %s", iface.Name)
 		}
 		seen[iface.Name] = struct{}{}
+		if strings.TrimSpace(iface.Device) != "" {
+			if iface.Device != strings.TrimSpace(iface.Device) {
+				return fmt.Errorf("interface %s device has leading/trailing whitespace", iface.Name)
+			}
+			if _, exists := seenDevices[iface.Device]; exists {
+				return fmt.Errorf("duplicate interface device binding: %s", iface.Device)
+			}
+			seenDevices[iface.Device] = struct{}{}
+		}
 		if iface.Zone != "" {
 			if _, ok := zoneSet[iface.Zone]; !ok {
 				return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
