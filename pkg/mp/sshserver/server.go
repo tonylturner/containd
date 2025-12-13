@@ -364,7 +364,7 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 		writeLn("containd console menu")
 		writeLn("")
 		writeLn("0)  Logout")
-		writeLn("1)  Assign interfaces (zone)")
+		writeLn("1)  Assign interfaces (bind)")
 		writeLn("2)  Set interface IP address")
 		writeLn("3)  Reset admin password")
 		writeLn("4)  Setup wizard")
@@ -384,8 +384,18 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 		case "0":
 			return
 		case "1":
+			_ = exec("show interfaces state")
 			_ = exec("show interfaces")
-			iface, ok := ask("Interface name (e.g. lan1): ")
+			auto, ok := ask("Auto-assign defaults now? (yes/no): ")
+			if !ok {
+				continue
+			}
+			auto = strings.ToLower(strings.TrimSpace(auto))
+			if auto == "yes" || auto == "y" {
+				_ = exec("assign interfaces auto")
+				continue
+			}
+			iface, ok := ask("Logical interface name (e.g. wan, dmz, lan1): ")
 			if !ok {
 				continue
 			}
@@ -394,16 +404,15 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 				writeLn("Interface name is required.")
 				continue
 			}
-			zone, ok := ask("Zone (wan/dmz/lan/mgmt): ")
+			dev, ok := ask("Kernel device (e.g. eth0) (blank to clear): ")
 			if !ok {
 				continue
 			}
-			zone = strings.TrimSpace(zone)
-			if zone == "" {
-				writeLn("Zone is required.")
-				continue
+			dev = strings.TrimSpace(dev)
+			if dev == "" {
+				dev = "none"
 			}
-			_ = exec("set interface zone " + shellEscape(iface) + " " + shellEscape(zone))
+			_ = exec("assign interfaces " + shellEscape(iface+"="+dev))
 		case "2":
 			_ = exec("show interfaces")
 			iface, ok := ask("Interface name (e.g. lan1): ")
@@ -415,16 +424,37 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 				writeLn("Interface name is required.")
 				continue
 			}
-			addrs, ok := ask("Addresses (CIDRs, space-separated; blank to clear): ")
+			mode, ok := ask("Mode (static/dhcp) (blank=static): ")
 			if !ok {
 				continue
 			}
-			addrs = strings.TrimSpace(addrs)
-			cmd := "set interface ip " + shellEscape(iface)
-			if addrs == "" {
-				cmd += " none"
-			} else {
-				cmd += " " + addrs
+			mode = strings.ToLower(strings.TrimSpace(mode))
+			if mode == "" {
+				mode = "static"
+			}
+			cmd := "set interface ip " + shellEscape(iface) + " " + shellEscape(mode)
+			if mode == "dhcp" {
+				_ = exec(cmd)
+				continue
+			}
+			cidr, ok := ask("CIDR (e.g. 192.168.1.2/24) (blank to clear): ")
+			if !ok {
+				continue
+			}
+			cidr = strings.TrimSpace(cidr)
+			if cidr == "" {
+				cmd = "set interface ip " + shellEscape(iface) + " none"
+				_ = exec(cmd)
+				continue
+			}
+			cmd += " " + shellEscape(cidr)
+			gw, ok := ask("Gateway (optional, blank for none): ")
+			if !ok {
+				continue
+			}
+			gw = strings.TrimSpace(gw)
+			if gw != "" {
+				cmd += " " + shellEscape(gw)
 			}
 			_ = exec(cmd)
 		case "3":
@@ -463,6 +493,7 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 			_ = exec("show system")
 		case "7":
 			_ = exec("show interfaces")
+			_ = exec("show interfaces state")
 		case "8":
 			_ = exec("show ip route")
 		case "9":

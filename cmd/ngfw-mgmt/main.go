@@ -773,7 +773,11 @@ func mgmtAllowedOnInterface(cfg *config.Config, ifaceName string, isTLS bool) bo
 		return true
 	}
 	for _, iface := range cfg.Interfaces {
-		if iface.Name != ifaceName {
+		effectiveDev := strings.TrimSpace(iface.Device)
+		if effectiveDev == "" {
+			effectiveDev = iface.Name
+		}
+		if effectiveDev != ifaceName && iface.Name != ifaceName {
 			continue
 		}
 		mgmt := boolDefault(iface.Access.Mgmt, true)
@@ -797,7 +801,11 @@ func sshAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
 		return true
 	}
 	for _, iface := range cfg.Interfaces {
-		if iface.Name != ifaceName {
+		effectiveDev := strings.TrimSpace(iface.Device)
+		if effectiveDev == "" {
+			effectiveDev = iface.Name
+		}
+		if effectiveDev != ifaceName && iface.Name != ifaceName {
 			continue
 		}
 		return boolDefault(iface.Access.SSH, true)

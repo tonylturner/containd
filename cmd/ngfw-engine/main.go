@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ func main() {
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger))
+	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 
@@ -199,6 +201,8 @@ func interfacesHandler(logger *log.Logger) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
+		replace := mode == "replace"
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -211,13 +215,56 @@ func interfacesHandler(logger *log.Logger) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if err := netcfg.ApplyInterfaces(ctx, ifaces); err != nil {
-			logger.Printf("apply interfaces failed: %v", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		if replace {
+			if err := netcfg.ApplyInterfacesReplace(ctx, ifaces); err != nil {
+				logger.Printf("apply interfaces(replace) failed: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := netcfg.ApplyInterfaces(ctx, ifaces); err != nil {
+				logger.Printf("apply interfaces failed: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+	}
+}
+
+func interfacesStateHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sysIfaces, err := net.Interfaces()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out := make([]config.InterfaceState, 0, len(sysIfaces))
+		for _, si := range sysIfaces {
+			addrs, _ := si.Addrs()
+			ss := make([]string, 0, len(addrs))
+			for _, a := range addrs {
+				if s := strings.TrimSpace(a.String()); s != "" {
+					ss = append(ss, s)
+				}
+			}
+			sort.Strings(ss)
+			out = append(out, config.InterfaceState{
+				Name:  si.Name,
+				Index: si.Index,
+				Up:    (si.Flags & net.FlagUp) != 0,
+				MTU:   si.MTU,
+				MAC:   strings.TrimSpace(si.HardwareAddr.String()),
+				Addrs: ss,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
 	}
 }
 

@@ -90,6 +90,7 @@ type mockEngine struct {
 	err     error
 	lastDP  config.DataPlaneConfig
 	lastIf  []config.Interface
+	state   []config.InterfaceState
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -100,6 +101,18 @@ func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 func (m *mockEngine) ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error {
 	m.lastIf = append([]config.Interface(nil), ifaces...)
 	return nil
+}
+
+func (m *mockEngine) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
+	m.lastIf = append([]config.Interface(nil), ifaces...)
+	return nil
+}
+
+func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
+	if m.state != nil {
+		return m.state, nil
+	}
+	return []config.InterfaceState{{Name: "eth0", Index: 1, Up: true, Addrs: []string{"192.0.2.1/24"}}}, nil
 }
 
 func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
@@ -208,6 +221,70 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for duplicate, got %d", rec.Code)
+	}
+}
+
+func TestAssignInterfacesAuto(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "lo", Index: 1, Up: true},
+			{Name: "eth0", Index: 2, Up: true},
+			{Name: "eth1", Index: 3, Up: true},
+			{Name: "eth2", Index: 4, Up: true},
+			{Name: "eth3", Index: 5, Up: true},
+			{Name: "eth4", Index: 6, Up: true},
+			{Name: "eth5", Index: 7, Up: true},
+			{Name: "eth6", Index: 8, Up: true},
+			{Name: "eth7", Index: 9, Up: true},
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.lastIf) == 0 {
+		t.Fatalf("expected interfaces applied to engine")
+	}
+	foundWAN := false
+	for _, iface := range eng.lastIf {
+		if iface.Name == "wan" {
+			foundWAN = true
+			if iface.Device != "eth0" {
+				t.Fatalf("expected wan device eth0, got %q", iface.Device)
+			}
+		}
+	}
+	if !foundWAN {
+		t.Fatalf("expected wan interface in engine config")
+	}
+}
+
+func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "eth0", Index: 2, Up: true},
+			{Name: "eth1", Index: 3, Up: true},
+			{Name: "eth2", Index: 4, Up: true},
+			{Name: "eth3", Index: 5, Up: true},
+			{Name: "eth4", Index: 6, Up: true},
+			{Name: "eth5", Index: 7, Up: true},
+			{Name: "eth6", Index: 8, Up: true},
+			{Name: "eth7", Index: 9, Up: true},
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"explicit","mappings":{"wan":"eth0","dmz":"eth0"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

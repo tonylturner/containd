@@ -168,8 +168,23 @@ type Interface struct {
 	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
 	Device    string          `json:"device,omitempty"`
 	Zone      string          `json:"zone"`
+	// AddressMode controls how addresses are acquired on this interface.
+	// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
+	AddressMode string         `json:"addressMode,omitempty"`
 	Addresses []string        `json:"addresses,omitempty"` // CIDR strings
+	// Gateway is an optional next-hop IP for a default route (primarily for "wan").
+	Gateway   string          `json:"gateway,omitempty"`
 	Access    InterfaceAccess `json:"access,omitempty"`
+}
+
+// InterfaceState is runtime information about a kernel interface (not persisted).
+type InterfaceState struct {
+	Name  string   `json:"name"`
+	Index int      `json:"index"`
+	Up    bool     `json:"up"`
+	MTU   int      `json:"mtu,omitempty"`
+	MAC   string   `json:"mac,omitempty"`
+	Addrs []string `json:"addrs,omitempty"` // CIDR strings
 }
 
 // InterfaceAccess controls which plane endpoints are reachable on a given interface.
@@ -472,6 +487,17 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 		if iface.Zone != "" {
 			if _, ok := zoneSet[iface.Zone]; !ok {
 				return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
+			}
+		}
+		if m := strings.ToLower(strings.TrimSpace(iface.AddressMode)); m != "" && m != "static" && m != "dhcp" {
+			return fmt.Errorf("interface %s has invalid addressMode %q", iface.Name, iface.AddressMode)
+		}
+		if strings.TrimSpace(iface.Gateway) != "" {
+			if iface.Gateway != strings.TrimSpace(iface.Gateway) {
+				return fmt.Errorf("interface %s gateway has leading/trailing whitespace", iface.Name)
+			}
+			if ip := net.ParseIP(iface.Gateway); ip == nil {
+				return fmt.Errorf("interface %s has invalid gateway %q", iface.Name, iface.Gateway)
 			}
 		}
 		for _, addr := range iface.Addresses {

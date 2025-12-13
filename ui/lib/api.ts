@@ -191,13 +191,24 @@ export type Interface = {
   name: string;
   device?: string;
   zone?: string;
+  addressMode?: string;
   addresses?: string[];
+  gateway?: string;
   access?: {
     mgmt?: boolean;
     http?: boolean;
     https?: boolean;
     ssh?: boolean;
   };
+};
+
+export type InterfaceState = {
+  name: string;
+  index: number;
+  up: boolean;
+  mtu: number;
+  mac: string;
+  addrs: string[];
 };
 
 export type Protocol = {
@@ -596,6 +607,7 @@ export const api = {
     deleteJSON(`/api/v1/zones/${encodeURIComponent(name)}`),
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
+  listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
   createInterface: (i: Interface) =>
     postJSON<Interface>("/api/v1/interfaces", i),
   updateInterface: (name: string, i: Partial<Interface>) =>

@@ -99,6 +99,53 @@ func (c *HTTPClient) ConfigureInterfaces(ctx context.Context, ifaces []config.In
 	return nil
 }
 
+func (c *HTTPClient) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(ifaces)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/interfaces?mode=replace", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine interfaces(replace) status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
+	if c.BaseURL == "" {
+		return nil, fmt.Errorf("engine BaseURL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/interfaces/state", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine interfaces state status %d", resp.StatusCode)
+	}
+	var out []config.InterfaceState
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListEvents fetches recent normalized events from the engine.
 func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error) {
 	u := c.BaseURL + "/internal/events"

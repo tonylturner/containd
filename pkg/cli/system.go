@@ -108,6 +108,58 @@ func showSystem(api *API) Command {
 	}
 }
 
+func showMgmtListeners(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var cfg config.Config
+		if err := api.getJSON(ctx, "/api/v1/config", &cfg); err != nil {
+			return err
+		}
+		if out == nil {
+			return nil
+		}
+
+		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+		kvTable(out, map[string]string{
+			"http_enabled":              yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)),
+			"https_enabled":             yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)),
+			"http_listen":               mgmtHTTP,
+			"https_listen":              mgmtHTTPS,
+			"redirect_http_to_https":    yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)),
+			"hsts":                      yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)),
+			"hsts_max_age_seconds":      fmt.Sprintf("%d", max(0, cfg.System.Mgmt.HSTSMaxAgeSeconds)),
+			"tls_cert_file":             firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "—"),
+			"tls_key_file":              firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "—"),
+			"trusted_ca_file":           firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "—"),
+			"ssh_listen":                firstNonEmpty(cfg.System.SSH.ListenAddr, ":2222"),
+			"ssh_allow_password":        yesNoStr(cfg.System.SSH.AllowPassword),
+			"ssh_authorized_keys_dir":   firstNonEmpty(cfg.System.SSH.AuthorizedKeysDir, "—"),
+		})
+
+		fmt.Fprintln(out)
+		t := newTable("IFACE", "DEVICE", "MGMT", "HTTP", "HTTPS", "SSH")
+		for _, iface := range cfg.Interfaces {
+			t.addRow(
+				iface.Name,
+				firstNonEmpty(iface.Device, "—"),
+				yesNoStr(boolDefault(iface.Access.Mgmt, true)),
+				yesNoStr(boolDefault(iface.Access.HTTP, true)),
+				yesNoStr(boolDefault(iface.Access.HTTPS, true)),
+				yesNoStr(boolDefault(iface.Access.SSH, true)),
+			)
+		}
+		t.render(out)
+		return nil
+	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func setSystemHostnameAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 1 {

@@ -32,6 +32,30 @@ func TestValidateHappyPath(t *testing.T) {
 	}
 }
 
+func TestValidateInterfaceGateway(t *testing.T) {
+	cfg := Config{
+		Zones: []Zone{{Name: "it"}},
+		Interfaces: []Interface{
+			{Name: "eth0", Zone: "it", Addresses: []string{"192.168.1.1/24"}, Gateway: "not-an-ip"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid gateway error")
+	}
+}
+
+func TestValidateInterfaceAddressMode(t *testing.T) {
+	cfg := Config{
+		Zones: []Zone{{Name: "it"}},
+		Interfaces: []Interface{
+			{Name: "eth0", Zone: "it", AddressMode: "bogus"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid addressMode error")
+	}
+}
+
 func TestValidateDetectsDuplicates(t *testing.T) {
 	cfg := Config{
 		Zones: []Zone{{Name: "it"}, {Name: "it"}},

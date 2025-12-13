@@ -190,6 +190,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show diff", RoleView, showDiff(api))
 		r.RegisterRole("show auth", RoleView, showAuth(api))
 		r.RegisterRole("show system", RoleView, showSystem(api))
+		r.RegisterRole("show mgmt listeners", RoleView, showMgmtListeners(api))
 		r.RegisterRole("show services", RoleView, showServicesStatus(api))
 		r.RegisterRole("show services status", RoleView, showServicesStatus(api))
 		r.RegisterRole("show audit", RoleView, showAudit(api))
@@ -200,6 +201,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show events", RoleView, showEvents(api))
 		r.RegisterRole("show zones", RoleView, showZonesAPI(api))
 		r.RegisterRole("show interfaces", RoleView, showInterfacesAPI(api))
+		r.RegisterRole("show interfaces state", RoleView, showInterfacesStateAPI(api))
+		r.RegisterRole("assign interfaces", RoleAdmin, assignInterfacesAPI(api))
 		r.RegisterRole("show assets", RoleView, showAssetsAPI(api))
 		r.RegisterRole("show firewall rules", RoleView, showFirewallRulesAPI(api))
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
@@ -208,6 +211,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set interface bind", RoleAdmin, setInterfaceBindAPI(api))
 		r.RegisterRole("set interface zone", RoleAdmin, setInterfaceZoneAPI(api))
 		r.RegisterRole("set interface ip", RoleAdmin, setInterfaceIPAPI(api))
+		r.RegisterRole("diag interfaces reconcile", RoleAdmin, interfacesReconcileAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
 		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
 		r.RegisterRole("set dataplane", RoleAdmin, setDataPlaneAPI(api))
@@ -236,6 +240,85 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show interfaces", RoleView, showInterfaces(store))
 	}
 	return r
+}
+
+func assignInterfacesAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
+		}
+		mode := strings.ToLower(strings.TrimSpace(args[0]))
+		req := map[string]any{}
+		switch mode {
+		case "auto":
+			req["mode"] = "auto"
+		default:
+			mappings := map[string]string{}
+			for _, a := range args {
+				parts := strings.SplitN(a, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
+				}
+				iface := strings.TrimSpace(parts[0])
+				dev := strings.TrimSpace(parts[1])
+				if iface == "" {
+					continue
+				}
+				if dev == "" || strings.EqualFold(dev, "none") || dev == "-" {
+					dev = ""
+				}
+				mappings[iface] = dev
+			}
+			if len(mappings) == 0 {
+				return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
+			}
+			req["mode"] = "explicit"
+			req["mappings"] = mappings
+		}
+
+		if api.Client == nil {
+			api.Client = defaultHTTPClient
+		}
+		buf := &bytes.Buffer{}
+		if err := json.NewEncoder(buf).Encode(req); err != nil {
+			return err
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, api.BaseURL+"/api/v1/interfaces/assign", buf)
+		if err != nil {
+			return err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if api.Token != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+api.Token)
+		}
+		resp, err := api.Client.Do(httpReq)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		api.updateTokenFromResponse(resp)
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+		var payload struct {
+			Interfaces []config.Interface `json:"interfaces"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&payload)
+		if out == nil {
+			return nil
+		}
+		fmt.Fprintln(out, "ok")
+		if len(payload.Interfaces) > 0 {
+			fmt.Fprintln(out)
+			t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS")
+			for _, iface := range payload.Interfaces {
+				t.addRow(iface.Name, firstNonEmpty(iface.Device, "—"), firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
+			}
+			t.render(out)
+		}
+		return nil
+	}
 }
 
 func factoryResetAPI(api *API) Command {
@@ -602,17 +685,26 @@ func showInterfaces(store config.Store) Command {
 			_, err = fmt.Fprintln(out, "No interfaces configured")
 			return err
 		}
-		t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS", "OS_ADDRS")
+		t := newTable("NAME", "DEVICE", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
 		for _, iface := range cfg.Interfaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
+			mode := firstNonEmpty(iface.AddressMode, "static")
 			osAddrs := "—"
 			if effectiveDev != "" {
 				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
 					osAddrs = strings.Join(a, ",")
 				}
 			}
-			t.addRow(iface.Name, dev, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses), osAddrs)
+			t.addRow(
+				iface.Name,
+				dev,
+				firstNonEmpty(iface.Zone, "—"),
+				mode,
+				joinCSV(iface.Addresses),
+				firstNonEmpty(iface.Gateway, "—"),
+				osAddrs,
+			)
 		}
 		t.render(out)
 		if allInterfaceAddrsEmpty(cfg.Interfaces) {
@@ -651,6 +743,12 @@ func showInterfacesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/interfaces", &ifaces); err != nil {
 			return err
 		}
+		var state []config.InterfaceState
+		_ = api.getJSON(ctx, "/api/v1/interfaces/state", &state)
+		stateByName := map[string]config.InterfaceState{}
+		for _, st := range state {
+			stateByName[st.Name] = st
+		}
 		if out == nil {
 			return nil
 		}
@@ -658,17 +756,28 @@ func showInterfacesAPI(api *API) Command {
 			fmt.Fprintln(out, "No interfaces configured")
 			return nil
 		}
-		t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS", "OS_ADDRS")
+		t := newTable("NAME", "DEVICE", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
 		for _, iface := range ifaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
+			mode := firstNonEmpty(iface.AddressMode, "static")
 			osAddrs := "—"
 			if effectiveDev != "" {
-				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
+				if st, ok := stateByName[effectiveDev]; ok && len(st.Addrs) > 0 {
+					osAddrs = strings.Join(st.Addrs, ",")
+				} else if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
 					osAddrs = strings.Join(a, ",")
 				}
 			}
-			t.addRow(iface.Name, dev, firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses), osAddrs)
+			t.addRow(
+				iface.Name,
+				dev,
+				firstNonEmpty(iface.Zone, "—"),
+				mode,
+				joinCSV(iface.Addresses),
+				firstNonEmpty(iface.Gateway, "—"),
+				osAddrs,
+			)
 		}
 		t.render(out)
 		if allInterfaceAddrsEmpty(ifaces) {
@@ -676,6 +785,45 @@ func showInterfacesAPI(api *API) Command {
 			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the bound kernel interface (DEVICE).")
 		}
 		return nil
+	}
+}
+
+func showInterfacesStateAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		var state []config.InterfaceState
+		if err := api.getJSON(ctx, "/api/v1/interfaces/state", &state); err != nil {
+			return err
+		}
+		if out == nil {
+			return nil
+		}
+		if len(state) == 0 {
+			fmt.Fprintln(out, "No interface state available")
+			return nil
+		}
+		t := newTable("NAME", "INDEX", "UP", "MTU", "MAC", "ADDRS")
+		for _, st := range state {
+			t.addRow(
+				st.Name,
+				fmt.Sprintf("%d", st.Index),
+				yesNoStr(st.Up),
+				fmt.Sprintf("%d", st.MTU),
+				firstNonEmpty(st.MAC, "—"),
+				truncate(strings.Join(st.Addrs, ","), 64),
+			)
+		}
+		t.render(out)
+		return nil
+	}
+}
+
+func interfacesReconcileAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) != 1 || strings.TrimSpace(args[0]) != "REPLACE" {
+			return fmt.Errorf("usage: diag interfaces reconcile REPLACE")
+		}
+		payload := map[string]string{"confirm": "REPLACE"}
+		return api.postJSON(ctx, "/api/v1/interfaces/reconcile", payload, out)
 	}
 }
 
@@ -798,17 +946,49 @@ func setInterfaceZoneAPI(api *API) Command {
 func setInterfaceIPAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 2 {
-			return fmt.Errorf("usage: set interface ip <name> <cidr...|none>")
+			return fmt.Errorf("usage: set interface ip <name> <cidr...|none> | set interface ip <name> static <cidr> [gateway] | set interface ip <name> dhcp")
 		}
-		addrs := args[1:]
-		if len(addrs) == 1 {
-			switch strings.ToLower(strings.TrimSpace(addrs[0])) {
-			case "none", "clear", "-":
-				addrs = []string{}
+		ifaceName := args[0]
+		mode := strings.ToLower(strings.TrimSpace(args[1]))
+
+		switch mode {
+		case "dhcp":
+			payload := map[string]any{
+				"addressMode": "dhcp",
+				"addresses":   []string{},
+				"gateway":     "",
 			}
+			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
+		case "static":
+			if len(args) < 3 {
+				return fmt.Errorf("usage: set interface ip %s static <cidr> [gateway]", ifaceName)
+			}
+			cidr := strings.TrimSpace(args[2])
+			gw := ""
+			if len(args) >= 4 {
+				gw = strings.TrimSpace(args[3])
+			}
+			payload := map[string]any{
+				"addressMode": "static",
+				"addresses":   []string{cidr},
+				"gateway":     gw,
+			}
+			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
+		default:
+			addrs := args[1:]
+			if len(addrs) == 1 {
+				switch strings.ToLower(strings.TrimSpace(addrs[0])) {
+				case "none", "clear", "-":
+					addrs = []string{}
+				}
+			}
+			payload := map[string]any{
+				"addressMode": "static",
+				"addresses":   addrs,
+				"gateway":     "",
+			}
+			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
 		}
-		payload := map[string]any{"addresses": addrs}
-		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
 	}
 }
 

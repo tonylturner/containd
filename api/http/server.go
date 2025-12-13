@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -36,6 +37,8 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 type EngineClient interface {
 	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
 	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
+	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
+	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 }
 
@@ -137,9 +140,12 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
 		protected.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
 		protected.GET("/interfaces", listInterfacesHandler(store))
-		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
-		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store))
-		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store))
+		protected.GET("/interfaces/state", interfaceStateHandler(store, engine))
+		protected.POST("/interfaces/assign", requireAdmin(), interfacesAssignHandler(store, engine, services))
+		protected.POST("/interfaces/reconcile", requireAdmin(), interfacesReconcileHandler(store, engine))
+		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store, engine, services))
+		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store, engine, services))
+		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
 		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
@@ -1073,7 +1079,189 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func createInterfaceHandler(store config.Store) gin.HandlerFunc {
+func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Ensure config exists (so default interfaces are seeded).
+		if _, err := loadOrInitConfig(c.Request.Context(), store); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, []config.InterfaceState{})
+			return
+		}
+		st, err := engine.ListInterfaceState(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, st)
+	}
+}
+
+func interfacesAssignHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Mode     string            `json:"mode"`
+			Mappings map[string]string `json:"mappings"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		mode := strings.ToLower(strings.TrimSpace(req.Mode))
+		if mode == "" {
+			if len(req.Mappings) > 0 {
+				mode = "explicit"
+			}
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		state, err := engine.ListInterfaceState(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		deviceSet := map[string]struct{}{}
+		devices := make([]string, 0, len(state))
+		for _, st := range state {
+			if strings.TrimSpace(st.Name) == "" {
+				continue
+			}
+			deviceSet[st.Name] = struct{}{}
+			if st.Name != "lo" {
+				devices = append(devices, st.Name)
+			}
+		}
+		sort.Strings(devices)
+
+		ifaceByName := map[string]*config.Interface{}
+		for i := range cfg.Interfaces {
+			ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
+		}
+
+		assignments := map[string]string{}
+		switch mode {
+		case "auto":
+			// Assign default logical interfaces to the first NIC-like kernel interfaces.
+			order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
+			needed := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; ok {
+					needed++
+				}
+			}
+			if needed == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "no default interfaces present"})
+				return
+			}
+			if len(devices) < needed {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough kernel interfaces (%d) for defaults (%d)", len(devices), needed)})
+				return
+			}
+			idx := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				assignments[logical] = devices[idx]
+				idx++
+			}
+		case "explicit":
+			if len(req.Mappings) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
+				return
+			}
+			for k, v := range req.Mappings {
+				k = strings.TrimSpace(k)
+				v = strings.TrimSpace(v)
+				if k == "" {
+					continue
+				}
+				// Allow clearing via empty/none.
+				if strings.EqualFold(v, "none") || v == "-" {
+					v = ""
+				}
+				assignments[k] = v
+			}
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be auto or explicit"})
+			return
+		}
+
+		used := map[string]string{} // device -> logical
+		for logical, dev := range assignments {
+			if _, ok := ifaceByName[logical]; !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown interface: " + logical})
+				return
+			}
+			if dev == "" {
+				continue
+			}
+			if _, ok := deviceSet[dev]; !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown kernel device: " + dev})
+				return
+			}
+			if prev, ok := used[dev]; ok && prev != logical {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("device %s already assigned to %s", dev, prev)})
+				return
+			}
+			used[dev] = logical
+		}
+
+		for logical, dev := range assignments {
+			ifaceByName[logical].Device = dev
+		}
+
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config"})
+		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
+	}
+}
+
+func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Confirm string `json:"confirm"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Confirm) != "REPLACE" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "confirm required: set {\"confirm\":\"REPLACE\"}"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "interfaces.reconcile", Target: "engine"})
+		c.JSON(http.StatusOK, gin.H{"status": "reconciled"})
+	}
+}
+
+func createInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var iface config.Interface
 		if err := c.ShouldBindJSON(&iface); err != nil || iface.Name == "" {
@@ -1096,11 +1284,18 @@ func createInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "interfaces.create", Target: iface.Name})
 		c.JSON(http.StatusOK, iface)
 	}
 }
 
-func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
+func deleteInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -1124,11 +1319,18 @@ func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "interfaces.delete", Target: name})
 		c.Status(http.StatusNoContent)
 	}
 }
 
-func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
+func updateInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
 		var iface config.Interface
@@ -1177,6 +1379,12 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
 		c.JSON(http.StatusOK, iface)

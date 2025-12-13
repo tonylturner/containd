@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-import { api, isAdmin, type Interface, type Zone } from "../../lib/api";
+import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
 export default function InterfacesPage() {
   const [ifaces, setIfaces] = useState<Interface[]>([]);
+  const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
   const [zone, setZone] = useState("");
@@ -15,9 +16,14 @@ export default function InterfacesPage() {
   const [saving, setSaving] = useState(false);
 
   async function refresh() {
-    const [i, z] = await Promise.all([api.listInterfaces(), api.listZones()]);
+    const [i, z, s] = await Promise.all([
+      api.listInterfaces(),
+      api.listZones(),
+      api.listInterfaceState(),
+    ]);
     setIfaces(i ?? []);
     setZones(z ?? []);
+    setState(s ?? []);
   }
 
   useEffect(() => {
@@ -139,8 +145,10 @@ export default function InterfacesPage() {
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Device</th>
+              <th className="px-4 py-3">Link</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">Addresses</th>
+              <th className="px-4 py-3">OS Addrs</th>
               <th className="px-4 py-3">Access</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -148,7 +156,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={6}>
+                <td className="px-4 py-4 text-slate-400" colSpan={8}>
                   No interfaces configured.
                 </td>
               </tr>
@@ -157,6 +165,7 @@ export default function InterfacesPage() {
               <InterfaceRow
                 key={i.name}
                 iface={i}
+                runtime={runtimeFor(i, state)}
                 zones={zones}
                 onDelete={onDelete}
                 onUpdate={onUpdate}
@@ -170,14 +179,21 @@ export default function InterfacesPage() {
   );
 }
 
+function runtimeFor(iface: Interface, state: InterfaceState[]): InterfaceState | null {
+  const effectiveDev = iface.device || iface.name;
+  return state.find((s) => s.name === effectiveDev) ?? null;
+}
+
 function InterfaceRow({
   iface,
+  runtime,
   zones,
   onDelete,
   onUpdate,
   canEdit,
 }: {
   iface: Interface;
+  runtime: InterfaceState | null;
   zones: Zone[];
   onDelete: (name: string) => void;
   onUpdate: (name: string, patch: Partial<Interface>) => void;
@@ -186,7 +202,9 @@ function InterfaceRow({
   const [editing, setEditing] = useState(false);
   const [device, setDevice] = useState(iface.device ?? "");
   const [zone, setZone] = useState(iface.zone ?? "");
+  const [mode, setMode] = useState((iface.addressMode ?? "static").toLowerCase());
   const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
+  const [gateway, setGateway] = useState(iface.gateway ?? "");
   const [mgmt, setMgmt] = useState(iface.access?.mgmt ?? true);
   const [http, setHTTP] = useState(iface.access?.http ?? true);
   const [https, setHTTPS] = useState(iface.access?.https ?? true);
@@ -206,6 +224,13 @@ function InterfaceRow({
           />
         ) : (
           <span className="text-slate-200">{iface.device || "—"}</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        {runtime ? (
+          <span className={chipClass(runtime.up)}>{runtime.up ? "up" : "down"}</span>
+        ) : (
+          <span className="text-slate-400">—</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -229,18 +254,46 @@ function InterfaceRow({
       </td>
       <td className="px-4 py-3">
         {editing ? (
-          <input
-            value={addresses}
-            onChange={(e) => setAddresses(e.target.value)}
-            disabled={!canEdit}
-            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
-          />
+          <div className="space-y-2">
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              disabled={!canEdit}
+              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+            >
+              <option value="static">static</option>
+              <option value="dhcp">dhcp</option>
+            </select>
+            <input
+              value={addresses}
+              onChange={(e) => setAddresses(e.target.value)}
+              disabled={!canEdit || mode === "dhcp"}
+              placeholder="CIDRs (comma-separated)"
+              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+            />
+            <input
+              value={gateway}
+              onChange={(e) => setGateway(e.target.value)}
+              disabled={!canEdit || mode === "dhcp"}
+              placeholder="gateway (optional)"
+              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+            />
+          </div>
         ) : (
           <span className="text-slate-200">
-            {(iface.addresses ?? []).length > 0
-              ? (iface.addresses ?? []).join(", ")
-              : "—"}
+            {(iface.addressMode ?? "static").toLowerCase() === "dhcp"
+              ? "dhcp"
+              : (iface.addresses ?? []).length > 0
+                ? (iface.addresses ?? []).join(", ")
+                : "—"}
           </span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        {runtime && runtime.addrs?.length ? (
+          <span className="text-slate-200">{runtime.addrs.join(", ")}</span>
+        ) : (
+          <span className="text-slate-400">—</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -300,10 +353,15 @@ function InterfaceRow({
                 onUpdate(iface.name, {
                   device: device.trim() || undefined,
                   zone: zone || undefined,
-                  addresses: addresses
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
+                  addressMode: mode,
+                  addresses:
+                    mode === "dhcp"
+                      ? []
+                      : addresses
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                  gateway: mode === "dhcp" ? "" : gateway.trim(),
                   access: {
                     mgmt,
                     ssh,
@@ -321,7 +379,9 @@ function InterfaceRow({
               onClick={() => {
                 setDevice(iface.device ?? "");
                 setZone(iface.zone ?? "");
+                setMode((iface.addressMode ?? "static").toLowerCase());
                 setAddresses((iface.addresses ?? []).join(", "));
+                setGateway(iface.gateway ?? "");
                 setMgmt(iface.access?.mgmt ?? true);
                 setSSH(iface.access?.ssh ?? true);
                 setHTTP(iface.access?.http ?? true);
