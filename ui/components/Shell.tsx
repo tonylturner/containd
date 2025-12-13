@@ -9,6 +9,27 @@ import { api } from "../lib/api";
 type NavItem = { href: string; label: string };
 type NavGroup = { label: string; items: NavItem[]; defaultCollapsed?: boolean };
 
+const REDIRECT_TRACE_KEY = "containd.auth.redirect_trace";
+
+function appendRedirectTrace(entry: {
+  ts: string;
+  from: string;
+  to: string;
+  reason: string;
+  stack?: string;
+}) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = sessionStorage.getItem(REDIRECT_TRACE_KEY);
+    const arr = raw ? (JSON.parse(raw) as any[]) : [];
+    arr.push(entry);
+    while (arr.length > 20) arr.shift();
+    sessionStorage.setItem(REDIRECT_TRACE_KEY, JSON.stringify(arr));
+  } catch {
+    // ignore
+  }
+}
+
 function buildNavGroups(isAdmin: boolean): NavGroup[] {
   const groups: NavGroup[] = [
     {
@@ -92,6 +113,13 @@ export function Shell({
       redirectingRef.current = true;
       const next = pathname.startsWith("/") ? pathname : "/";
       const url = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      appendRedirectTrace({
+        ts: new Date().toISOString(),
+        from: pathname,
+        to: url,
+        reason,
+        stack: new Error("redirectToLogin").stack || undefined,
+      });
       window.location.href = url;
     },
     [pathname],
@@ -112,7 +140,17 @@ export function Shell({
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const onExpired = () => redirectToLogin("expired");
+    const onExpired = async () => {
+      // Some API calls can race a token refresh: one request may 401 while another (or the retry)
+      // succeeds. Before bouncing the whole UI to /login, re-check auth once.
+      try {
+        const { status } = await api.meStatus();
+        if (status === 200) return;
+      } catch {
+        // fall through
+      }
+      redirectToLogin("expired");
+    };
     window.addEventListener("containd:auth:expired", onExpired as EventListener);
     return () => window.removeEventListener("containd:auth:expired", onExpired as EventListener);
   }, [redirectToLogin]);

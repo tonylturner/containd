@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -27,6 +28,13 @@ const (
 	maxTTL  = 4 * time.Hour
 )
 
+func abortJSON(c *gin.Context, status int, msg string) {
+	// Mirror the JSON error message in a header so it's easy to spot in browser DevTools
+	// even when the response body isn't surfaced.
+	c.Header("X-Containd-Auth-Error", msg)
+	c.AbortWithStatusJSON(status, gin.H{"error": msg})
+}
+
 func jwtSecret() []byte {
 	return []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")))
 }
@@ -43,7 +51,7 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 			// In lab mode we still require a token to keep login/logout semantics,
 			// but we do not validate signatures or sessions.
 			if bearerOrCookie(c) == "" {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+				abortJSON(c, http.StatusUnauthorized, "login required")
 				return
 			}
 			c.Set(ctxRoleKey, string(roleAdmin))
@@ -60,14 +68,12 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 		// Legacy token mode if users store or secret is not configured.
 		if userStore == nil || len(secret) == 0 {
 			if adminToken == "" && auditorToken == "" {
-				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-					"error": "auth not configured; set CONTAIND_JWT_SECRET or legacy CONTAIND_ADMIN_TOKEN",
-				})
+				abortJSON(c, http.StatusServiceUnavailable, "auth not configured; set CONTAIND_JWT_SECRET or legacy CONTAIND_ADMIN_TOKEN")
 				return
 			}
 			h := c.GetHeader("Authorization")
 			if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+				abortJSON(c, http.StatusUnauthorized, "missing bearer token")
 				return
 			}
 			tok := strings.TrimSpace(h[len("bearer "):])
@@ -79,14 +85,14 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 				c.Set(ctxRoleKey, string(roleView))
 				c.Next()
 			default:
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				abortJSON(c, http.StatusUnauthorized, "invalid token")
 			}
 			return
 		}
 
 		raw := bearerOrCookie(c)
 		if raw == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+			abortJSON(c, http.StatusUnauthorized, "missing token")
 			return
 		}
 
@@ -98,25 +104,35 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 			return secret, nil
 		})
 		if err != nil || !parsed.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			abortJSON(c, http.StatusUnauthorized, "invalid token")
 			return
 		}
 
 		jti, _ := claims["jti"].(string)
 		sub, _ := claims["sub"].(string)
 		if jti == "" || sub == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+			abortJSON(c, http.StatusUnauthorized, "invalid token claims")
 			return
 		}
 
 		sess, err := userStore.GetSession(c.Request.Context(), jti)
-		if err != nil || sess.Revoked {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked"})
+		if err != nil {
+			// Distinguish not-found (expired/revoked) from backend errors (e.g. SQLITE_BUSY),
+			// otherwise the UI will treat transient storage failures as "session expired".
+			if errors.Is(err, users.ErrNotFound) {
+				abortJSON(c, http.StatusUnauthorized, "session revoked")
+			} else {
+				abortJSON(c, http.StatusServiceUnavailable, "auth backend unavailable")
+			}
+			return
+		}
+		if sess.Revoked {
+			abortJSON(c, http.StatusUnauthorized, "session revoked")
 			return
 		}
 		if time.Now().UTC().After(sess.ExpiresAt) {
 			_ = userStore.RevokeSession(c.Request.Context(), jti)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired"})
+			abortJSON(c, http.StatusUnauthorized, "session expired")
 			return
 		}
 
@@ -143,12 +159,20 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 
 		// Role/username are sourced from DB (not the token claims) to prevent stale role elevation.
 		u, err := userStore.GetByID(c.Request.Context(), sub)
-		if err != nil || u == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		if err != nil {
+			if errors.Is(err, users.ErrNotFound) {
+				abortJSON(c, http.StatusUnauthorized, "user not found")
+			} else {
+				abortJSON(c, http.StatusServiceUnavailable, "auth backend unavailable")
+			}
+			return
+		}
+		if u == nil {
+			abortJSON(c, http.StatusUnauthorized, "user not found")
 			return
 		}
 		if sess.UserID != "" && sess.UserID != u.ID {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session mismatch"})
+			abortJSON(c, http.StatusUnauthorized, "session mismatch")
 			return
 		}
 		r := u.Role
@@ -168,7 +192,7 @@ func requireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		v, _ := c.Get(ctxRoleKey)
 		if v != string(roleAdmin) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+			abortJSON(c, http.StatusForbidden, "admin role required")
 			return
 		}
 		c.Next()

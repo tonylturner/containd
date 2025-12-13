@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { api, clearLocalAuth } from "../../lib/api";
+import { api, clearLocalAuth, getLastAuthError } from "../../lib/api";
 
 type State = "idle" | "logging_in" | "error";
 
@@ -24,6 +24,7 @@ function LoginInner() {
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
   const [alreadyLoggedIn, setAlreadyLoggedIn] = useState(false);
 
   useEffect(() => {
@@ -44,6 +45,11 @@ function LoginInner() {
       // Avoid redirect loops between "/" and "/login". If we're already authenticated,
       // show a "continue" prompt instead of bouncing.
       setAlreadyLoggedIn(status === 200);
+      if (status !== 200) {
+        setDetail(getLastAuthError());
+      } else {
+        setDetail(null);
+      }
     })();
   }, [paramsKey]);
 
@@ -92,6 +98,11 @@ function LoginInner() {
         {info && (
           <div className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
             {info}
+          </div>
+        )}
+        {detail && (
+          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+            Last auth error: <span className="font-mono">{detail}</span>
           </div>
         )}
 

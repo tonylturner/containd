@@ -14,6 +14,7 @@ const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";
+const AUTH_ERROR_KEY = "containd.auth.last_error";
 let redirectingToLogin = false;
 let authExpiredEmitted = false;
 
@@ -32,6 +33,23 @@ function setSessionToken(token: string | null) {
     if (!token) sessionStorage.removeItem(SESSION_TOKEN_KEY);
     else sessionStorage.setItem(SESSION_TOKEN_KEY, token);
   } catch {}
+}
+
+function setLastAuthError(msg: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!msg) sessionStorage.removeItem(AUTH_ERROR_KEY);
+    else sessionStorage.setItem(AUTH_ERROR_KEY, msg);
+  } catch {}
+}
+
+export function getLastAuthError(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(AUTH_ERROR_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function setStoredRole(role: string | null) {
@@ -84,6 +102,25 @@ function updateSessionTokenFromResponse(res: Response) {
   if (next) setSessionToken(next);
 }
 
+async function captureAuthError(res: Response) {
+  if (typeof window === "undefined") return;
+  if (res.status !== 401 && res.status !== 403) return;
+  try {
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.includes("application/json")) return;
+    const j = await res.clone().json();
+    const msg =
+      typeof j?.error === "string"
+        ? j.error
+        : typeof j?.message === "string"
+          ? j.message
+          : null;
+    if (msg) setLastAuthError(msg);
+  } catch {
+    // ignore
+  }
+}
+
 async function fetchWithSession(path: string, init: RequestInit): Promise<Response> {
   const url = `${API_BASE}${path}`;
 
@@ -105,12 +142,14 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
           headers: { ...h, Authorization: `Bearer ${fallback}` },
           credentials: "include",
         });
+        await captureAuthError(retry);
         updateSessionTokenFromResponse(retry);
         return retry;
       }
     }
   }
 
+  await captureAuthError(res);
   updateSessionTokenFromResponse(res);
   return res;
 }
@@ -380,9 +419,8 @@ export type ConfigBundle = {
 
 export async function fetchHealth(): Promise<HealthResponse | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/v1/health`, {
+    const res = await fetchWithSession("/api/v1/health", {
       cache: "no-store",
-      credentials: "include",
     });
     if (!res.ok) return null;
     return (await res.json()) as HealthResponse;
@@ -393,12 +431,11 @@ export async function fetchHealth(): Promise<HealthResponse | null> {
 
 export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/v1/dataplane`, {
-      headers: authHeaders(),
+    const res = await fetchWithSession("/api/v1/dataplane", {
+      headers: { ...authHeaders() },
       cache: "no-store",
-      credentials: "include",
     });
-    if (!res.ok) return null;
+    if (handleUnauthorized(res) || !res.ok) return null;
     return (await res.json()) as DataPlaneConfig;
   } catch {
     return null;
@@ -409,13 +446,12 @@ export async function setDataPlane(
   cfg: DataPlaneConfig,
 ): Promise<DataPlaneConfig | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/v1/dataplane`, {
+    const res = await fetchWithSession("/api/v1/dataplane", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(cfg),
-      credentials: "include",
     });
-    if (!res.ok) return null;
+    if (handleUnauthorized(res) || !res.ok) return null;
     return (await res.json()) as DataPlaneConfig;
   } catch {
     return null;
@@ -503,6 +539,7 @@ export const api = {
     if (res) {
       // Allow future session-expired notifications after a successful login.
       authExpiredEmitted = false;
+      setLastAuthError(null);
     }
     return res;
   },
@@ -515,13 +552,19 @@ export const api = {
   me: async () => {
     const u = await getJSON<User>("/api/v1/auth/me");
     if (u?.role) setStoredRole(u.role);
-    if (u) authExpiredEmitted = false;
+    if (u) {
+      authExpiredEmitted = false;
+      setLastAuthError(null);
+    }
     return u;
   },
   meStatus: async () => {
     const res = await getJSONWithStatus<User>("/api/v1/auth/me");
     if (res.data?.role) setStoredRole(res.data.role);
-    if (res.status === 200) authExpiredEmitted = false;
+    if (res.status === 200) {
+      authExpiredEmitted = false;
+      setLastAuthError(null);
+    }
     return res;
   },
   updateMe: (patch: UpdateMeRequest) =>

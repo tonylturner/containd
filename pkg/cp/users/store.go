@@ -76,11 +76,36 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open users sqlite: %w", err)
 	}
+	// This store is hit on every authenticated API request (session sliding window),
+	// so keep SQLite access serialized to avoid SQLITE_BUSY races under concurrent HTTP calls.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if err := tuneSQLite(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := bootstrap(db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func tuneSQLite(db *sql.DB) error {
+	// Pragmas are applied per-connection. With SetMaxOpenConns(1), this reliably applies
+	// to all operations in this store.
+	pragmas := []string{
+		`PRAGMA journal_mode=WAL;`,
+		`PRAGMA synchronous=NORMAL;`,
+		`PRAGMA foreign_keys=ON;`,
+		`PRAGMA busy_timeout=5000;`,
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return fmt.Errorf("sqlite pragma %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 func bootstrap(db *sql.DB) error {
