@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -242,7 +243,15 @@ func diagTraceroute() Command {
 		if ipc == nil {
 			return fmt.Errorf("traceroute unavailable: IPv4 packet conn not supported")
 		}
-		fmt.Fprintf(out, "traceroute to %s (%s), %d hops max\n", host, dst.String(), maxHops)
+		mode := "raw"
+		if _, ok := pc.LocalAddr().(*net.UDPAddr); ok {
+			mode = "udp4"
+		}
+		limitNote := ""
+		if mode == "udp4" {
+			limitNote = " (limited: intermediate hops may be hidden)"
+		}
+		fmt.Fprintf(out, "traceroute to %s (%s), %d hops max (icmp/%s)%s\n", host, dst.String(), maxHops, mode, limitNote)
 		for ttl := 1; ttl <= maxHops; ttl++ {
 			select {
 			case <-ctx.Done():
@@ -252,34 +261,139 @@ func diagTraceroute() Command {
 			if err := ipc.SetTTL(ttl); err != nil {
 				return fmt.Errorf("set TTL=%d: %w", ttl, err)
 			}
-			seq := ttl
-			msg := icmp.Message{
-				Type: ipv4.ICMPTypeEcho,
-				Code: 0,
-				Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd-trace")},
+			peerIP := ""
+			reached := false
+
+			fmt.Fprintf(out, "%2d  ", ttl)
+			for probe := 0; probe < 3; probe++ {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				seq := ttl*10 + probe
+				msg := icmp.Message{
+					Type: ipv4.ICMPTypeEcho,
+					Code: 0,
+					Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd-trace")},
 				}
 				b, _ := msg.Marshal(nil)
 				start := time.Now()
 				_ = pc.SetDeadline(time.Now().Add(2 * time.Second))
 				if _, err := pc.WriteTo(b, dstAddr); err != nil {
-					fmt.Fprintf(out, "%2d  send error: %v\n", ttl, err)
+					fmt.Fprintf(out, "send=%v ", err)
 					continue
 				}
 
-			buf := make([]byte, 1500)
-			n, peer, err := pc.ReadFrom(buf)
-			if err != nil {
-				fmt.Fprintf(out, "%2d  *\n", ttl)
-				continue
+				buf := make([]byte, 1500)
+				n, peer, err := pc.ReadFrom(buf)
+				if err != nil {
+					fmt.Fprint(out, "* ")
+					continue
+				}
+				rtt := time.Since(start).Round(time.Millisecond)
+				rm, err := icmp.ParseMessage(1, buf[:n])
+				if err != nil {
+					fmt.Fprint(out, "? ")
+					continue
+				}
+
+				if peerIP == "" {
+					switch p := peer.(type) {
+					case *net.IPAddr:
+						peerIP = p.IP.String()
+					case *net.UDPAddr:
+						peerIP = p.IP.String()
+					default:
+						peerIP = peer.String()
+					}
+					if peerIP == "" {
+						peerIP = peer.String()
+					}
+					fmt.Fprintf(out, "%s  ", peerIP)
+				}
+				fmt.Fprintf(out, "%s ", rtt)
+
+				if rm.Type == ipv4.ICMPTypeEchoReply {
+					reached = true
+				}
 			}
-			rtt := time.Since(start).Round(time.Millisecond)
-			rm, err := icmp.ParseMessage(1, buf[:n])
-			if err != nil {
-				fmt.Fprintf(out, "%2d  %s  (parse error)\n", ttl, peer.String())
-				continue
+			fmt.Fprintln(out)
+			if reached {
+				break
 			}
-			fmt.Fprintf(out, "%2d  %s  %s\n", ttl, peer.String(), rtt)
-			if rm.Type == ipv4.ICMPTypeEchoReply {
+		}
+		return nil
+	}
+}
+
+func diagTCPTraceroute() Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if out == nil {
+			return nil
+		}
+		if len(args) < 2 {
+			return fmt.Errorf("usage: diag tcptraceroute <host> <port> [max_hops]")
+		}
+		host := args[0]
+		port := strings.TrimSpace(args[1])
+		if port == "" {
+			return fmt.Errorf("invalid port")
+		}
+		maxHops := 20
+		if len(args) >= 3 {
+			if v, err := strconv.Atoi(args[2]); err == nil && v > 0 && v <= 64 {
+				maxHops = v
+			}
+		}
+		dst, err := resolveIPv4(host)
+		if err != nil {
+			return err
+		}
+
+		target := net.JoinHostPort(dst.String(), port)
+		fmt.Fprintf(out, "tcptraceroute to %s (%s), port %s, %d hops max (limited: intermediate hops may be hidden)\n", host, dst.String(), port, maxHops)
+
+		for ttl := 1; ttl <= maxHops; ttl++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			fmt.Fprintf(out, "%2d  ", ttl)
+			reached := false
+			for probe := 0; probe < 3; probe++ {
+				start := time.Now()
+				d := net.Dialer{
+					Timeout: 2 * time.Second,
+					Control: func(network, address string, c syscall.RawConn) error {
+						var ctrlErr error
+						if err := c.Control(func(fd uintptr) {
+							ctrlErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TTL, ttl)
+						}); err != nil {
+							return err
+						}
+						return ctrlErr
+					},
+				}
+				conn, err := d.DialContext(ctx, "tcp4", target)
+				if err == nil {
+					_ = conn.Close()
+					fmt.Fprintf(out, "%s ", time.Since(start).Round(time.Millisecond))
+					reached = true
+					continue
+				}
+				// For low TTLs, many environments simply time out rather than returning ICMP Time Exceeded.
+				var nerr net.Error
+				if errors.As(err, &nerr) && nerr.Timeout() {
+					fmt.Fprint(out, "* ")
+					continue
+				}
+				fmt.Fprint(out, "* ")
+			}
+			fmt.Fprintln(out)
+			if reached {
 				break
 			}
 		}

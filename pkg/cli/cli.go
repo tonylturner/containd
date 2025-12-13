@@ -175,6 +175,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("show ip route", RoleView, showIPRoute())
 	r.RegisterRole("diag ping", RoleView, diagPing())
 	r.RegisterRole("diag traceroute", RoleView, diagTraceroute())
+	r.RegisterRole("diag tcptraceroute", RoleView, diagTCPTraceroute())
 	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
 	if api != nil {
 		r.RegisterRole("show health", RoleView, showHealth(api))

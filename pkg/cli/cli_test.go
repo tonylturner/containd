@@ -242,6 +242,15 @@ func TestShowFirewallRulesViaAPI(t *testing.T) {
 	}
 }
 
+func TestDiagTCPTracerouteUsage(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	err := reg.ParseAndExecute(context.Background(), "diag tcptraceroute", &buf)
+	if err == nil {
+		t.Fatalf("expected usage error")
+	}
+}
+
 func TestSetZoneViaAPI(t *testing.T) {
 	client := &mockHTTPClient{
 		resp: &http.Response{
