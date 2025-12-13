@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -75,11 +76,36 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open users sqlite: %w", err)
 	}
+	// This store is hit on every authenticated API request (session sliding window),
+	// so keep SQLite access serialized to avoid SQLITE_BUSY races under concurrent HTTP calls.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if err := tuneSQLite(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := bootstrap(db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func tuneSQLite(db *sql.DB) error {
+	// Pragmas are applied per-connection. With SetMaxOpenConns(1), this reliably applies
+	// to all operations in this store.
+	pragmas := []string{
+		`PRAGMA journal_mode=WAL;`,
+		`PRAGMA synchronous=NORMAL;`,
+		`PRAGMA foreign_keys=ON;`,
+		`PRAGMA busy_timeout=5000;`,
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return fmt.Errorf("sqlite pragma %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 func bootstrap(db *sql.DB) error {
@@ -111,20 +137,48 @@ CREATE TABLE IF NOT EXISTS sessions (
 }
 
 func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
+	username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
+	password := os.Getenv("CONTAIND_DEFAULT_ADMIN_PASSWORD")
+	if username == "" {
+		username = "containd"
+	}
+	if password == "" {
+		password = "containd"
+	}
+
+	// If there are already users, do not silently create additional admins unless the operator
+	// explicitly set CONTAIND_DEFAULT_ADMIN_USERNAME/PASSWORD and that user doesn't exist yet.
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users`).Scan(&count); err != nil {
 		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
-		return nil
+		if strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME")) == "" {
+			return nil
+		}
+		// If the user already exists, do nothing.
+		if _, err := s.GetByUsername(ctx, username); err == nil {
+			return nil
+		}
+		// Otherwise create it (explicit operator intent).
+		_, err := s.Create(ctx, User{
+			Username:  username,
+			FirstName: "Default",
+			LastName:  "Admin",
+			Role:      "admin",
+			Email:     "",
+		}, password)
+		return err
 	}
+
+	// Fresh DB: always seed the default admin.
 	_, err := s.Create(ctx, User{
-		Username:  "containd",
+		Username:  username,
 		FirstName: "Default",
 		LastName:  "Admin",
 		Role:      "admin",
 		Email:     "",
-	}, "containd")
+	}, password)
 	return err
 }
 

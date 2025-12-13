@@ -105,6 +105,17 @@ func TestHelpCommands(t *testing.T) {
 	}
 }
 
+func TestShowInterfacesOS(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	if err := reg.ParseAndExecute(context.Background(), "show interfaces os", &buf); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("IFACE")) || !bytes.Contains(buf.Bytes(), []byte("ADDRS")) {
+		t.Fatalf("unexpected output: %s", buf.String())
+	}
+}
+
 func TestSetSystemHostnameUsage(t *testing.T) {
 	// API-backed command exists only when API is provided.
 	client := &mockHTTPClient{
@@ -125,16 +136,16 @@ func TestSetSystemHostnameUsage(t *testing.T) {
 
 func TestShowServicesStatusTable(t *testing.T) {
 	body := bytes.NewBufferString(`{
-  "syslog": {"configured_forwarders": 2},
-  "proxy": {
-    "forward_enabled": true,
-    "reverse_enabled": false,
-    "envoy_running": true,
-    "nginx_running": false,
-    "envoy_path": "/usr/bin/envoy",
-    "nginx_path": "/usr/sbin/nginx"
-  }
-}`)
+	  "syslog": {"configured_forwarders": 2},
+	  "proxy": {
+	    "forward_enabled": true,
+	    "reverse_enabled": false,
+	    "envoy_running": true,
+	    "nginx_running": false,
+	    "envoy_path": "/usr/bin/envoy",
+	    "nginx_path": "/usr/sbin/nginx"
+	  }
+	}`)
 	client := &mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -201,6 +212,53 @@ func TestShowZonesViaAPI(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("it")) {
 		t.Fatalf("expected zones output, got %s", buf.String())
+	}
+}
+
+func TestShowAssetsViaAPI(t *testing.T) {
+	body := bytes.NewBufferString(`[{"id":"a1","name":"PLC-1","type":"PLC","zone":"lan","ips":["10.0.0.10"],"criticality":"HIGH","tags":["ot"]}]`)
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(body),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	if err := reg.Execute(context.Background(), "show assets", &buf, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("PLC-1")) || !bytes.Contains(buf.Bytes(), []byte("HIGH")) {
+		t.Fatalf("unexpected output: %s", buf.String())
+	}
+}
+
+func TestShowFirewallRulesViaAPI(t *testing.T) {
+	body := bytes.NewBufferString(`[{"id":"r1","sourceZones":["lan"],"destZones":["wan"],"protocols":[{"name":"tcp","port":"443"}],"action":"ALLOW"}]`)
+	client := &mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(body),
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+	reg := NewRegistry(nil, api)
+	var buf bytes.Buffer
+	if err := reg.Execute(context.Background(), "show firewall rules", &buf, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("tcp/443")) || !bytes.Contains(buf.Bytes(), []byte("ALLOW")) {
+		t.Fatalf("unexpected output: %s", buf.String())
+	}
+}
+
+func TestDiagTCPTracerouteUsage(t *testing.T) {
+	reg := NewRegistry(&memStore{}, nil)
+	var buf bytes.Buffer
+	err := reg.ParseAndExecute(context.Background(), "diag tcptraceroute", &buf)
+	if err == nil {
+		t.Fatalf("expected usage error")
 	}
 }
 

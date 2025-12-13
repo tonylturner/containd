@@ -75,6 +75,30 @@ func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 	return nil
 }
 
+func (c *HTTPClient) ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(ifaces)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/interfaces", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine interfaces status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ListEvents fetches recent normalized events from the engine.
 func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error) {
 	u := c.BaseURL + "/internal/events"

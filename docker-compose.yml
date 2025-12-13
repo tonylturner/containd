@@ -4,6 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile.mgmt
     image: containd/containd:dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       # Management listeners
       - NGFW_MGMT_ADDR=${CONTAIND_MGMT_HTTP_ADDR:-:8080}
@@ -33,6 +36,9 @@ services:
       - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:-containd-dev-secret-change-me}
       - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
       - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
+      # Default admin provisioned on fresh installs (users DB empty).
+      - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
+      - CONTAIND_DEFAULT_ADMIN_PASSWORD=${CONTAIND_DEFAULT_ADMIN_PASSWORD:-}
 
       # Optional: point mgmt at a separate engine service.
       - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://engine:8081}
@@ -62,6 +68,9 @@ services:
       context: .
       dockerfile: Dockerfile.engine
     image: containd/containd-engine:dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       - NGFW_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
       # Comma-separated list of interfaces to capture on (empty is allowed for now).

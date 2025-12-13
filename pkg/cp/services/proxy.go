@@ -18,7 +18,11 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 )
 
-const defaultServicesDir = "/var/lib/containd/services"
+// defaultServicesDir must be writable in the single-container appliance image.
+// In docker-compose we mount a persistent volume at /data.
+const defaultServicesDir = "/data/services"
+
+const defaultCertsDir = "/data/certs"
 
 type ProxyOptions struct {
 	BaseDir   string
@@ -34,6 +38,7 @@ type ProxyManager struct {
 	Supervise bool
 	EnvoyPath string
 	NginxPath string
+	CertsDir  string
 
 	mu       sync.Mutex
 	lastCfg  config.ProxyConfig
@@ -55,6 +60,10 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 	if baseDir == "" {
 		baseDir = defaultServicesDir
 	}
+	certsDir := strings.TrimSpace(os.Getenv("CONTAIND_CERTS_DIR"))
+	if certsDir == "" {
+		certsDir = defaultCertsDir
+	}
 	envoyPath := opts.EnvoyPath
 	if envoyPath == "" {
 		envoyPath = "/usr/bin/envoy"
@@ -68,6 +77,7 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 		Supervise: opts.Supervise,
 		EnvoyPath: envoyPath,
 		NginxPath: nginxPath,
+		CertsDir:  certsDir,
 		logger:    logging.New("[services/proxy]"),
 	}
 }
@@ -150,8 +160,13 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		"hasCert": func(ref string) bool { return ref != "" },
 	}).Parse(nginxReverseTemplate))
 
+	type tmplData struct {
+		config.ReverseProxyConfig
+		CertsDir string
+	}
+
 	var buf bytes.Buffer
-	if err := tpl.Execute(&buf, cfg); err != nil {
+	if err := tpl.Execute(&buf, tmplData{ReverseProxyConfig: cfg, CertsDir: m.CertsDir}); err != nil {
 		return err
 	}
 	return os.WriteFile(path, buf.Bytes(), 0o644)
@@ -372,8 +387,8 @@ server {
   {{- if $site.TLSEnabled }}
     {{- if hasCert $site.CertRef }}
   listen {{ $site.ListenPort }} ssl;
-  ssl_certificate /var/lib/containd/certs/{{ $site.CertRef }}.crt;
-  ssl_certificate_key /var/lib/containd/certs/{{ $site.CertRef }}.key;
+  ssl_certificate {{ $.CertsDir }}/{{ $site.CertRef }}.crt;
+  ssl_certificate_key {{ $.CertsDir }}/{{ $site.CertRef }}.key;
     {{- else }}
   # TLS enabled but certRef not set; serving plaintext until certificates are configured.
   listen {{ $site.ListenPort }};

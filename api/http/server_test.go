@@ -89,10 +89,16 @@ type mockEngine struct {
 	snap    rules.Snapshot
 	err     error
 	lastDP  config.DataPlaneConfig
+	lastIf  []config.Interface
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
 	m.lastDP = cfg
+	return nil
+}
+
+func (m *mockEngine) ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error {
+	m.lastIf = append([]config.Interface(nil), ifaces...)
 	return nil
 }
 

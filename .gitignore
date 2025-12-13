@@ -30,6 +30,7 @@ go.work.sum
 # Go / build caches
 .cache/
 .gocache/
+gocache/
 bin/
 
 # Node/Next.js

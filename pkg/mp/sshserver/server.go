@@ -524,12 +524,13 @@ func (s *Server) runDiagnosticsMenu(ctx context.Context, rw io.ReadWriter, reade
 		writeLn("")
 		writeLn("0)  Back")
 		writeLn("1)  Ping host")
-		writeLn("2)  Traceroute host")
-		writeLn("3)  Capture pcap")
-		writeLn("4)  Show ip route")
+		writeLn("2)  Traceroute host (ICMP)")
+		writeLn("3)  Traceroute host (TCP)")
+		writeLn("4)  Capture pcap")
+		writeLn("5)  Show ip route")
 		writeLn("")
 
-		choice, ok := ask("Select option (0-4): ")
+		choice, ok := ask("Select option (0-5): ")
 		if !ok {
 			return
 		}
@@ -546,7 +547,14 @@ func (s *Server) runDiagnosticsMenu(ctx context.Context, rw io.ReadWriter, reade
 				writeLn("Host required.")
 				continue
 			}
-			_ = exec("diag ping " + shellEscape(host))
+			cnt, _ := ask("Count (default 4): ")
+			cnt = strings.TrimSpace(cnt)
+			cmd := "diag ping " + shellEscape(host)
+			if cnt != "" {
+				cmd += " " + shellEscape(cnt)
+			}
+			writeLn("Running... (may take a few seconds)")
+			_ = exec(cmd)
 		case "2":
 			host, ok := ask("Host/IP: ")
 			if !ok {
@@ -557,8 +565,46 @@ func (s *Server) runDiagnosticsMenu(ctx context.Context, rw io.ReadWriter, reade
 				writeLn("Host required.")
 				continue
 			}
-			_ = exec("diag traceroute " + shellEscape(host))
+			hops, _ := ask("Max hops (default 10): ")
+			hops = strings.TrimSpace(hops)
+			cmd := "diag traceroute " + shellEscape(host)
+			if hops != "" {
+				cmd += " " + shellEscape(hops)
+			} else {
+				cmd += " 10"
+			}
+			writeLn("Running... (can take up to ~60s)")
+			_ = exec(cmd)
 		case "3":
+			host, ok := ask("Host/IP: ")
+			if !ok {
+				continue
+			}
+			host = strings.TrimSpace(host)
+			if host == "" {
+				writeLn("Host required.")
+				continue
+			}
+			port, ok := ask("Port (e.g. 443): ")
+			if !ok {
+				continue
+			}
+			port = strings.TrimSpace(port)
+			if port == "" {
+				writeLn("Port required.")
+				continue
+			}
+			hops, _ := ask("Max hops (default 10): ")
+			hops = strings.TrimSpace(hops)
+			cmd := "diag tcptraceroute " + shellEscape(host) + " " + shellEscape(port)
+			if hops != "" {
+				cmd += " " + shellEscape(hops)
+			} else {
+				cmd += " 10"
+			}
+			writeLn("Running... (can take up to ~60s)")
+			_ = exec(cmd)
+		case "4":
 			iface, ok := ask("Interface (e.g. eth0/wan/lan1): ")
 			if !ok {
 				continue
@@ -589,8 +635,9 @@ func (s *Server) runDiagnosticsMenu(ctx context.Context, rw io.ReadWriter, reade
 				}
 				cmd += " " + shellEscape(file)
 			}
+			writeLn("Running capture... (writes pcap to /data)")
 			_ = exec(cmd)
-		case "4":
+		case "5":
 			_ = exec("show ip route")
 		default:
 			writeLn("Unknown option.")

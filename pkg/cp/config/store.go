@@ -69,6 +69,14 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// Keep access serialized; this avoids SQLITE_BUSY errors with modernc/sqlite
+	// when multiple goroutines update candidate/running state concurrently.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if err := tuneSQLite(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := bootstrapSchema(db); err != nil {
 		db.Close()
 		return nil, err
@@ -79,6 +87,20 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func tuneSQLite(db *sql.DB) error {
+	pragmas := []string{
+		`PRAGMA journal_mode=WAL;`,
+		`PRAGMA synchronous=NORMAL;`,
+		`PRAGMA busy_timeout=5000;`,
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return fmt.Errorf("sqlite pragma %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 func bootstrapSchema(db *sql.DB) error {
@@ -129,7 +151,29 @@ func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
 
 // LoadCandidate returns the candidate config or ErrNotFound if none exists.
 func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
-	return s.loadKind(ctx, configKeyCandidate)
+	cfg, err := s.loadKind(ctx, configKeyCandidate)
+	if err == nil {
+		return cfg, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+
+	// Appliance UX: treat "candidate missing" as "candidate == running" and
+	// lazily seed candidate so operations like `diff` and `commit` behave
+	// predictably on fresh installs.
+	running, rerr := s.Load(ctx)
+	if rerr != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Double-check after acquiring the lock.
+	if existing, eerr := s.loadKind(ctx, configKeyCandidate); eerr == nil {
+		return existing, nil
+	}
+	_ = s.saveKind(ctx, configKeyCandidate, running)
+	return running, nil
 }
 
 func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {

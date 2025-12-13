@@ -103,6 +103,19 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 		// Clear cookies on the response so browser sessions immediately drop auth.
 		clearAuthCookie(c)
 
-		c.JSON(http.StatusOK, gin.H{"status": "reset", "username": "containd", "password": "containd"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "reset",
+			"loggedOut": true,
+			"login": gin.H{
+				"username": "containd",
+				"password": "containd",
+			},
+			"message": "Factory reset completed; you have been logged out.",
+			"nextSteps": []string{
+				"Log in with containd/containd",
+				"Change the default password immediately",
+				"Enroll an SSH key and disable SSH password auth",
+			},
+		})
 	}
 }
