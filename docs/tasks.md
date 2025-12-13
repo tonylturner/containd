@@ -69,6 +69,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
   - [~] Add in-app console/CLI (dashboard console replacing roadmap; uses mgmt `/api/v1/cli/execute`).
+  - [x] Add in-app documentation (MkDocs Material) behind Help icon.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -118,6 +119,12 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Expand `docs/mkdocs/architecture.md` with module boundaries and data/control/management plane flows.
   - [x] Update `docs/mkdocs/dataplane.md` with policy compilation → engine flow.
   - [x] Flesh out `docs/mkdocs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
+  - [~] Integrate MkDocs + Material (build pipeline + nav + search).
+    - [x] Add `mkdocs.yml` using `docs/mkdocs/` as source.
+    - [x] Add `docs/mkdocs/index.md` as docs landing page.
+    - [x] Add `docs/mkdocs/assets/` for images and diagrams.
+    - [x] Build docs into UI static assets (e.g. `ui/public/docs/`) during image build.
+    - [x] Add CI target to validate docs build.
 
 - [ ] Firewall core networking
   - [~] Routing + policy routing (config model + engine netlink apply; replace/reconcile semantics pending).

@@ -31,7 +31,13 @@ go.work.sum
 .cache/
 .gocache/
 gocache/
+.gomodcache/
+.gopath/
 bin/
+
+# MkDocs
+site/
+ui/public/docs/
 
 # Node/Next.js
 node_modules/

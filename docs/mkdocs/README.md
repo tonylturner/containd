@@ -1,6 +1,12 @@
 # Product Documentation
 
-This folder contains user- and operator-facing documentation intended to be rendered by a static docs tool (MkDocs or similar).
+This folder contains user- and operator-facing documentation intended to be rendered by MkDocs (Material theme).
+
+Source of truth: `docs/mkdocs/`
+
+Local build (requires Python + MkDocs):
+- `mkdocs build`
+- or `mkdocs serve` for live preview
 
 Start here:
 - `architecture.md` – overall planes/modules and how requests flow
