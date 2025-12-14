@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -17,10 +17,10 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/enforce"
-	"github.com/containd/containd/pkg/dp/netcfg"
+	"github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -34,6 +34,7 @@ type healthResponse struct {
 func main() {
 	addr := addrFromEnv("NGFW_ENGINE_ADDR", ":8081")
 	logger := logging.New("[engine]")
+	ownership := newOwnershipManager(logger)
 
 	ifaces := []string{}
 	enforceEnabled := false
@@ -62,14 +63,17 @@ func main() {
 		go mockDPI(logger, dpEngine)
 	}
 
+	ownership.start(context.Background())
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
-	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger))
-	mux.HandleFunc("/internal/routing", routingHandler(logger))
+	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
+	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
+	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 
@@ -196,7 +200,7 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 	}
 }
 
-func interfacesHandler(logger *log.Logger) http.HandlerFunc {
+func interfacesHandler(logger *log.Logger, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -228,6 +232,10 @@ func interfacesHandler(logger *log.Logger) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+		}
+		// Store desired state for background ownership reconcile (non-destructive).
+		if ownership != nil {
+			ownership.setInterfaces(ifaces)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
@@ -269,7 +277,7 @@ func interfacesStateHandler() http.HandlerFunc {
 	}
 }
 
-func routingHandler(logger *log.Logger) http.HandlerFunc {
+func routingHandler(logger *log.Logger, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -287,14 +295,36 @@ func routingHandler(logger *log.Logger) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		// Replace semantics are provided for future reconcile; for now we do additive apply.
-		if err := netcfg.ApplyRouting(ctx, routing); err != nil {
+		// Replace semantics are future; for now we do additive apply.
+		resolved := routing
+		if ownership != nil {
+			// Best-effort resolve logical iface names (wan/dmz/lanX) to kernel device names
+			// using the last known interface bindings.
+			// If no bindings exist, the route will still apply when Iface already names a kernel device.
+			resolved = resolveRoutingIfaces(routing, ownership.currentInterfaces())
+		}
+		if err := netcfg.ApplyRouting(ctx, resolved); err != nil {
 			logger.Printf("apply routing failed: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if ownership != nil {
+			ownership.setRouting(routing)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+	}
+}
+
+func ownershipHandler(ownership *ownershipManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(ownershipStatusJSON(ownership))
 	}
 }
 
@@ -341,22 +371,22 @@ func mockDPI(logger *log.Logger, dpEngine *engine.Engine) {
 	}
 	state := flow.NewState(key, time.Now())
 	t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			pkt := &dpi.ParsedPacket{
-				Payload: raw,
-				Proto:   "tcp",
-				SrcPort: 12345,
-				DstPort: 502,
-			}
-			if !dpEngine.ShouldInspect(state, pkt) {
-				continue
-			}
-			events, err := dpEngine.DPI().OnPacket(state, pkt)
-			if err != nil {
-				logger.Printf("mock dpi error: %v", err)
-				continue
-			}
+	defer t.Stop()
+	for range t.C {
+		pkt := &dpi.ParsedPacket{
+			Payload: raw,
+			Proto:   "tcp",
+			SrcPort: 12345,
+			DstPort: 502,
+		}
+		if !dpEngine.ShouldInspect(state, pkt) {
+			continue
+		}
+		events, err := dpEngine.DPI().OnPacket(state, pkt)
+		if err != nil {
+			logger.Printf("mock dpi error: %v", err)
+			continue
+		}
 		dpEngine.RecordDPIEvents(state, pkt, events)
 		for _, ev := range events {
 			logger.Printf("dpi event proto=%s kind=%s attrs=%v", ev.Proto, ev.Kind, ev.Attributes)

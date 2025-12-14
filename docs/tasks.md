@@ -77,6 +77,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Document compose usage in README and `docs/mkdocs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
   - [x] Add compose UX helpers (checked-in `.env.example`, ignore `.env`, `scripts/containd` connection helper).
+  - [ ] Add lab harness compose example(s) (sample hosts + enforced default routes via firewall) and document recommended topology patterns (internal networks, stable gateway IPs).
 - [ ] Observability/logging
   - [x] Add structured logging helper in `pkg/common`.
   - [x] Use helper in both binaries.
@@ -96,6 +97,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] ICS policy primitives (Modbus fields in policy; enforcement/matching pending).
   - [ ] OT policy templates (Purdue baseline, maintenance window, SIS hardening).
   - [ ] Selective DPI steering (NFQUEUE/AF_PACKET) based on ICS predicates.
+    - [ ] NFQUEUE implementation details: bounded queues/backpressure + overload policy (fail-open/closed per policy class).
+    - [ ] Decision caching + bypass marking (nftables sets/marks/conntrack marks) to return classified flows to kernel fast path.
+    - [ ] Metrics for steering + cache (queue depth, drops, cache hit rate, p95/p99 classify time).
 - [ ] IDS/IPS
   - [~] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack (IDS done, IPS pending).
 
@@ -125,16 +129,18 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [x] Add `docs/mkdocs/assets/` for images and diagrams.
     - [x] Build docs into UI static assets (e.g. `ui/public/docs/`) during image build.
     - [x] Add CI target to validate docs build.
+  - [ ] Add ADR(s): compose-first lab deployment (stable gateway IPs) and selective steering baseline (kernel fast path + NFQUEUE for L7 semantics).
 
 - [ ] Firewall core networking
   - [~] Routing + policy routing (config model + engine netlink apply; replace/reconcile semantics pending).
+    - [x] Add management API + UI page for static routes and policy rules.
   - [ ] VLAN subinterfaces (config + netlink link creation + UI/CLI inputs).
   - [ ] Policy-based routing UX (CLI/UI/API to edit rules, plus `show ip rule`).
   - [ ] NAT UX (CLI/UI/API) for SNAT/DNAT and validation.
 
 - [ ] Appliance-grade networking & performance
-  - [ ] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).
-  - [ ] Interface discovery + assignment UX (map physical NICs → `wan/dmz/lan1-6`, show link state/addresses).
+  - [~] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).
+  - [~] Interface discovery + assignment UX (map physical NICs → `wan/dmz/lan1-6`, show link state/addresses).
   - [ ] Linux routing reconcile (remove stale routes/rules managed by containd).
   - [ ] Linux neighbor visibility + tooling (`show neighbors`, ARP/ND tables).
   - [ ] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.

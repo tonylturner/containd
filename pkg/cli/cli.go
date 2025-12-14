@@ -202,6 +202,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show zones", RoleView, showZonesAPI(api))
 		r.RegisterRole("show interfaces", RoleView, showInterfacesAPI(api))
 		r.RegisterRole("show interfaces state", RoleView, showInterfacesStateAPI(api))
+		r.RegisterRole("show routing", RoleView, showRoutingAPI(api))
 		r.RegisterRole("assign interfaces", RoleAdmin, assignInterfacesAPI(api))
 		r.RegisterRole("show assets", RoleView, showAssetsAPI(api))
 		r.RegisterRole("show firewall rules", RoleView, showFirewallRulesAPI(api))

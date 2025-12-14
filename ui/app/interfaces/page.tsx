@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -14,6 +14,8 @@ export default function InterfacesPage() {
   const [addresses, setAddresses] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
 
   async function refresh() {
     const [i, z, s] = await Promise.all([
@@ -26,9 +28,59 @@ export default function InterfacesPage() {
     setState(s ?? []);
   }
 
+  const unboundConfigured = useMemo(() => {
+    const byDev = new Set(
+      ifaces
+        .map((i) => (i.device || "").trim())
+        .filter(Boolean),
+    );
+    const missingRuntime = ifaces.filter((i) => !runtimeFor(i, state));
+    const osIfaces = state
+      .map((s) => s.name)
+      .filter((n) => n !== "lo")
+      .sort();
+    const unassignedOS = osIfaces.filter((n) => !byDev.has(n));
+    return {
+      missingRuntime,
+      unassignedOS,
+    };
+  }, [ifaces, state]);
+
   useEffect(() => {
     refresh();
   }, []);
+
+  async function onAutoAssign() {
+    setError(null);
+    setAssigning(true);
+    const res = await api.assignInterfaces("auto");
+    setAssigning(false);
+    if (!res) {
+      setError("Failed to auto-assign interfaces.");
+      return;
+    }
+    await refresh();
+  }
+
+  async function onReconcileReplace() {
+    setError(null);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Reconcile will REPLACE OS addresses for interfaces with configured static addresses. Continue?",
+      )
+    ) {
+      return;
+    }
+    setReconciling(true);
+    const res = await api.reconcileInterfacesReplace();
+    setReconciling(false);
+    if (!res) {
+      setError("Failed to reconcile interfaces.");
+      return;
+    }
+    await refresh();
+  }
 
   async function onCreate() {
     setError(null);
@@ -81,17 +133,48 @@ export default function InterfacesPage() {
     <Shell
       title="Interfaces"
       actions={
-        <button
-          onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin() && (
+            <>
+              <button
+                onClick={onAutoAssign}
+                disabled={assigning}
+                className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30 disabled:opacity-50"
+                title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected OS interfaces"
+              >
+                {assigning ? "Assigning..." : "Auto-assign"}
+              </button>
+              <button
+                onClick={onReconcileReplace}
+                disabled={reconciling}
+                className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-1.5 text-sm text-amber hover:bg-amber/15 disabled:opacity-50"
+                title="Reconcile interface addresses (replace semantics for configured static addresses)"
+              >
+                {reconciling ? "Reconciling..." : "Reconcile"}
+              </button>
+            </>
+          )}
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          >
+            Refresh
+          </button>
+        </div>
       }
     >
       {!isAdmin() && (
         <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
+        </div>
+      )}
+      {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          <div className="font-semibold">Interface bindings needed</div>
+          <div className="mt-1 text-amber/90">
+            Some configured interfaces are not bound to OS devices. Use <span className="font-semibold">Auto-assign</span>{" "}
+            or set the <span className="font-semibold">Device</span> field per interface.
+          </div>
         </div>
       )}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
@@ -175,6 +258,45 @@ export default function InterfacesPage() {
           </tbody>
         </table>
       </div>
+
+      {state.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-sm font-semibold text-white">Detected OS interfaces</h2>
+          <div className="mt-1 text-xs text-slate-400">
+            This is what the kernel currently exposes (used for device binding and link/address state).
+          </div>
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/10">
+            <table className="w-full text-sm">
+              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+                <tr>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Link</th>
+                  <th className="px-4 py-3">MAC</th>
+                  <th className="px-4 py-3">MTU</th>
+                  <th className="px-4 py-3">Addrs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state
+                  .slice()
+                  .sort((a, b) => a.index - b.index)
+                  .filter((s) => s.name !== "lo")
+                  .map((s) => (
+                    <tr key={s.name} className="border-t border-white/5">
+                      <td className="px-4 py-3 font-medium text-white">{s.name}</td>
+                      <td className="px-4 py-3">
+                        <span className={chipClass(s.up)}>{s.up ? "up" : "down"}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-200">{s.mac || "—"}</td>
+                      <td className="px-4 py-3 text-slate-200">{s.mtu || "—"}</td>
+                      <td className="px-4 py-3 text-slate-200">{(s.addrs ?? []).join(", ") || "—"}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </Shell>
   );
 }

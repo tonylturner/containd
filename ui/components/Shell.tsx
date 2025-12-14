@@ -42,6 +42,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
       items: [
         { href: "/zones/", label: "Zones" },
         { href: "/interfaces/", label: "Interfaces" },
+        { href: "/routing/", label: "Routing" },
         { href: "/firewall/", label: "Firewall Rules" },
         { href: "/ics/", label: "ICS Policy" },
         { href: "/ids/", label: "IDS Rules" },

@@ -1,6 +1,6 @@
 # containd
 
-`containd` is an open-source next-generation firewall purpose-built for ICS/OT environments. This repository follows the agent specification in `AGENTS.md` and evolves through staged phases. Product/operator docs live under `docs/mkdocs/` and the roadmap is tracked in `docs/tasks.md`.
+`containd` is an open-source next-generation firewall purpose-built for ICS/OT environments. This repository follows the agent specification in `agents.md` and evolves through staged phases. Product/operator docs live under `docs/mkdocs/` and the roadmap is tracked in `docs/tasks.md`.
 
 ## Current status
 
@@ -51,7 +51,7 @@ Defaults:
 - UI/API: `http://localhost:${CONTAIND_PUBLISH_HTTP_PORT:-8080}` and `https://localhost:${CONTAIND_PUBLISH_HTTPS_PORT:-8443}`
 - SSH: `ssh -p ${CONTAIND_PUBLISH_SSH_PORT:-2222} containd@localhost` (password `containd` until you enroll a key)
 
-Next steps: flesh out control plane models, data plane capture/flow tracking, and the full UI/CLI experience per `AGENTS.md`.
+Next steps: flesh out control plane models, data plane capture/flow tracking, and the full UI/CLI experience per `agents.md`.
 
 ## Docs
 

@@ -25,6 +25,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `show diff`
   - `show system`
   - `show services status`
+  - `show routing`
   - `show ids rules`
   - `show audit`
   - `show dataplane`

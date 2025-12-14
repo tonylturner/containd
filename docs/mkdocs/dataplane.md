@@ -12,6 +12,7 @@ This document tracks the data-plane design and current scaffolding.
   - Interface addressing + default routes applied via netlink (`pkg/dp/netcfg`).
   - Static routes + basic policy routing rules (PBR) applied via netlink (`routing` config).
   - nftables rules compiled/applied for zone firewall and basic NAT (masquerade).
+  - Ownership loop in `ngfw-engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
 
 ## Pipeline (planned)
 1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.

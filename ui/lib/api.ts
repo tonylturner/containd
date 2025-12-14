@@ -211,6 +211,26 @@ export type InterfaceState = {
   addrs: string[];
 };
 
+export type StaticRoute = {
+  dst: string;
+  gateway?: string;
+  iface?: string;
+  table?: number;
+  metric?: number;
+};
+
+export type PolicyRule = {
+  priority?: number;
+  src?: string;
+  dst?: string;
+  table: number;
+};
+
+export type RoutingConfig = {
+  routes?: StaticRoute[];
+  rules?: PolicyRule[];
+};
+
 export type Protocol = {
   name: string;
   port?: string;
@@ -608,12 +628,22 @@ export const api = {
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
   listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
+  assignInterfaces: (mode: "auto" | "explicit", mappings?: Record<string, string>) =>
+    postJSON<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
+      mode,
+      mappings: mappings ?? {},
+    }),
+  reconcileInterfacesReplace: () =>
+    postJSON<{ status: string }>("/api/v1/interfaces/reconcile", { confirm: "REPLACE" }),
   createInterface: (i: Interface) =>
     postJSON<Interface>("/api/v1/interfaces", i),
   updateInterface: (name: string, i: Partial<Interface>) =>
     patchJSON<Interface>(`/api/v1/interfaces/${encodeURIComponent(name)}`, i),
   deleteInterface: (name: string) =>
     deleteJSON(`/api/v1/interfaces/${encodeURIComponent(name)}`),
+
+  getRouting: () => getJSON<RoutingConfig>("/api/v1/routing"),
+  setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
 
   listFirewallRules: () => getJSON<FirewallRule[]>("/api/v1/firewall/rules"),
   createFirewallRule: (r: FirewallRule) =>

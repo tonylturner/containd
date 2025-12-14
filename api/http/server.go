@@ -34,14 +34,14 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 }
 
 // EngineClient is an optional interface for pushing compiled snapshots to the data plane.
-	type EngineClient interface {
-		Configure(ctx context.Context, cfg config.DataPlaneConfig) error
-		ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
-		ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
-		ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
-		ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
-		ApplyRules(ctx context.Context, snap rules.Snapshot) error
-	}
+type EngineClient interface {
+	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
+	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
+	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
+	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
+	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
+	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+}
 
 type TelemetryClient interface {
 	ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
@@ -147,6 +147,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store, engine, services))
 		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store, engine, services))
 		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
+		protected.GET("/routing", getRoutingHandler(store))
+		protected.POST("/routing", requireAdmin(), setRoutingHandler(store, engine, services))
 		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
@@ -1392,6 +1394,43 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 		}
 		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
 		c.JSON(http.StatusOK, iface)
+	}
+}
+
+func getRoutingHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Routing)
+	}
+}
+
+func setRoutingHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var routingCfg config.RoutingConfig
+		if err := c.ShouldBindJSON(&routingCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Routing = routingCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "routing.set", Target: "config"})
+		c.JSON(http.StatusOK, cfg.Routing)
 	}
 }
 
