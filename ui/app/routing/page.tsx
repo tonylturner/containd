@@ -8,6 +8,8 @@ import {
   type Gateway,
   type Interface,
   type InterfaceState,
+  type OSRoute,
+  type OSRoutingSnapshot,
   type PolicyRule,
   type RoutingConfig,
   type StaticRoute,
@@ -58,6 +60,11 @@ function pickWanIface(ifs: Interface[]): Interface | null {
   return byZone ?? null;
 }
 
+function effectiveDev(i: Interface | null): string {
+  if (!i) return "";
+  return (i.device || i.name || "").trim();
+}
+
 function pickWanCIDR(state: InterfaceState | null): string | null {
   if (!state) return null;
   for (const addr of state.addrs || []) {
@@ -72,10 +79,12 @@ function pickWanCIDR(state: InterfaceState | null): string | null {
 
 export default function RoutingPage() {
   const [cfg, setCfg] = useState<RoutingConfig>({ gateways: [], routes: [], rules: [] });
+  const [osRouting, setOSRouting] = useState<OSRoutingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [detecting, setDetecting] = useState(false);
 
   const [gwName, setGwName] = useState("");
   const [gwAddr, setGwAddr] = useState("");
@@ -94,12 +103,9 @@ export default function RoutingPage() {
   const [rulePrio, setRulePrio] = useState("");
 
   async function refresh() {
-    const r = await api.getRouting();
-    setCfg({
-      gateways: r?.gateways ?? [],
-      routes: r?.routes ?? [],
-      rules: r?.rules ?? [],
-    });
+    const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
+    setCfg({ gateways: r?.gateways ?? [], routes: r?.routes ?? [], rules: r?.rules ?? [] });
+    setOSRouting(osr);
   }
 
   useEffect(() => {
@@ -271,11 +277,12 @@ export default function RoutingPage() {
         setError("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
         return;
       }
-      const wanState = (states ?? []).find((s) => s.name === wanIface.name) ?? null;
+      const wanDev = effectiveDev(wanIface);
+      const wanState = (states ?? []).find((s) => s.name === wanDev) ?? null;
       const wanCIDR = pickWanCIDR(wanState);
       if (!wanCIDR) {
         setError(
-          `Could not determine WAN IPv4 address for '${wanIface.name}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
+          `Could not determine WAN IPv4 address for '${wanDev}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
         );
         return;
       }
@@ -289,7 +296,7 @@ export default function RoutingPage() {
       const nextGateway: Gateway = {
         name: gwName,
         address: inferredGw,
-        iface: wanIface.name,
+        iface: wanDev,
         description: "Auto (WAN) from OS address",
       };
       const gateways = cfg.gateways ?? [];
@@ -306,7 +313,7 @@ export default function RoutingPage() {
       const nextDefault: StaticRoute = {
         dst: "default",
         gateway: gwName,
-        iface: wanIface.name,
+        iface: wanDev,
         table: 0,
       };
       const nextRoutes =
@@ -314,11 +321,63 @@ export default function RoutingPage() {
 
       await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
       setNotice(
-        `Created/updated '${gwName}' (${inferredGw} via ${wanIface.name}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN→WAN and SNAT is enabled.`,
+        `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN→WAN and SNAT is enabled.`,
       );
     } catch (e) {
       setError(`Failed to auto-configure WAN default route: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  async function refreshOSRouting() {
+    setDetecting(true);
+    const osr = await api.getOSRouting();
+    setDetecting(false);
+    setOSRouting(osr);
+    if (!osr) {
+      setError("Failed to load OS routing table (not supported or API unavailable).");
+    }
+  }
+
+  async function adoptOSDefaultRoute() {
+    if (!isAdmin()) return;
+    setError(null);
+    setNotice(null);
+    const def: OSRoute | undefined = osRouting?.defaultRoute;
+    if (!def || !def.gateway) {
+      setError("No OS default route with a gateway was detected.");
+      return;
+    }
+    const gwIP = def.gateway.trim();
+    const dev = (def.iface || "").trim();
+    if (!gwIP || !dev) {
+      setError("Detected default route is missing a gateway or interface.");
+      return;
+    }
+
+    const gwName = "os-default-gw";
+    const nextGateway: Gateway = {
+      name: gwName,
+      address: gwIP,
+      iface: dev,
+      description: "Adopted from OS default route",
+    };
+    const gateways = cfg.gateways ?? [];
+    const existingGwIdx = gateways.findIndex((g) => g.name === gwName);
+    const nextGateways =
+      existingGwIdx >= 0 ? gateways.map((g, i) => (i === existingGwIdx ? nextGateway : g)) : [...gateways, nextGateway];
+
+    const routes = cfg.routes ?? [];
+    const isDefaultDst = (dst: string) => {
+      const d = dst.trim().toLowerCase();
+      return d === "default" || d === "0.0.0.0/0";
+    };
+    const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
+    const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: dev, table: 0 };
+    const nextRoutes =
+      existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
+
+    await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+    setNotice(`Adopted OS default route via ${dev} → ${gwIP} into routing config.`);
   }
 
   return (
@@ -326,6 +385,13 @@ export default function RoutingPage() {
       title="Routing"
       actions={
         <div className="flex items-center gap-2">
+          <button
+            onClick={refreshOSRouting}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            title="Reload OS routing table snapshot"
+          >
+            {detecting ? "Detecting..." : "Detect from OS"}
+          </button>
           {isAdmin() && (
             <button
               onClick={autoWanDefaultRoute}
@@ -371,6 +437,64 @@ export default function RoutingPage() {
           {notice}
         </div>
       )}
+
+      <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Detect from OS</h2>
+            <div className="mt-1 text-xs text-slate-400">
+              Shows the current kernel routing table. This is useful in Docker labs where the OS already has a working default
+              route, but your configured routing is still empty.
+            </div>
+          </div>
+          {isAdmin() && (
+            <button
+              onClick={adoptOSDefaultRoute}
+              disabled={!osRouting?.defaultRoute?.gateway || !osRouting?.defaultRoute?.iface}
+              className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15 disabled:opacity-50"
+              title="Create a gateway + default route in config from the detected OS default route"
+            >
+              Adopt default route
+            </button>
+          )}
+        </div>
+
+        {osRouting?.routes?.length ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm text-slate-200">
+              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+                <tr>
+                  <th className="px-3 py-2">Destination</th>
+                  <th className="px-3 py-2">Gateway</th>
+                  <th className="px-3 py-2">Iface</th>
+                  <th className="px-3 py-2">Metric</th>
+                </tr>
+              </thead>
+              <tbody>
+                {osRouting.routes.map((r, idx) => (
+                  <tr key={idx} className="border-t border-white/5">
+                    <td className="px-3 py-2 font-medium text-white">{r.dst || "—"}</td>
+                    <td className="px-3 py-2">{r.gateway || "—"}</td>
+                    <td className="px-3 py-2">{r.iface || "—"}</td>
+                    <td className="px-3 py-2">{typeof r.metric === "number" ? String(r.metric) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {osRouting.defaultRoute?.gateway && osRouting.defaultRoute?.iface && (
+              <div className="mt-3 text-xs text-slate-400">
+                Detected default: <span className="text-slate-200">{osRouting.defaultRoute.iface}</span> →{" "}
+                <span className="text-slate-200">{osRouting.defaultRoute.gateway}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-slate-300">
+            No OS routes detected (or not supported in this environment). Click <span className="font-semibold">Detect from OS</span>{" "}
+            to refresh.
+          </div>
+        )}
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur lg:col-span-2">

@@ -7,10 +7,32 @@
 **/*.exe
 **/*.test
 
+# Local Go caches (large; never needed in image builds)
+.gocache
+.gomodcache
+.gopath
+
+# Local binaries produced in repo root
+ngfw-mgmt
+ngfw-engine
+
 # UI artifacts
-ui/node_modules
-ui/.next
-ui/out
+**/node_modules
+**/.next
+**/out
+ui/.turbo
+ui/.eslintcache
+ui/.swc
+ui/coverage
+ui/.vercel
 
 # Local data volumes
 data
+
+# Local env files (compose reads these; image builds should not)
+.env
+
+# Docs not required for image builds (keep MkDocs source used by Dockerfile.mgmt)
+docs
+!docs/mkdocs
+!docs/requirements-mkdocs.txt

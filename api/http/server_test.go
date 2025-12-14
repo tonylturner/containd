@@ -320,6 +320,49 @@ func TestAssignInterfacesAuto(t *testing.T) {
 	}
 }
 
+func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "lo", Index: 1, Up: true},
+			// Deliberately scramble numbering vs expected "wan/dmz/lan..." order.
+			{Name: "eth0", Index: 2, Up: true, Addrs: []string{"192.168.245.2/24"}}, // should become lan4
+			{Name: "eth1", Index: 3, Up: true, Addrs: []string{"192.168.240.2/24"}}, // should become wan
+			{Name: "eth2", Index: 4, Up: true, Addrs: []string{"192.168.241.2/24"}}, // dmz
+			{Name: "eth3", Index: 5, Up: true, Addrs: []string{"192.168.242.2/24"}}, // lan1
+			{Name: "eth4", Index: 6, Up: true, Addrs: []string{"192.168.243.2/24"}}, // lan2
+			{Name: "eth5", Index: 7, Up: true, Addrs: []string{"192.168.244.2/24"}}, // lan3
+			{Name: "eth6", Index: 8, Up: true, Addrs: []string{"192.168.246.2/24"}}, // lan5
+			{Name: "eth7", Index: 9, Up: true, Addrs: []string{"192.168.247.2/24"}}, // lan6
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got := map[string]string{}
+	for _, iface := range eng.lastIf {
+		if iface.Name == "" || iface.Device == "" {
+			continue
+		}
+		got[iface.Name] = iface.Device
+	}
+	if got["wan"] != "eth1" {
+		t.Fatalf("expected wan device eth1 (subnet match), got %q", got["wan"])
+	}
+	if got["dmz"] != "eth2" {
+		t.Fatalf("expected dmz device eth2 (subnet match), got %q", got["dmz"])
+	}
+	if got["lan4"] != "eth0" {
+		t.Fatalf("expected lan4 device eth0 (subnet match), got %q", got["lan4"])
+	}
+}
+
 func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
 	m := &mockStore{}
 	eng := &mockEngine{

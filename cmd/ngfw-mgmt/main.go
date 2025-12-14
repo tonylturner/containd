@@ -82,7 +82,13 @@ func main() {
 	enableHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true)
 
 	var engineClient httpapi.EngineClient
-	if engineURL := os.Getenv("NGFW_ENGINE_URL"); engineURL != "" {
+	if engineURL := strings.TrimSpace(os.Getenv("NGFW_ENGINE_URL")); engineURL != "" {
+		// Be forgiving: allow "127.0.0.1:8081" in env files and treat it as http://127.0.0.1:8081.
+		// This prevents the UI from losing interface runtime state due to a missing URL scheme.
+		if !strings.Contains(engineURL, "://") {
+			engineURL = "http://" + engineURL
+			logger.Printf("WARNING: NGFW_ENGINE_URL missing scheme; using %q", engineURL)
+		}
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	serviceManager := services.NewManager(services.ManagerOptions{})

@@ -155,6 +155,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store, engine, services))
 		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
 		protected.GET("/routing", getRoutingHandler(store))
+		protected.GET("/routing/os", getOSRoutingHandler())
 		protected.POST("/routing", requireAdmin(), setRoutingHandler(store, engine, services))
 		protected.POST("/routing/reconcile", requireAdmin(), routingReconcileHandler(store, engine))
 		protected.GET("/firewall/nat", getFirewallNATHandler(store))
@@ -1241,37 +1242,99 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
 		}
 
-		assignments := map[string]string{}
-		switch mode {
-		case "auto":
-			// Assign default logical interfaces to the first NIC-like kernel interfaces.
-			order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
-			needed := 0
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; ok {
-					needed++
+			assignments := map[string]string{}
+			switch mode {
+			case "auto":
+				// Assign default logical interfaces to detected kernel interfaces.
+				//
+				// Note: In Docker-based lab mode, interface numbering (eth0/eth1/...) can vary depending
+				// on network attach order. To keep the appliance UX stable, try to match interface roles
+				// by the IPv4 subnets currently present on each interface (configurable via env vars,
+				// defaulting to this repo's docker-compose subnets). Fall back to index ordering.
+				order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
+				subnetByLogical := map[string]string{
+					"wan":  envOrDefault("CONTAIND_AUTO_WAN_SUBNET", "192.168.240.0/24"),
+					"dmz":  envOrDefault("CONTAIND_AUTO_DMZ_SUBNET", "192.168.241.0/24"),
+					"lan1": envOrDefault("CONTAIND_AUTO_LAN1_SUBNET", "192.168.242.0/24"),
+					"lan2": envOrDefault("CONTAIND_AUTO_LAN2_SUBNET", "192.168.243.0/24"),
+					"lan3": envOrDefault("CONTAIND_AUTO_LAN3_SUBNET", "192.168.244.0/24"),
+					"lan4": envOrDefault("CONTAIND_AUTO_LAN4_SUBNET", "192.168.245.0/24"),
+					"lan5": envOrDefault("CONTAIND_AUTO_LAN5_SUBNET", "192.168.246.0/24"),
+					"lan6": envOrDefault("CONTAIND_AUTO_LAN6_SUBNET", "192.168.247.0/24"),
+				}
+				needed := 0
+				for _, logical := range order {
+					if _, ok := ifaceByName[logical]; ok {
+						needed++
 				}
 			}
 			if needed == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "no default interfaces present"})
 				return
 			}
-			if len(candidates) < needed {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
-				return
-			}
-			idx := 0
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; !ok {
-					continue
+				if len(candidates) < needed {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
+					return
 				}
-				assignments[logical] = candidates[idx].name
-				idx++
-			}
-		case "explicit":
-			if len(req.Mappings) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
-				return
+
+				stateByName := map[string]config.InterfaceState{}
+				for _, st := range state {
+					if strings.TrimSpace(st.Name) == "" {
+						continue
+					}
+					stateByName[st.Name] = st
+				}
+				usedDev := map[string]bool{}
+				for _, logical := range order {
+					if _, ok := ifaceByName[logical]; !ok {
+						continue
+					}
+					cidr := strings.TrimSpace(subnetByLogical[logical])
+					if cidr == "" {
+						continue
+					}
+					for _, cand := range candidates {
+						if usedDev[cand.name] {
+							continue
+						}
+						st, ok := stateByName[cand.name]
+						if !ok {
+							continue
+						}
+						if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
+							assignments[logical] = cand.name
+							usedDev[cand.name] = true
+							break
+						}
+					}
+				}
+
+				remaining := make([]candidate, 0, len(candidates))
+				for _, cand := range candidates {
+					if usedDev[cand.name] {
+						continue
+					}
+					remaining = append(remaining, cand)
+				}
+				idx := 0
+				for _, logical := range order {
+					if _, ok := ifaceByName[logical]; !ok {
+						continue
+					}
+					if _, already := assignments[logical]; already {
+						continue
+					}
+					if idx >= len(remaining) {
+						c.JSON(http.StatusBadRequest, gin.H{"error": "not enough eligible kernel interfaces to complete auto-assign"})
+						return
+					}
+					assignments[logical] = remaining[idx].name
+					idx++
+				}
+			case "explicit":
+				if len(req.Mappings) == 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
+					return
 			}
 			for k, v := range req.Mappings {
 				k = strings.TrimSpace(k)
@@ -1349,6 +1412,55 @@ func isAutoAssignableDevice(name string, mac string) bool {
 		}
 	}
 	return true
+}
+
+func envOrDefault(key, def string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return false
+	}
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil || ipnet == nil {
+		return false
+	}
+	for _, a := range addrs {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		var ip net.IP
+		if strings.Contains(a, "/") {
+			var ipnet2 *net.IPNet
+			ip, ipnet2, err = net.ParseCIDR(a)
+			if err != nil || ipnet2 == nil {
+				continue
+			}
+		} else {
+			ip = net.ParseIP(a)
+			if ip == nil {
+				continue
+			}
+		}
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue
+		}
+		if ip4[0] == 169 && ip4[1] == 254 {
+			continue
+		}
+		if ipnet.Contains(ip4) {
+			return true
+		}
+	}
+	return false
 }
 
 func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {

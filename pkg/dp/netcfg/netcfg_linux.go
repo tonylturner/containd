@@ -148,11 +148,30 @@ func shouldEnableForwarding(ifaces []config.Interface) bool {
 func enableForwarding() error {
 	// These sysctls are per-netns on Linux.
 	if err := writeSysctl("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+		// In some containerized environments (notably Docker Desktop / VM-backed runtimes),
+		// kernel sysctls may be mounted read-only or blocked. Forwarding is still often
+		// effectively enabled in the underlying VM; do not fail interface application
+		// just because we can't write the sysctl from inside the container.
+		if isSysctlWriteBlocked(err) {
+			return nil
+		}
 		return fmt.Errorf("enable ipv4 forwarding: %w", err)
 	}
 	// Best-effort: enable v6 forwarding for future dual-stack. Not all kernels expose this.
 	_ = writeSysctl("/proc/sys/net/ipv6/conf/all/forwarding", "1")
 	return nil
+}
+
+func isSysctlWriteBlocked(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Common error types include *os.PathError wrapping syscall.Errno.
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == syscall.EPERM || errno == syscall.EACCES || errno == syscall.EROFS
+	}
+	return os.IsPermission(err)
 }
 
 func writeSysctl(path, val string) error {

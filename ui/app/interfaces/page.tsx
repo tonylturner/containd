@@ -71,6 +71,11 @@ export default function InterfacesPage() {
     setIfaces(i ?? []);
     setZones(z ?? []);
     setState(s ?? []);
+    if (s === null) {
+      setError(
+        "Unable to load interface runtime state from the dataplane (engine unreachable). Check CONTAIND_ENGINE_URL/NGFW_ENGINE_URL and restart.",
+      );
+    }
   }
 
   const unboundConfigured = useMemo(() => {
@@ -151,7 +156,7 @@ export default function InterfacesPage() {
     setName("");
     setZone("");
     setAddresses("");
-    refresh();
+    await refresh();
   }
 
   async function onDelete(ifaceName: string) {
@@ -161,7 +166,7 @@ export default function InterfacesPage() {
       setError("Failed to delete interface.");
       return;
     }
-    refresh();
+    await refresh();
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
@@ -171,7 +176,7 @@ export default function InterfacesPage() {
       setError("Failed to update interface.");
       return;
     }
-    refresh();
+    await refresh();
   }
 
   return (
@@ -211,6 +216,18 @@ export default function InterfacesPage() {
       {!isAdmin() && (
         <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
+        </div>
+      )}
+      {state.length === 0 && (
+        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          <div className="font-semibold">Interface runtime state unavailable</div>
+          <div className="mt-1 text-amber/90">
+            The UI can’t see OS/Docker-assigned addresses right now (the dataplane interface-state feed is empty). In the
+            current compose setup this usually means the management plane can’t reach the engine. Check{" "}
+            <span className="font-semibold">CONTAIND_ENGINE_URL</span> in <span className="font-semibold">.env</span>{" "}
+            (should be <span className="font-mono">http://127.0.0.1:8081</span> in shared-network-namespace mode) and then
+            restart.
+          </div>
         </div>
       )}
       {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
@@ -362,8 +379,8 @@ function InterfaceRow({
   iface: Interface;
   runtime: InterfaceState | null;
   zones: Zone[];
-  onDelete: (name: string) => void;
-  onUpdate: (name: string, patch: Partial<Interface>) => void;
+  onDelete: (name: string) => Promise<void>;
+  onUpdate: (name: string, patch: Partial<Interface>) => Promise<void>;
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -590,8 +607,8 @@ function InterfaceRow({
         {editing ? (
           <div className="inline-flex gap-2">
             <button
-              onClick={() => {
-                onUpdate(iface.name, {
+              onClick={async () => {
+                await onUpdate(iface.name, {
                   device: device.trim() || undefined,
                   zone: zone || undefined,
                   addressMode: mode,
@@ -608,7 +625,7 @@ function InterfaceRow({
                     ssh,
                     http,
                     https,
-                  },
+                    },
                 });
                 setEditing(false);
               }}
@@ -645,7 +662,7 @@ function InterfaceRow({
                   Edit
                 </button>
                 <button
-                  onClick={() => onDelete(iface.name)}
+                  onClick={async () => onDelete(iface.name)}
                   className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
                 >
                   Delete

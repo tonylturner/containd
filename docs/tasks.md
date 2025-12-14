@@ -76,6 +76,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
+  - [x] Compose: make mgmt share engine network namespace (interim) so UI/runtime/diagnostics see the same interfaces/IPs as the dataplane.
   - [ ] Validate Dockerfiles with runtime smoke scripts.
   - [x] Document compose usage in README and `docs/mkdocs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
@@ -126,6 +127,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Expand `docs/mkdocs/architecture.md` with module boundaries and data/control/management plane flows.
   - [x] Update `docs/mkdocs/dataplane.md` with policy compilation → engine flow.
   - [x] Flesh out `docs/mkdocs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
+  - [x] Document compose networking model (shared netns, engine URL requirements) in `docs/mkdocs/docker-compose.md`.
   - [~] Integrate MkDocs + Material (build pipeline + nav + search).
     - [x] Add `mkdocs.yml` using `docs/mkdocs/` as source.
     - [x] Add `docs/mkdocs/index.md` as docs landing page.
@@ -139,6 +141,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [x] Add management API + UI page for static routes and policy rules.
     - [x] Add named gateways to routing config (optional; routes can reference gateway names).
     - [x] Add UI helper to auto-create a WAN gateway + default route (best-effort; Docker-friendly).
+    - [x] Add “Detect from OS” routing snapshot + one-click adopt default route + gateway.
     - [x] Add routing reconcile endpoint (admin, confirm `REPLACE`) and engine `mode=replace`.
     - [x] Add `show ip rule` CLI command (kernel view; Linux only).
     - [x] Add CLI commands to edit routes/rules (`set route add|del`, `set ip rule add|del`) via mgmt API/config.

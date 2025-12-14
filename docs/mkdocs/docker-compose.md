@@ -30,6 +30,40 @@ Docker Compose automatically loads `.env` from the same directory as `docker-com
 - `CONTAIND_COOKIE_SECURE`: set to `1` when running behind HTTPS (or a TLS-terminating proxy) to force the `Secure` cookie flag.
 - `CONTAIND_TRUSTED_PROXIES`: comma-separated list of proxy IPs/CIDRs you trust for client IP resolution (e.g. `127.0.0.1,::1,10.0.0.0/8`).
 
+### Management ↔ Engine connectivity
+
+The management plane (`containd`) talks to the dataplane engine over the engine’s internal HTTP API.
+
+- `CONTAIND_ENGINE_URL`: base URL for the engine API (must include a scheme, e.g. `http://127.0.0.1:8081`).
+
+In the default compose file, `containd` runs in the same network namespace as the `engine` container
+(`network_mode: "service:engine"`). This makes “interface/IP reality” consistent for UI, CLI, and dataplane,
+but it also means:
+
+- Use `http://127.0.0.1:8081` for `CONTAIND_ENGINE_URL` (container-local loopback), not `http://engine:8081`.
+
+## Interface mapping (Docker lab mode)
+
+When the `engine` service is attached to multiple Docker networks, Docker creates one kernel interface per network.
+The kernel device names (`eth0`, `eth1`, …) are not guaranteed to correspond to `wan/dmz/lan1…` in a stable order,
+because Docker network attach order can vary.
+
+In this repo’s `docker-compose.yml`, we explicitly pin:
+- `wan` as the default-gateway network (`gw_priority`) so the kernel default route is via WAN.
+- interface names (`interface_name`) so `wan/dmz/lan1..lan6` reliably map to `eth0..eth7`.
+
+To keep the appliance UI/CLI stable in Docker labs, `Interfaces → Auto-assign` prefers matching interface roles by
+the IPv4 subnets present on each interface (defaults match this repo’s `docker-compose.yml`):
+
+- `wan`: `192.168.240.0/24`
+- `dmz`: `192.168.241.0/24`
+- `lan1..lan6`: `192.168.242.0/24` … `192.168.247.0/24`
+
+If those subnets aren’t present, auto-assign falls back to kernel index ordering.
+
+To override subnet matching (for custom lab topologies), set:
+`CONTAIND_AUTO_WAN_SUBNET`, `CONTAIND_AUTO_DMZ_SUBNET`, `CONTAIND_AUTO_LAN1_SUBNET` … `CONTAIND_AUTO_LAN6_SUBNET`.
+
 ### Ports
 
 - `CONTAIND_PUBLISH_HTTP_PORT`: host port for HTTP UI/API → container `8080`.
@@ -56,4 +90,5 @@ To avoid “chicken/egg” provisioning, you can seed an admin SSH key (authoriz
 
 - Validate compose: `docker compose config -q`
 - Follow logs: `docker compose logs -f containd`
+- If interface auto-assign/reconcile fails with `engine interfaces status 400`, check `docker compose logs -f engine` for `ip_forward`/sysctl errors; older builds treated that as fatal in some VM-backed Docker runtimes.
 - Factory reset (CLI): `factory reset NUCLEAR` (admin only; wipes config/users/audit and re-seeds defaults)

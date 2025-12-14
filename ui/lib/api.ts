@@ -239,6 +239,18 @@ export type RoutingConfig = {
   rules?: PolicyRule[];
 };
 
+export type OSRoute = {
+  dst: string;
+  gateway?: string;
+  iface?: string;
+  metric?: number;
+};
+
+export type OSRoutingSnapshot = {
+  routes: OSRoute[];
+  defaultRoute?: OSRoute;
+};
+
 export type Protocol = {
   name: string;
   port?: string;
@@ -671,6 +683,7 @@ export const api = {
     deleteJSON(`/api/v1/interfaces/${encodeURIComponent(name)}`),
 
   getRouting: () => getJSON<RoutingConfig>("/api/v1/routing"),
+  getOSRouting: () => getJSON<OSRoutingSnapshot>("/api/v1/routing/os"),
   setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
   reconcileRoutingReplace: () =>
     postJSON<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),

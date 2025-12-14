@@ -4,6 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile.mgmt
     image: containd/containd:dev
+    # Run mgmt/UI in the same network namespace as the engine so interface/IP
+    # mapping matches what the dataplane sees. This avoids confusion where
+    # the UI shows engine interface state but diagnostics originate from a
+    # different container IP.
+    network_mode: "service:engine"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -41,35 +46,12 @@ services:
       - CONTAIND_DEFAULT_ADMIN_PASSWORD=${CONTAIND_DEFAULT_ADMIN_PASSWORD:-}
 
       # Optional: point mgmt at a separate engine service.
-      - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://engine:8081}
-    ports:
-      - "${CONTAIND_PUBLISH_HTTP_PORT:-8080}:8080"
-      - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
-      - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
+      - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://127.0.0.1:8081}
     volumes:
       - ./data:/data
     command: ["/usr/bin/ngfw-mgmt"]
     depends_on:
       - engine
-    # Attach mgmt to all appliance networks so UI/API can bind any of them.
-    # Docker will present these as eth0..eth7 in this order.
-    networks:
-      wan:
-        ipv4_address: 192.168.240.3
-      dmz:
-        ipv4_address: 192.168.241.3
-      lan1:
-        ipv4_address: 192.168.242.3
-      lan2:
-        ipv4_address: 192.168.243.3
-      lan3:
-        ipv4_address: 192.168.244.3
-      lan4:
-        ipv4_address: 192.168.245.3
-      lan5:
-        ipv4_address: 192.168.246.3
-      lan6:
-        ipv4_address: 192.168.247.3
 
   engine:
     build:
@@ -86,26 +68,54 @@ services:
       # Enable nftables enforcement when running privileged.
       - NGFW_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-0}
     ports:
+      - "${CONTAIND_PUBLISH_HTTP_PORT:-8080}:8080"
+      - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
+      - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
       - "${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
     command: ["/usr/bin/ngfw-engine"]
     # Attach engine to all appliance networks; eth0..eth7 correspond to wan/dmz/lan1..lan6.
     networks:
       wan:
         ipv4_address: 192.168.240.2
+        # Ensure Docker chooses WAN as the default gateway network.
+        gw_priority: 100
+        priority: 1000
+        interface_name: eth0
       dmz:
         ipv4_address: 192.168.241.2
+        gw_priority: 0
+        priority: 900
+        interface_name: eth1
       lan1:
         ipv4_address: 192.168.242.2
+        gw_priority: 0
+        priority: 800
+        interface_name: eth2
       lan2:
         ipv4_address: 192.168.243.2
+        gw_priority: 0
+        priority: 700
+        interface_name: eth3
       lan3:
         ipv4_address: 192.168.244.2
+        gw_priority: 0
+        priority: 600
+        interface_name: eth4
       lan4:
         ipv4_address: 192.168.245.2
+        gw_priority: 0
+        priority: 500
+        interface_name: eth5
       lan5:
         ipv4_address: 192.168.246.2
+        gw_priority: 0
+        priority: 400
+        interface_name: eth6
       lan6:
         ipv4_address: 192.168.247.2
+        gw_priority: 0
+        priority: 300
+        interface_name: eth7
 
 networks:
   wan:
