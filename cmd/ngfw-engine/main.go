@@ -18,6 +18,7 @@ import (
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dpi"
+	"github.com/containd/containd/pkg/dp/dhcpd"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/flow"
@@ -65,6 +66,7 @@ func main() {
 	}
 
 	ownership.start(context.Background())
+	dhcpMgr := dhcpd.NewManager()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -78,10 +80,80 @@ func main() {
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())
+	mux.HandleFunc("/internal/services", servicesHandler(logger, ownership, dhcpMgr))
+	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 
 	logger.Printf("ngfw-engine starting on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		logger.Fatalf("server exited: %v", err)
+	}
+}
+
+func servicesHandler(logger *log.Logger, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
+	var current config.ServicesConfig
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(current)
+			return
+		case http.MethodPost:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "failed to read body", http.StatusBadRequest)
+				return
+			}
+			var svc config.ServicesConfig
+			if err := json.Unmarshal(body, &svc); err != nil {
+				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			// WireGuard runs in the engine (privileged) because it requires NET_ADMIN.
+			if err := netcfg.ApplyWireGuard(ctx, svc.VPN.WireGuard); err != nil {
+				logger.Printf("apply wireguard failed: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if dhcpMgr != nil {
+				var ifaces []config.Interface
+				if ownership != nil {
+					ifaces = ownership.currentInterfaces()
+				}
+				if err := dhcpMgr.Apply(ctx, svc.DHCP, ifaces); err != nil {
+					logger.Printf("apply dhcp failed: %v", err)
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			current = svc
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}
+}
+
+func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
+	type resp struct {
+		Leases []dhcpd.Lease `json:"leases"`
+		Status any          `json:"status,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if mgr == nil {
+			_ = json.NewEncoder(w).Encode(resp{Leases: nil, Status: map[string]any{"enabled": false}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp{Leases: mgr.Leases(), Status: mgr.Status()})
 	}
 }
 
@@ -97,23 +169,41 @@ func conntrackHandler() http.HandlerFunc {
 		Entries []conntrack.Entry `json:"entries"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			limit := 200
+			if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+				if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
+					limit = v
+				}
+			}
+			entries, err := conntrack.List(limit)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp{Entries: entries})
+			return
+		case http.MethodPost:
+			var req conntrack.DeleteRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if err := conntrack.Delete(ctx, req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "deleted"})
+			return
+		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		limit := 200
-		if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
-				limit = v
-			}
-		}
-		entries, err := conntrack.List(limit)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp{Entries: entries})
 	}
 }
 

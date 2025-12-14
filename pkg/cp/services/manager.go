@@ -23,6 +23,8 @@ type Manager struct {
 	DNS    *DNSManager
 	NTP    *NTPManager
 	Proxy  *ProxyManager
+	DHCP   *DHCPManager
+	VPN    *VPNManager
 }
 
 func NewManager(opts ManagerOptions) *Manager {
@@ -44,6 +46,8 @@ func NewManager(opts ManagerOptions) *Manager {
 			EnvoyPath: opts.EnvoyPath,
 			NginxPath: opts.NginxPath,
 		}),
+		DHCP: NewDHCPManager(opts.BaseDir),
+		VPN:  NewVPNManager(opts.BaseDir),
 	}
 }
 
@@ -69,6 +73,16 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 			return err
 		}
 	}
+	if m.DHCP != nil {
+		if err := m.DHCP.Apply(ctx, cfg.DHCP); err != nil {
+			return err
+		}
+	}
+	if m.VPN != nil {
+		if err := m.VPN.Apply(ctx, cfg.VPN); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -86,6 +100,12 @@ func (m *Manager) Status() any {
 	}
 	if m.Proxy != nil {
 		out["proxy"] = m.Proxy.Status()
+	}
+	if m.DHCP != nil {
+		out["dhcp"] = m.DHCP.Status()
+	}
+	if m.VPN != nil {
+		out["vpn"] = m.VPN.Status()
 	}
 	return out
 }

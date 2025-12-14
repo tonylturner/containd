@@ -28,16 +28,32 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 		}
 	}
 
+	byName := map[string]config.Interface{}
 	for _, iface := range ifaces {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if strings.TrimSpace(iface.Name) != "" {
+			byName[iface.Name] = iface
 		}
-		if strings.EqualFold(strings.TrimSpace(iface.AddressMode), "dhcp") {
-			// DHCP means "OS-managed addressing". In container deployments, Docker assigns an address
-			// at container start; we intentionally do not run a DHCP client here yet.
-			// We also avoid deleting any existing addresses when switching to DHCP.
+	}
+
+	resolveDev := func(ref string) string {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return ""
+		}
+		if i, ok := byName[ref]; ok {
+			if d := strings.TrimSpace(i.Device); d != "" {
+				return d
+			}
+			return strings.TrimSpace(i.Name)
+		}
+		return ref
+	}
+
+	// 1) Ensure bridge/VLAN devices exist and attach members.
+	bridgeMembers := map[string]string{} // memberDev -> bridgeDev
+	for _, iface := range ifaces {
+		t := strings.ToLower(strings.TrimSpace(iface.Type))
+		if t == "" || t == "physical" {
 			continue
 		}
 		dev := strings.TrimSpace(iface.Device)
@@ -47,6 +63,122 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 		if dev == "" {
 			continue
 		}
+
+		switch t {
+		case "bridge":
+			if err := ensureBridge(dev); err != nil {
+				return fmt.Errorf("ensure bridge %s: %w", dev, err)
+			}
+			if err := setLinkUp(dev); err != nil {
+				return fmt.Errorf("set link up %s: %w", dev, err)
+			}
+			br, err := net.InterfaceByName(dev)
+			if err != nil {
+				return fmt.Errorf("bridge %s not found after create: %w", dev, err)
+			}
+			for _, m := range iface.Members {
+				memberDev := resolveDev(m)
+				if memberDev == "" {
+					continue
+				}
+				bridgeMembers[memberDev] = dev
+				if err := setLinkUp(memberDev); err != nil {
+					return fmt.Errorf("set link up %s: %w", memberDev, err)
+				}
+				if err := setLinkMaster(memberDev, br.Index); err != nil {
+					return fmt.Errorf("attach %s to bridge %s: %w", memberDev, dev, err)
+				}
+			}
+		case "vlan":
+			parentDev := resolveDev(iface.Parent)
+			if parentDev == "" {
+				return fmt.Errorf("vlan %s missing parent", iface.Name)
+			}
+			parent, err := net.InterfaceByName(parentDev)
+			if err != nil {
+				return fmt.Errorf("vlan %s parent %s not found: %w", iface.Name, parentDev, err)
+			}
+			if err := ensureVLAN(dev, parent.Index, iface.VLANID); err != nil {
+				return fmt.Errorf("ensure vlan %s: %w", dev, err)
+			}
+			if err := setLinkUp(dev); err != nil {
+				return fmt.Errorf("set link up %s: %w", dev, err)
+			}
+		default:
+			// validated earlier
+		}
+	}
+
+	for _, iface := range ifaces {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		dev := strings.TrimSpace(iface.Device)
+		if dev == "" {
+			dev = strings.TrimSpace(iface.Name)
+		}
+		if dev == "" {
+			continue
+		}
+
+		// If this kernel device is a bridge member, it should not carry L3 addresses.
+		if br := bridgeMembers[dev]; br != "" {
+			if len(iface.Addresses) > 0 || strings.TrimSpace(iface.Gateway) != "" {
+				return fmt.Errorf("interface %s (%s) is a bridge member of %s; assign addresses to the bridge instead", iface.Name, dev, br)
+			}
+			continue
+		}
+
+		if strings.EqualFold(strings.TrimSpace(iface.AddressMode), "dhcp") {
+			// DHCP means "OS-managed addressing". If the interface already has a non-link-local IPv4 address
+			// (common in Docker), keep it. Otherwise, attempt a minimal DHCPv4 lease acquisition.
+			if err := setLinkUp(dev); err != nil {
+				return fmt.Errorf("set link up %s: %w", dev, err)
+			}
+			nic, err := net.InterfaceByName(dev)
+			if err != nil {
+				return fmt.Errorf("interface %s (%s) not found: %w", iface.Name, dev, err)
+			}
+			existing, _ := listAddrs(nic.Index, unix.AF_INET)
+			hasIPv4 := false
+			for _, ipnet := range existing {
+				if ipnet == nil || ipnet.IP == nil {
+					continue
+				}
+				ip4 := ipnet.IP.To4()
+				if ip4 == nil {
+					continue
+				}
+				if strings.HasPrefix(ip4.String(), "169.254.") {
+					continue
+				}
+				hasIPv4 = true
+				break
+			}
+			if hasIPv4 {
+				continue
+			}
+			lease, err := dhcpAcquireV4(ctx, dev, 5)
+			if err != nil {
+				return fmt.Errorf("dhcp on %s: %w", dev, err)
+			}
+			_, ipnet, err := net.ParseCIDR(strings.TrimSpace(lease.AddrCIDR))
+			if err != nil || ipnet == nil {
+				return fmt.Errorf("dhcp on %s: invalid lease cidr %q", dev, lease.AddrCIDR)
+			}
+			if err := addAddr(nic.Index, ipnet); err != nil {
+				return fmt.Errorf("dhcp add addr %s %s: %w", dev, ipnet.String(), err)
+			}
+			if strings.TrimSpace(lease.RouterIP) != "" {
+				if err := addDefaultRoute(nic.Index, lease.RouterIP); err != nil {
+					return fmt.Errorf("dhcp add default route %s via %s: %w", dev, lease.RouterIP, err)
+				}
+			}
+			continue
+		}
+
 		// Safety: only apply when config explicitly provides addresses.
 		// We avoid deleting or overriding existing addresses in early phases.
 		if len(iface.Addresses) == 0 {
@@ -305,6 +437,157 @@ func setLinkUp(name string) error {
 		return err
 	}
 	return readNetlinkAck(fd, seq)
+}
+
+const nlaNested = 0x8000
+
+func ensureBridge(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("empty bridge name")
+	}
+	if _, err := net.InterfaceByName(name); err == nil {
+		return nil
+	}
+
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+
+	seq := atomic.AddUint32(&nlSeq, 1)
+	var req bytes.Buffer
+	hdr := unix.NlMsghdr{
+		Type:  unix.RTM_NEWLINK,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	ifi := unix.IfInfomsg{Family: unix.AF_UNSPEC}
+	_ = binary.Write(&req, binary.LittleEndian, ifi)
+
+	addRtAttr(&req, unix.IFLA_IFNAME, append([]byte(name), 0))
+	addNestedRtAttr(&req, unix.IFLA_LINKINFO, func(b *bytes.Buffer) {
+		addRtAttr(b, unix.IFLA_INFO_KIND, append([]byte("bridge"), 0))
+	})
+
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+	return readNetlinkAck(fd, seq)
+}
+
+func ensureVLAN(name string, parentIndex int, vlanID int) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("empty vlan name")
+	}
+	if vlanID < 1 || vlanID > 4094 {
+		return fmt.Errorf("invalid vlan id %d", vlanID)
+	}
+	if _, err := net.InterfaceByName(name); err == nil {
+		return nil
+	}
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+
+	seq := atomic.AddUint32(&nlSeq, 1)
+	var req bytes.Buffer
+	hdr := unix.NlMsghdr{
+		Type:  unix.RTM_NEWLINK,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	ifi := unix.IfInfomsg{Family: unix.AF_UNSPEC}
+	_ = binary.Write(&req, binary.LittleEndian, ifi)
+
+	addRtAttr(&req, unix.IFLA_IFNAME, append([]byte(name), 0))
+	link := make([]byte, 4)
+	binary.LittleEndian.PutUint32(link, uint32(parentIndex))
+	addRtAttr(&req, unix.IFLA_LINK, link)
+
+	addNestedRtAttr(&req, unix.IFLA_LINKINFO, func(b *bytes.Buffer) {
+		addRtAttr(b, unix.IFLA_INFO_KIND, append([]byte("vlan"), 0))
+		addNestedRtAttr(b, unix.IFLA_INFO_DATA, func(d *bytes.Buffer) {
+			// IFLA_VLAN_ID is 1 in linux/if_link.h.
+			v := make([]byte, 2)
+			binary.LittleEndian.PutUint16(v, uint16(vlanID))
+			addRtAttr(d, 1 /* IFLA_VLAN_ID */, v)
+		})
+	})
+
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+	return readNetlinkAck(fd, seq)
+}
+
+func setLinkMaster(member string, masterIndex int) error {
+	member = strings.TrimSpace(member)
+	if member == "" {
+		return fmt.Errorf("empty member name")
+	}
+	nic, err := net.InterfaceByName(member)
+	if err != nil {
+		return err
+	}
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+
+	seq := atomic.AddUint32(&nlSeq, 1)
+	var req bytes.Buffer
+	hdr := unix.NlMsghdr{
+		Type:  unix.RTM_NEWLINK,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	ifi := unix.IfInfomsg{
+		Family: unix.AF_UNSPEC,
+		Index:  int32(nic.Index),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, ifi)
+
+	m := make([]byte, 4)
+	binary.LittleEndian.PutUint32(m, uint32(masterIndex))
+	addRtAttr(&req, unix.IFLA_MASTER, m)
+
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+	return readNetlinkAck(fd, seq)
+}
+
+func addNestedRtAttr(parent *bytes.Buffer, attrType uint16, fn func(*bytes.Buffer)) {
+	var child bytes.Buffer
+	fn(&child)
+	addRtAttr(parent, attrType|nlaNested, child.Bytes())
 }
 
 var nlSeq uint32

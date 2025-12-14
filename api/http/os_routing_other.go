@@ -14,3 +14,6 @@ func getOSRoutingHandler() gin.HandlerFunc {
 	}
 }
 
+func detectKernelDefaultRouteIface() string {
+	return ""
+}

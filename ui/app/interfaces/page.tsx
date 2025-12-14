@@ -56,8 +56,13 @@ export default function InterfacesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
   const [zone, setZone] = useState("");
+  const [ifaceType, setIfaceType] = useState<"physical" | "bridge" | "vlan">("physical");
+  const [members, setMembers] = useState("");
+  const [parent, setParent] = useState("");
+  const [vlanId, setVlanId] = useState("10");
   const [addresses, setAddresses] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [reconciling, setReconciling] = useState(false);
@@ -134,19 +139,41 @@ export default function InterfacesPage() {
 
   async function onCreate() {
     setError(null);
+    setNotice(null);
     if (!name.trim()) {
       setError("Interface name is required.");
       return;
     }
     setSaving(true);
-    const payload: Interface = {
-      name: name.trim(),
-      zone: zone || undefined,
-      addresses: addresses
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    };
+    const base: Interface = { name: name.trim(), zone: zone || undefined };
+    const addrs = addresses
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const payload: Interface =
+      ifaceType === "bridge"
+        ? {
+            ...base,
+            type: "bridge",
+            members: members
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            addresses: addrs,
+          }
+        : ifaceType === "vlan"
+          ? {
+              ...base,
+              type: "vlan",
+              parent: parent.trim() || undefined,
+              vlanId: Number.parseInt(vlanId, 10) || undefined,
+              addresses: addrs,
+            }
+          : {
+              ...base,
+              type: "physical",
+              addresses: addrs,
+            };
     const created = await api.createInterface(payload);
     setSaving(false);
     if (!created) {
@@ -155,28 +182,39 @@ export default function InterfacesPage() {
     }
     setName("");
     setZone("");
+    setIfaceType("physical");
+    setMembers("");
+    setParent("");
+    setVlanId("10");
     setAddresses("");
     await refresh();
+    setNotice("Interface created.");
   }
 
   async function onDelete(ifaceName: string) {
     setError(null);
+    setNotice(null);
     const ok = await api.deleteInterface(ifaceName);
     if (!ok) {
       setError("Failed to delete interface.");
       return;
     }
     await refresh();
+    setNotice("Interface deleted.");
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
     setError(null);
+    setNotice(null);
     const updated = await api.updateInterface(ifaceName, patch);
     if (!updated) {
       setError("Failed to update interface.");
       return;
     }
+    // Optimistic config update so the row reflects immediately even if runtime state is slightly delayed.
+    setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated } : i)));
     await refresh();
+    setNotice("Saved.");
   }
 
   return (
@@ -218,6 +256,11 @@ export default function InterfacesPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {notice && (
+        <div className="mb-4 rounded-xl border border-mint/20 bg-mint/10 px-4 py-3 text-sm text-mint">
+          {notice}
+        </div>
+      )}
       {state.length === 0 && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           <div className="font-semibold">Interface runtime state unavailable</div>
@@ -241,7 +284,7 @@ export default function InterfacesPage() {
       )}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create interface</h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="mt-3 grid gap-3 md:grid-cols-6">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -249,6 +292,21 @@ export default function InterfacesPage() {
             disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
+          <select
+            value={ifaceType}
+            onChange={(e) =>
+              setIfaceType(
+                (e.target.value as "physical" | "bridge" | "vlan") || "physical",
+              )
+            }
+            disabled={!isAdmin()}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            title="Interface type"
+          >
+            <option value="physical">physical</option>
+            <option value="bridge">bridge</option>
+            <option value="vlan">vlan</option>
+          </select>
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
@@ -262,6 +320,32 @@ export default function InterfacesPage() {
               </option>
             ))}
           </select>
+          {ifaceType === "bridge" ? (
+            <input
+              value={members}
+              onChange={(e) => setMembers(e.target.value)}
+              placeholder="members (comma-separated)"
+              disabled={!isAdmin()}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
+            />
+          ) : ifaceType === "vlan" ? (
+            <>
+              <input
+                value={parent}
+                onChange={(e) => setParent(e.target.value)}
+                placeholder="parent (e.g. wan or eth0)"
+                disabled={!isAdmin()}
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              />
+              <input
+                value={vlanId}
+                onChange={(e) => setVlanId(e.target.value)}
+                placeholder="vlan id (1-4094)"
+                disabled={!isAdmin()}
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              />
+            </>
+          ) : null}
           <input
             value={addresses}
             onChange={(e) => setAddresses(e.target.value)}
@@ -269,6 +353,21 @@ export default function InterfacesPage() {
             disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
           />
+        </div>
+        <div className="mt-2 text-xs text-slate-400">
+          {ifaceType === "bridge" ? (
+            <span>
+              Bridge members should be L2-only; assign IPs to the bridge interface (not the member interfaces).
+            </span>
+          ) : ifaceType === "vlan" ? (
+            <span>
+              VLAN creates a subinterface in the dataplane netns. Use <span className="font-semibold">parent</span> as a
+              logical interface name (e.g. <span className="font-mono">wan</span>) or an OS device name (e.g.{" "}
+              <span className="font-mono">eth0</span>).
+            </span>
+          ) : (
+            <span />
+          )}
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p className="text-sm text-amber">{error}</p>}
@@ -289,6 +388,7 @@ export default function InterfacesPage() {
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">Device</th>
               <th className="px-4 py-3">Link</th>
               <th className="px-4 py-3">Zone</th>
@@ -301,7 +401,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={8}>
+                <td className="px-4 py-4 text-slate-400" colSpan={9}>
                   No interfaces configured.
                 </td>
               </tr>
@@ -312,6 +412,8 @@ export default function InterfacesPage() {
                 iface={i}
                 runtime={runtimeFor(i, state)}
                 zones={zones}
+                allIfaces={ifaces}
+                osState={state}
                 onDelete={onDelete}
                 onUpdate={onUpdate}
                 canEdit={isAdmin()}
@@ -372,6 +474,8 @@ function InterfaceRow({
   iface,
   runtime,
   zones,
+  allIfaces,
+  osState,
   onDelete,
   onUpdate,
   canEdit,
@@ -379,11 +483,19 @@ function InterfaceRow({
   iface: Interface;
   runtime: InterfaceState | null;
   zones: Zone[];
+  allIfaces: Interface[];
+  osState: InterfaceState[];
   onDelete: (name: string) => Promise<void>;
   onUpdate: (name: string, patch: Partial<Interface>) => Promise<void>;
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const [itype, setIType] = useState((iface.type ?? "physical").toLowerCase());
+  const [members, setMembers] = useState((iface.members ?? []).join(", "));
+  const [parent, setParent] = useState(iface.parent ?? "");
+  const [vlanId, setVlanId] = useState(
+    typeof iface.vlanId === "number" ? String(iface.vlanId) : "",
+  );
   const [device, setDevice] = useState(iface.device ?? "");
   const [zone, setZone] = useState(iface.zone ?? "");
   const [mode, setMode] = useState((iface.addressMode ?? "static").toLowerCase());
@@ -397,9 +509,110 @@ function InterfaceRow({
   const detectedCIDR = firstIPv4CIDR(runtime?.addrs);
   const suggestedGateway = suggestGatewayFromCIDR(detectedCIDR);
 
+  const memberCandidates = useMemo(() => {
+    const logical = (allIfaces ?? [])
+      .filter((x) => x.name !== iface.name)
+      .map((x) => x.name);
+    const os = (osState ?? [])
+      .map((s) => s.name)
+      .filter((n) => n !== "lo");
+    return Array.from(new Set([...logical, ...os])).sort();
+  }, [allIfaces, osState, iface.name]);
+
+  const parentCandidates = memberCandidates;
+
+  function typeLabel(): string {
+    const t = (iface.type ?? "physical").toLowerCase();
+    if (t === "bridge") {
+      const ms = iface.members ?? [];
+      return ms.length ? `bridge (${ms.length})` : "bridge";
+    }
+    if (t === "vlan") {
+      const p = iface.parent ? iface.parent : "parent";
+      const id = typeof iface.vlanId === "number" ? String(iface.vlanId) : "?";
+      return `vlan (${p}.${id})`;
+    }
+    return "physical";
+  }
+
   return (
     <tr className="border-t border-white/5">
       <td className="px-4 py-3 font-medium text-white">{iface.name}</td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <div className="space-y-2">
+            <select
+              value={itype}
+              onChange={(e) => setIType(e.target.value)}
+              disabled={!canEdit}
+              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+            >
+              <option value="physical">physical</option>
+              <option value="bridge">bridge</option>
+              <option value="vlan">vlan</option>
+            </select>
+            {itype === "bridge" ? (
+              <div className="space-y-1">
+                <input
+                  value={members}
+                  onChange={(e) => setMembers(e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="members (comma-separated)"
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+                />
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    const existing = members
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    if (!existing.includes(v)) existing.push(v);
+                    setMembers(existing.join(", "));
+                  }}
+                  disabled={!canEdit}
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                  title="Quick-pick a member (appends)"
+                >
+                  <option value="">+ add member…</option>
+                  {memberCandidates.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : itype === "vlan" ? (
+              <div className="space-y-1">
+                <select
+                  value={parent}
+                  onChange={(e) => setParent(e.target.value)}
+                  disabled={!canEdit}
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+                >
+                  <option value="">(parent)</option>
+                  {parentCandidates.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={vlanId}
+                  onChange={(e) => setVlanId(e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="vlan id (1-4094)"
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-slate-200">{typeLabel()}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {editing ? (
           <input
@@ -512,11 +725,11 @@ function InterfaceRow({
           <span className="text-slate-200">
             {(iface.addressMode ?? "static").toLowerCase() === "dhcp" ? (
               runtime && runtime.addrs?.length ? (
-                <span title="OS/Docker-assigned addresses">
+                <span>
                   dhcp <span className="text-slate-400">({runtime.addrs.join(", ")})</span>
                 </span>
               ) : (
-                <span title="DHCP enabled (no OS/Docker address detected yet)">dhcp</span>
+                <span>dhcp</span>
               )
             ) : (iface.addresses ?? []).length > 0 ? (
               (iface.addresses ?? []).join(", ")
@@ -536,10 +749,9 @@ function InterfaceRow({
                 : "—";
           const network = runtime?.addrs?.length ? runtime.addrs.join(", ") : "—";
           const hasNetwork = network !== "—";
-          if (!hasNetwork) return <span className="text-slate-400">—</span>;
           return (
             <span className="relative inline-flex items-center justify-center rounded-md border border-white/10 bg-white/5 p-1 text-slate-200 group">
-              <DockerIcon className="h-4 w-4 text-[#2496ED]" />
+              <DockerIcon className={hasNetwork ? "h-4 w-4 text-[#2496ED]" : "h-4 w-4 text-slate-500"} />
               <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-white/10 bg-black/90 px-3 py-2 text-xs text-slate-200 opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
                 <div className="font-semibold text-white">Network</div>
                 <div className="mt-1 text-slate-200">
@@ -548,6 +760,11 @@ function InterfaceRow({
                 <div className="text-slate-200">
                   <span className="text-slate-400">Interface address:</span> {configured}
                 </div>
+                {!hasNetwork ? (
+                  <div className="mt-1 text-slate-400">
+                    No OS/Docker IP detected yet (check device binding / link state).
+                  </div>
+                ) : null}
                 <span className="absolute left-1/2 top-full -translate-x-1/2 border-8 border-transparent border-t-black/90" />
               </span>
             </span>
@@ -609,6 +826,19 @@ function InterfaceRow({
             <button
               onClick={async () => {
                 await onUpdate(iface.name, {
+                  type: itype || undefined,
+                  members:
+                    itype === "bridge"
+                      ? members
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                      : [],
+                  parent: itype === "vlan" ? parent.trim() || undefined : undefined,
+                  vlanId:
+                    itype === "vlan" && vlanId.trim()
+                      ? Number.parseInt(vlanId, 10)
+                      : undefined,
                   device: device.trim() || undefined,
                   zone: zone || undefined,
                   addressMode: mode,
@@ -635,6 +865,10 @@ function InterfaceRow({
             </button>
             <button
               onClick={() => {
+                setIType((iface.type ?? "physical").toLowerCase());
+                setMembers((iface.members ?? []).join(", "));
+                setParent(iface.parent ?? "");
+                setVlanId(typeof iface.vlanId === "number" ? String(iface.vlanId) : "");
                 setDevice(iface.device ?? "");
                 setZone(iface.zone ?? "");
                 setMode((iface.addressMode ?? "static").toLowerCase());

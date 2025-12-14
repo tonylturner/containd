@@ -128,7 +128,10 @@ export default function DiagnosticsPage() {
 
   const [reachSrc, setReachSrc] = useState("lan1");
   const [reachDst, setReachDst] = useState("");
-  const [reachPort, setReachPort] = useState<number>(443);
+  const [reachProto, setReachProto] = useState<"tcp" | "udp" | "icmp">("tcp");
+  const [reachSelfTest, setReachSelfTest] = useState(false);
+  const [reachDstIface, setReachDstIface] = useState("wan");
+  const [reachPort, setReachPort] = useState<string>("");
   const [reachRes, setReachRes] = useState<CmdResult | null>(null);
 
   const dstInterfaceChoices = useMemo(() => {
@@ -405,62 +408,143 @@ export default function DiagnosticsPage() {
             </div>
             <div>
               <div className="mb-1 text-xs text-slate-400">Destination</div>
-              <input
-                value={reachDst}
-                onChange={(e) => setReachDst(e.target.value)}
-                placeholder="host, IP, or interface name"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <div className="mt-1 text-[11px] text-slate-400">
-                Tip: set this to another interface name (e.g. <span className="text-slate-200">wan</span>) or an IP.
-              </div>
+              {reachSelfTest ? (
+                <>
+                  <select
+                    value={reachDstIface}
+                    onChange={(e) => setReachDstIface(e.target.value)}
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  >
+                    {ifaces
+                      .slice()
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((i) => (
+                        <option key={i.name} value={i.name}>
+                          {i.name}
+                        </option>
+                      ))}
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    Self-test runs a temporary listener on the destination interface so TCP/UDP can be validated even when
+                    nothing is running.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={reachDst}
+                    onChange={(e) => setReachDst(e.target.value)}
+                    placeholder="host, IP, or interface name"
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    Tip: set this to another interface name (e.g. <span className="text-slate-200">wan</span>) for a
+                    deterministic self-test, or an IP/host for best-effort probing.
+                  </div>
+                </>
+              )}
             </div>
           </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
-              <div className="mb-1 text-xs text-slate-400">TCP port (optional)</div>
+              <div className="mb-1 text-xs text-slate-400">Protocol</div>
+              <select
+                value={reachProto}
+                onChange={(e) => {
+                  const v = e.target.value as "tcp" | "udp" | "icmp";
+                  setReachProto(v);
+                  if (v === "icmp") setReachPort("");
+                  if (v === "icmp") setReachSelfTest(false);
+                }}
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              >
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+                <option value="icmp">icmp</option>
+              </select>
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={reachSelfTest}
+                  disabled={reachProto === "icmp"}
+                  onChange={(e) => setReachSelfTest(e.target.checked)}
+                />
+                Self-test (dst interface)
+                <span className="text-slate-500">
+                  {reachProto === "icmp" ? "(not applicable)" : "(recommended for interface↔interface checks)"}
+                </span>
+              </label>
+            </div>
+            <div>
+              <div className="mb-1 text-xs text-slate-400">Port (tcp/udp only; optional)</div>
               <input
-                value={String(reachPort)}
-                onChange={(e) => setReachPort(Math.max(1, Math.min(65535, Number(e.target.value) || 443)))}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                value={reachPort}
+                disabled={reachProto === "icmp"}
+                onChange={(e) => {
+                  if (reachProto === "icmp") return;
+                  const v = e.target.value;
+                  if (v === "") {
+                    setReachPort("");
+                    return;
+                  }
+                  // Only allow digits; keep UX simple.
+                  if (!v.match(/^[0-9]+$/)) return;
+                  const n = Number(v);
+                  if (!Number.isFinite(n) || n < 1 || n > 65535) return;
+                  setReachPort(String(n));
+                }}
+                placeholder={
+                  reachProto === "icmp"
+                    ? "N/A for ICMP"
+                    : "blank = skip (or self-test if dst is an interface name)"
+                }
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 disabled:opacity-60"
               />
             </div>
-            <div className="flex items-end justify-between gap-2">
-              <div className="text-[11px] text-slate-400">
-                Uses `diag reach` (new).
-                {dstInterfaceChoices.length > 0 ? (
-                  <div className="mt-1">
-                    Quick pick:
-                    {dstInterfaceChoices.slice(0, 4).map((c) => (
-                      <button
-                        key={c.value}
-                        type="button"
-                        className="ml-2 rounded-md bg-white/5 px-2 py-1 text-[11px] text-slate-200 hover:bg-white/10"
-                        onClick={() => setReachDst(c.ip ? c.ip : c.value)}
-                        title={c.ip ? `Use ${c.value} OS/Docker IP: ${c.ip}` : `Use ${c.value}`}
-                      >
-                        {c.value}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={async () => {
-                  const dst = reachDst.trim();
-                  if (!dst) return;
-                  setBusy("reach");
-                  const line = `diag reach ${reachSrc} ${dst} ${reachPort}`;
-                  setReachRes(await runCLI(line));
-                  setBusy(null);
-                }}
-                className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-              >
-                {busy === "reach" ? "Running..." : "Run"}
-              </button>
+          </div>
+          <div className="mt-3 flex items-end justify-between gap-2">
+            <div className="text-[11px] text-slate-400">
+              Uses `diag reach` (new).
+              {dstInterfaceChoices.length > 0 ? (
+                <div className="mt-1">
+                  Quick pick:
+                  {dstInterfaceChoices.slice(0, 4).map((c) => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className="ml-2 rounded-md bg-white/5 px-2 py-1 text-[11px] text-slate-200 hover:bg-white/10"
+                      onClick={() => {
+                        if (reachSelfTest) {
+                          setReachDstIface(c.value);
+                          return;
+                        }
+                        setReachDst(c.ip ? c.ip : c.value);
+                      }}
+                      title={c.ip ? `Use ${c.value} OS/Docker IP: ${c.ip}` : `Use ${c.value}`}
+                    >
+                      {c.value}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={async () => {
+                const dst = reachSelfTest ? reachDstIface.trim() : reachDst.trim();
+                if (!dst) return;
+                setBusy("reach");
+                const portArg = reachPort.trim();
+                let line = `diag reach ${reachSrc} ${dst} ${reachProto}`;
+                if (reachProto !== "icmp" && portArg) line += ` ${portArg}`;
+                setReachRes(await runCLI(line));
+                setBusy(null);
+              }}
+              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+            >
+              {busy === "reach" ? "Running..." : "Run"}
+            </button>
           </div>
           {reachRes && (
             <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
@@ -482,4 +566,3 @@ export default function DiagnosticsPage() {
     </Shell>
   );
 }
-

@@ -129,6 +129,8 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
   const res = await fetch(url, {
     ...init,
     credentials: "include",
+    // Avoid stale UI after writes: these endpoints are dynamic appliance state.
+    cache: "no-store",
   });
 
   if (res.status === 401 && !ENV_TOKEN) {
@@ -141,6 +143,7 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
           ...init,
           headers: { ...h, Authorization: `Bearer ${fallback}` },
           credentials: "include",
+          cache: "no-store",
         });
         await captureAuthError(retry);
         updateSessionTokenFromResponse(retry);
@@ -190,6 +193,10 @@ export type Zone = {
 export type Interface = {
   name: string;
   device?: string;
+  type?: string;
+  parent?: string;
+  vlanId?: number;
+  members?: string[];
   zone?: string;
   addressMode?: string;
   addresses?: string[];
@@ -385,6 +392,74 @@ export type NTPConfig = {
   enabled?: boolean;
   servers?: string[];
   intervalSeconds?: number;
+};
+
+export type DHCPPool = {
+  iface: string;
+  start: string;
+  end: string;
+};
+
+export type DHCPConfig = {
+  enabled?: boolean;
+  listenIfaces?: string[];
+  pools?: DHCPPool[];
+  leaseSeconds?: number;
+  router?: string;
+  dnsServers?: string[];
+  domain?: string;
+  authoritative?: boolean;
+};
+
+export type DHCPLease = {
+  iface: string;
+  mac: string;
+  ip: string;
+  expiresAt: string;
+  hostname?: string;
+};
+
+export type WGPeer = {
+  name?: string;
+  publicKey: string;
+  allowedIPs?: string[];
+  endpoint?: string;
+  persistentKeepalive?: number;
+};
+
+export type WireGuardConfig = {
+  enabled?: boolean;
+  interface?: string;
+  listenPort?: number;
+  addressCIDR?: string;
+  privateKey?: string;
+  peers?: WGPeer[];
+};
+
+export type OpenVPNConfig = {
+  enabled?: boolean;
+  mode?: string;
+};
+
+export type VPNConfig = {
+  wireguard?: WireGuardConfig;
+  openvpn?: OpenVPNConfig;
+};
+
+export type ConntrackEntry = {
+  proto: string;
+  state?: string;
+  src?: string;
+  dst?: string;
+  sport?: string;
+  dport?: string;
+  replySrc?: string;
+  replyDst?: string;
+  replySport?: string;
+  replyDport?: string;
+  mark?: string;
+  assured?: boolean;
+  timeoutSecs?: number;
 };
 
 export type TelemetryEvent = {
@@ -761,10 +836,21 @@ export const api = {
   setDNS: (cfg: DNSConfig) => postJSON<DNSConfig>("/api/v1/services/dns", cfg),
   getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
   setNTP: (cfg: NTPConfig) => postJSON<NTPConfig>("/api/v1/services/ntp", cfg),
+  getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
+  setDHCP: (cfg: DHCPConfig) => postJSON<DHCPConfig>("/api/v1/services/dhcp", cfg),
+  listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
+  getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
+  setVPN: (cfg: VPNConfig) => postJSON<VPNConfig>("/api/v1/services/vpn", cfg),
 
   // Telemetry
   listEvents: (limit = 500) =>
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
   listFlows: (limit = 200) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+
+  // Sessions / Conntrack
+  listConntrack: (limit = 200) =>
+    getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
+  killConntrack: (req: { proto: string; src: string; dst: string; sport?: number; dport?: number }) =>
+    postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
 };

@@ -102,6 +102,8 @@ type ServicesConfig struct {
 	DNS    DNSConfig    `json:"dns,omitempty"`
 	NTP    NTPConfig    `json:"ntp,omitempty"`
 	Proxy  ProxyConfig  `json:"proxy,omitempty"`
+	DHCP   DHCPConfig   `json:"dhcp,omitempty"`
+	VPN    VPNConfig    `json:"vpn,omitempty"`
 }
 
 type SyslogConfig struct {
@@ -163,16 +165,76 @@ type ReverseProxySite struct {
 	Description string   `json:"description,omitempty"`
 }
 
-type Interface struct {
-	Name string `json:"name"`
-	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
-	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
-	Device string `json:"device,omitempty"`
-	Zone   string `json:"zone"`
-	// AddressMode controls how addresses are acquired on this interface.
-	// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
-	AddressMode string   `json:"addressMode,omitempty"`
-	Addresses   []string `json:"addresses,omitempty"` // CIDR strings
+// DHCPConfig defines an embedded DHCPv4 server (LAN-side) managed by containd.
+// Runtime integration is phased; this is the persisted configuration model.
+type DHCPConfig struct {
+	Enabled        bool       `json:"enabled"`
+	ListenIfaces   []string   `json:"listenIfaces,omitempty"`   // logical interface names (e.g. "lan2")
+	Pools          []DHCPPool `json:"pools,omitempty"`          // address pools per interface (optional)
+	LeaseSeconds   int        `json:"leaseSeconds,omitempty"`   // default lease time
+	Router         string     `json:"router,omitempty"`         // default gateway handed to clients
+	DNSServers     []string   `json:"dnsServers,omitempty"`     // DNS servers handed to clients
+	Domain         string     `json:"domain,omitempty"`         // optional domain
+	Authoritative  bool       `json:"authoritative,omitempty"`  // authoritative mode (lab default)
+	EnableConflict bool       `json:"enableConflict,omitempty"` // conflict detection (phased)
+}
+
+type DHCPPool struct {
+	Iface string `json:"iface"` // logical interface name
+	Start string `json:"start"` // start IPv4
+	End   string `json:"end"`   // end IPv4
+}
+
+// VPNConfig defines VPN services managed by containd.
+type VPNConfig struct {
+	WireGuard WireGuardConfig `json:"wireguard,omitempty"`
+	OpenVPN   OpenVPNConfig   `json:"openvpn,omitempty"`
+}
+
+// WireGuardConfig defines a WireGuard server configuration.
+// Keys are secrets and should be redacted in exports by default.
+type WireGuardConfig struct {
+	Enabled     bool     `json:"enabled"`
+	Interface   string   `json:"interface,omitempty"` // e.g. "wg0"
+	ListenPort  int      `json:"listenPort,omitempty"`
+	AddressCIDR string   `json:"addressCIDR,omitempty"` // e.g. "10.8.0.1/24"
+	PrivateKey  string   `json:"privateKey,omitempty"`  // base64, stored encrypted later
+	Peers       []WGPeer `json:"peers,omitempty"`
+}
+
+type WGPeer struct {
+	Name                string   `json:"name,omitempty"`
+	PublicKey           string   `json:"publicKey"`
+	AllowedIPs          []string `json:"allowedIPs,omitempty"`          // CIDRs
+	Endpoint            string   `json:"endpoint,omitempty"`            // host:port (optional)
+	PersistentKeepalive int      `json:"persistentKeepalive,omitempty"` // seconds
+}
+
+// OpenVPNConfig is a placeholder for OpenVPN support.
+type OpenVPNConfig struct {
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode,omitempty"` // server|client (phased)
+}
+
+	type Interface struct {
+		Name string `json:"name"`
+		// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
+		// When empty, the logical name may be used as the kernel interface name (legacy behavior).
+		Device string `json:"device,omitempty"`
+		// Type controls how this interface is realized in the OS.
+		// Supported: ""/"physical" (default), "bridge", "vlan".
+		Type string `json:"type,omitempty"`
+		// Parent is the parent interface for VLAN interfaces (logical interface name or kernel device name).
+		Parent string `json:"parent,omitempty"`
+		// VLANID is the 802.1Q VLAN ID for VLAN interfaces (1-4094).
+		VLANID int `json:"vlanId,omitempty"`
+		// Members are bridge members (logical interface names or kernel device names) for bridge interfaces.
+		Members []string `json:"members,omitempty"`
+		Zone   string `json:"zone"`
+		// AddressMode controls how addresses are acquired on this interface.
+		// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
+		AddressMode string   `json:"addressMode,omitempty"`
+		Addresses   []string `json:"addresses,omitempty"` // CIDR strings
 	// Gateway is an optional next-hop IP for a default route (primarily for "wan").
 	Gateway string          `json:"gateway,omitempty"`
 	Access  InterfaceAccess `json:"access,omitempty"`
@@ -525,18 +587,25 @@ func validateZones(zones []Zone) error {
 	return nil
 }
 
-func validateInterfaces(ifaces []Interface, zones []Zone) error {
-	zoneSet := map[string]struct{}{}
-	for _, z := range zones {
-		zoneSet[z.Name] = struct{}{}
-	}
-	seen := map[string]struct{}{}
-	seenDevices := map[string]struct{}{}
-	for _, iface := range ifaces {
-		if iface.Name == "" {
-			return errors.New("interface name cannot be empty")
+	func validateInterfaces(ifaces []Interface, zones []Zone) error {
+		zoneSet := map[string]struct{}{}
+		for _, z := range zones {
+			zoneSet[z.Name] = struct{}{}
 		}
-		if _, exists := seen[iface.Name]; exists {
+		seen := map[string]struct{}{}
+		seenDevices := map[string]struct{}{}
+		// Validate cross-interface references for bridges/VLANs.
+		byName := map[string]Interface{}
+		for _, iface := range ifaces {
+			if strings.TrimSpace(iface.Name) != "" {
+				byName[iface.Name] = iface
+			}
+		}
+		for _, iface := range ifaces {
+			if iface.Name == "" {
+				return errors.New("interface name cannot be empty")
+			}
+			if _, exists := seen[iface.Name]; exists {
 			return fmt.Errorf("duplicate interface: %s", iface.Name)
 		}
 		seen[iface.Name] = struct{}{}
@@ -549,15 +618,43 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 			}
 			seenDevices[iface.Device] = struct{}{}
 		}
-		if iface.Zone != "" {
-			if _, ok := zoneSet[iface.Zone]; !ok {
-				return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
+			if iface.Zone != "" {
+				if _, ok := zoneSet[iface.Zone]; !ok {
+					return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
+				}
 			}
-		}
-		if m := strings.ToLower(strings.TrimSpace(iface.AddressMode)); m != "" && m != "static" && m != "dhcp" {
-			return fmt.Errorf("interface %s has invalid addressMode %q", iface.Name, iface.AddressMode)
-		}
-		if strings.TrimSpace(iface.Gateway) != "" {
+			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t != "" && t != "physical" && t != "bridge" && t != "vlan" {
+				return fmt.Errorf("interface %s has invalid type %q", iface.Name, iface.Type)
+			}
+			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "bridge" {
+				if len(iface.Members) == 0 {
+					return fmt.Errorf("interface %s type bridge requires members", iface.Name)
+				}
+				for _, m := range iface.Members {
+					m = strings.TrimSpace(m)
+					if m == "" {
+						return fmt.Errorf("interface %s has empty bridge member", iface.Name)
+					}
+					if m == iface.Name {
+						return fmt.Errorf("interface %s cannot include itself as a bridge member", iface.Name)
+					}
+					if ref, ok := byName[m]; ok && strings.ToLower(strings.TrimSpace(ref.Type)) == "bridge" {
+						return fmt.Errorf("interface %s bridge member %q is also a bridge (nested bridges not supported)", iface.Name, m)
+					}
+				}
+			}
+			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "vlan" {
+				if strings.TrimSpace(iface.Parent) == "" {
+					return fmt.Errorf("interface %s type vlan requires parent", iface.Name)
+				}
+				if iface.VLANID < 1 || iface.VLANID > 4094 {
+					return fmt.Errorf("interface %s has invalid vlanId %d (expected 1-4094)", iface.Name, iface.VLANID)
+				}
+			}
+			if m := strings.ToLower(strings.TrimSpace(iface.AddressMode)); m != "" && m != "static" && m != "dhcp" {
+				return fmt.Errorf("interface %s has invalid addressMode %q", iface.Name, iface.AddressMode)
+			}
+			if strings.TrimSpace(iface.Gateway) != "" {
 			if iface.Gateway != strings.TrimSpace(iface.Gateway) {
 				return fmt.Errorf("interface %s gateway has leading/trailing whitespace", iface.Name)
 			}
@@ -932,6 +1029,12 @@ func validateServices(s ServicesConfig) error {
 	if err := validateProxy(s.Proxy); err != nil {
 		return err
 	}
+	if err := validateDHCP(s.DHCP); err != nil {
+		return err
+	}
+	if err := validateVPN(s.VPN); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -959,6 +1062,77 @@ func validateProxy(p ProxyConfig) error {
 		if len(s.Backends) == 0 {
 			return fmt.Errorf("reverse proxy site %s must have at least one backend", s.Name)
 		}
+	}
+	return nil
+}
+
+func validateDHCP(d DHCPConfig) error {
+	for _, n := range d.ListenIfaces {
+		if strings.TrimSpace(n) == "" {
+			return errors.New("dhcp listenIfaces cannot include empty")
+		}
+	}
+	for _, p := range d.Pools {
+		if strings.TrimSpace(p.Iface) == "" {
+			return errors.New("dhcp pool iface is required")
+		}
+		if ip := net.ParseIP(strings.TrimSpace(p.Start)); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp pool %s start invalid: %q", p.Iface, p.Start)
+		}
+		if ip := net.ParseIP(strings.TrimSpace(p.End)); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp pool %s end invalid: %q", p.Iface, p.End)
+		}
+	}
+	if d.LeaseSeconds < 0 {
+		return errors.New("dhcp leaseSeconds cannot be negative")
+	}
+	if d.Router != "" {
+		if ip := net.ParseIP(strings.TrimSpace(d.Router)); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp router invalid: %q", d.Router)
+		}
+	}
+	for _, s := range d.DNSServers {
+		if ip := net.ParseIP(strings.TrimSpace(s)); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp dnsServers invalid: %q", s)
+		}
+	}
+	return nil
+}
+
+func validateVPN(v VPNConfig) error {
+	wg := v.WireGuard
+	if wg.ListenPort != 0 && (wg.ListenPort < 1 || wg.ListenPort > 65535) {
+		return fmt.Errorf("vpn.wireguard listenPort invalid: %d", wg.ListenPort)
+	}
+	if wg.AddressCIDR != "" {
+		if _, _, err := net.ParseCIDR(strings.TrimSpace(wg.AddressCIDR)); err != nil {
+			return fmt.Errorf("vpn.wireguard addressCIDR invalid: %q", wg.AddressCIDR)
+		}
+	}
+	for _, p := range wg.Peers {
+		if strings.TrimSpace(p.PublicKey) == "" {
+			return errors.New("vpn.wireguard peer publicKey is required")
+		}
+		for _, cidr := range p.AllowedIPs {
+			if strings.TrimSpace(cidr) == "" {
+				return errors.New("vpn.wireguard allowedIPs cannot include empty")
+			}
+			if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+				return fmt.Errorf("vpn.wireguard peer allowedIPs invalid: %q", cidr)
+			}
+		}
+		if p.PersistentKeepalive < 0 {
+			return errors.New("vpn.wireguard persistentKeepalive cannot be negative")
+		}
+		if p.Endpoint != "" {
+			// Accept host:port (hostname or IP).
+			if _, _, err := net.SplitHostPort(strings.TrimSpace(p.Endpoint)); err != nil {
+				return fmt.Errorf("vpn.wireguard peer endpoint invalid: %q", p.Endpoint)
+			}
+		}
+	}
+	if v.OpenVPN.Mode != "" && v.OpenVPN.Mode != "server" && v.OpenVPN.Mode != "client" {
+		return fmt.Errorf("vpn.openvpn mode invalid: %q", v.OpenVPN.Mode)
 	}
 	return nil
 }

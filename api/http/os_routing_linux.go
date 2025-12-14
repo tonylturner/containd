@@ -130,6 +130,14 @@ func readProcNetRoute() (*osRoutingSnapshot, error) {
 	return &osRoutingSnapshot{Routes: routes, DefaultRoute: def}, nil
 }
 
+func detectKernelDefaultRouteIface() string {
+	st, err := readProcNetRoute()
+	if err != nil || st == nil || st.DefaultRoute == nil {
+		return ""
+	}
+	return strings.TrimSpace(st.DefaultRoute.Iface)
+}
+
 func parseProcNetHexIPv4(hexLE string) (net.IP, error) {
 	v, err := strconv.ParseUint(hexLE, 16, 32)
 	if err != nil {
@@ -141,4 +149,3 @@ func parseProcNetHexIPv4(hexLE string) (net.IP, error) {
 	b3 := byte((v >> 24) & 0xff)
 	return net.IPv4(b0, b1, b2, b3), nil
 }
-

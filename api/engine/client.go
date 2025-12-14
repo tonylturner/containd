@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/conntrack"
+	"github.com/containd/containd/pkg/dp/dhcpd"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -172,6 +175,35 @@ func (c *HTTPClient) ConfigureRoutingReplace(ctx context.Context, routing config
 	return nil
 }
 
+func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(services)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/services", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
+		}
+		return fmt.Errorf("engine services status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("engine BaseURL is empty")
@@ -244,6 +276,53 @@ func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.
 		return nil, err
 	}
 	return out.Entries, nil
+}
+
+func (c *HTTPClient) ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error) {
+	u := c.BaseURL + "/internal/dhcp/leases"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("engine dhcp leases status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out struct {
+		Leases []dhcpd.Lease `json:"leases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Leases, nil
+}
+
+func (c *HTTPClient) DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error {
+	u := c.BaseURL + "/internal/conntrack"
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("engine conntrack delete status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
 }
 
 // ListFlows fetches recent flow summaries derived from events.

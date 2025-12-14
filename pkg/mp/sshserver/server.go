@@ -849,6 +849,22 @@ func (s *Server) runWizard(ctx context.Context, username string, rw io.ReadWrite
 		}
 	}
 
+	// Optional: enable basic outbound connectivity (LAN/MGMT -> WAN) in one step.
+	// This mirrors the UI "Quick start (LAN→WAN)" action.
+	if v, ok := ask("Enable outbound Internet for LAN/MGMT → WAN now? (yes/no, blank to skip): "); ok && v != "" {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v == "y" || v == "yes" {
+			if exec("set outbound quickstart") {
+				writeLn("ok")
+			} else {
+				writeLn("warning: outbound quick start failed (continuing)")
+			}
+		}
+	} else if !ok {
+		writeLn("Wizard cancelled.")
+		return
+	}
+
 	if v, ok := ask("Commit changes now? (yes/no): "); ok {
 		v = strings.ToLower(strings.TrimSpace(v))
 		if v == "y" || v == "yes" {

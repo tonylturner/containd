@@ -20,3 +20,12 @@ type Entry struct {
 	Raw         string `json:"raw,omitempty"`
 }
 
+// DeleteRequest identifies a flow to delete from conntrack (best-effort).
+// This is intentionally minimal for operator-driven session termination.
+type DeleteRequest struct {
+	Proto string `json:"proto"`
+	Src   string `json:"src"`
+	Dst   string `json:"dst"`
+	Sport int    `json:"sport,omitempty"`
+	Dport int    `json:"dport,omitempty"`
+}

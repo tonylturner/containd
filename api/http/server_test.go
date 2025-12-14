@@ -92,6 +92,7 @@ type mockEngine struct {
 	lastIf  []config.Interface
 	lastRT  config.RoutingConfig
 	lastRTR config.RoutingConfig
+	lastSvc config.ServicesConfig
 	state   []config.InterfaceState
 }
 
@@ -117,6 +118,11 @@ func (m *mockEngine) ConfigureRouting(ctx context.Context, routing config.Routin
 
 func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
 	m.lastRTR = routing
+	return nil
+}
+
+func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+	m.lastSvc = services
 	return nil
 }
 

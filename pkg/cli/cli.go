@@ -218,6 +218,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
 		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
 		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
+		r.RegisterRole("set interface bridge", RoleAdmin, setInterfaceBridgeAPI(api))
+		r.RegisterRole("set interface vlan", RoleAdmin, setInterfaceVLANAPI(api))
 		r.RegisterRole("set interface bind", RoleAdmin, setInterfaceBindAPI(api))
 		r.RegisterRole("set interface zone", RoleAdmin, setInterfaceZoneAPI(api))
 		r.RegisterRole("set interface ip", RoleAdmin, setInterfaceIPAPI(api))
@@ -229,6 +231,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
 		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
 		r.RegisterRole("set nat", RoleAdmin, setNATAPI(api))
+		r.RegisterRole("set outbound quickstart", RoleAdmin, setOutboundQuickstartLANWAN(api))
 		r.RegisterRole("set port-forward add", RoleAdmin, setPortForwardAddAPI(api))
 		r.RegisterRole("set port-forward del", RoleAdmin, setPortForwardDelAPI(api))
 		r.RegisterRole("set port-forward enable", RoleAdmin, setPortForwardEnableAPI(api, true))
@@ -937,6 +940,44 @@ func setInterfaceAPI(api *API) Command {
 			Name:      args[0],
 			Zone:      args[1],
 			Addresses: args[2:],
+		}
+		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
+	}
+}
+
+func setInterfaceBridgeAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 3 {
+			return fmt.Errorf("usage: set interface bridge <name> <zone> <members_csv> [cidr...]")
+		}
+		members := splitCSV(args[2])
+		iface := config.Interface{
+			Name:      args[0],
+			Zone:      args[1],
+			Type:      "bridge",
+			Members:   members,
+			Addresses: args[3:],
+		}
+		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
+	}
+}
+
+func setInterfaceVLANAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 4 {
+			return fmt.Errorf("usage: set interface vlan <name> <zone> <parent> <vlan_id> [cidr...]")
+		}
+		vlanID, err := strconv.Atoi(strings.TrimSpace(args[3]))
+		if err != nil {
+			return fmt.Errorf("invalid vlan_id %q", args[3])
+		}
+		iface := config.Interface{
+			Name:      args[0],
+			Zone:      args[1],
+			Type:      "vlan",
+			Parent:    args[2],
+			VLANID:    vlanID,
+			Addresses: args[4:],
 		}
 		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
 	}

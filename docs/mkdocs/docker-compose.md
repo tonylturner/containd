@@ -42,6 +42,13 @@ but it also means:
 
 - Use `http://127.0.0.1:8081` for `CONTAIND_ENGINE_URL` (container-local loopback), not `http://engine:8081`.
 
+### Low ports (DNS / DHCP)
+
+Some appliance services traditionally bind to privileged ports (e.g. DNS on `53/udp,tcp`).
+
+In Docker lab mode, `docker-compose.yml` grants `CAP_NET_BIND_SERVICE` so embedded services can bind to low ports
+without running as root.
+
 ## Interface mapping (Docker lab mode)
 
 When the `engine` service is attached to multiple Docker networks, Docker creates one kernel interface per network.

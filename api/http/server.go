@@ -25,6 +25,7 @@ import (
 	cpids "github.com/containd/containd/pkg/cp/ids"
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/containd/containd/pkg/dp/conntrack"
+	"github.com/containd/containd/pkg/dp/dhcpd"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -41,6 +42,7 @@ type EngineClient interface {
 	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
 	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
 	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
+	ConfigureServices(ctx context.Context, services config.ServicesConfig) error
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 }
@@ -52,6 +54,14 @@ type TelemetryClient interface {
 
 type ConntrackClient interface {
 	ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error)
+}
+
+type ConntrackKiller interface {
+	DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error
+}
+
+type DHCPLeasesClient interface {
+	ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error)
 }
 
 // ServicesApplier is an optional interface for applying services config
@@ -124,21 +134,27 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
 		protected.GET("/services/syslog", getSyslogHandler(store))
-		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store))
+		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
 		protected.GET("/services/dns", getDNSHandler(store))
-		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store))
+		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
-		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store))
+		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store, services))
+		protected.GET("/services/dhcp", getDHCPHandler(store))
+		protected.POST("/services/dhcp", requireAdmin(), setDHCPHandler(store, services, engine))
+		protected.GET("/services/vpn", getVPNHandler(store))
+		protected.POST("/services/vpn", requireAdmin(), setVPNHandler(store, services, engine))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
-		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
+		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
-		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
+		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
 		protected.GET("/services/status", getServicesStatusHandler(services))
-		protected.GET("/events", listEventsHandler(engine))
-		protected.GET("/flows", listFlowsHandler(engine))
-		protected.GET("/conntrack", listConntrackHandler(engine))
-		protected.GET("/dataplane", getDataPlaneHandler(store))
-		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+			protected.GET("/events", listEventsHandler(engine))
+			protected.GET("/flows", listFlowsHandler(engine))
+			protected.GET("/conntrack", listConntrackHandler(engine))
+			protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
+			protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
+			protected.GET("/dataplane", getDataPlaneHandler(store))
+			protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -179,6 +195,25 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	}
 
 	return r
+}
+
+func dhcpLeasesHandler(engine any) gin.HandlerFunc {
+	type resp struct {
+		Leases []dhcpd.Lease `json:"leases"`
+	}
+	return func(c *gin.Context) {
+		cl, ok := engine.(DHCPLeasesClient)
+		if !ok || cl == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "engine dhcp leases not available"})
+			return
+		}
+		leases, err := cl.ListDHCPLeases(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, resp{Leases: leases})
+	}
 }
 
 func healthHandler(c *gin.Context) {
@@ -416,6 +451,9 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
 			return err
 		}
+		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
+			return err
+		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			return err
 		}
@@ -460,7 +498,7 @@ func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setSyslogHandler(store config.Store) gin.HandlerFunc {
+func setSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var syslogCfg config.SyslogConfig
 		if err := c.ShouldBindJSON(&syslogCfg); err != nil {
@@ -477,6 +515,12 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
@@ -492,7 +536,7 @@ func getDNSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setDNSHandler(store config.Store) gin.HandlerFunc {
+func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dnsCfg config.DNSConfig
 		if err := c.ShouldBindJSON(&dnsCfg); err != nil {
@@ -508,6 +552,12 @@ func setDNSHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.dns.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.DNS)
@@ -525,7 +575,7 @@ func getNTPHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setNTPHandler(store config.Store) gin.HandlerFunc {
+func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ntpCfg config.NTPConfig
 		if err := c.ShouldBindJSON(&ntpCfg); err != nil {
@@ -542,8 +592,104 @@ func setNTPHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.NTP)
+	}
+}
+
+func getDHCPHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.DHCP)
+	}
+}
+
+func setDHCPHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var dhcpCfg config.DHCPConfig
+		if err := c.ShouldBindJSON(&dhcpCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.DHCP = dhcpCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.dhcp.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.DHCP)
+	}
+}
+
+func getVPNHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.VPN)
+	}
+}
+
+func setVPNHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var vpnCfg config.VPNConfig
+		if err := c.ShouldBindJSON(&vpnCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.VPN = vpnCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.VPN)
 	}
 }
 
@@ -558,7 +704,7 @@ func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
+func setForwardProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var forwardCfg config.ForwardProxyConfig
 		if err := c.ShouldBindJSON(&forwardCfg); err != nil {
@@ -574,6 +720,12 @@ func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
@@ -591,7 +743,7 @@ func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
+func setReverseProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var reverseCfg config.ReverseProxyConfig
 		if err := c.ShouldBindJSON(&reverseCfg); err != nil {
@@ -607,6 +759,12 @@ func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
@@ -690,6 +848,27 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, ents)
+	}
+}
+
+func killConntrackHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ck, ok := engine.(ConntrackKiller)
+		if !ok || ck == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "conntrack delete not supported"})
+			return
+		}
+		var req conntrack.DeleteRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		if err := ck.DeleteConntrack(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "conntrack.delete", Target: "dataplane"})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }
 
@@ -1285,8 +1464,46 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 					stateByName[st.Name] = st
 				}
 				usedDev := map[string]bool{}
+
+				// Prefer the kernel's default-route egress device for WAN when available.
+				// This avoids confusing assignments in container labs where extra virtual/tunnel
+				// interfaces may exist but are not the actual "uplink".
+				if wanIface, ok := ifaceByName["wan"]; ok && wanIface != nil {
+					defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
+					if defDev != "" && !usedDev[defDev] {
+						if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+							assignments["wan"] = defDev
+							usedDev[defDev] = true
+						}
+					}
+				}
+
+				// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
+				// prefer those exact/prefix matches next.
 				for _, logical := range order {
 					if _, ok := ifaceByName[logical]; !ok {
+						continue
+					}
+					if _, already := assignments[logical]; already {
+						continue
+					}
+					for _, cand := range candidates {
+						if usedDev[cand.name] {
+							continue
+						}
+						if cand.name == logical || strings.HasPrefix(cand.name, logical) {
+							assignments[logical] = cand.name
+							usedDev[cand.name] = true
+							break
+						}
+					}
+				}
+
+				for _, logical := range order {
+					if _, ok := ifaceByName[logical]; !ok {
+						continue
+					}
+					if _, already := assignments[logical]; already {
 						continue
 					}
 					cidr := strings.TrimSpace(subnetByLogical[logical])

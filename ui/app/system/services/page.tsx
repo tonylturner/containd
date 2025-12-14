@@ -68,6 +68,34 @@ export default function ServicesOverviewPage() {
             Configure →
           </Link>
         </Card>
+
+        <Card title="DHCP">
+          <p className="text-sm text-slate-200">
+            LAN DHCP server configuration.
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            Enabled: {(status?.dhcp as any)?.enabled ? "yes" : "no"}{" "}
+            {((status?.dhcp as any)?.listen_ifaces ?? 0) > 0 &&
+              `(ifaces=${(status?.dhcp as any)?.listen_ifaces ?? 0})`}
+          </p>
+          <Link href="/dhcp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+            Configure →
+          </Link>
+        </Card>
+
+        <Card title="VPN">
+          <p className="text-sm text-slate-200">
+            WireGuard (preferred) and OpenVPN (optional).
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            WireGuard: {(status?.vpn as any)?.wireguard_enabled ? "on" : "off"}{" "}
+            {((status?.vpn as any)?.wg_peers ?? 0) > 0 &&
+              `(peers=${(status?.vpn as any)?.wg_peers ?? 0})`}
+          </p>
+          <Link href="/vpn/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+            Configure →
+          </Link>
+        </Card>
       </div>
     </Shell>
   );

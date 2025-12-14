@@ -342,6 +342,12 @@ export default function RoutingPage() {
     if (!isAdmin()) return;
     setError(null);
     setNotice(null);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Adopt the current OS default route into containd config (creates/updates a gateway + default route)?")
+    ) {
+      return;
+    }
     const def: OSRoute | undefined = osRouting?.defaultRoute;
     if (!def || !def.gateway) {
       setError("No OS default route with a gateway was detected.");
@@ -437,6 +443,38 @@ export default function RoutingPage() {
           {notice}
         </div>
       )}
+
+      {(() => {
+        const hasConfig =
+          (cfg.gateways ?? []).length > 0 || (cfg.routes ?? []).length > 0 || (cfg.rules ?? []).length > 0;
+        const hasOSDefault = !!(osRouting?.defaultRoute?.gateway && osRouting?.defaultRoute?.iface);
+        if (hasConfig || !hasOSDefault) return null;
+        return (
+          <div className="mb-6 rounded-2xl border border-mint/20 bg-mint/10 p-5 shadow-lg backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Routing not configured yet</div>
+                <div className="mt-1 text-xs text-slate-200">
+                  The kernel already has a working default route (
+                  <span className="font-semibold">{osRouting?.defaultRoute?.iface}</span> →{" "}
+                  <span className="font-semibold">{osRouting?.defaultRoute?.gateway}</span>). Adopt it into containd so
+                  routing/NAT policies can be applied consistently.
+                </div>
+              </div>
+              {isAdmin() ? (
+                <button
+                  onClick={adoptOSDefaultRoute}
+                  className="rounded-lg border border-mint/30 bg-mint/15 px-3 py-1.5 text-sm text-mint hover:bg-mint/20"
+                >
+                  Adopt OS default route
+                </button>
+              ) : (
+                <div className="text-xs text-slate-300">Admin required to adopt routing.</div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
