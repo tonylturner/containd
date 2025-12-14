@@ -15,6 +15,8 @@ docker compose up -d --build
 bash scripts/containd-connect
 ```
 
+Tip: `bash scripts/containd up` wraps `docker compose up -d --build` and prints connection info automatically.
+
 ## Configuration via `.env`
 
 Docker Compose automatically loads `.env` from the same directory as `docker-compose.yml`.

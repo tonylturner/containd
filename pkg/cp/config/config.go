@@ -164,18 +164,18 @@ type ReverseProxySite struct {
 }
 
 type Interface struct {
-	Name      string          `json:"name"`
+	Name string `json:"name"`
 	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
 	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
-	Device    string          `json:"device,omitempty"`
-	Zone      string          `json:"zone"`
+	Device string `json:"device,omitempty"`
+	Zone   string `json:"zone"`
 	// AddressMode controls how addresses are acquired on this interface.
 	// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
-	AddressMode string         `json:"addressMode,omitempty"`
-	Addresses []string        `json:"addresses,omitempty"` // CIDR strings
+	AddressMode string   `json:"addressMode,omitempty"`
+	Addresses   []string `json:"addresses,omitempty"` // CIDR strings
 	// Gateway is an optional next-hop IP for a default route (primarily for "wan").
-	Gateway   string          `json:"gateway,omitempty"`
-	Access    InterfaceAccess `json:"access,omitempty"`
+	Gateway string          `json:"gateway,omitempty"`
+	Access  InterfaceAccess `json:"access,omitempty"`
 }
 
 // InterfaceState is runtime information about a kernel interface (not persisted).
@@ -293,24 +293,51 @@ type Asset struct {
 }
 
 type FirewallConfig struct {
-	DefaultAction Action `json:"defaultAction"`
-	Rules         []Rule `json:"rules"`
+	DefaultAction Action    `json:"defaultAction"`
+	Rules         []Rule    `json:"rules"`
 	NAT           NATConfig `json:"nat,omitempty"`
 }
 
-// NATConfig defines minimal source NAT behavior.
-// This is a Phase-1 baseline: MASQUERADE for selected source zones egressing a zone.
+// NATConfig defines minimal NAT behavior.
+// Phase-1 baseline:
+// - SNAT masquerade for selected source zones egressing a zone
+// - DNAT port forwards (ingress zone + protocol/port -> destination IP:port)
 type NATConfig struct {
-	Enabled     bool     `json:"enabled"`
-	EgressZone  string   `json:"egressZone,omitempty"`  // default "wan"
-	SourceZones []string `json:"sourceZones,omitempty"` // default ["lan","dmz"] when enabled
+	Enabled      bool          `json:"enabled"`
+	EgressZone   string        `json:"egressZone,omitempty"`  // default "wan"
+	SourceZones  []string      `json:"sourceZones,omitempty"` // default ["lan","dmz"] when enabled
+	PortForwards []PortForward `json:"portForwards,omitempty"`
+}
+
+// PortForward defines a simple DNAT rule for inbound traffic.
+// Note: a corresponding firewall allow rule is still required for traffic to pass (forward chain).
+type PortForward struct {
+	ID             string   `json:"id"`
+	Enabled        bool     `json:"enabled"`
+	Description    string   `json:"description,omitempty"`
+	IngressZone    string   `json:"ingressZone"` // e.g. "wan"
+	Proto          string   `json:"proto"`       // "tcp" or "udp"
+	ListenPort     int      `json:"listenPort"`
+	DestIP         string   `json:"destIp"`                   // IPv4 only for now
+	DestPort       int      `json:"destPort,omitempty"`       // 0 => same as listenPort
+	AllowedSources []string `json:"allowedSources,omitempty"` // optional CIDR allowlist
 }
 
 // RoutingConfig defines static routes and basic policy routing rules.
 // In early phases we support IPv4 only.
 type RoutingConfig struct {
-	Routes []StaticRoute `json:"routes,omitempty"`
-	Rules  []PolicyRule  `json:"rules,omitempty"`
+	Gateways []Gateway     `json:"gateways,omitempty"`
+	Routes   []StaticRoute `json:"routes,omitempty"`
+	Rules    []PolicyRule  `json:"rules,omitempty"`
+}
+
+// Gateway is a named next-hop definition that can be referenced by routes.
+// In early phases this is an IPv4-only convenience for UI/CLI; it is resolved at apply-time.
+type Gateway struct {
+	Name        string `json:"name"`
+	Address     string `json:"address"`            // IPv4
+	Iface       string `json:"iface,omitempty"`    // OS device name preferred; may also be a logical name
+	Description string `json:"description,omitempty"`
 }
 
 // StaticRoute is a route entry for a given table (0 means main).
@@ -593,28 +620,87 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 }
 
 func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {
-	if !n.Enabled {
+	// Validate SNAT fields only when enabled.
+	if n.Enabled {
+		egress := strings.TrimSpace(n.EgressZone)
+		if egress == "" {
+			egress = "wan"
+		}
+		if _, ok := zoneSet[egress]; !ok {
+			return fmt.Errorf("nat.egressZone references unknown zone %s", egress)
+		}
+		srcZones := n.SourceZones
+		if len(srcZones) == 0 {
+			srcZones = []string{"lan", "dmz"}
+		}
+		for _, z := range srcZones {
+			z = strings.TrimSpace(z)
+			if z == "" {
+				continue
+			}
+			if _, ok := zoneSet[z]; !ok {
+				return fmt.Errorf("nat.sourceZones references unknown zone %s", z)
+			}
+		}
+	}
+	// Validate DNAT port forwards regardless of SNAT enabled state.
+	if err := validatePortForwards(n.PortForwards, zoneSet); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}) error {
+	if len(pfs) == 0 {
 		return nil
 	}
-	egress := strings.TrimSpace(n.EgressZone)
-	if egress == "" {
-		egress = "wan"
-	}
-	if _, ok := zoneSet[egress]; !ok {
-		return fmt.Errorf("nat.egressZone references unknown zone %s", egress)
-	}
-	srcZones := n.SourceZones
-	if len(srcZones) == 0 {
-		srcZones = []string{"lan", "dmz"}
-	}
-	for _, z := range srcZones {
-		z = strings.TrimSpace(z)
-		if z == "" {
-			continue
+	ids := map[string]struct{}{}
+	bindings := map[string]struct{}{} // ingress|proto|listenPort
+	for _, pf := range pfs {
+		if strings.TrimSpace(pf.ID) == "" {
+			return fmt.Errorf("nat.portForwards[].id cannot be empty")
 		}
-		if _, ok := zoneSet[z]; !ok {
-			return fmt.Errorf("nat.sourceZones references unknown zone %s", z)
+		if _, ok := ids[pf.ID]; ok {
+			return fmt.Errorf("duplicate nat.portForwards id: %s", pf.ID)
 		}
+		ids[pf.ID] = struct{}{}
+
+		ingress := strings.TrimSpace(pf.IngressZone)
+		if ingress == "" {
+			return fmt.Errorf("port-forward %s ingressZone cannot be empty", pf.ID)
+		}
+		if _, ok := zoneSet[ingress]; !ok {
+			return fmt.Errorf("port-forward %s ingressZone references unknown zone %s", pf.ID, ingress)
+		}
+
+		proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+		if proto != "tcp" && proto != "udp" {
+			return fmt.Errorf("port-forward %s proto must be tcp or udp", pf.ID)
+		}
+		if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
+			return fmt.Errorf("port-forward %s listenPort out of range: %d", pf.ID, pf.ListenPort)
+		}
+		if strings.TrimSpace(pf.DestIP) == "" {
+			return fmt.Errorf("port-forward %s destIp cannot be empty", pf.ID)
+		}
+		ip := net.ParseIP(strings.TrimSpace(pf.DestIP))
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("port-forward %s destIp must be an IPv4 address: %q", pf.ID, pf.DestIP)
+		}
+		if pf.DestPort != 0 && (pf.DestPort < 1 || pf.DestPort > 65535) {
+			return fmt.Errorf("port-forward %s destPort out of range: %d", pf.ID, pf.DestPort)
+		}
+		for _, cidr := range pf.AllowedSources {
+			if _, _, err := net.ParseCIDR(cidr); err != nil {
+				return fmt.Errorf("port-forward %s has invalid allowedSources CIDR %q: %v", pf.ID, cidr, err)
+			}
+		}
+
+		key := fmt.Sprintf("%s|%s|%d", ingress, proto, pf.ListenPort)
+		if _, ok := bindings[key]; ok {
+			return fmt.Errorf("duplicate port-forward binding (ingressZone/proto/listenPort): %s %s %d", ingress, proto, pf.ListenPort)
+		}
+		bindings[key] = struct{}{}
 	}
 	return nil
 }
@@ -690,7 +776,7 @@ func validateAssets(assets []Asset, zones []Zone) error {
 }
 
 func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
-	if len(r.Routes) == 0 && len(r.Rules) == 0 {
+	if len(r.Gateways) == 0 && len(r.Routes) == 0 && len(r.Rules) == 0 {
 		return nil
 	}
 	ifaceSet := map[string]struct{}{}
@@ -708,6 +794,28 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 	}
 	_ = zoneSet
 
+	gwByName := map[string]Gateway{}
+	for _, gw := range r.Gateways {
+		name := strings.TrimSpace(gw.Name)
+		if name == "" {
+			return errors.New("routing.gateways name cannot be empty")
+		}
+		if _, ok := gwByName[name]; ok {
+			return fmt.Errorf("routing.gateways duplicate name %q", name)
+		}
+		addr := strings.TrimSpace(gw.Address)
+		ip := net.ParseIP(addr)
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("routing.gateways %s address must be an IPv4 address", name)
+		}
+		if ifn := strings.TrimSpace(gw.Iface); ifn != "" {
+			if _, ok := ifaceSet[ifn]; !ok {
+				return fmt.Errorf("routing.gateways %s iface unknown %q", name, gw.Iface)
+			}
+		}
+		gwByName[name] = gw
+	}
+
 	for _, rt := range r.Routes {
 		dst := strings.TrimSpace(rt.Dst)
 		if dst == "" {
@@ -716,17 +824,19 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 		if strings.EqualFold(dst, "default") {
 			dst = "0.0.0.0/0"
 		}
-		if _, _, err := net.ParseCIDR(dst); err != nil {
-			return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
-		}
-		if gw := strings.TrimSpace(rt.Gateway); gw != "" {
-			if net.ParseIP(gw) == nil {
-				return fmt.Errorf("routing.routes gateway invalid %q", rt.Gateway)
+			if _, _, err := net.ParseCIDR(dst); err != nil {
+				return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
 			}
-		}
-		if ifn := strings.TrimSpace(rt.Iface); ifn != "" {
-			if _, ok := ifaceSet[ifn]; !ok {
-				return fmt.Errorf("routing.routes iface unknown %q", rt.Iface)
+			if gw := strings.TrimSpace(rt.Gateway); gw != "" {
+				if net.ParseIP(gw) == nil {
+					if _, ok := gwByName[gw]; !ok {
+						return fmt.Errorf("routing.routes gateway invalid %q (must be IP or a defined gateway name)", rt.Gateway)
+					}
+				}
+			}
+			if ifn := strings.TrimSpace(rt.Iface); ifn != "" {
+				if _, ok := ifaceSet[ifn]; !ok {
+					return fmt.Errorf("routing.routes iface unknown %q", rt.Iface)
 			}
 		}
 		if rt.Table < 0 || rt.Table > 252 {

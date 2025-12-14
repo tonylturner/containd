@@ -24,9 +24,10 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		Firewall: make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		Default:  dprules.Action(cfg.Firewall.DefaultAction),
 		NAT: dprules.NATConfig{
-			Enabled:     cfg.Firewall.NAT.Enabled,
-			EgressZone:  cfg.Firewall.NAT.EgressZone,
-			SourceZones: append([]string(nil), cfg.Firewall.NAT.SourceZones...),
+			Enabled:      cfg.Firewall.NAT.Enabled,
+			EgressZone:   cfg.Firewall.NAT.EgressZone,
+			SourceZones:  append([]string(nil), cfg.Firewall.NAT.SourceZones...),
+			PortForwards: make([]dprules.PortForward, 0, len(cfg.Firewall.NAT.PortForwards)),
 		},
 		IDS: dprules.IDSConfig{
 			Enabled: cfg.IDS.Enabled,
@@ -41,6 +42,23 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		if len(snap.NAT.SourceZones) == 0 {
 			snap.NAT.SourceZones = []string{"lan", "dmz"}
 		}
+	}
+	for _, pf := range cfg.Firewall.NAT.PortForwards {
+		destPort := pf.DestPort
+		if destPort == 0 {
+			destPort = pf.ListenPort
+		}
+		snap.NAT.PortForwards = append(snap.NAT.PortForwards, dprules.PortForward{
+			ID:             pf.ID,
+			Enabled:        pf.Enabled,
+			Description:    pf.Description,
+			IngressZone:    pf.IngressZone,
+			Proto:          pf.Proto,
+			ListenPort:     pf.ListenPort,
+			DestIP:         pf.DestIP,
+			DestPort:       destPort,
+			AllowedSources: append([]string(nil), pf.AllowedSources...),
+		})
 	}
 	if snap.Version == "" {
 		snap.Version = "compiled-" + cfg.SchemaVersion

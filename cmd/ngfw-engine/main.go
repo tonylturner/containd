@@ -16,6 +16,7 @@ import (
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/capture"
+	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/engine"
@@ -76,6 +77,7 @@ func main() {
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
+	mux.HandleFunc("/internal/conntrack", conntrackHandler())
 
 	logger.Printf("ngfw-engine starting on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -88,6 +90,31 @@ func addrFromEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func conntrackHandler() http.HandlerFunc {
+	type resp struct {
+		Entries []conntrack.Entry `json:"entries"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		limit := 200
+		if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
+				limit = v
+			}
+		}
+		entries, err := conntrack.List(limit)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp{Entries: entries})
+	}
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +310,7 @@ func routingHandler(logger *log.Logger, ownership *ownershipManager) http.Handle
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		mode := strings.TrimSpace(r.URL.Query().Get("mode"))
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -295,7 +323,6 @@ func routingHandler(logger *log.Logger, ownership *ownershipManager) http.Handle
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		// Replace semantics are future; for now we do additive apply.
 		resolved := routing
 		if ownership != nil {
 			// Best-effort resolve logical iface names (wan/dmz/lanX) to kernel device names
@@ -303,7 +330,14 @@ func routingHandler(logger *log.Logger, ownership *ownershipManager) http.Handle
 			// If no bindings exist, the route will still apply when Iface already names a kernel device.
 			resolved = resolveRoutingIfaces(routing, ownership.currentInterfaces())
 		}
-		if err := netcfg.ApplyRouting(ctx, resolved); err != nil {
+		applyErr := error(nil)
+		if strings.EqualFold(mode, "replace") {
+			applyErr = netcfg.ApplyRoutingReplace(ctx, resolved)
+		} else {
+			applyErr = netcfg.ApplyRouting(ctx, resolved)
+		}
+		if applyErr != nil {
+			err := applyErr
 			logger.Printf("apply routing failed: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

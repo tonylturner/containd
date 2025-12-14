@@ -91,6 +91,7 @@ type mockEngine struct {
 	lastDP  config.DataPlaneConfig
 	lastIf  []config.Interface
 	lastRT  config.RoutingConfig
+	lastRTR config.RoutingConfig
 	state   []config.InterfaceState
 }
 
@@ -111,6 +112,11 @@ func (m *mockEngine) ConfigureInterfacesReplace(ctx context.Context, ifaces []co
 
 func (m *mockEngine) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
 	m.lastRT = routing
+	return nil
+}
+
+func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
+	m.lastRTR = routing
 	return nil
 }
 
@@ -227,6 +233,50 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for duplicate, got %d", rec.Code)
+	}
+}
+
+func TestGetAndSetFirewallNAT(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	// GET returns default (disabled) NAT config.
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodGet, "/api/v1/firewall/nat", nil)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var nat config.NATConfig
+		if err := json.Unmarshal(rec.Body.Bytes(), &nat); err != nil {
+			t.Fatalf("invalid JSON response: %v", err)
+		}
+		if nat.Enabled {
+			t.Fatalf("expected nat disabled by default, got enabled")
+		}
+	}
+
+	// POST updates NAT config (valid zones).
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"wan","sourceZones":["lan","dmz"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// POST with unknown egress zone fails validation.
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"nope","sourceZones":["lan"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
 	}
 }
 

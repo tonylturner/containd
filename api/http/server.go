@@ -24,6 +24,7 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	cpids "github.com/containd/containd/pkg/cp/ids"
 	"github.com/containd/containd/pkg/cp/users"
+	"github.com/containd/containd/pkg/dp/conntrack"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -39,6 +40,7 @@ type EngineClient interface {
 	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
 	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
 	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
+	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 }
@@ -46,6 +48,10 @@ type EngineClient interface {
 type TelemetryClient interface {
 	ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
 	ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error)
+}
+
+type ConntrackClient interface {
+	ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error)
 }
 
 // ServicesApplier is an optional interface for applying services config
@@ -130,6 +136,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine))
 		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/conntrack", listConntrackHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/assets", listAssetsHandler(store))
@@ -149,6 +156,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
 		protected.GET("/routing", getRoutingHandler(store))
 		protected.POST("/routing", requireAdmin(), setRoutingHandler(store, engine, services))
+		protected.POST("/routing/reconcile", requireAdmin(), routingReconcileHandler(store, engine))
+		protected.GET("/firewall/nat", getFirewallNATHandler(store))
+		protected.POST("/firewall/nat", requireAdmin(), setFirewallNATHandler(store))
 		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
@@ -660,6 +670,28 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
+func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cc, ok := engine.(ConntrackClient)
+		if !ok || cc == nil {
+			c.JSON(http.StatusOK, []conntrack.Entry{})
+			return
+		}
+		limit := 200
+		if q := c.Query("limit"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		ents, err := cc.ListConntrack(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, ents)
+	}
+}
+
 func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -733,8 +765,13 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		var r req
-		if err := c.ShouldBindJSON(&r); err != nil || r.Line == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing line"})
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			return
+		}
+		// Treat blank input as a no-op; the UI console may send empty lines.
+		if strings.TrimSpace(r.Line) == "" {
+			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
 		loopbackHostPort := func(addr string, defaultPort string) string {
@@ -814,6 +851,39 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, resp{Output: buf.String()})
+	}
+}
+
+func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Firewall.NAT)
+	}
+}
+
+func setFirewallNATHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var nat config.NATConfig
+		if err := c.ShouldBindJSON(&nat); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid NAT payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Firewall.NAT = nat
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "firewall.nat.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Firewall.NAT)
 	}
 }
 
@@ -1137,17 +1207,34 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			return
 		}
 		deviceSet := map[string]struct{}{}
-		devices := make([]string, 0, len(state))
+		type candidate struct {
+			name   string
+			index  int
+			hasMAC bool
+		}
+		candidates := make([]candidate, 0, len(state))
 		for _, st := range state {
 			if strings.TrimSpace(st.Name) == "" {
 				continue
 			}
 			deviceSet[st.Name] = struct{}{}
-			if st.Name != "lo" {
-				devices = append(devices, st.Name)
+			if st.Name != "lo" && isAutoAssignableDevice(st.Name, st.MAC) {
+				mac := strings.TrimSpace(strings.ToLower(st.MAC))
+				hasMAC := mac != "" && mac != "00:00:00:00:00:00"
+				candidates = append(candidates, candidate{name: st.Name, index: st.Index, hasMAC: hasMAC})
 			}
 		}
-		sort.Strings(devices)
+		sort.SliceStable(candidates, func(i, j int) bool {
+			// Prefer NICs with a real MAC if we have it.
+			if candidates[i].hasMAC != candidates[j].hasMAC {
+				return candidates[i].hasMAC
+			}
+			// Prefer kernel index ordering when available; fall back to name.
+			if candidates[i].index > 0 && candidates[j].index > 0 && candidates[i].index != candidates[j].index {
+				return candidates[i].index < candidates[j].index
+			}
+			return candidates[i].name < candidates[j].name
+		})
 
 		ifaceByName := map[string]*config.Interface{}
 		for i := range cfg.Interfaces {
@@ -1169,8 +1256,8 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 				c.JSON(http.StatusBadRequest, gin.H{"error": "no default interfaces present"})
 				return
 			}
-			if len(devices) < needed {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough kernel interfaces (%d) for defaults (%d)", len(devices), needed)})
+			if len(candidates) < needed {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
 				return
 			}
 			idx := 0
@@ -1178,7 +1265,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 				if _, ok := ifaceByName[logical]; !ok {
 					continue
 				}
-				assignments[logical] = devices[idx]
+				assignments[logical] = candidates[idx].name
 				idx++
 			}
 		case "explicit":
@@ -1238,6 +1325,30 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config"})
 		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
 	}
+}
+
+func isAutoAssignableDevice(name string, mac string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || name == "lo" {
+		return false
+	}
+	// In appliance mode we want "real" NIC-like devices, not tunnels/virtual plumbing.
+	// Users can still explicitly bind to these if they want.
+	skipPrefixes := []string{
+		"erspan", "gre", "gretap", "ipip", "sit", "ip6tnl",
+		"tun", "tap",
+		"veth", "br", "docker", "cni", "flannel", "calico",
+		"vxlan", "geneve",
+		"wg", "tailscale",
+		"virbr", "vmnet", "utun",
+		"dummy", "ifb", "nlmon",
+	}
+	for _, p := range skipPrefixes {
+		if strings.HasPrefix(name, p) {
+			return false
+		}
+	}
+	return true
 }
 
 func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
@@ -1434,6 +1545,33 @@ func setRoutingHandler(store config.Store, engine EngineClient, services Service
 	}
 }
 
+func routingReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Confirm string `json:"confirm"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Confirm) != "REPLACE" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "confirm required: set {\"confirm\":\"REPLACE\"}"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ConfigureRoutingReplace(c.Request.Context(), cfg.Routing); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "routing.reconcile", Target: "engine"})
+		c.JSON(http.StatusOK, gin.H{"status": "reconciled"})
+	}
+}
+
 func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -1623,6 +1761,11 @@ func autoBindDefaultInterfaceDevices(cfg *config.Config) {
 			continue
 		}
 		if len(si.HardwareAddr) == 0 {
+			continue
+		}
+		// Keep the same "no tunnels/virtual" approach as interfaces auto-assign.
+		// (We don't have MAC strings here; HardwareAddr presence already helps.)
+		if !isAutoAssignableDevice(si.Name, si.HardwareAddr.String()) {
 			continue
 		}
 		candidates = append(candidates, sysIface{idx: si.Index, name: si.Name})

@@ -219,6 +219,13 @@ export type StaticRoute = {
   metric?: number;
 };
 
+export type Gateway = {
+  name: string;
+  address: string;
+  iface?: string;
+  description?: string;
+};
+
 export type PolicyRule = {
   priority?: number;
   src?: string;
@@ -227,6 +234,7 @@ export type PolicyRule = {
 };
 
 export type RoutingConfig = {
+  gateways?: Gateway[];
   routes?: StaticRoute[];
   rules?: PolicyRule[];
 };
@@ -255,6 +263,25 @@ export type FirewallRule = {
   protocols?: Protocol[];
   ics?: ICSPredicate;
   action: "ALLOW" | "DENY";
+};
+
+export type NATConfig = {
+  enabled: boolean;
+  egressZone?: string;
+  sourceZones?: string[];
+  portForwards?: PortForward[];
+};
+
+export type PortForward = {
+  id: string;
+  enabled: boolean;
+  description?: string;
+  ingressZone: string;
+  proto: "tcp" | "udp";
+  listenPort: number;
+  destIp: string;
+  destPort?: number;
+  allowedSources?: string[];
 };
 
 export type Asset = {
@@ -445,6 +472,7 @@ export type ConfigBundle = {
   firewall?: {
     defaultAction?: "ALLOW" | "DENY";
     rules?: FirewallRule[];
+    nat?: NATConfig;
   };
   services?: unknown;
 };
@@ -644,6 +672,8 @@ export const api = {
 
   getRouting: () => getJSON<RoutingConfig>("/api/v1/routing"),
   setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
+  reconcileRoutingReplace: () =>
+    postJSON<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
 
   listFirewallRules: () => getJSON<FirewallRule[]>("/api/v1/firewall/rules"),
   createFirewallRule: (r: FirewallRule) =>
@@ -652,6 +682,8 @@ export const api = {
     patchJSON<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
   deleteFirewallRule: (id: string) =>
     deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+  getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
+  setNAT: (cfg: NATConfig) => postJSON<NATConfig>("/api/v1/firewall/nat", cfg),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),

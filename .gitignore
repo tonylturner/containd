@@ -34,6 +34,8 @@ gocache/
 .gomodcache/
 .gopath/
 bin/
+ngfw-engine
+ngfw-mgmt
 
 # MkDocs
 site/

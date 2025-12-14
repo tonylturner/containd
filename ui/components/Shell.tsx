@@ -54,7 +54,10 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
     },
     {
       label: "Operations",
-      items: [{ href: "/dataplane/", label: "Dataplane" }],
+      items: [
+        { href: "/dataplane/", label: "Dataplane" },
+        { href: "/diagnostics/", label: "Diagnostics" },
+      ],
       defaultCollapsed: true,
     },
     {

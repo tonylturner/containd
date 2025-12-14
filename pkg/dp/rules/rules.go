@@ -3,19 +3,32 @@ package rules
 // Snapshot is an immutable rule set used by the data-plane fast path.
 // It is intended to be hot-swapped atomically by the engine.
 type Snapshot struct {
-	Version   string  // compiled rule version
-	Firewall  []Entry // firewall rules
-	NAT       NATConfig
-	IDS       IDSConfig
+	Version  string  // compiled rule version
+	Firewall []Entry // firewall rules
+	NAT      NATConfig
+	IDS      IDSConfig
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
-	Default   Action
+	Default    Action
 }
 
 type NATConfig struct {
-	Enabled     bool
-	EgressZone  string
-	SourceZones []string
+	Enabled      bool
+	EgressZone   string
+	SourceZones  []string
+	PortForwards []PortForward
+}
+
+type PortForward struct {
+	ID             string
+	Enabled        bool
+	Description    string
+	IngressZone    string
+	Proto          string
+	ListenPort     int
+	DestIP         string
+	DestPort       int
+	AllowedSources []string
 }
 
 type Entry struct {

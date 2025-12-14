@@ -54,14 +54,22 @@ services:
     # Attach mgmt to all appliance networks so UI/API can bind any of them.
     # Docker will present these as eth0..eth7 in this order.
     networks:
-      wan: {}
-      dmz: {}
-      lan1: {}
-      lan2: {}
-      lan3: {}
-      lan4: {}
-      lan5: {}
-      lan6: {}
+      wan:
+        ipv4_address: 192.168.240.3
+      dmz:
+        ipv4_address: 192.168.241.3
+      lan1:
+        ipv4_address: 192.168.242.3
+      lan2:
+        ipv4_address: 192.168.243.3
+      lan3:
+        ipv4_address: 192.168.244.3
+      lan4:
+        ipv4_address: 192.168.245.3
+      lan5:
+        ipv4_address: 192.168.246.3
+      lan6:
+        ipv4_address: 192.168.247.3
 
   engine:
     build:
@@ -82,14 +90,22 @@ services:
     command: ["/usr/bin/ngfw-engine"]
     # Attach engine to all appliance networks; eth0..eth7 correspond to wan/dmz/lan1..lan6.
     networks:
-      wan: {}
-      dmz: {}
-      lan1: {}
-      lan2: {}
-      lan3: {}
-      lan4: {}
-      lan5: {}
-      lan6: {}
+      wan:
+        ipv4_address: 192.168.240.2
+      dmz:
+        ipv4_address: 192.168.241.2
+      lan1:
+        ipv4_address: 192.168.242.2
+      lan2:
+        ipv4_address: 192.168.243.2
+      lan3:
+        ipv4_address: 192.168.244.2
+      lan4:
+        ipv4_address: 192.168.245.2
+      lan5:
+        ipv4_address: 192.168.246.2
+      lan6:
+        ipv4_address: 192.168.247.2
 
 networks:
   wan:

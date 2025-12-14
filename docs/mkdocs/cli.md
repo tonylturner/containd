@@ -13,6 +13,8 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `show interfaces`
 - Local diagnostics:
   - `show ip route` (Linux only)
+  - `show ip rule` (Linux only)
+  - `show neighbors` (Linux only; IPv4 ARP for now)
   - `diag ping <host> [count]`
   - `diag traceroute <host> [max_hops]`
   - `diag capture <iface> [seconds] [file]` (Linux only; writes `.pcap`)
@@ -26,6 +28,11 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `show system`
   - `show services status`
   - `show routing`
+  - `show nat`
+  - `show port-forwards` (DNAT config)
+  - `show conntrack [limit]` (kernel conntrack via engine; may be unavailable depending on runtime)
+  - `show sessions [limit]` (alias of `show conntrack`)
+  - `diag routing reconcile REPLACE`
   - `show ids rules`
   - `show audit`
   - `show dataplane`
@@ -33,8 +40,19 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 - Mutating commands (API):
   - `set zone <name> [description]`
   - `set interface <name> <zone> [cidr...]`
+  - `set interface ip <name> dhcp`
+  - `set interface ip <name> static <cidr> [gateway]`
+  - `set interface bind <name> <os_iface>`
+  - `set route add <dst|default> [via <gw>] [dev <iface>] [table <n>] [metric <n>]` (gateway can be an IP or a gateway name)
+  - `set route del <dst|default> [via <gw>] [dev <iface>] [table <n>] [metric <n>]`
+  - `set ip rule add <table> [src <cidr>] [dst <cidr>] [priority <n>]`
+  - `set ip rule del <table> [src <cidr>] [dst <cidr>] [priority <n>] | set ip rule del <table> all`
   - `set firewall rule <id> <action> [src_zone] [dst_zone]`
   - `delete firewall rule <id>`
+  - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
+  - `set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off]`
+  - `set port-forward del <id>`
+  - `set port-forward enable <id>` / `set port-forward disable <id>`
   - `set dataplane enforcement <on|off> [table] [iface...]`
   - `set system hostname <name>` (candidate)
   - `set system mgmt listen <addr>` (candidate)

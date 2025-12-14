@@ -39,7 +39,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
   - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
   - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings done).
-    - [~] Add NAT masquerade via nftables postrouting (config + compile done; CLI/UI surface pending).
+    - [x] Add NAT masquerade via nftables postrouting (config + compile + CLI/UI surface).
 - [x] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.
@@ -56,7 +56,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add diagnostics commands (`diag ping`, `diag traceroute`, `diag capture`, `show ip route`).
     - [x] Make `diag ping` work without raw ICMP (TCP fallback).
     - [x] Improve Linux traceroute accuracy (UDP + error queue).
-  - [ ] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
+    - [x] Add interface/path reachability probe (`diag reach <src_iface> <dst> [port]`) to validate routing + basic TCP reachability.
+  - [~] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
+    - [x] Add `show sessions`/`show conntrack` (API-backed via engine `/internal/conntrack`; kernel table, best-effort).
   - [ ] Add SSH hardening (rate limiting, banners, host key persistence review).
 - [ ] UI integration
   - [x] Add dashboard fetching `/api/v1/health`.
@@ -69,6 +71,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
   - [~] Add in-app console/CLI (dashboard console replacing roadmap; uses mgmt `/api/v1/cli/execute`).
+  - [x] Add Operations > Diagnostics page (graphical wrappers for `diag ping`, `diag traceroute`, `diag tcptraceroute`, plus interface connectivity probe).
   - [x] Add in-app documentation (MkDocs Material) behind Help icon.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
@@ -134,16 +137,35 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] Firewall core networking
   - [~] Routing + policy routing (config model + engine netlink apply; replace/reconcile semantics pending).
     - [x] Add management API + UI page for static routes and policy rules.
+    - [x] Add named gateways to routing config (optional; routes can reference gateway names).
+    - [x] Add UI helper to auto-create a WAN gateway + default route (best-effort; Docker-friendly).
+    - [x] Add routing reconcile endpoint (admin, confirm `REPLACE`) and engine `mode=replace`.
+    - [x] Add `show ip rule` CLI command (kernel view; Linux only).
+    - [x] Add CLI commands to edit routes/rules (`set route add|del`, `set ip rule add|del`) via mgmt API/config.
   - [ ] VLAN subinterfaces (config + netlink link creation + UI/CLI inputs).
-  - [ ] Policy-based routing UX (CLI/UI/API to edit rules, plus `show ip rule`).
-  - [ ] NAT UX (CLI/UI/API) for SNAT/DNAT and validation.
+  - [~] Policy-based routing UX (CLI/UI/API to edit rules, plus `show ip rule`).
+    - [x] UI page supports editing policy rules.
+    - [x] CLI supports add/delete policy rules.
+    - [ ] Add richer validation/preview (show kernel rules, conflicts) and better UX for multi-table designs.
+  - [~] NAT UX (CLI/UI/API) for SNAT/DNAT and validation.
+    - [x] SNAT masquerade (zone-based) surfaced to UI/CLI/API.
+    - [x] Add UI quick-start to enable LAN/MGMT → WAN outbound (default route + SNAT + allow rule).
+    - [~] DNAT/port-forwarding (UI/CLI/API + validation).
+      - [x] Add port-forward config model and nftables prerouting DNAT compile.
+      - [x] Expose port forwards via UI/CLI using the existing NAT endpoint.
+      - [ ] Add richer validation (overlap checks across zones + preview of generated nft rules).
 
 - [ ] Appliance-grade networking & performance
   - [~] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).
   - [~] Interface discovery + assignment UX (map physical NICs → `wan/dmz/lan1-6`, show link state/addresses).
-  - [ ] Linux routing reconcile (remove stale routes/rules managed by containd).
-  - [ ] Linux neighbor visibility + tooling (`show neighbors`, ARP/ND tables).
-  - [ ] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.
+    - [x] Static interface IP apply replaces non-link-local IPv4 addresses on the bound kernel interface (DHCP remains OS/Docker-managed; full replace via explicit reconcile).
+  - [~] Linux routing reconcile (remove stale routes/rules managed by containd).
+    - [x] Replace-mode reconcile removes containd-managed routes/rules (best-effort).
+    - [ ] Harden reconcile safety/coverage (more tables, v6, edge cases) as deployments expand.
+  - [~] Linux neighbor visibility + tooling (`show neighbors`, ARP/ND tables). (ARP only done)
+  - [~] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.
+    - [x] Add read-only conntrack visibility (best-effort) via `/proc/net/nf_conntrack` (engine) exposed through mgmt API.
+    - [ ] Add conntrack kill (targeted) once enforcement hooks are ready.
   - [ ] NAT performance + conntrack tuning defaults (sysctls, table sizing) with persisted config knobs.
   - [ ] NIC performance baseline: RSS/RPS/XPS guidance + optional auto-tuning (documented and gated).
   - [ ] eBPF/XDP optional acceleration plan (counters/early drop) aligned with enforcement design.

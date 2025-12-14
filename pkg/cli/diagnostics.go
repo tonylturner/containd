@@ -151,18 +151,18 @@ func diagPing() Command {
 			}
 		}
 		ip, err := resolveIPv4(host)
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
 
-			c, err := listenICMPv4("0.0.0.0")
-			if err != nil {
-				if isRawSocketDenied(err) {
-					return tcpPingFallback(ctx, out, host, ip, count)
-				}
-				return err
+		c, err := listenICMPv4("0.0.0.0")
+		if err != nil {
+			if isRawSocketDenied(err) {
+				return tcpPingFallback(ctx, out, host, ip, count)
 			}
-			defer c.Close()
+			return err
+		}
+		defer c.Close()
 
 		id := os.Getpid() & 0xffff
 		dstAddr := icmpV4DstAddr(c, ip, id)
@@ -172,26 +172,35 @@ func diagPing() Command {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-				default:
+			default:
+			}
+
+			seq := i + 1
+			msg := icmp.Message{
+				Type: ipv4.ICMPTypeEcho,
+				Code: 0,
+				Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
+			}
+			b, _ := msg.Marshal(nil)
+			start := time.Now()
+			_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+			if _, err := c.WriteTo(b, dstAddr); err != nil {
+				if isRawSocketDenied(err) {
+					// Some environments allow opening a UDP-based ICMP socket but deny sending/receiving.
+					// Fall back to a TCP connect probe so "diag ping" remains useful in containers.
+					return tcpPingFallback(ctx, out, host, ip, count)
 				}
-				seq := i + 1
-				msg := icmp.Message{
-					Type: ipv4.ICMPTypeEcho,
-					Code: 0,
-					Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
+				fmt.Fprintf(out, "seq=%d send error: %v\n", seq, err)
+				continue
+			}
+			buf := make([]byte, 1500)
+			n, peer, err := c.ReadFrom(buf)
+			if err != nil {
+				if isRawSocketDenied(err) {
+					return tcpPingFallback(ctx, out, host, ip, count)
 				}
-				b, _ := msg.Marshal(nil)
-				start := time.Now()
-				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-				if _, err := c.WriteTo(b, dstAddr); err != nil {
-					fmt.Fprintf(out, "seq=%d send error: %v\n", seq, err)
-					continue
-				}
-				buf := make([]byte, 1500)
-				n, peer, err := c.ReadFrom(buf)
-				if err != nil {
-					fmt.Fprintf(out, "seq=%d timeout\n", seq)
-					continue
+				fmt.Fprintf(out, "seq=%d timeout\n", seq)
+				continue
 			}
 			rtt := time.Since(start)
 			rm, err := icmp.ParseMessage(1, buf[:n])

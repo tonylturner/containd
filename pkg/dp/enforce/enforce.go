@@ -103,6 +103,55 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	}
 	buf.WriteString("  }\n")
 
+	// PREROUTING NAT: DNAT port forwards (simple destination NAT).
+	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
+		entries := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+		buf.WriteString("  chain prerouting {\n")
+		buf.WriteString("    type nat hook prerouting priority dstnat;\n")
+		buf.WriteString("    policy accept;\n")
+		for _, pf := range entries {
+			if !pf.Enabled {
+				continue
+			}
+			ingress := strings.TrimSpace(pf.IngressZone)
+			if ingress == "" {
+				continue
+			}
+			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+			if proto != "tcp" && proto != "udp" {
+				continue
+			}
+			if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
+				continue
+			}
+			dstIP := strings.TrimSpace(pf.DestIP)
+			if net.ParseIP(dstIP) == nil {
+				continue
+			}
+			dstPort := pf.DestPort
+			if dstPort == 0 {
+				dstPort = pf.ListenPort
+			}
+			if dstPort < 1 || dstPort > 65535 {
+				continue
+			}
+
+			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+			parts := []string{
+				fmt.Sprintf("comment \"pf:%s\"", pf.ID),
+				fmt.Sprintf("iifname @%s", ingSet),
+			}
+			if len(pf.AllowedSources) > 0 {
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+			}
+			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort))
+			parts = append(parts, fmt.Sprintf("dnat to %s:%d", dstIP, dstPort))
+			buf.WriteString("    " + strings.Join(parts, " ") + "\n")
+		}
+		buf.WriteString("  }\n")
+	}
+
 	// POSTROUTING NAT: source NAT (masquerade) for common lab/appliance setups.
 	if snap.NAT.Enabled && len(snap.ZoneIfaces) > 0 {
 		egress := strings.TrimSpace(snap.NAT.EgressZone)

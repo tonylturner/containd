@@ -23,7 +23,7 @@ func TestCompileSnapshotFirewallMapping(t *testing.T) {
 						FunctionCode: []uint8{3, 16},
 						Addresses:    []string{"0-100"},
 					},
-					Action:      config.ActionAllow,
+					Action: config.ActionAllow,
 				},
 			},
 		},
@@ -43,5 +43,37 @@ func TestCompileSnapshotFirewallMapping(t *testing.T) {
 	}
 	if snap.Firewall[0].Action != rules.ActionAllow {
 		t.Fatalf("expected allow action, got %s", snap.Firewall[0].Action)
+	}
+}
+
+func TestCompileSnapshotPortForwards(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Zones = []config.Zone{{Name: "wan"}, {Name: "lan"}}
+	cfg.Interfaces = []config.Interface{
+		{Name: "wan", Zone: "wan", Device: "eth0"},
+		{Name: "lan1", Zone: "lan", Device: "eth1"},
+	}
+	cfg.Firewall.NAT.PortForwards = []config.PortForward{
+		{
+			ID:          "pf-ssh",
+			Enabled:     true,
+			IngressZone: "wan",
+			Proto:       "tcp",
+			ListenPort:  2222,
+			DestIP:      "192.168.242.10",
+			DestPort:    22,
+		},
+	}
+
+	snap, err := CompileSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(snap.NAT.PortForwards) != 1 {
+		t.Fatalf("expected 1 port forward, got %d", len(snap.NAT.PortForwards))
+	}
+	pf := snap.NAT.PortForwards[0]
+	if pf.ID != "pf-ssh" || pf.DestPort != 22 || pf.ListenPort != 2222 || pf.IngressZone != "wan" || pf.Proto != "tcp" {
+		t.Fatalf("unexpected port forward: %+v", pf)
 	}
 }

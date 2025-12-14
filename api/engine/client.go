@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/dp/conntrack"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/rules"
 )
@@ -147,6 +148,30 @@ func (c *HTTPClient) ConfigureRouting(ctx context.Context, routing config.Routin
 	return nil
 }
 
+func (c *HTTPClient) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(routing)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/routing?mode=replace", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine routing(replace) status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("engine BaseURL is empty")
@@ -193,6 +218,32 @@ func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Even
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+	u := c.BaseURL + "/internal/conntrack"
+	if limit > 0 {
+		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine conntrack status %d", resp.StatusCode)
+	}
+	var out struct {
+		Entries []conntrack.Entry `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Entries, nil
 }
 
 // ListFlows fetches recent flow summaries derived from events.

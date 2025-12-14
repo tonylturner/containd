@@ -63,6 +63,15 @@ func showRoutingAPI(api *API) Command {
 	}
 }
 
+func routingReconcileAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) != 1 || strings.TrimSpace(args[0]) != "REPLACE" {
+			return fmt.Errorf("usage: diag routing reconcile REPLACE")
+		}
+		return api.postJSON(ctx, "/api/v1/routing/reconcile", map[string]string{"confirm": "REPLACE"}, out)
+	}
+}
+
 func emptyDash(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "—"

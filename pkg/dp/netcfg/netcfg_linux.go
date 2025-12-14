@@ -35,7 +35,9 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 		default:
 		}
 		if strings.EqualFold(strings.TrimSpace(iface.AddressMode), "dhcp") {
-			// DHCP is a placeholder for now; leave any existing OS config untouched.
+			// DHCP means "OS-managed addressing". In container deployments, Docker assigns an address
+			// at container start; we intentionally do not run a DHCP client here yet.
+			// We also avoid deleting any existing addresses when switching to DHCP.
 			continue
 		}
 		dev := strings.TrimSpace(iface.Device)
@@ -58,6 +60,7 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 			return fmt.Errorf("set link up %s: %w", dev, err)
 		}
 		desired := map[string]struct{}{}
+		desiredV4 := map[string]struct{}{}
 		for _, cidr := range iface.Addresses {
 			select {
 			case <-ctx.Done():
@@ -72,12 +75,19 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 				return fmt.Errorf("interface %s invalid CIDR %q", iface.Name, cidr)
 			} else {
 				desired[ipnet.String()] = struct{}{}
+				if ipnet.IP.To4() != nil {
+					desiredV4[ipnet.String()] = struct{}{}
+				}
 				if err := addAddr(nic.Index, ipnet); err != nil {
 					return fmt.Errorf("add addr %s %s: %w", dev, ipnet.String(), err)
 				}
 			}
 		}
-		if opts.Replace {
+		// Default behavior for static addressing: ensure the configured IPv4 addresses are the
+		// only non-link-local IPv4 addresses on the interface. This makes "set interface ip ..."
+		// behave like a real firewall interface assignment, even in containerized deployments.
+		replaceV4 := len(desiredV4) > 0
+		if opts.Replace || replaceV4 {
 			existing, err := listAddrs(nic.Index, unix.AF_UNSPEC)
 			if err != nil {
 				return fmt.Errorf("list addrs %s: %w", dev, err)
@@ -89,8 +99,15 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 				if _, ok := desired[ipnet.String()]; ok {
 					continue
 				}
-				// Avoid removing link-local IPv6 addresses by default.
-				if ipnet.IP != nil && ipnet.IP.To16() != nil && ipnet.IP.To4() == nil && ipnet.IP.IsLinkLocalUnicast() {
+				if ipnet.IP != nil && ipnet.IP.To4() == nil {
+					// Avoid removing link-local IPv6 addresses by default.
+					if ipnet.IP.To16() != nil && ipnet.IP.IsLinkLocalUnicast() {
+						continue
+					}
+				}
+				// For "static apply" we only replace IPv4; keep any IPv6 global addresses unless
+				// the operator explicitly requested a full reconcile.
+				if !opts.Replace && replaceV4 && ipnet.IP != nil && ipnet.IP.To4() == nil {
 					continue
 				}
 				if err := delAddr(nic.Index, ipnet); err != nil {
