@@ -11,11 +11,14 @@
 ## Running the skeleton
 
 ```bash
-# Management plane API (uses Gin)
-go run ./cmd/ngfw-mgmt
+# Combined appliance (default)
+go run ./cmd/containd all
 
-# Data plane stub
-go run ./cmd/ngfw-engine
+# Management plane only
+go run ./cmd/containd mgmt
+
+# Data plane only
+go run ./cmd/containd engine
 ```
 
 Health endpoints:
@@ -29,8 +32,7 @@ UI serving:
 
 Containers:
 - Build appliance image (single container, default): `docker build -f Dockerfile.mgmt -t containd/containd:dev .`
-- Build engine-only image: `docker build -f Dockerfile.engine -t containd/containd-engine:dev .`
-- Compose (mgmt + engine) + prints connection info: `bash scripts/containd up --build`
+- Compose (combined containd) + prints connection info: `bash scripts/containd up --build`
 - Publish (example): `docker tag containd/containd:dev ghcr.io/you/containd:dev && docker push ghcr.io/you/containd:dev`
 
 Consume published image:
