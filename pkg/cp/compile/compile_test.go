@@ -77,3 +77,67 @@ func TestCompileSnapshotPortForwards(t *testing.T) {
 		t.Fatalf("unexpected port forward: %+v", pf)
 	}
 }
+
+func TestExpandCIDRTokensVPN(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Zones = []config.Zone{{Name: "wan"}, {Name: "lan"}}
+	cfg.Interfaces = []config.Interface{
+		{Name: "wan", Zone: "wan", Device: "eth0"},
+		{Name: "lan1", Zone: "lan", Device: "eth1"},
+	}
+
+	cfg.Services.VPN.WireGuard.Enabled = true
+	cfg.Services.VPN.WireGuard.AddressCIDR = "10.8.0.1/24"
+	cfg.Services.VPN.OpenVPN.Enabled = true
+	cfg.Services.VPN.OpenVPN.Mode = "server"
+	cfg.Services.VPN.OpenVPN.Server = &config.OpenVPNManagedServerConfig{
+		ListenPort:  1194,
+		Proto:       "udp",
+		TunnelCIDR:  "10.9.0.0/24",
+		PublicEndpoint: "vpn.example.com",
+	}
+
+	cfg.Firewall.Rules = []config.Rule{
+		{
+			ID:          "vpn-any",
+			SourceZones: []string{"lan"},
+			DestZones:   []string{"wan"},
+			Sources:     []string{"vpn:any"},
+			Action:      config.ActionAllow,
+			Protocols:   []config.Protocol{{Name: "tcp", Port: "443"}},
+		},
+		{
+			ID:          "vpn-wg",
+			SourceZones: []string{"lan"},
+			DestZones:   []string{"wan"},
+			Sources:     []string{"vpn:wireguard"},
+			Action:      config.ActionAllow,
+			Protocols:   []config.Protocol{{Name: "tcp", Port: "443"}},
+		},
+		{
+			ID:          "vpn-ovpn",
+			SourceZones: []string{"lan"},
+			DestZones:   []string{"wan"},
+			Sources:     []string{"vpn:openvpn"},
+			Action:      config.ActionAllow,
+			Protocols:   []config.Protocol{{Name: "tcp", Port: "443"}},
+		},
+	}
+
+	snap, err := CompileSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(snap.Firewall) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(snap.Firewall))
+	}
+	if got := snap.Firewall[0].Sources; len(got) != 2 || got[0] != "10.8.0.1/24" || got[1] != "10.9.0.0/24" {
+		t.Fatalf("vpn:any expansion unexpected: %+v", got)
+	}
+	if got := snap.Firewall[1].Sources; len(got) != 1 || got[0] != "10.8.0.1/24" {
+		t.Fatalf("vpn:wireguard expansion unexpected: %+v", got)
+	}
+	if got := snap.Firewall[2].Sources; len(got) != 1 || got[0] != "10.9.0.0/24" {
+		t.Fatalf("vpn:openvpn expansion unexpected: %+v", got)
+	}
+}

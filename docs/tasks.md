@@ -40,6 +40,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
       - [x] Add admin upload endpoint for `.ovpn` profiles (stored under `/data/openvpn/profiles/`, rejects `daemon`).
       - [x] Add UI upload control that sets `openvpn.configPath` automatically.
       - [x] Add managed OpenVPN client config (remote/port/proto + PEM upload) rendered to `/data/openvpn/managed/` by mgmt and supervised as the active config.
+      - [x] Add VPN UI setup helpers (required-field checklist + inline guidance for common fields).
       - [~] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
   - [~] Implement DHCP server runtime for LAN (leases + status/events).
     - [~] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 → UDP/1067 for nonroot).
@@ -72,7 +73,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [~] Add local input rules for appliance services (mgmt/ssh/vpn) and auto-open VPN server ports on WAN.
       - [x] Auto-open management plane ports and VPN server ports in nftables input chain when enabled.
       - [ ] Add configurable bind zone/interface for VPN server listeners and corresponding auto rules.
-      - [ ] Add VPN tunnel network objects (e.g., `wg0` CIDR, OpenVPN tunnel CIDR) for policy targeting.
+      - [x] Add VPN tunnel network objects for policy targeting (rule CIDR tokens: `vpn:any`, `vpn:wireguard`, `vpn:openvpn`).
 - [x] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.

@@ -68,12 +68,14 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	for _, r := range cfg.Firewall.Rules {
+		srcs := expandCIDRTokens(append([]string(nil), r.Sources...), cfg)
+		dsts := expandCIDRTokens(append([]string(nil), r.Destinations...), cfg)
 		entry := dprules.Entry{
 			ID:           r.ID,
 			SourceZones:  append([]string(nil), r.SourceZones...),
 			DestZones:    append([]string(nil), r.DestZones...),
-			Sources:      append([]string(nil), r.Sources...),
-			Destinations: append([]string(nil), r.Destinations...),
+			Sources:      srcs,
+			Destinations: dsts,
 			Protocols:    make([]dprules.Protocol, 0, len(r.Protocols)),
 			Action:       dprules.Action(r.Action),
 			ICS: dprules.ICSPredicate{
@@ -133,6 +135,73 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	return snap, nil
+}
+
+func expandCIDRTokens(in []string, cfg *config.Config) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		switch s {
+		case "vpn:any", "vpn:all", "vpn:*":
+			out = append(out, vpnCIDRs(cfg)...)
+		case "vpn:wireguard", "vpn:wg":
+			if cidr := strings.TrimSpace(cfg.Services.VPN.WireGuard.AddressCIDR); cidr != "" {
+				out = append(out, cidr)
+			}
+		case "vpn:openvpn", "vpn:ovpn":
+			if cfg.Services.VPN.OpenVPN.Server != nil && strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) == "server" {
+				if cidr := strings.TrimSpace(cfg.Services.VPN.OpenVPN.Server.TunnelCIDR); cidr != "" {
+					out = append(out, cidr)
+				}
+			}
+		default:
+			if strings.TrimSpace(raw) != "" {
+				out = append(out, strings.TrimSpace(raw))
+			}
+		}
+	}
+	out = compactAndSortCIDRs(out)
+	return out
+}
+
+func vpnCIDRs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	var out []string
+	if cidr := strings.TrimSpace(cfg.Services.VPN.WireGuard.AddressCIDR); cidr != "" {
+		out = append(out, cidr)
+	}
+	if cfg.Services.VPN.OpenVPN.Server != nil && strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) == "server" {
+		if cidr := strings.TrimSpace(cfg.Services.VPN.OpenVPN.Server.TunnelCIDR); cidr != "" {
+			out = append(out, cidr)
+		}
+	}
+	return compactAndSortCIDRs(out)
+}
+
+func compactAndSortCIDRs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {

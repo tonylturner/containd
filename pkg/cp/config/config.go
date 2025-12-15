@@ -758,6 +758,9 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 			}
 		}
 		for _, cidr := range append(r.Sources, r.Destinations...) {
+			if isSpecialCIDRToken(cidr) {
+				continue
+			}
 			if _, _, err := net.ParseCIDR(cidr); err != nil {
 				return fmt.Errorf("rule %s has invalid CIDR %q: %v", r.ID, cidr, err)
 			}
@@ -772,6 +775,20 @@ func validateFirewall(f FirewallConfig, zones []Zone) error {
 		}
 	}
 	return nil
+}
+
+func isSpecialCIDRToken(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "vpn:any", "vpn:all", "vpn:*":
+		return true
+	case "vpn:wireguard", "vpn:wg":
+		return true
+	case "vpn:openvpn", "vpn:ovpn":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {

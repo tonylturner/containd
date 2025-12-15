@@ -20,6 +20,8 @@ import { Shell } from "../../components/Shell";
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
 
+type FieldIssue = { field: string; message: string; severity: "required" | "recommended" };
+
 function normalize(cfg: VPNConfig | null): { wireguard: WireGuardConfig; openvpn: OpenVPNConfig } {
   return {
     wireguard: {
@@ -63,6 +65,40 @@ type VPNServiceStatus = {
   openvpn_last_error?: string;
 };
 
+function hasNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function hasLikelyPEM(v: unknown): boolean {
+  if (typeof v !== "string") return false;
+  const t = v.trim();
+  if (!t) return false;
+  return t.includes("BEGIN") && t.includes("END");
+}
+
+function IssuesBanner({ title, issues }: { title: string; issues: FieldIssue[] }) {
+  if (!issues.length) return null;
+  const required = issues.filter((i) => i.severity === "required");
+  const recommended = issues.filter((i) => i.severity === "recommended");
+  return (
+    <div className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+      <div className="font-medium text-amber">{title}</div>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber/90">
+        {required.map((i) => (
+          <li key={`${i.field}:${i.message}`}>
+            <span className="font-semibold">Required:</span> {i.message}
+          </li>
+        ))}
+        {recommended.map((i) => (
+          <li key={`${i.field}:${i.message}`}>
+            <span className="font-semibold">Recommended:</span> {i.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const defaultOpenVPNManaged: OpenVPNManagedClientConfig = {
   remote: "",
   port: 1194,
@@ -95,6 +131,44 @@ export default function VPNPage() {
   const [svcStatus, setSvcStatus] = useState<VPNServiceStatus | null>(null);
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
   const [newClientName, setNewClientName] = useState<string>("");
+
+  const wireguardIssues = useMemo<FieldIssue[]>(() => {
+    if (!cfg.wireguard.enabled) return [];
+    const out: FieldIssue[] = [];
+    if (!hasNonEmptyString(cfg.wireguard.interface)) out.push({ field: "wireguard.interface", severity: "required", message: "Interface name is required (e.g. wg0)." });
+    if (!cfg.wireguard.listenPort || cfg.wireguard.listenPort <= 0) out.push({ field: "wireguard.listenPort", severity: "required", message: "Listen port must be set." });
+    if (!hasNonEmptyString(cfg.wireguard.addressCIDR)) out.push({ field: "wireguard.addressCIDR", severity: "required", message: "Tunnel address CIDR is required (e.g. 10.8.0.1/24)." });
+    if (!hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
+    if (!cfg.wireguard.peers?.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
+    return out;
+  }, [cfg.wireguard]);
+
+  const openvpnIssues = useMemo<FieldIssue[]>(() => {
+    if (!cfg.openvpn.enabled) return [];
+    const out: FieldIssue[] = [];
+    const mode = (cfg.openvpn.mode ?? "client").trim();
+    if (mode === "client") {
+      if (cfg.openvpn.managed) {
+        const m = cfg.openvpn.managed;
+        if (!hasNonEmptyString(m.remote)) out.push({ field: "openvpn.managed.remote", severity: "required", message: "Remote is required (VPN gateway hostname/IP)." });
+        if (!m.port || m.port <= 0) out.push({ field: "openvpn.managed.port", severity: "required", message: "Port must be set." });
+        if (!hasNonEmptyString(m.proto)) out.push({ field: "openvpn.managed.proto", severity: "required", message: "Protocol must be set (udp/tcp)." });
+        if (!hasLikelyPEM(m.ca)) out.push({ field: "openvpn.managed.ca", severity: "required", message: "CA certificate (PEM) is required." });
+        if (!hasLikelyPEM(m.cert)) out.push({ field: "openvpn.managed.cert", severity: "required", message: "Client certificate (PEM) is required." });
+        if (!hasLikelyPEM(m.key)) out.push({ field: "openvpn.managed.key", severity: "required", message: "Client key (PEM) is required." });
+      } else {
+        if (!hasNonEmptyString(cfg.openvpn.configPath)) out.push({ field: "openvpn.configPath", severity: "required", message: "Config Path is required when not using managed config." });
+      }
+    } else if (mode === "server") {
+      const s = cfg.openvpn.server;
+      if (!s) out.push({ field: "openvpn.server", severity: "required", message: "Server configuration is required." });
+      if (!s?.listenPort || s.listenPort <= 0) out.push({ field: "openvpn.server.listenPort", severity: "required", message: "Listen port must be set." });
+      if (!hasNonEmptyString(s?.proto)) out.push({ field: "openvpn.server.proto", severity: "required", message: "Protocol must be set (udp/tcp)." });
+      if (!hasNonEmptyString(s?.tunnelCIDR)) out.push({ field: "openvpn.server.tunnelCIDR", severity: "required", message: "Tunnel CIDR is required (client address pool)." });
+      if (!hasNonEmptyString(s?.publicEndpoint)) out.push({ field: "openvpn.server.publicEndpoint", severity: "recommended", message: "Set Public Endpoint so generated client profiles know where to connect." });
+    }
+    return out;
+  }, [cfg.openvpn]);
 
   async function refresh() {
     const current = await api.getVPN();
@@ -276,8 +350,8 @@ export default function VPNPage() {
           <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-mint/10 blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-black/30">
-                <img src="/icons/wireguard.svg" alt="WireGuard" className="h-6 w-6 invert opacity-90" />
+              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-gradient-to-br from-mint/25 to-sky/10">
+                <img src="/icons/wireguard.svg" alt="WireGuard" className="h-6 w-6 invert opacity-90 drop-shadow" />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white">WireGuard</h2>
@@ -309,6 +383,12 @@ export default function VPNPage() {
               />
               Enable WireGuard
             </label>
+
+            {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
+            <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+              When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the <span className="font-mono">wan</span> zone
+              (nftables input) so clients can connect.
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div>
@@ -345,6 +425,9 @@ export default function VPNPage() {
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
               />
+              <p className="mt-1 text-[11px] text-slate-400">
+                This is the VPN client network used for policy targeting (e.g. firewall rules can match <span className="font-mono">vpn:wireguard</span>).
+              </p>
             </div>
 
             <div>
@@ -477,8 +560,8 @@ export default function VPNPage() {
           <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-amber/10 blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-black/30">
-                <img src="/icons/openvpn.svg" alt="OpenVPN" className="h-6 w-6 invert opacity-90" />
+              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-gradient-to-br from-amber/25 to-rose/10">
+                <img src="/icons/openvpn.svg" alt="OpenVPN" className="h-6 w-6 invert opacity-90 drop-shadow" />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white">OpenVPN</h2>
@@ -505,6 +588,9 @@ export default function VPNPage() {
               />
               Enable OpenVPN
             </label>
+
+            <IssuesBanner title="OpenVPN setup checklist" issues={openvpnIssues} />
+
             <div>
               <label className="text-xs uppercase tracking-wide text-slate-400">Mode</label>
               <select
@@ -569,6 +655,7 @@ export default function VPNPage() {
                           className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                           placeholder="vpn.example.com"
                         />
+                        <p className="mt-1 text-[11px] text-slate-400">Hostname or IP address of the OpenVPN gateway.</p>
                       </div>
                       <div>
                         <label className="text-xs uppercase tracking-wide text-slate-400">Port</label>
@@ -802,6 +889,9 @@ export default function VPNPage() {
                         }
                         className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                       />
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Client address pool. Firewall rules can match this network via <span className="font-mono">vpn:openvpn</span>.
+                      </p>
                     </div>
                   </div>
 
