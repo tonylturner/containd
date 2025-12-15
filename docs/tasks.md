@@ -33,25 +33,30 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [x] WireGuard: apply kernel interface + peers via engine (generic netlink; v4-only endpoints/AllowedIPs initially).
     - [x] WireGuard: remove interface on disable + emit runtime events into unified event stream.
     - [x] WireGuard: add runtime status (handshake/tx/rx counters) and surface in UI.
-  - [~] Implement OpenVPN runtime (client/server) after WireGuard.
-    - [x] Embed `openvpn` binary into mgmt image (distroless runtime copy + deps).
-    - [x] Add mgmt supervisor/status/events for OpenVPN (foreground config; restarts on config path changes).
-    - [~] Add OpenVPN UI config card + runtime status (client/server phased; managed client first).
-      - [x] Add admin upload endpoint for `.ovpn` profiles (stored under `/data/openvpn/profiles/`, rejects `daemon`).
-      - [x] Add UI upload control that sets `openvpn.configPath` automatically.
-      - [x] Add managed OpenVPN client config (remote/port/proto + PEM upload) rendered to `/data/openvpn/managed/` by mgmt and supervised as the active config.
-      - [x] Add VPN UI setup helpers (required-field checklist + inline guidance for common fields).
-      - [~] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
+    - [~] Implement OpenVPN runtime (client/server) after WireGuard.
+      - [x] Embed `openvpn` binary into mgmt image (distroless runtime copy + deps).
+      - [x] Add mgmt supervisor/status/events for OpenVPN (foreground config; restarts on config path changes).
+      - [~] Add OpenVPN UI config card + runtime status (client/server phased; managed client first).
+        - [x] Add admin upload endpoint for `.ovpn` profiles (stored under `/data/openvpn/profiles/`, rejects `daemon`).
+        - [x] Add UI upload control that sets `openvpn.configPath` automatically.
+        - [x] Add managed OpenVPN client config (remote/port/proto + PEM upload) rendered to `/data/openvpn/managed/` by mgmt and supervised as the active config.
+        - [x] Add VPN UI setup helpers (required-field checklist + inline guidance for common fields).
+        - [~] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
+          - [ ] Clarify "client network / address pool" semantics in docs + UI (WireGuard uses static peer AllowedIPs; OpenVPN server allocates from `tunnelCIDR`).
   - [~] Implement DHCP server runtime for LAN (leases + status/events).
-    - [~] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 → UDP/1067 for nonroot).
+    - [~] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 -> UDP/1067 for nonroot).
       - [x] Serve per-interface scopes (one listener per interface + pool mapping; restarts when config/scope changes).
       - [x] Persist leases across restarts (engine writes to `/data/dhcp-leases.json`; atomic writes).
       - [x] Add richer status/errors/events (listener crash/restart + lease load/persist errors).
     - [x] Expose current DHCP leases via mgmt API and UI lease table.
     - [x] Emit DHCP runtime + lease events into unified event stream (`/api/v1/events`).
     - [x] Add DHCP lease churn into audit log (`service.dhcp.lease.*`).
-    - [ ] Add DHCP reservations (MAC → fixed IP, per-interface) and surface in UI/CLI.
+    - [ ] Add DHCP reservations (MAC -> fixed IP, per-interface) and surface in UI/CLI.
+      - [ ] Enforce reservations in allocator (reserved IP wins over dynamic).
+      - [ ] Emit reservation events (`service.dhcp.reservation.hit|miss`) into unified event stream + audit.
     - [ ] Add richer DHCP logging fields (hostname, vendor class, requested IP) and lease history export.
+      - [ ] Persist requested IP / vendor class metadata alongside leases (best-effort).
+      - [ ] Add simple lease history export (bounded local file/endpoint).
   - [x] Add audit endpoints and UI/CLI views (forwarding pending).
   - [x] Add users endpoints (admin-only).
   - [~] Add identity endpoints (beyond users/sessions) as phased work.
