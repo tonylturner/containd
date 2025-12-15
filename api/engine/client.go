@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dhcpd"
 	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -202,6 +203,38 @@ func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.Serv
 		return fmt.Errorf("engine services status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (c *HTTPClient) GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error) {
+	if c.BaseURL == "" {
+		return netcfg.WireGuardStatus{}, fmt.Errorf("engine BaseURL is empty")
+	}
+	u := c.BaseURL + "/internal/wireguard/status"
+	if strings.TrimSpace(iface) != "" {
+		u += "?iface=" + url.QueryEscape(strings.TrimSpace(iface))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return netcfg.WireGuardStatus{}, fmt.Errorf("engine wireguard status %d: %s", resp.StatusCode, detail)
+		}
+		return netcfg.WireGuardStatus{}, fmt.Errorf("engine wireguard status %d", resp.StatusCode)
+	}
+	var out netcfg.WireGuardStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	return out, nil
 }
 
 func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {

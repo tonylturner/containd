@@ -20,10 +20,11 @@ import (
 // the binary is present. This keeps the UX "appliance-like" without requiring
 // a separate init system.
 type DNSManager struct {
-	BaseDir string
-	Supervise bool
-	UnboundPath string
+	BaseDir       string
+	Supervise     bool
+	UnboundPath   string
 	CheckConfPath string
+	OnEvent       func(kind string, attrs map[string]any)
 
 	mu         sync.Mutex
 	lastCfg    config.DNSConfig
@@ -61,9 +62,9 @@ func NewDNSManager(baseDir string) *DNSManager {
 	})
 
 	return &DNSManager{
-		BaseDir:      baseDir,
-		Supervise:    supervise,
-		UnboundPath:  unboundPath,
+		BaseDir:       baseDir,
+		Supervise:     supervise,
+		UnboundPath:   unboundPath,
 		CheckConfPath: checkConfPath,
 	}
 }
@@ -80,6 +81,7 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 	path := filepath.Join(m.BaseDir, "unbound.conf")
 	if !cfg.Enabled {
 		_ = m.stopLocked()
+		m.emit("service.dns.disabled", map[string]any{})
 		_ = os.Remove(path)
 		m.mu.Lock()
 		m.lastRender = time.Now().UTC()
@@ -130,6 +132,7 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.mu.Unlock()
+		m.emit("service.dns.render_failed", map[string]any{"error": err.Error()})
 		return err
 	}
 	m.mu.Lock()
@@ -142,10 +145,88 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 			m.mu.Lock()
 			m.lastError = err.Error()
 			m.mu.Unlock()
+			m.emit("service.dns.start_failed", map[string]any{"error": err.Error()})
 			return err
 		}
 	}
 
+	return nil
+}
+
+func (m *DNSManager) Validate(ctx context.Context, cfg config.DNSConfig) error {
+	_ = ctx
+	if !cfg.Enabled {
+		return nil
+	}
+	port := cfg.ListenPort
+	if port == 0 {
+		port = 53
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("dns listenPort invalid: %d", port)
+	}
+	// If upstreams are present, ensure they are non-empty and trimmed.
+	for _, u := range cfg.UpstreamServers {
+		if strings.TrimSpace(u) == "" {
+			return fmt.Errorf("dns upstreamServers contains empty entry")
+		}
+	}
+	if m.CheckConfPath == "" {
+		// No validator binary available; best-effort checks above.
+		return nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "containd-unbound-validate-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	path := filepath.Join(tmpDir, "unbound.conf")
+
+	// Render a minimal config identical to Apply(), but without starting processes.
+	var b strings.Builder
+	b.WriteString("server:\n")
+	b.WriteString("  verbosity: 1\n")
+	b.WriteString("  username: \"\"\n")
+	b.WriteString("  chroot: \"\"\n")
+	b.WriteString("  directory: \"/tmp\"\n")
+	b.WriteString("  pidfile: \"\"\n")
+	b.WriteString("  use-syslog: no\n")
+	b.WriteString("  logfile: \"\"\n")
+	b.WriteString("  auto-trust-anchor-file: \"\"\n")
+	b.WriteString(fmt.Sprintf("  interface: 0.0.0.0@%d\n", port))
+	b.WriteString("  access-control: 0.0.0.0/0 allow\n")
+	if cfg.CacheSizeMB > 0 {
+		b.WriteString(fmt.Sprintf("  msg-cache-size: %dm\n", cfg.CacheSizeMB))
+		b.WriteString(fmt.Sprintf("  rrset-cache-size: %dm\n", cfg.CacheSizeMB))
+	}
+	if len(cfg.UpstreamServers) > 0 {
+		b.WriteString("\nforward-zone:\n")
+		b.WriteString("  name: \".\"\n")
+		for _, u := range cfg.UpstreamServers {
+			u = strings.TrimSpace(u)
+			if u == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("  forward-addr: %s\n", u))
+		}
+	}
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+
+	var out bytes.Buffer
+	testCmd := exec.Command(m.CheckConfPath, path)
+	testCmd.Stdout = &out
+	testCmd.Stderr = &out
+	if err := testCmd.Run(); err != nil {
+		msg := strings.TrimSpace(out.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("unbound-checkconf failed: %s", msg)
+	}
 	return nil
 }
 
@@ -178,40 +259,6 @@ func (m *DNSManager) Status() map[string]any {
 	}
 }
 
-func firstNonZero(v int, def int) int {
-	if v != 0 {
-		return v
-	}
-	return def
-}
-
-func detectBinary(candidates []string) (string, bool) {
-	for _, p := range candidates {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			return p, true
-		}
-	}
-	return "", false
-}
-
-func formatMaybe(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
-}
-
-func pidOrZero(cmd *exec.Cmd) int {
-	if cmd == nil || cmd.Process == nil {
-		return 0
-	}
-	return cmd.Process.Pid
-}
-
 func (m *DNSManager) startOrReload(configPath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -226,6 +273,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 			if msg == "" {
 				msg = err.Error()
 			}
+			go m.emit("service.dns.validate_failed", map[string]any{"error": msg})
 			return fmt.Errorf("unbound-checkconf failed: %s", msg)
 		}
 	}
@@ -233,6 +281,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 	if m.running && m.cmd != nil && m.cmd.Process != nil {
 		// Best-effort reload (SIGHUP). If it fails, restart.
 		if err := m.cmd.Process.Signal(syscall.SIGHUP); err == nil {
+			go m.emit("service.dns.reloaded", map[string]any{"pid": m.cmd.Process.Pid})
 			return nil
 		}
 		_ = m.stopLockedNoLock()
@@ -248,6 +297,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 	m.running = true
 	m.lastStart = time.Now().UTC()
 	m.lastExit = ""
+	go m.emit("service.dns.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
 
 	go func() {
 		err := cmd.Wait()
@@ -260,6 +310,12 @@ func (m *DNSManager) startOrReload(configPath string) error {
 		} else {
 			m.lastExit = "exited"
 		}
+		exit := m.lastExit
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		}
+		go m.emit("service.dns.exited", map[string]any{"pid": pid, "exit": exit})
 	}()
 
 	return nil
@@ -279,8 +335,19 @@ func (m *DNSManager) stopLockedNoLock() error {
 	}
 
 	_ = m.cmd.Process.Signal(syscall.SIGTERM)
+	go m.emit("service.dns.stopped", map[string]any{"pid": m.cmd.Process.Pid})
 	m.running = false
 	m.cmd = nil
 	m.lastStop = time.Now().UTC()
 	return nil
+}
+
+func (m *DNSManager) emit(kind string, attrs map[string]any) {
+	if m == nil || m.OnEvent == nil {
+		return
+	}
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	m.OnEvent(kind, attrs)
 }

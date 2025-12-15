@@ -34,30 +34,30 @@ const (
 )
 
 const (
-	wgDeviceAUnspec      = 0
-	wgDeviceAIfindex     = 1
-	wgDeviceAIfname      = 2
-	wgDeviceAPrivateKey  = 3
-	wgDeviceAPublicKey   = 4
-	wgDeviceAListenPort  = 5
-	wgDeviceAFwmark      = 6
-	wgDeviceAPeers       = 7
-	wgDeviceAFlags       = 8
+	wgDeviceAUnspec            = 0
+	wgDeviceAIfindex           = 1
+	wgDeviceAIfname            = 2
+	wgDeviceAPrivateKey        = 3
+	wgDeviceAPublicKey         = 4
+	wgDeviceAListenPort        = 5
+	wgDeviceAFwmark            = 6
+	wgDeviceAPeers             = 7
+	wgDeviceAFlags             = 8
 	wgDeviceALastHandshakeTime = 9
 )
 
 const (
-	wgPeerAUnspec                     = 0
-	wgPeerAPublicKey                  = 1
-	wgPeerAPresharedKey               = 2
-	wgPeerAEndpoint                   = 3
-	wgPeerAPersistentKeepalive        = 4
-	wgPeerALastHandshakeTime          = 5
-	wgPeerARxBytes                    = 6
-	wgPeerATxBytes                    = 7
-	wgPeerAAllowedIPs                 = 8
-	wgPeerAProtocolVersion            = 9
-	wgPeerAFlags                      = 10
+	wgPeerAUnspec              = 0
+	wgPeerAPublicKey           = 1
+	wgPeerAPresharedKey        = 2
+	wgPeerAEndpoint            = 3
+	wgPeerAPersistentKeepalive = 4
+	wgPeerALastHandshakeTime   = 5
+	wgPeerARxBytes             = 6
+	wgPeerATxBytes             = 7
+	wgPeerAAllowedIPs          = 8
+	wgPeerAProtocolVersion     = 9
+	wgPeerAFlags               = 10
 )
 
 const (
@@ -95,13 +95,14 @@ type genlMsgHdr struct {
 }
 
 func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
-	if !cfg.Enabled {
-		// Best-effort: if disabled, do nothing. (We do not delete the interface yet.)
-		return nil
-	}
 	ifName := strings.TrimSpace(cfg.Interface)
 	if ifName == "" {
 		ifName = "wg0"
+	}
+	if !cfg.Enabled {
+		// Best-effort: if disabled, remove the interface (this also drops its routes).
+		_ = deleteLink(ifName)
+		return nil
 	}
 	if err := ensureWireGuard(ifName); err != nil {
 		return err
@@ -119,7 +120,12 @@ func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
 		return err
 	}
 
-	// Assign the WireGuard interface address (if configured).
+	// Replace IPv4 addresses on the WireGuard interface (we "own" this interface).
+	if addrs, err := listAddrs(nic.Index, unix.AF_INET); err == nil {
+		for _, a := range addrs {
+			_ = delAddr(nic.Index, a)
+		}
+	}
 	if strings.TrimSpace(cfg.AddressCIDR) != "" {
 		_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cfg.AddressCIDR))
 		if err != nil || ipnet == nil {
@@ -144,6 +150,47 @@ func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
 	}
 
 	return nil
+}
+
+func deleteLink(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("empty link name")
+	}
+	nic, err := net.InterfaceByName(name)
+	if err != nil {
+		return nil
+	}
+
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+
+	seq := atomic.AddUint32(&nlSeq, 1)
+	var req bytes.Buffer
+	hdr := unix.NlMsghdr{
+		Type:  unix.RTM_DELLINK,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	ifi := unix.IfInfomsg{
+		Family: unix.AF_UNSPEC,
+		Index:  int32(nic.Index),
+	}
+	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return err
+	}
+	return readNetlinkAck(fd, seq)
 }
 
 func ensureWireGuard(name string) error {
@@ -261,7 +308,7 @@ func readRouteAck(fd int, seq uint32) error {
 		return err
 	}
 	for _, m := range msgs {
-		if m.Header.Seq != int(seq) {
+		if m.Header.Seq != seq {
 			continue
 		}
 		if m.Header.Type != unix.NLMSG_ERROR {
@@ -283,6 +330,16 @@ func readRouteAck(fd int, seq uint32) error {
 }
 
 func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) error {
+	for _, peer := range cfg.Peers {
+		pk := strings.TrimSpace(peer.PublicKey)
+		if pk == "" {
+			return fmt.Errorf("wireguard: peer publicKey is required")
+		}
+		if _, err := decodeKey32(pk); err != nil {
+			return fmt.Errorf("wireguard: peer publicKey: %w", err)
+		}
+	}
+
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_GENERIC)
 	if err != nil {
 		return fmt.Errorf("wireguard: netlink generic socket: %w", err)
@@ -312,12 +369,10 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 	binary.LittleEndian.PutUint32(ifi, uint32(ifIndex))
 	addNLAttr(&req, wgDeviceAIfindex, ifi)
 
-	// Replace peers as a set when we provide any peers.
-	if len(cfg.Peers) > 0 {
-		flags := make([]byte, 4)
-		binary.LittleEndian.PutUint32(flags, wgDeviceFReplacePeers)
-		addNLAttr(&req, wgDeviceAFlags, flags)
-	}
+	// Replace peers as a set (including allowing an empty set to remove peers).
+	flags := make([]byte, 4)
+	binary.LittleEndian.PutUint32(flags, wgDeviceFReplacePeers)
+	addNLAttr(&req, wgDeviceAFlags, flags)
 
 	if pk := strings.TrimSpace(cfg.PrivateKey); pk != "" {
 		b, err := decodeKey32(pk)
@@ -332,58 +387,52 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 		addNLAttr(&req, wgDeviceAListenPort, lp)
 	}
 
-	if len(cfg.Peers) > 0 {
-		addNestedNLAttr(&req, wgDeviceAPeers, func(peersBuf *bytes.Buffer) {
-			for i, peer := range cfg.Peers {
-				idx := uint16(i + 1)
-				addNestedNLAttr(peersBuf, idx, func(pbuf *bytes.Buffer) {
-					pk := strings.TrimSpace(peer.PublicKey)
-					if pk != "" {
-						b, err := decodeKey32(pk)
-						if err == nil {
-							addNLAttr(pbuf, wgPeerAPublicKey, b)
-						}
-					}
-					// Replace allowed IPs.
-					pflags := make([]byte, 4)
-					binary.LittleEndian.PutUint32(pflags, wgPeerFReplaceAllowedIPs)
-					addNLAttr(pbuf, wgPeerAFlags, pflags)
+	addNestedNLAttr(&req, wgDeviceAPeers, func(peersBuf *bytes.Buffer) {
+		for i, peer := range cfg.Peers {
+			idx := uint16(i + 1)
+			addNestedNLAttr(peersBuf, idx, func(pbuf *bytes.Buffer) {
+				pk := strings.TrimSpace(peer.PublicKey)
+				b, _ := decodeKey32(pk)
+				addNLAttr(pbuf, wgPeerAPublicKey, b)
+				// Replace allowed IPs.
+				pflags := make([]byte, 4)
+				binary.LittleEndian.PutUint32(pflags, wgPeerFReplaceAllowedIPs)
+				addNLAttr(pbuf, wgPeerAFlags, pflags)
 
-					if ka := peer.PersistentKeepalive; ka > 0 {
-						v := make([]byte, 2)
-						binary.LittleEndian.PutUint16(v, uint16(ka))
-						addNLAttr(pbuf, wgPeerAPersistentKeepalive, v)
+				if ka := peer.PersistentKeepalive; ka > 0 {
+					v := make([]byte, 2)
+					binary.LittleEndian.PutUint16(v, uint16(ka))
+					addNLAttr(pbuf, wgPeerAPersistentKeepalive, v)
+				}
+				if ep := strings.TrimSpace(peer.Endpoint); ep != "" {
+					raw, err := encodeSockaddr(ep)
+					if err == nil {
+						addNLAttr(pbuf, wgPeerAEndpoint, raw)
 					}
-					if ep := strings.TrimSpace(peer.Endpoint); ep != "" {
-						raw, err := encodeSockaddr(ep)
-						if err == nil {
-							addNLAttr(pbuf, wgPeerAEndpoint, raw)
+				}
+				addNestedNLAttr(pbuf, wgPeerAAllowedIPs, func(aips *bytes.Buffer) {
+					for j, cidr := range peer.AllowedIPs {
+						cidr = strings.TrimSpace(cidr)
+						if cidr == "" {
+							continue
 						}
-					}
-					addNestedNLAttr(pbuf, wgPeerAAllowedIPs, func(aips *bytes.Buffer) {
-						for j, cidr := range peer.AllowedIPs {
-							cidr = strings.TrimSpace(cidr)
-							if cidr == "" {
-								continue
+						idx2 := uint16(j + 1)
+						addNestedNLAttr(aips, idx2, func(ab *bytes.Buffer) {
+							family, ipBytes, mask, ok := parseCIDRForWG(cidr)
+							if !ok {
+								return
 							}
-							idx2 := uint16(j + 1)
-							addNestedNLAttr(aips, idx2, func(ab *bytes.Buffer) {
-								family, ipBytes, mask, ok := parseCIDRForWG(cidr)
-								if !ok {
-									return
-								}
-								fb := make([]byte, 2)
-								binary.LittleEndian.PutUint16(fb, family)
-								addNLAttr(ab, wgAllowedipAFamily, fb)
-								addNLAttr(ab, wgAllowedipAIpaddr, ipBytes)
-								addNLAttr(ab, wgAllowedipACidrMask, []byte{mask})
-							})
-						}
-					})
+							fb := make([]byte, 2)
+							binary.LittleEndian.PutUint16(fb, family)
+							addNLAttr(ab, wgAllowedipAFamily, fb)
+							addNLAttr(ab, wgAllowedipAIpaddr, ipBytes)
+							addNLAttr(ab, wgAllowedipACidrMask, []byte{mask})
+						})
+					}
 				})
-			}
-		})
-	}
+			})
+		}
+	})
 
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
@@ -435,7 +484,7 @@ func genlFamilyID(ctx context.Context, fd int, name string) (int, error) {
 			return 0, err
 		}
 		for _, m := range msgs {
-			if m.Header.Seq != int(seq) {
+			if m.Header.Seq != seq {
 				continue
 			}
 			if m.Header.Type == unix.NLMSG_ERROR {
@@ -485,7 +534,7 @@ func readGenlAck(ctx context.Context, fd int, seq uint32) error {
 			return err
 		}
 		for _, m := range msgs {
-			if m.Header.Seq != int(seq) {
+			if m.Header.Seq != seq {
 				continue
 			}
 			if m.Header.Type != unix.NLMSG_ERROR {

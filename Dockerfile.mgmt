@@ -32,6 +32,14 @@ RUN set -eux; \
   ldd /usr/sbin/unbound | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
   ldd /usr/sbin/unbound-checkconf | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
 
+FROM debian:bookworm-slim AS openvpn
+RUN apt-get update && apt-get install -y --no-install-recommends openvpn ca-certificates && rm -rf /var/lib/apt/lists/*
+# Stage the OpenVPN binary and its shared library dependencies (for distroless runtime).
+RUN set -eux; \
+  mkdir -p /out; \
+  cp --parents /usr/sbin/openvpn /out; \
+  ldd /usr/sbin/openvpn | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
+
 FROM golang:1.25.5-alpine AS builder
 
 WORKDIR /src
@@ -54,6 +62,7 @@ COPY --from=nginx /etc/nginx /etc/nginx
 COPY --from=nginx /usr/lib /usr/lib
 COPY --from=nginx /lib /lib
 COPY --from=unbound /out/ /
+COPY --from=openvpn /out/ /
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/ngfw-mgmt"]

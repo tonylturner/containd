@@ -82,6 +82,19 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    ct state { established, related } accept\n")
 	// Allow management-plane to talk to engine internal API.
 	buf.WriteString("    tcp dport 8081 accept\n")
+	// Local service allow rules (mgmt/ssh/vpn). Deterministic ordering.
+	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
+	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
+	for _, lr := range locals {
+		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
+		if err != nil {
+			return "", err
+		}
+		if line == "" {
+			continue
+		}
+		buf.WriteString("    " + line + "\n")
+	}
 	buf.WriteString("  }\n")
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
@@ -237,6 +250,36 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 	default:
 		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 	}
+	return strings.Join(parts, " "), nil
+}
+
+func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {
+	proto := strings.ToLower(strings.TrimSpace(r.Proto))
+	if proto != "tcp" && proto != "udp" {
+		return "", fmt.Errorf("local input %s invalid proto %q", r.ID, r.Proto)
+	}
+	if r.Port < 1 || r.Port > 65535 {
+		return "", fmt.Errorf("local input %s invalid port %d", r.ID, r.Port)
+	}
+
+	parts := []string{fmt.Sprintf("comment \"local:%s\"", r.ID)}
+	if len(r.Ifaces) > 0 {
+		ifs := append([]string(nil), r.Ifaces...)
+		sort.Strings(ifs)
+		for i, v := range ifs {
+			ifs[i] = fmt.Sprintf("\"%s\"", v)
+		}
+		parts = append(parts, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
+	} else if strings.TrimSpace(r.Zone) != "" {
+		z := strings.TrimSpace(r.Zone)
+		if len(zoneIfaces[z]) == 0 {
+			// No interfaces for this zone -> rule never matches, omit.
+			return "", nil
+		}
+		setName := "zone_" + sanitizeIdent(z) + "_ifaces"
+		parts = append(parts, fmt.Sprintf("iifname @%s", setName))
+	}
+	parts = append(parts, proto, fmt.Sprintf("dport %d", r.Port), "accept")
 	return strings.Join(parts, " "), nil
 }
 

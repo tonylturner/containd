@@ -28,13 +28,29 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Implement DNS resolver runtime (Unbound supervision) for lab/SMB appliance mode.
     - [x] Render `unbound.conf` from `services.dns` config.
     - [x] Embed `unbound` + `unbound-checkconf` in the mgmt image and supervise the process when enabled.
-    - [ ] Add DNS events into unified event stream (queries, SERVFAIL spikes, config reloads).
+    - [~] Add DNS events into unified event stream (start/stop/reload now; query/error summaries later).
   - [~] Implement VPN runtime (WireGuard first; OpenVPN later).
-    - [~] WireGuard: apply kernel interface + peers via engine (generic netlink; v4-only endpoints/AllowedIPs initially).
-  - [ ] Implement OpenVPN runtime (client/server) after WireGuard.
+    - [x] WireGuard: apply kernel interface + peers via engine (generic netlink; v4-only endpoints/AllowedIPs initially).
+    - [x] WireGuard: remove interface on disable + emit runtime events into unified event stream.
+    - [x] WireGuard: add runtime status (handshake/tx/rx counters) and surface in UI.
+  - [~] Implement OpenVPN runtime (client/server) after WireGuard.
+    - [x] Embed `openvpn` binary into mgmt image (distroless runtime copy + deps).
+    - [x] Add mgmt supervisor/status/events for OpenVPN (foreground config; restarts on config path changes).
+    - [~] Add OpenVPN UI config card + runtime status (client/server phased; managed client first).
+      - [x] Add admin upload endpoint for `.ovpn` profiles (stored under `/data/openvpn/profiles/`, rejects `daemon`).
+      - [x] Add UI upload control that sets `openvpn.configPath` automatically.
+      - [x] Add managed OpenVPN client config (remote/port/proto + PEM upload) rendered to `/data/openvpn/managed/` by mgmt and supervised as the active config.
+      - [~] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
   - [~] Implement DHCP server runtime for LAN (leases + status/events).
     - [~] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 → UDP/1067 for nonroot).
+      - [x] Serve per-interface scopes (one listener per interface + pool mapping; restarts when config/scope changes).
+      - [x] Persist leases across restarts (engine writes to `/data/dhcp-leases.json`; atomic writes).
+      - [x] Add richer status/errors/events (listener crash/restart + lease load/persist errors).
     - [x] Expose current DHCP leases via mgmt API and UI lease table.
+    - [x] Emit DHCP runtime + lease events into unified event stream (`/api/v1/events`).
+    - [x] Add DHCP lease churn into audit log (`service.dhcp.lease.*`).
+    - [ ] Add DHCP reservations (MAC → fixed IP, per-interface) and surface in UI/CLI.
+    - [ ] Add richer DHCP logging fields (hostname, vendor class, requested IP) and lease history export.
   - [x] Add audit endpoints and UI/CLI views (forwarding pending).
   - [x] Add users endpoints (admin-only).
   - [~] Add identity endpoints (beyond users/sessions) as phased work.
@@ -53,6 +69,10 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
   - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings done).
     - [x] Add NAT masquerade via nftables postrouting (config + compile + CLI/UI surface).
+    - [~] Add local input rules for appliance services (mgmt/ssh/vpn) and auto-open VPN server ports on WAN.
+      - [x] Auto-open management plane ports and VPN server ports in nftables input chain when enabled.
+      - [ ] Add configurable bind zone/interface for VPN server listeners and corresponding auto rules.
+      - [ ] Add VPN tunnel network objects (e.g., `wg0` CIDR, OpenVPN tunnel CIDR) for policy targeting.
 - [x] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.
   - [x] Add unit tests for flow key hashing/equality.

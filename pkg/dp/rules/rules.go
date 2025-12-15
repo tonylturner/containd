@@ -5,11 +5,25 @@ package rules
 type Snapshot struct {
 	Version  string  // compiled rule version
 	Firewall []Entry // firewall rules
+	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
+	// This is used for management plane, VPN listeners, etc.
+	LocalInput []LocalServiceRule
 	NAT      NATConfig
 	IDS      IDSConfig
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
 	Default    Action
+}
+
+// LocalServiceRule is a minimal allow rule for traffic destined to the appliance itself.
+// If Ifaces is non-empty, it matches iifname against that set. If Zone is non-empty,
+// it matches iifname against the zone interface set. If both are empty, it matches any.
+type LocalServiceRule struct {
+	ID     string
+	Ifaces []string
+	Zone   string
+	Proto  string // tcp|udp
+	Port   int
 }
 
 type NATConfig struct {

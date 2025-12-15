@@ -50,6 +50,9 @@ services:
       - NGFW_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://127.0.0.1:8081}
     volumes:
       - ./data:/data
+    # OpenVPN requires a TUN device when enabled.
+    devices:
+      - /dev/net/tun:/dev/net/tun
     command: ["/usr/bin/ngfw-mgmt"]
     depends_on:
       - engine
@@ -74,6 +77,9 @@ services:
       - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
       - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
       - "${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
+    volumes:
+      # Persist DHCP leases and other engine state that must survive container restarts.
+      - ./data:/data
     command: ["/usr/bin/ngfw-engine"]
     # Attach engine to all appliance networks; eth0..eth7 correspond to wan/dmz/lan1..lan6.
     networks:

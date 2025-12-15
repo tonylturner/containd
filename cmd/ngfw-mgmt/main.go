@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cp/users"
+	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/mp/sshserver"
 	"github.com/gin-gonic/gin"
 )
@@ -91,6 +93,7 @@ func main() {
 		}
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
+	startDHCPLeaseAuditIngestor(logger, engineClient, auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
 	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
 	// Best-effort initial service render on startup.
@@ -184,6 +187,84 @@ func main() {
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatalf("ngfw-mgmt server exited: %v", err)
 	}
+}
+
+func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStore audit.Store) {
+	if logger == nil || auditStore == nil || engineClient == nil {
+		return
+	}
+	type eventLister interface {
+		ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+	}
+	ec, ok := engineClient.(eventLister)
+	if !ok {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+
+		var lastID uint64
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			evs, err := ec.ListEvents(ctx, 1000)
+			cancel()
+			if err != nil || len(evs) == 0 {
+				continue
+			}
+
+			var maxID uint64
+			for _, ev := range evs {
+				if ev.ID > maxID {
+					maxID = ev.ID
+				}
+			}
+			// If the engine restarted, its event IDs may reset back near zero. In that case,
+			// reset our cursor so we don't silently stop recording lease churn.
+			if maxID != 0 && maxID < lastID {
+				lastID = 0
+			}
+
+			// Engine events are returned newest-first; iterate oldest-first to preserve order.
+			for i := len(evs) - 1; i >= 0; i-- {
+				ev := evs[i]
+				if ev.ID == 0 || ev.ID <= lastID {
+					continue
+				}
+				if ev.Proto != "dhcp" || !strings.HasPrefix(ev.Kind, "service.dhcp.lease.") {
+					continue
+				}
+
+				dev, _ := ev.Attributes["dev"].(string)
+				mac, _ := ev.Attributes["mac"].(string)
+				ip, _ := ev.Attributes["ip"].(string)
+				host, _ := ev.Attributes["hostname"].(string)
+				exp, _ := ev.Attributes["expires_at"].(string)
+
+				target := strings.TrimSpace(strings.Join([]string{dev, ip, mac}, " "))
+				detailParts := []string{}
+				if host != "" {
+					detailParts = append(detailParts, "hostname="+host)
+				}
+				if exp != "" {
+					detailParts = append(detailParts, "expires_at="+exp)
+				}
+				detailParts = append(detailParts, fmt.Sprintf("event_id=%d", ev.ID))
+
+				_ = auditStore.Add(context.Background(), audit.Record{
+					Timestamp: ev.Timestamp,
+					Actor:     "system",
+					Source:    "dhcp",
+					Action:    ev.Kind,
+					Target:    target,
+					Result:    "ok",
+					Detail:    strings.Join(detailParts, " "),
+				})
+				lastID = ev.ID
+			}
+		}
+	}()
 }
 
 func addrFromEnv(key, fallback string) string {

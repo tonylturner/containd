@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,10 +24,12 @@ import (
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
 	cpids "github.com/containd/containd/pkg/cp/ids"
+	cpservices "github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dhcpd"
 	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -62,6 +65,14 @@ type ConntrackKiller interface {
 
 type DHCPLeasesClient interface {
 	ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error)
+}
+
+type WireGuardStatusClient interface {
+	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
+}
+
+type ServicesValidator interface {
+	Validate(ctx context.Context, cfg config.ServicesConfig) error
 }
 
 // ServicesApplier is an optional interface for applying services config
@@ -143,18 +154,23 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/dhcp", requireAdmin(), setDHCPHandler(store, services, engine))
 		protected.GET("/services/vpn", getVPNHandler(store))
 		protected.POST("/services/vpn", requireAdmin(), setVPNHandler(store, services, engine))
+		protected.POST("/services/vpn/openvpn/profile", requireAdmin(), uploadOpenVPNProfileHandler(store, services, engine))
+		protected.GET("/services/vpn/openvpn/clients", requireAdmin(), listOpenVPNClientsHandler(store))
+		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), createOpenVPNClientHandler(store))
+		protected.GET("/services/vpn/openvpn/clients/:name", requireAdmin(), downloadOpenVPNClientHandler(store))
+		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
 		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
 		protected.GET("/services/status", getServicesStatusHandler(services))
-			protected.GET("/events", listEventsHandler(engine))
-			protected.GET("/flows", listFlowsHandler(engine))
-			protected.GET("/conntrack", listConntrackHandler(engine))
-			protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
-			protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
-			protected.GET("/dataplane", getDataPlaneHandler(store))
-			protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+		protected.GET("/events", listEventsHandler(engine, services))
+		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/conntrack", listConntrackHandler(engine))
+		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
+		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
+		protected.GET("/dataplane", getDataPlaneHandler(store))
+		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -548,6 +564,14 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			next := cfg.Services
+			next.DNS = dnsCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		cfg.Services.DNS = dnsCfg
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -693,6 +717,345 @@ func setVPNHandler(store config.Store, services ServicesApplier, engine EngineCl
 	}
 }
 
+func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	type req struct {
+		Name string `json:"name"`
+		OVPN string `json:"ovpn"`
+	}
+	return func(c *gin.Context) {
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			name = "client"
+		}
+		name = sanitizeProfileName(name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile name"})
+			return
+		}
+		ovpn := strings.TrimSpace(r.OVPN)
+		if ovpn == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ovpn content is empty"})
+			return
+		}
+		if len(ovpn) > 1_000_000 {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "ovpn content too large"})
+			return
+		}
+		if err := ensureOpenVPNConfigForegroundString(ovpn); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Persist under /data so it survives container restarts.
+		base := "/data/openvpn/profiles"
+		if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
+			base = v
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := filepath.Join(base, name+".ovpn")
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(ovpn+"\n"), 0o600); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			_ = os.Remove(tmp)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.VPN.OpenVPN.ConfigPath = path
+		// Explicit profile uploads are considered "advanced" mode; prefer them over managed config.
+		cfg.Services.VPN.OpenVPN.Managed = nil
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name})
+		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
+	}
+}
+
+func sanitizeProfileName(in string) string {
+	in = strings.ToLower(strings.TrimSpace(in))
+	var b strings.Builder
+	for _, r := range in {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			// drop
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}
+
+func ensureOpenVPNConfigForegroundString(s string) error {
+	lines := strings.Split(s, "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if fields[0] == "daemon" {
+			return fmt.Errorf("openvpn profile contains 'daemon' directive; remove it (supervisor requires foreground)")
+		}
+	}
+	return nil
+}
+
+func openVPNBaseDir() string {
+	base := "/data/openvpn"
+	if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
+		base = v
+		if strings.HasSuffix(base, "/profiles") {
+			base = filepath.Dir(base)
+		}
+	}
+	return base
+}
+
+func openVPNManagedServerPKIDir() string {
+	return filepath.Join(openVPNBaseDir(), "managed", "server", "pki")
+}
+
+func openVPNManagedServerClientsDir() string {
+	return filepath.Join(openVPNManagedServerPKIDir(), "clients")
+}
+
+func listOpenVPNClientsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		dir := openVPNManagedServerClientsDir()
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			// If missing, treat as empty.
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusOK, gin.H{"clients": []string{}})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var out []string
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".crt") {
+				out = append(out, strings.TrimSuffix(name, ".crt"))
+			}
+		}
+		sort.Strings(out)
+		c.JSON(http.StatusOK, gin.H{"clients": out})
+	}
+}
+
+func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Name string `json:"name"`
+	}
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		pkiDir := openVPNManagedServerPKIDir()
+		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Ensure server cert exists too, so the PKI is complete.
+		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
+		clientCertPath, _, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.create", Target: clientName})
+		c.JSON(http.StatusOK, gin.H{"name": clientName})
+	}
+}
+
+func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		ovpn := cfg.Services.VPN.OpenVPN
+		if !ovpn.Enabled || strings.TrimSpace(ovpn.Mode) != "server" || ovpn.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		publicEndpoint := strings.TrimSpace(ovpn.Server.PublicEndpoint)
+		if publicEndpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn.server.publicEndpoint is required to generate client profiles"})
+			return
+		}
+		proto := strings.ToLower(strings.TrimSpace(ovpn.Server.Proto))
+		if proto == "" {
+			proto = "udp"
+		}
+		port := ovpn.Server.ListenPort
+		if port == 0 {
+			port = 1194
+		}
+
+		pkiDir := openVPNManagedServerPKIDir()
+		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
+		clientCertPath, clientKeyPath, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		caPEM, err := os.ReadFile(caCertPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		certPEM, err := os.ReadFile(clientCertPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		keyPEM, err := os.ReadFile(clientKeyPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		var b strings.Builder
+		b.WriteString("client\n")
+		b.WriteString("dev tun\n")
+		b.WriteString("nobind\n")
+		b.WriteString("persist-key\n")
+		b.WriteString("persist-tun\n")
+		b.WriteString("remote " + publicEndpoint + " " + strconv.Itoa(port) + "\n")
+		if proto == "tcp" {
+			b.WriteString("proto tcp-client\n")
+		} else {
+			b.WriteString("proto udp\n")
+		}
+		b.WriteString("remote-cert-tls server\n")
+		b.WriteString("verb 3\n")
+		writeInlineBlock(&b, "ca", caPEM)
+		writeInlineBlock(&b, "cert", certPEM)
+		writeInlineBlock(&b, "key", keyPEM)
+
+		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.download", Target: clientName})
+		c.Header("Content-Type", "application/x-openvpn-profile")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", clientName+".ovpn"))
+		c.String(http.StatusOK, b.String())
+	}
+}
+
+func writeInlineBlock(b *strings.Builder, tag string, pemBytes []byte) {
+	b.WriteString("<" + tag + ">\n")
+	b.Write(pemBytes)
+	if len(pemBytes) == 0 || pemBytes[len(pemBytes)-1] != '\n' {
+		b.WriteString("\n")
+	}
+	b.WriteString("</" + tag + ">\n")
+}
+
+func getWireGuardStatusHandler(engine any) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cl, ok := engine.(WireGuardStatusClient)
+		if !ok || cl == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "engine wireguard status not available"})
+			return
+		}
+		iface := strings.TrimSpace(c.Query("iface"))
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		st, err := cl.GetWireGuardStatus(ctx, iface)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, st)
+	}
+}
+
 func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -785,25 +1148,52 @@ func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
 	}
 }
 
-func listEventsHandler(engine EngineClient) gin.HandlerFunc {
+func listEventsHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tc, ok := engine.(TelemetryClient)
-		if !ok || tc == nil {
-			c.JSON(http.StatusOK, []dpevents.Event{})
-			return
-		}
 		limit := 500
 		if q := c.Query("limit"); q != "" {
 			if v, err := strconv.Atoi(q); err == nil && v > 0 {
 				limit = v
 			}
 		}
-		evs, err := tc.ListEvents(c.Request.Context(), limit)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
+
+		var out []dpevents.Event
+		var engineErr error
+
+		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
+			evs, err := tc.ListEvents(c.Request.Context(), limit)
+			if err != nil {
+				engineErr = err
+			} else {
+				out = append(out, evs...)
+			}
 		}
-		c.JSON(http.StatusOK, evs)
+
+		if s, ok := services.(interface {
+			ListTelemetryEvents(limit int) []dpevents.Event
+		}); ok && s != nil {
+			out = append(out, s.ListTelemetryEvents(limit)...)
+		}
+
+		if engineErr != nil && len(out) > 0 {
+			// Surface the error as a synthetic event so operators can see it in the UI.
+			out = append(out, dpevents.Event{
+				Proto:     "system",
+				Kind:      "system.engine.telemetry_error",
+				Timestamp: time.Now().UTC(),
+				Attributes: map[string]any{
+					"error": engineErr.Error(),
+				},
+			})
+		}
+
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Timestamp.After(out[j].Timestamp)
+		})
+		if limit > 0 && len(out) > limit {
+			out = out[:limit]
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 
@@ -1421,137 +1811,137 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
 		}
 
-			assignments := map[string]string{}
-			switch mode {
-			case "auto":
-				// Assign default logical interfaces to detected kernel interfaces.
-				//
-				// Note: In Docker-based lab mode, interface numbering (eth0/eth1/...) can vary depending
-				// on network attach order. To keep the appliance UX stable, try to match interface roles
-				// by the IPv4 subnets currently present on each interface (configurable via env vars,
-				// defaulting to this repo's docker-compose subnets). Fall back to index ordering.
-				order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
-				subnetByLogical := map[string]string{
-					"wan":  envOrDefault("CONTAIND_AUTO_WAN_SUBNET", "192.168.240.0/24"),
-					"dmz":  envOrDefault("CONTAIND_AUTO_DMZ_SUBNET", "192.168.241.0/24"),
-					"lan1": envOrDefault("CONTAIND_AUTO_LAN1_SUBNET", "192.168.242.0/24"),
-					"lan2": envOrDefault("CONTAIND_AUTO_LAN2_SUBNET", "192.168.243.0/24"),
-					"lan3": envOrDefault("CONTAIND_AUTO_LAN3_SUBNET", "192.168.244.0/24"),
-					"lan4": envOrDefault("CONTAIND_AUTO_LAN4_SUBNET", "192.168.245.0/24"),
-					"lan5": envOrDefault("CONTAIND_AUTO_LAN5_SUBNET", "192.168.246.0/24"),
-					"lan6": envOrDefault("CONTAIND_AUTO_LAN6_SUBNET", "192.168.247.0/24"),
-				}
-				needed := 0
-				for _, logical := range order {
-					if _, ok := ifaceByName[logical]; ok {
-						needed++
+		assignments := map[string]string{}
+		switch mode {
+		case "auto":
+			// Assign default logical interfaces to detected kernel interfaces.
+			//
+			// Note: In Docker-based lab mode, interface numbering (eth0/eth1/...) can vary depending
+			// on network attach order. To keep the appliance UX stable, try to match interface roles
+			// by the IPv4 subnets currently present on each interface (configurable via env vars,
+			// defaulting to this repo's docker-compose subnets). Fall back to index ordering.
+			order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
+			subnetByLogical := map[string]string{
+				"wan":  envOrDefault("CONTAIND_AUTO_WAN_SUBNET", "192.168.240.0/24"),
+				"dmz":  envOrDefault("CONTAIND_AUTO_DMZ_SUBNET", "192.168.241.0/24"),
+				"lan1": envOrDefault("CONTAIND_AUTO_LAN1_SUBNET", "192.168.242.0/24"),
+				"lan2": envOrDefault("CONTAIND_AUTO_LAN2_SUBNET", "192.168.243.0/24"),
+				"lan3": envOrDefault("CONTAIND_AUTO_LAN3_SUBNET", "192.168.244.0/24"),
+				"lan4": envOrDefault("CONTAIND_AUTO_LAN4_SUBNET", "192.168.245.0/24"),
+				"lan5": envOrDefault("CONTAIND_AUTO_LAN5_SUBNET", "192.168.246.0/24"),
+				"lan6": envOrDefault("CONTAIND_AUTO_LAN6_SUBNET", "192.168.247.0/24"),
+			}
+			needed := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; ok {
+					needed++
 				}
 			}
 			if needed == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "no default interfaces present"})
 				return
 			}
-				if len(candidates) < needed {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
-					return
-				}
+			if len(candidates) < needed {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
+				return
+			}
 
-				stateByName := map[string]config.InterfaceState{}
-				for _, st := range state {
-					if strings.TrimSpace(st.Name) == "" {
-						continue
-					}
-					stateByName[st.Name] = st
+			stateByName := map[string]config.InterfaceState{}
+			for _, st := range state {
+				if strings.TrimSpace(st.Name) == "" {
+					continue
 				}
-				usedDev := map[string]bool{}
+				stateByName[st.Name] = st
+			}
+			usedDev := map[string]bool{}
 
-				// Prefer the kernel's default-route egress device for WAN when available.
-				// This avoids confusing assignments in container labs where extra virtual/tunnel
-				// interfaces may exist but are not the actual "uplink".
-				if wanIface, ok := ifaceByName["wan"]; ok && wanIface != nil {
-					defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
-					if defDev != "" && !usedDev[defDev] {
-						if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
-							assignments["wan"] = defDev
-							usedDev[defDev] = true
-						}
-					}
-				}
-
-				// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
-				// prefer those exact/prefix matches next.
-				for _, logical := range order {
-					if _, ok := ifaceByName[logical]; !ok {
-						continue
-					}
-					if _, already := assignments[logical]; already {
-						continue
-					}
-					for _, cand := range candidates {
-						if usedDev[cand.name] {
-							continue
-						}
-						if cand.name == logical || strings.HasPrefix(cand.name, logical) {
-							assignments[logical] = cand.name
-							usedDev[cand.name] = true
-							break
-						}
+			// Prefer the kernel's default-route egress device for WAN when available.
+			// This avoids confusing assignments in container labs where extra virtual/tunnel
+			// interfaces may exist but are not the actual "uplink".
+			if wanIface, ok := ifaceByName["wan"]; ok && wanIface != nil {
+				defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
+				if defDev != "" && !usedDev[defDev] {
+					if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+						assignments["wan"] = defDev
+						usedDev[defDev] = true
 					}
 				}
+			}
 
-				for _, logical := range order {
-					if _, ok := ifaceByName[logical]; !ok {
-						continue
-					}
-					if _, already := assignments[logical]; already {
-						continue
-					}
-					cidr := strings.TrimSpace(subnetByLogical[logical])
-					if cidr == "" {
-						continue
-					}
-					for _, cand := range candidates {
-						if usedDev[cand.name] {
-							continue
-						}
-						st, ok := stateByName[cand.name]
-						if !ok {
-							continue
-						}
-						if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
-							assignments[logical] = cand.name
-							usedDev[cand.name] = true
-							break
-						}
-					}
+			// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
+			// prefer those exact/prefix matches next.
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
 				}
-
-				remaining := make([]candidate, 0, len(candidates))
+				if _, already := assignments[logical]; already {
+					continue
+				}
 				for _, cand := range candidates {
 					if usedDev[cand.name] {
 						continue
 					}
-					remaining = append(remaining, cand)
+					if cand.name == logical || strings.HasPrefix(cand.name, logical) {
+						assignments[logical] = cand.name
+						usedDev[cand.name] = true
+						break
+					}
 				}
-				idx := 0
-				for _, logical := range order {
-					if _, ok := ifaceByName[logical]; !ok {
+			}
+
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				if _, already := assignments[logical]; already {
+					continue
+				}
+				cidr := strings.TrimSpace(subnetByLogical[logical])
+				if cidr == "" {
+					continue
+				}
+				for _, cand := range candidates {
+					if usedDev[cand.name] {
 						continue
 					}
-					if _, already := assignments[logical]; already {
+					st, ok := stateByName[cand.name]
+					if !ok {
 						continue
 					}
-					if idx >= len(remaining) {
-						c.JSON(http.StatusBadRequest, gin.H{"error": "not enough eligible kernel interfaces to complete auto-assign"})
-						return
+					if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
+						assignments[logical] = cand.name
+						usedDev[cand.name] = true
+						break
 					}
-					assignments[logical] = remaining[idx].name
-					idx++
 				}
-			case "explicit":
-				if len(req.Mappings) == 0 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
+			}
+
+			remaining := make([]candidate, 0, len(candidates))
+			for _, cand := range candidates {
+				if usedDev[cand.name] {
+					continue
+				}
+				remaining = append(remaining, cand)
+			}
+			idx := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				if _, already := assignments[logical]; already {
+					continue
+				}
+				if idx >= len(remaining) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "not enough eligible kernel interfaces to complete auto-assign"})
 					return
+				}
+				assignments[logical] = remaining[idx].name
+				idx++
+			}
+		case "explicit":
+			if len(req.Mappings) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
+				return
 			}
 			for k, v := range req.Mappings {
 				k = strings.TrimSpace(k)

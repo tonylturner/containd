@@ -44,7 +44,17 @@ func (c *Config) RedactedCopy() *Config {
 	if c.Firewall.Rules != nil {
 		cp.Firewall.Rules = append([]Rule(nil), c.Firewall.Rules...)
 	}
-	// Future: redact Services secrets (proxy upstream creds, TLS keys, etc.).
+	// Redact known secrets.
+	cp.Services.VPN.WireGuard.PrivateKey = ""
+	if cp.Services.VPN.OpenVPN.Managed != nil {
+		m := *cp.Services.VPN.OpenVPN.Managed
+		m.CA = ""
+		m.Cert = ""
+		m.Key = ""
+		m.Password = ""
+		cp.Services.VPN.OpenVPN.Managed = &m
+	}
+	// Future: redact additional Services secrets (proxy upstream creds, TLS keys, etc.).
 	return &cp
 }
 
@@ -212,29 +222,77 @@ type WGPeer struct {
 
 // OpenVPNConfig is a placeholder for OpenVPN support.
 type OpenVPNConfig struct {
-	Enabled bool   `json:"enabled"`
-	Mode    string `json:"mode,omitempty"` // server|client (phased)
+	Enabled    bool   `json:"enabled"`
+	Mode       string `json:"mode,omitempty"`       // server|client (phased)
+	ConfigPath string `json:"configPath,omitempty"` // path to a foreground OpenVPN config file (phased)
+
+	// Managed is a structured configuration that containd renders into an OpenVPN config
+	// file and supporting credential files. This is preferred over raw profile uploads.
+	Managed *OpenVPNManagedClientConfig `json:"managed,omitempty"`
+
+	// Server is a structured OpenVPN server configuration that containd renders into an
+	// OpenVPN config file plus a generated local PKI (CA + server cert). Client profiles
+	// can be generated from this configuration.
+	Server *OpenVPNManagedServerConfig `json:"server,omitempty"`
 }
 
-	type Interface struct {
-		Name string `json:"name"`
-		// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
-		// When empty, the logical name may be used as the kernel interface name (legacy behavior).
-		Device string `json:"device,omitempty"`
-		// Type controls how this interface is realized in the OS.
-		// Supported: ""/"physical" (default), "bridge", "vlan".
-		Type string `json:"type,omitempty"`
-		// Parent is the parent interface for VLAN interfaces (logical interface name or kernel device name).
-		Parent string `json:"parent,omitempty"`
-		// VLANID is the 802.1Q VLAN ID for VLAN interfaces (1-4094).
-		VLANID int `json:"vlanId,omitempty"`
-		// Members are bridge members (logical interface names or kernel device names) for bridge interfaces.
-		Members []string `json:"members,omitempty"`
-		Zone   string `json:"zone"`
-		// AddressMode controls how addresses are acquired on this interface.
-		// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
-		AddressMode string   `json:"addressMode,omitempty"`
-		Addresses   []string `json:"addresses,omitempty"` // CIDR strings
+// OpenVPNManagedClientConfig is the initial managed OpenVPN client configuration.
+// This is intentionally minimal; additional options (TLS settings, cipher suites, etc.)
+// can be added as the product matures.
+type OpenVPNManagedClientConfig struct {
+	Remote   string `json:"remote,omitempty"` // host or IP
+	Port     int    `json:"port,omitempty"`   // default 1194
+	Proto    string `json:"proto,omitempty"`  // udp|tcp (default udp)
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"` // stored as a secret; redacted in exports
+
+	// PEM blocks (as strings). These are secrets and should be encrypted at rest later.
+	CA   string `json:"ca,omitempty"`
+	Cert string `json:"cert,omitempty"`
+	Key  string `json:"key,omitempty"`
+}
+
+// OpenVPNManagedServerConfig is the initial managed OpenVPN server configuration.
+type OpenVPNManagedServerConfig struct {
+	ListenPort int    `json:"listenPort,omitempty"` // default 1194
+	Proto      string `json:"proto,omitempty"`      // udp|tcp (default udp)
+
+	// TunnelCIDR is the VPN client address pool.
+	// Example: "10.9.0.0/24"
+	TunnelCIDR string `json:"tunnelCIDR,omitempty"`
+
+	// PublicEndpoint is used when generating client profiles. Example: "vpn.example.com"
+	PublicEndpoint string `json:"publicEndpoint,omitempty"`
+
+	// PushDNS are DNS servers pushed to clients (optional).
+	PushDNS []string `json:"pushDNS,omitempty"`
+
+	// PushRoutes are CIDRs pushed to clients (optional).
+	PushRoutes []string `json:"pushRoutes,omitempty"`
+
+	// ClientToClient enables inter-client forwarding inside the VPN.
+	ClientToClient bool `json:"clientToClient,omitempty"`
+}
+
+type Interface struct {
+	Name string `json:"name"`
+	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
+	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
+	Device string `json:"device,omitempty"`
+	// Type controls how this interface is realized in the OS.
+	// Supported: ""/"physical" (default), "bridge", "vlan".
+	Type string `json:"type,omitempty"`
+	// Parent is the parent interface for VLAN interfaces (logical interface name or kernel device name).
+	Parent string `json:"parent,omitempty"`
+	// VLANID is the 802.1Q VLAN ID for VLAN interfaces (1-4094).
+	VLANID int `json:"vlanId,omitempty"`
+	// Members are bridge members (logical interface names or kernel device names) for bridge interfaces.
+	Members []string `json:"members,omitempty"`
+	Zone    string   `json:"zone"`
+	// AddressMode controls how addresses are acquired on this interface.
+	// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
+	AddressMode string   `json:"addressMode,omitempty"`
+	Addresses   []string `json:"addresses,omitempty"` // CIDR strings
 	// Gateway is an optional next-hop IP for a default route (primarily for "wan").
 	Gateway string          `json:"gateway,omitempty"`
 	Access  InterfaceAccess `json:"access,omitempty"`
@@ -397,8 +455,8 @@ type RoutingConfig struct {
 // In early phases this is an IPv4-only convenience for UI/CLI; it is resolved at apply-time.
 type Gateway struct {
 	Name        string `json:"name"`
-	Address     string `json:"address"`            // IPv4
-	Iface       string `json:"iface,omitempty"`    // OS device name preferred; may also be a logical name
+	Address     string `json:"address"`         // IPv4
+	Iface       string `json:"iface,omitempty"` // OS device name preferred; may also be a logical name
 	Description string `json:"description,omitempty"`
 }
 
@@ -587,25 +645,25 @@ func validateZones(zones []Zone) error {
 	return nil
 }
 
-	func validateInterfaces(ifaces []Interface, zones []Zone) error {
-		zoneSet := map[string]struct{}{}
-		for _, z := range zones {
-			zoneSet[z.Name] = struct{}{}
+func validateInterfaces(ifaces []Interface, zones []Zone) error {
+	zoneSet := map[string]struct{}{}
+	for _, z := range zones {
+		zoneSet[z.Name] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	seenDevices := map[string]struct{}{}
+	// Validate cross-interface references for bridges/VLANs.
+	byName := map[string]Interface{}
+	for _, iface := range ifaces {
+		if strings.TrimSpace(iface.Name) != "" {
+			byName[iface.Name] = iface
 		}
-		seen := map[string]struct{}{}
-		seenDevices := map[string]struct{}{}
-		// Validate cross-interface references for bridges/VLANs.
-		byName := map[string]Interface{}
-		for _, iface := range ifaces {
-			if strings.TrimSpace(iface.Name) != "" {
-				byName[iface.Name] = iface
-			}
+	}
+	for _, iface := range ifaces {
+		if iface.Name == "" {
+			return errors.New("interface name cannot be empty")
 		}
-		for _, iface := range ifaces {
-			if iface.Name == "" {
-				return errors.New("interface name cannot be empty")
-			}
-			if _, exists := seen[iface.Name]; exists {
+		if _, exists := seen[iface.Name]; exists {
 			return fmt.Errorf("duplicate interface: %s", iface.Name)
 		}
 		seen[iface.Name] = struct{}{}
@@ -618,43 +676,43 @@ func validateZones(zones []Zone) error {
 			}
 			seenDevices[iface.Device] = struct{}{}
 		}
-			if iface.Zone != "" {
-				if _, ok := zoneSet[iface.Zone]; !ok {
-					return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
+		if iface.Zone != "" {
+			if _, ok := zoneSet[iface.Zone]; !ok {
+				return fmt.Errorf("interface %s references unknown zone %s", iface.Name, iface.Zone)
+			}
+		}
+		if t := strings.ToLower(strings.TrimSpace(iface.Type)); t != "" && t != "physical" && t != "bridge" && t != "vlan" {
+			return fmt.Errorf("interface %s has invalid type %q", iface.Name, iface.Type)
+		}
+		if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "bridge" {
+			if len(iface.Members) == 0 {
+				return fmt.Errorf("interface %s type bridge requires members", iface.Name)
+			}
+			for _, m := range iface.Members {
+				m = strings.TrimSpace(m)
+				if m == "" {
+					return fmt.Errorf("interface %s has empty bridge member", iface.Name)
+				}
+				if m == iface.Name {
+					return fmt.Errorf("interface %s cannot include itself as a bridge member", iface.Name)
+				}
+				if ref, ok := byName[m]; ok && strings.ToLower(strings.TrimSpace(ref.Type)) == "bridge" {
+					return fmt.Errorf("interface %s bridge member %q is also a bridge (nested bridges not supported)", iface.Name, m)
 				}
 			}
-			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t != "" && t != "physical" && t != "bridge" && t != "vlan" {
-				return fmt.Errorf("interface %s has invalid type %q", iface.Name, iface.Type)
+		}
+		if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "vlan" {
+			if strings.TrimSpace(iface.Parent) == "" {
+				return fmt.Errorf("interface %s type vlan requires parent", iface.Name)
 			}
-			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "bridge" {
-				if len(iface.Members) == 0 {
-					return fmt.Errorf("interface %s type bridge requires members", iface.Name)
-				}
-				for _, m := range iface.Members {
-					m = strings.TrimSpace(m)
-					if m == "" {
-						return fmt.Errorf("interface %s has empty bridge member", iface.Name)
-					}
-					if m == iface.Name {
-						return fmt.Errorf("interface %s cannot include itself as a bridge member", iface.Name)
-					}
-					if ref, ok := byName[m]; ok && strings.ToLower(strings.TrimSpace(ref.Type)) == "bridge" {
-						return fmt.Errorf("interface %s bridge member %q is also a bridge (nested bridges not supported)", iface.Name, m)
-					}
-				}
+			if iface.VLANID < 1 || iface.VLANID > 4094 {
+				return fmt.Errorf("interface %s has invalid vlanId %d (expected 1-4094)", iface.Name, iface.VLANID)
 			}
-			if t := strings.ToLower(strings.TrimSpace(iface.Type)); t == "vlan" {
-				if strings.TrimSpace(iface.Parent) == "" {
-					return fmt.Errorf("interface %s type vlan requires parent", iface.Name)
-				}
-				if iface.VLANID < 1 || iface.VLANID > 4094 {
-					return fmt.Errorf("interface %s has invalid vlanId %d (expected 1-4094)", iface.Name, iface.VLANID)
-				}
-			}
-			if m := strings.ToLower(strings.TrimSpace(iface.AddressMode)); m != "" && m != "static" && m != "dhcp" {
-				return fmt.Errorf("interface %s has invalid addressMode %q", iface.Name, iface.AddressMode)
-			}
-			if strings.TrimSpace(iface.Gateway) != "" {
+		}
+		if m := strings.ToLower(strings.TrimSpace(iface.AddressMode)); m != "" && m != "static" && m != "dhcp" {
+			return fmt.Errorf("interface %s has invalid addressMode %q", iface.Name, iface.AddressMode)
+		}
+		if strings.TrimSpace(iface.Gateway) != "" {
 			if iface.Gateway != strings.TrimSpace(iface.Gateway) {
 				return fmt.Errorf("interface %s gateway has leading/trailing whitespace", iface.Name)
 			}
@@ -921,19 +979,19 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 		if strings.EqualFold(dst, "default") {
 			dst = "0.0.0.0/0"
 		}
-			if _, _, err := net.ParseCIDR(dst); err != nil {
-				return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
-			}
-			if gw := strings.TrimSpace(rt.Gateway); gw != "" {
-				if net.ParseIP(gw) == nil {
-					if _, ok := gwByName[gw]; !ok {
-						return fmt.Errorf("routing.routes gateway invalid %q (must be IP or a defined gateway name)", rt.Gateway)
-					}
+		if _, _, err := net.ParseCIDR(dst); err != nil {
+			return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
+		}
+		if gw := strings.TrimSpace(rt.Gateway); gw != "" {
+			if net.ParseIP(gw) == nil {
+				if _, ok := gwByName[gw]; !ok {
+					return fmt.Errorf("routing.routes gateway invalid %q (must be IP or a defined gateway name)", rt.Gateway)
 				}
 			}
-			if ifn := strings.TrimSpace(rt.Iface); ifn != "" {
-				if _, ok := ifaceSet[ifn]; !ok {
-					return fmt.Errorf("routing.routes iface unknown %q", rt.Iface)
+		}
+		if ifn := strings.TrimSpace(rt.Iface); ifn != "" {
+			if _, ok := ifaceSet[ifn]; !ok {
+				return fmt.Errorf("routing.routes iface unknown %q", rt.Iface)
 			}
 		}
 		if rt.Table < 0 || rt.Table > 252 {
@@ -1133,6 +1191,92 @@ func validateVPN(v VPNConfig) error {
 	}
 	if v.OpenVPN.Mode != "" && v.OpenVPN.Mode != "server" && v.OpenVPN.Mode != "client" {
 		return fmt.Errorf("vpn.openvpn mode invalid: %q", v.OpenVPN.Mode)
+	}
+	if v.OpenVPN.Enabled {
+		mode := strings.TrimSpace(v.OpenVPN.Mode)
+		if mode == "" {
+			mode = "client"
+		}
+		// At least one of {configPath, managed} must be provided.
+		if strings.TrimSpace(v.OpenVPN.ConfigPath) == "" && v.OpenVPN.Managed == nil && v.OpenVPN.Server == nil {
+			return errors.New("vpn.openvpn enabled but neither configPath nor managed config is set")
+		}
+		// Managed config is client-only for now.
+		if v.OpenVPN.Managed != nil {
+			if mode != "client" {
+				return errors.New("vpn.openvpn managed config currently supports client mode only")
+			}
+			m := v.OpenVPN.Managed
+			if strings.TrimSpace(m.Remote) == "" {
+				return errors.New("vpn.openvpn.managed remote is required")
+			}
+			port := m.Port
+			if port == 0 {
+				port = 1194
+			}
+			if port < 1 || port > 65535 {
+				return fmt.Errorf("vpn.openvpn.managed port invalid: %d", m.Port)
+			}
+			proto := strings.ToLower(strings.TrimSpace(m.Proto))
+			if proto == "" {
+				proto = "udp"
+			}
+			if proto != "udp" && proto != "tcp" {
+				return fmt.Errorf("vpn.openvpn.managed proto invalid: %q", m.Proto)
+			}
+			if strings.TrimSpace(m.CA) == "" {
+				return errors.New("vpn.openvpn.managed ca is required")
+			}
+			if strings.TrimSpace(m.Cert) == "" {
+				return errors.New("vpn.openvpn.managed cert is required")
+			}
+			if strings.TrimSpace(m.Key) == "" {
+				return errors.New("vpn.openvpn.managed key is required")
+			}
+			if (strings.TrimSpace(m.Username) != "") != (strings.TrimSpace(m.Password) != "") {
+				return errors.New("vpn.openvpn.managed username and password must be set together")
+			}
+		}
+		// Managed server config
+		if v.OpenVPN.Server != nil {
+			if mode != "server" {
+				return errors.New("vpn.openvpn server config requires mode=server")
+			}
+			s := v.OpenVPN.Server
+			port := s.ListenPort
+			if port == 0 {
+				port = 1194
+			}
+			if port < 1 || port > 65535 {
+				return fmt.Errorf("vpn.openvpn.server listenPort invalid: %d", s.ListenPort)
+			}
+			proto := strings.ToLower(strings.TrimSpace(s.Proto))
+			if proto == "" {
+				proto = "udp"
+			}
+			if proto != "udp" && proto != "tcp" {
+				return fmt.Errorf("vpn.openvpn.server proto invalid: %q", s.Proto)
+			}
+			if strings.TrimSpace(s.TunnelCIDR) == "" {
+				return errors.New("vpn.openvpn.server tunnelCIDR is required")
+			}
+			if _, _, err := net.ParseCIDR(strings.TrimSpace(s.TunnelCIDR)); err != nil {
+				return fmt.Errorf("vpn.openvpn.server tunnelCIDR invalid: %q", s.TunnelCIDR)
+			}
+			for _, ipStr := range s.PushDNS {
+				if ip := net.ParseIP(strings.TrimSpace(ipStr)); ip == nil || ip.To4() == nil {
+					return fmt.Errorf("vpn.openvpn.server pushDNS invalid: %q", ipStr)
+				}
+			}
+			for _, cidr := range s.PushRoutes {
+				if strings.TrimSpace(cidr) == "" {
+					return errors.New("vpn.openvpn.server pushRoutes cannot include empty")
+				}
+				if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+					return fmt.Errorf("vpn.openvpn.server pushRoutes invalid: %q", cidr)
+				}
+			}
+		}
 	}
 	return nil
 }

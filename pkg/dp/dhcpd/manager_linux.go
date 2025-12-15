@@ -37,6 +37,10 @@ type pool struct {
 type listener struct {
 	cancel context.CancelFunc
 	errCh  chan error
+	cfg    config.DHCPConfig
+	pool   pool
+	start  time.Time
+	retry  int
 }
 
 // Manager runs a minimal DHCPv4 server on configured interfaces.
@@ -57,6 +61,8 @@ type Manager struct {
 	lastApply time.Time
 
 	statePath string
+
+	OnEvent func(kind string, attrs map[string]any)
 }
 
 func NewManager() *Manager {
@@ -67,10 +73,22 @@ func NewManager() *Manager {
 	}
 }
 
+// SetOnEvent registers a callback for emitting normalized runtime/lease events.
+// The callback must be non-blocking (it runs on the DHCP handler goroutine).
+func (m *Manager) SetOnEvent(fn func(kind string, attrs map[string]any)) {
+	if m == nil {
+		return
+	}
+	m.OnEvent = fn
+}
+
 func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []config.Interface) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastApply = time.Now().UTC()
+
+	// Opportunistically prune expired leases on apply.
+	m.pruneExpiredLeasesLocked()
 
 	// Resolve logical interface names to kernel devices.
 	byName := map[string]config.Interface{}
@@ -128,12 +146,19 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		}
 		_ = ensureRedirect(ctx, nil, false)
 		m.lastErr = ""
+		go m.emit("service.dhcp.disabled", map[string]any{
+			"enabled": false,
+		})
 		return nil
 	}
 
 	// Ensure nft redirect exists for selected devs.
 	if err := ensureRedirect(ctx, devs, true); err != nil {
 		m.lastErr = err.Error()
+		go m.emit("service.dhcp.redirect_failed", map[string]any{
+			"error":   err.Error(),
+			"devices": devs,
+		})
 		return err
 	}
 
@@ -142,6 +167,24 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		if !contains(devs, dev) {
 			l.cancel()
 			delete(m.listeners, dev)
+			go m.emit("service.dhcp.listener_stopped", map[string]any{"dev": dev})
+		}
+	}
+
+	// Restart listeners whose scope/config changed.
+	for _, dev := range devs {
+		l, ok := m.listeners[dev]
+		if !ok {
+			continue
+		}
+		pl, ok := pools[dev]
+		if !ok {
+			continue
+		}
+		if dhcpListenerNeedsRestart(l, cfg, pl) {
+			l.cancel()
+			delete(m.listeners, dev)
+			go m.emit("service.dhcp.listener_restarting", map[string]any{"dev": dev})
 		}
 	}
 
@@ -154,31 +197,88 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		if !ok {
 			return fmt.Errorf("dhcp: no pool configured for %s", dev)
 		}
-		lctx, cancel := context.WithCancel(context.Background())
-		errCh := make(chan error, 1)
-		go func(dev string, pl pool) {
-			errCh <- serveDHCPv4(lctx, dev, cfg, pl, m)
-		}(dev, pl)
-		m.listeners[dev] = listener{cancel: cancel, errCh: errCh}
+		m.startListenerLocked(dev, cfg, pl)
 	}
 
 	// Best-effort load persisted leases on first enable.
 	m.loadLeasesLocked()
 
 	m.lastErr = ""
+	go m.emit("service.dhcp.applied", map[string]any{
+		"enabled": true,
+		"devices": devs,
+		"pools":   len(pools),
+	})
 	return nil
+}
+
+func dhcpListenerNeedsRestart(l listener, cfg config.DHCPConfig, pl pool) bool {
+	// Note: we only compare fields that affect on-wire behavior.
+	if l.pool.Start == nil || l.pool.End == nil || pl.Start == nil || pl.End == nil {
+		return true
+	}
+	if !l.pool.Start.Equal(pl.Start) || !l.pool.End.Equal(pl.End) {
+		return true
+	}
+	if strings.TrimSpace(l.cfg.Router) != strings.TrimSpace(cfg.Router) {
+		return true
+	}
+	if strings.TrimSpace(l.cfg.Domain) != strings.TrimSpace(cfg.Domain) {
+		return true
+	}
+	if parseLeaseSeconds(l.cfg.LeaseSeconds) != parseLeaseSeconds(cfg.LeaseSeconds) {
+		return true
+	}
+	if !sameStringSet(l.cfg.DNSServers, cfg.DNSServers) {
+		return true
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	am := map[string]struct{}{}
+	for _, s := range a {
+		if v := strings.TrimSpace(s); v != "" {
+			am[v] = struct{}{}
+		}
+	}
+	bm := map[string]struct{}{}
+	for _, s := range b {
+		if v := strings.TrimSpace(s); v != "" {
+			bm[v] = struct{}{}
+		}
+	}
+	if len(am) != len(bm) {
+		return false
+	}
+	for k := range am {
+		if _, ok := bm[k]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) Status() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	devs := make([]map[string]any, 0, len(m.listeners))
+	for dev, l := range m.listeners {
+		devs = append(devs, map[string]any{
+			"dev":        dev,
+			"started_at": l.start.UTC().Format(time.RFC3339Nano),
+			"retry":      l.retry,
+		})
+	}
+	sort.Slice(devs, func(i, j int) bool { return fmt.Sprint(devs[i]["dev"]) < fmt.Sprint(devs[j]["dev"]) })
 	return map[string]any{
 		"enabled":        len(m.listeners) > 0,
 		"listen_devices": len(m.listeners),
+		"devices":        devs,
 		"leases":         len(m.leases),
 		"last_apply":     m.lastApply.Format(time.RFC3339Nano),
 		"last_error":     m.lastErr,
-		"note":           "DHCP server is minimal (IPv4 only; no conflict detection).",
+		"note":           "DHCP server is minimal (IPv4 only; no conflict detection). It runs per-interface listeners and persists leases to /data.",
 	}
 }
 
@@ -211,6 +311,7 @@ func (m *Manager) upsertLease(dev, mac, ip, hostname string, leaseSeconds int) {
 	}
 	exp := time.Now().UTC().Add(time.Duration(leaseSeconds) * time.Second).Format(time.RFC3339Nano)
 	key := dev + "|" + mac
+	prev, hadPrev := m.leases[key]
 	m.leases[key] = Lease{
 		Iface:     dev,
 		MAC:       mac,
@@ -219,6 +320,17 @@ func (m *Manager) upsertLease(dev, mac, ip, hostname string, leaseSeconds int) {
 		Hostname:  hostname,
 	}
 	m.persistLeasesLocked()
+	action := "assigned"
+	if hadPrev && prev.IP == ip {
+		action = "renewed"
+	}
+	go m.emit("service.dhcp.lease."+action, map[string]any{
+		"dev":        dev,
+		"mac":        mac,
+		"ip":         ip,
+		"hostname":   hostname,
+		"expires_at": exp,
+	})
 }
 
 func (m *Manager) lookupLeaseIP(dev, mac string) (string, bool) {
@@ -236,6 +348,17 @@ func (m *Manager) lookupLeaseIP(dev, mac string) (string, bool) {
 		return "", false
 	}
 	return l.IP, true
+}
+
+func (m *Manager) emit(kind string, attrs map[string]any) {
+	if m == nil || m.OnEvent == nil {
+		return
+	}
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	attrs["component"] = "dhcpd"
+	m.OnEvent(kind, attrs)
 }
 
 func (m *Manager) isIPInUse(dev, ip string) bool {
@@ -264,10 +387,16 @@ func (m *Manager) loadLeasesLocked() {
 	}
 	var ls []Lease
 	if err := json.Unmarshal(b, &ls); err != nil {
+		m.lastErr = "lease load failed: " + err.Error()
+		go m.emit("service.dhcp.lease_load_failed", map[string]any{"error": err.Error()})
 		return
 	}
 	for _, l := range ls {
 		if strings.TrimSpace(l.Iface) == "" || strings.TrimSpace(l.MAC) == "" || strings.TrimSpace(l.IP) == "" {
+			continue
+		}
+		// Filter expired on load.
+		if t, err := time.Parse(time.RFC3339Nano, l.ExpiresAt); err == nil && time.Now().UTC().After(t) {
 			continue
 		}
 		m.leases[l.Iface+"|"+l.MAC] = l
@@ -280,11 +409,113 @@ func (m *Manager) persistLeasesLocked() {
 	}
 	_ = os.MkdirAll(filepath.Dir(m.statePath), 0o755)
 	var ls []Lease
-	for _, l := range m.leases {
+	now := time.Now().UTC()
+	for k, l := range m.leases {
+		if t, err := time.Parse(time.RFC3339Nano, l.ExpiresAt); err == nil && now.After(t) {
+			delete(m.leases, k)
+			continue
+		}
 		ls = append(ls, l)
 	}
 	b, _ := json.MarshalIndent(ls, "", "  ")
-	_ = os.WriteFile(m.statePath, b, 0o600)
+	tmp := m.statePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		m.lastErr = "lease persist failed: " + err.Error()
+		go m.emit("service.dhcp.lease_persist_failed", map[string]any{"error": err.Error()})
+		return
+	}
+	if err := os.Rename(tmp, m.statePath); err != nil {
+		m.lastErr = "lease persist failed: " + err.Error()
+		go m.emit("service.dhcp.lease_persist_failed", map[string]any{"error": err.Error()})
+		_ = os.Remove(tmp)
+		return
+	}
+}
+
+func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool) {
+	lctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func(dev string, pl pool) {
+		errCh <- serveDHCPv4(lctx, dev, cfg, pl, m)
+	}(dev, pl)
+	m.listeners[dev] = listener{
+		cancel: cancel,
+		errCh:  errCh,
+		cfg:    cfg,
+		pool:   pl,
+		start:  time.Now().UTC(),
+		retry:  0,
+	}
+	go m.emit("service.dhcp.listener_started", map[string]any{"dev": dev})
+
+	// Monitor exit and restart with backoff (best-effort).
+	go func(dev string) {
+		err := <-errCh
+		if err == nil || errors.Is(err, context.Canceled) {
+			return
+		}
+		m.handleListenerExit(dev, err)
+	}(dev)
+}
+
+func (m *Manager) handleListenerExit(dev string, err error) {
+	m.mu.Lock()
+	l, ok := m.listeners[dev]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	// Listener exited unexpectedly; clear it so we can restart.
+	delete(m.listeners, dev)
+	l.retry++
+	m.lastErr = fmt.Sprintf("listener %s failed: %v", dev, err)
+	cfg := l.cfg
+	pl := l.pool
+	m.mu.Unlock()
+
+	go m.emit("service.dhcp.listener_failed", map[string]any{
+		"dev":   dev,
+		"error": err.Error(),
+	})
+
+	// Backoff restart: 250ms, 500ms, 1s, 2s, 4s (cap).
+	backoff := 250 * time.Millisecond
+	for i := 0; i < l.retry && backoff < 4*time.Second; i++ {
+		backoff *= 2
+		if backoff > 4*time.Second {
+			backoff = 4 * time.Second
+		}
+	}
+	time.Sleep(backoff)
+
+	m.mu.Lock()
+	// Only restart if DHCP is still enabled and this dev is still desired.
+	if !cfg.Enabled || containsListener(m.listeners, dev) {
+		m.mu.Unlock()
+		return
+	}
+	m.startListenerLocked(dev, cfg, pl)
+	// Carry retry count forward (so repeated failures back off).
+	nl := m.listeners[dev]
+	nl.retry = l.retry
+	m.listeners[dev] = nl
+	m.mu.Unlock()
+	go m.emit("service.dhcp.listener_restarted", map[string]any{"dev": dev, "retry": l.retry})
+}
+
+func containsListener(listeners map[string]listener, dev string) bool {
+	_, ok := listeners[dev]
+	return ok
+}
+
+func (m *Manager) pruneExpiredLeasesLocked() {
+	now := time.Now().UTC()
+	for k, l := range m.leases {
+		t, err := time.Parse(time.RFC3339Nano, l.ExpiresAt)
+		if err == nil && now.After(t) {
+			delete(m.leases, k)
+		}
+	}
 }
 
 func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
@@ -413,4 +644,3 @@ func parsePort(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
 }
-

@@ -41,6 +41,7 @@ type FlowSummary struct {
 // Store holds a bounded ring buffer of recent events.
 type Store struct {
 	capacity int
+	idBase   uint64
 	nextID   atomic.Uint64
 
 	mu     sync.Mutex
@@ -48,10 +49,14 @@ type Store struct {
 }
 
 func NewStore(capacity int) *Store {
+	return NewStoreWithIDBase(capacity, 0)
+}
+
+func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &Store{capacity: capacity}
+	return &Store{capacity: capacity, idBase: idBase}
 }
 
 // Record converts DPI events into normalized events and appends them.
@@ -62,7 +67,7 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ev := range in {
-		id := s.nextID.Add(1)
+		id := s.idBase + s.nextID.Add(1)
 		out := Event{
 			ID:         id,
 			FlowID:     ev.FlowID,
@@ -87,6 +92,25 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 			s.events = append([]Event{}, s.events[shift:]...)
 		}
 	}
+}
+
+// Append adds an already-normalized event (e.g. system/service events) to the buffer.
+// If e.ID is zero, a new unique ID is assigned from the store's counter.
+func (s *Store) Append(e Event) Event {
+	if s == nil {
+		return e
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e.ID == 0 {
+		e.ID = s.idBase + s.nextID.Add(1)
+	}
+	s.events = append(s.events, e)
+	if len(s.events) > s.capacity {
+		shift := len(s.events) - s.capacity
+		s.events = append([]Event{}, s.events[shift:]...)
+	}
+	return e
 }
 
 // List returns recent events newest-first, up to limit.
@@ -161,4 +185,3 @@ func (s *Store) Flows(limit int) []FlowSummary {
 	}
 	return out[:limit]
 }
-

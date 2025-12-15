@@ -439,11 +439,57 @@ export type WireGuardConfig = {
 export type OpenVPNConfig = {
   enabled?: boolean;
   mode?: string;
+  configPath?: string;
+  managed?: OpenVPNManagedClientConfig;
+  server?: OpenVPNManagedServerConfig;
+};
+
+export type OpenVPNManagedClientConfig = {
+  remote?: string;
+  port?: number;
+  proto?: string;
+  username?: string;
+  password?: string;
+  ca?: string;
+  cert?: string;
+  key?: string;
+};
+
+export type OpenVPNManagedServerConfig = {
+  listenPort?: number;
+  proto?: string;
+  tunnelCIDR?: string;
+  publicEndpoint?: string;
+  pushDNS?: string[];
+  pushRoutes?: string[];
+  clientToClient?: boolean;
 };
 
 export type VPNConfig = {
   wireguard?: WireGuardConfig;
   openvpn?: OpenVPNConfig;
+};
+
+export type OpenVPNProfileUploadResponse = {
+  configPath: string;
+  vpn: VPNConfig;
+};
+
+export type WireGuardPeerStatus = {
+  publicKey: string;
+  endpoint?: string;
+  lastHandshake?: string;
+  rxBytes?: number;
+  txBytes?: number;
+  allowedIPs?: string[];
+};
+
+export type WireGuardStatus = {
+  interface: string;
+  present: boolean;
+  publicKey?: string;
+  listenPort?: number;
+  peers?: WireGuardPeerStatus[];
 };
 
 export type ConntrackEntry = {
@@ -841,6 +887,18 @@ export const api = {
   listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
   getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
   setVPN: (cfg: VPNConfig) => postJSON<VPNConfig>("/api/v1/services/vpn", cfg),
+  uploadOpenVPNProfile: (name: string, ovpn: string) =>
+    postJSON<OpenVPNProfileUploadResponse>("/api/v1/services/vpn/openvpn/profile", { name, ovpn }),
+  listOpenVPNClients: () =>
+    getJSON<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients"),
+  createOpenVPNClient: (name: string) =>
+    postJSON<{ name: string }>("/api/v1/services/vpn/openvpn/clients", { name }),
+  downloadOpenVPNClientURL: (name: string) =>
+    `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
+  getWireGuardStatus: (iface?: string) =>
+    getJSON<WireGuardStatus>(
+      `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,
+    ),
 
   // Telemetry
   listEvents: (limit = 500) =>

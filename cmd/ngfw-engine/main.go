@@ -17,10 +17,11 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/conntrack"
-	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/dhcpd"
+	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/engine"
+	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/flow"
 	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
@@ -67,6 +68,20 @@ func main() {
 
 	ownership.start(context.Background())
 	dhcpMgr := dhcpd.NewManager()
+	// Emit DHCP runtime events into the unified telemetry store.
+	if dhcpMgr != nil {
+		dhcpMgr.SetOnEvent(func(kind string, attrs map[string]any) {
+			if dpEngine == nil || dpEngine.Events() == nil {
+				return
+			}
+			dpEngine.Events().Append(dpevents.Event{
+				Proto:      "dhcp",
+				Kind:       kind,
+				Attributes: attrs,
+				Timestamp:  time.Now().UTC(),
+			})
+		})
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -80,7 +95,8 @@ func main() {
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())
-	mux.HandleFunc("/internal/services", servicesHandler(logger, ownership, dhcpMgr))
+	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
+	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 
 	logger.Printf("ngfw-engine starting on %s", addr)
@@ -89,7 +105,30 @@ func main() {
 	}
 }
 
-func servicesHandler(logger *log.Logger, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
+func wireguardStatusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		iface := strings.TrimSpace(r.URL.Query().Get("iface"))
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		st, err := netcfg.GetWireGuardStatus(ctx, iface)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "not supported") {
+				http.Error(w, err.Error(), http.StatusNotImplemented)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(st)
+	}
+}
+
+func servicesHandler(logger *log.Logger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
 	var current config.ServicesConfig
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -113,8 +152,44 @@ func servicesHandler(logger *log.Logger, ownership *ownershipManager, dhcpMgr *d
 			// WireGuard runs in the engine (privileged) because it requires NET_ADMIN.
 			if err := netcfg.ApplyWireGuard(ctx, svc.VPN.WireGuard); err != nil {
 				logger.Printf("apply wireguard failed: %v", err)
+				if dpEngine != nil && dpEngine.Events() != nil {
+					dpEngine.Events().Append(dpevents.Event{
+						Proto:     "vpn",
+						Kind:      "service.wireguard.apply_failed",
+						Timestamp: time.Now().UTC(),
+						Attributes: map[string]any{
+							"error": err.Error(),
+						},
+					})
+				}
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
+			}
+			if dpEngine != nil && dpEngine.Events() != nil {
+				kind := "service.wireguard.disabled"
+				if svc.VPN.WireGuard.Enabled {
+					kind = "service.wireguard.applied"
+				}
+				dpEngine.Events().Append(dpevents.Event{
+					Proto:     "vpn",
+					Kind:      kind,
+					Timestamp: time.Now().UTC(),
+					Attributes: map[string]any{
+						"interface": func() string {
+							if v := strings.TrimSpace(svc.VPN.WireGuard.Interface); v != "" {
+								return v
+							}
+							return "wg0"
+						}(),
+						"listen_port": func() int {
+							if svc.VPN.WireGuard.ListenPort > 0 {
+								return svc.VPN.WireGuard.ListenPort
+							}
+							return 51820
+						}(),
+						"peers": len(svc.VPN.WireGuard.Peers),
+					},
+				})
 			}
 			if dhcpMgr != nil {
 				var ifaces []config.Interface
@@ -141,7 +216,7 @@ func servicesHandler(logger *log.Logger, ownership *ownershipManager, dhcpMgr *d
 func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 	type resp struct {
 		Leases []dhcpd.Lease `json:"leases"`
-		Status any          `json:"status,omitempty"`
+		Status any           `json:"status,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

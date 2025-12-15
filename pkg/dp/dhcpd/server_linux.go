@@ -34,30 +34,30 @@ const (
 	dhcpMsgAck      = 5
 	dhcpMsgNak      = 6
 
-	dhcpOptSubnetMask    = 1
-	dhcpOptRouter        = 3
-	dhcpOptDNSServer     = 6
-	dhcpOptHostName      = 12
-	dhcpOptDomainName    = 15
-	dhcpOptRequestIP     = 50
-	dhcpOptLeaseTime     = 51
-	dhcpOptMsgType       = 53
-	dhcpOptServerID      = 54
-	dhcpOptParamReqList  = 55
-	dhcpOptClientID      = 61
-	dhcpOptEnd           = 255
-	dhcpOptPad           = 0
-	dhcpMagicCookie uint32 = 0x63825363
+	dhcpOptSubnetMask          = 1
+	dhcpOptRouter              = 3
+	dhcpOptDNSServer           = 6
+	dhcpOptHostName            = 12
+	dhcpOptDomainName          = 15
+	dhcpOptRequestIP           = 50
+	dhcpOptLeaseTime           = 51
+	dhcpOptMsgType             = 53
+	dhcpOptServerID            = 54
+	dhcpOptParamReqList        = 55
+	dhcpOptClientID            = 61
+	dhcpOptEnd                 = 255
+	dhcpOptPad                 = 0
+	dhcpMagicCookie     uint32 = 0x63825363
 )
 
 type request struct {
-	xid       uint32
-	flags     uint16
-	mac       string
-	msgType   byte
-	reqIP     net.IP
-	hostname  string
-	clientID  []byte
+	xid      uint32
+	flags    uint16
+	mac      string
+	msgType  byte
+	reqIP    net.IP
+	hostname string
+	clientID []byte
 }
 
 func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool, m *Manager) error {
@@ -66,10 +66,6 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 		return fmt.Errorf("dhcp: empty device")
 	}
 
-	iface, err := net.InterfaceByName(dev)
-	if err != nil {
-		return fmt.Errorf("dhcp: iface %q: %w", dev, err)
-	}
 	serverIP, mask, err := ifaceIPv4(dev)
 	if err != nil {
 		return fmt.Errorf("dhcp: iface %q has no IPv4 address (needed for server-id): %w", dev, err)
@@ -126,6 +122,14 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 		if req.msgType != dhcpMsgDiscover && req.msgType != dhcpMsgRequest {
 			continue
 		}
+		if m != nil {
+			switch req.msgType {
+			case dhcpMsgDiscover:
+				go m.emit("service.dhcp.discover", map[string]any{"dev": dev, "mac": req.mac, "hostname": req.hostname})
+			case dhcpMsgRequest:
+				go m.emit("service.dhcp.request", map[string]any{"dev": dev, "mac": req.mac, "hostname": req.hostname, "requested_ip": ipOrEmpty(req.reqIP)})
+			}
+		}
 
 		assignedIP := net.IP(nil)
 		if existing, ok := m.lookupLeaseIP(dev, req.mac); ok {
@@ -140,6 +144,9 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 		if assignedIP == nil {
 			ip, err := nextFreeIP(dev, pl, m)
 			if err != nil {
+				if m != nil {
+					go m.emit("service.dhcp.nak", map[string]any{"dev": dev, "mac": req.mac, "reason": "no_free_ip"})
+				}
 				_ = sendNAK(fd, dev, req, serverIP)
 				continue
 			}
@@ -148,12 +155,25 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 
 		switch req.msgType {
 		case dhcpMsgDiscover:
+			if m != nil {
+				go m.emit("service.dhcp.offer", map[string]any{"dev": dev, "mac": req.mac, "ip": assignedIP.String(), "hostname": req.hostname})
+			}
 			_ = sendOffer(fd, dev, req, assignedIP, serverIP, mask, routerIP, dnsIPs, leaseSeconds, cfg.Domain)
 		case dhcpMsgRequest:
 			m.upsertLease(dev, req.mac, assignedIP.String(), req.hostname, leaseSeconds)
+			if m != nil {
+				go m.emit("service.dhcp.ack", map[string]any{"dev": dev, "mac": req.mac, "ip": assignedIP.String(), "hostname": req.hostname})
+			}
 			_ = sendAck(fd, dev, req, assignedIP, serverIP, mask, routerIP, dnsIPs, leaseSeconds, cfg.Domain)
 		}
 	}
+}
+
+func ipOrEmpty(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 func ifaceIPv4(dev string) (ip net.IP, mask net.IPMask, err error) {

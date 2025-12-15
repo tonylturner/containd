@@ -27,6 +27,8 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Envoy Proxy | Optional explicit forward proxy | Apache-2.0 | Copied into the mgmt appliance image from `envoyproxy/envoy`. |
 | Nginx | Optional reverse proxy | BSD-2-Clause | Copied into the mgmt appliance image from `nginxinc/nginx-unprivileged`. |
 | Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image (forwarder-first config; supervised by `ngfw-mgmt`). |
+| WireGuard (Linux kernel) | Remote access VPN dataplane | GPL-2.0-only | WireGuard runs via Linux kernel interfaces + generic netlink control; we do not bundle the `wg` CLI in the appliance image. |
+| OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `ngfw-mgmt` when enabled with a foreground config (no `daemon`). |
 | nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Userspace `nft` binary is copied into the engine image from Debian packages. |
 | Distroless base (`base-debian12`) | Minimal runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
@@ -54,13 +56,3 @@ These are used to build UI/docs (CI/Docker build stages), but are not included i
 | xterm.js | Web UI console | MIT | Planned for a richer in-UI terminal experience. |
 | React Flow | Topology UI | MIT | Planned for topology/graph screens. |
 | Recharts | Charts | MIT | Candidate for dashboards. |
-
----
-
-## Removed / Rejected (License Reasons)
-
-| Component | Purpose | SPDX License | Reason |
-|---|---|---|---|
-| Squid | Forward proxy | GPL-2.0-only | Removed to avoid copyleft obligations. |
-| Suricata | IDS/IPS signatures | GPL-2.0-only | Removed to avoid copyleft obligations. |
-| Chrony | NTP client | GPL-2.0-only | Removed to avoid copyleft obligations. |
