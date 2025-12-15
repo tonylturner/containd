@@ -1,0 +1,103 @@
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    image: containd/containd-engine:dev
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+    environment:
+      - NGFW_ENGINE_ADDR=:8081
+    volumes:
+      - ./data-smoke:/data
+    networks:
+      wan_net:
+        ipv4_address: 172.30.0.2
+      lan_net:
+        ipv4_address: 172.31.0.2
+    command: ["/usr/bin/ngfw-engine"]
+    ports:
+      - "8081:8081"
+      - "18080:18080"
+      - "18443:18443"
+      - "12222:2222"
+
+  containd:
+    build:
+      context: .
+      dockerfile: Dockerfile.mgmt
+    image: containd/containd:dev
+    user: "0"
+    network_mode: "service:engine"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+    environment:
+      - NGFW_MGMT_ADDR=:18080
+      - NGFW_MGMT_HTTPS_ADDR=:18443
+      - NGFW_ENGINE_URL=http://127.0.0.1:8081
+      - CONTAIND_ENGINE_URL=http://127.0.0.1:8081
+      - CONTAIND_ADMIN_TOKEN=devtoken
+      - CONTAIND_LAB_MODE=1
+      - CONTAIND_JWT_SECRET=
+      - NGFW_CONFIG_DB=/data/config.db
+      - NGFW_AUDIT_DB=/data/audit.db
+      - NGFW_USERS_DB=/data/users.db
+    volumes:
+      - ./data-smoke:/data
+      - ./ui/out:/var/lib/ngfw/ui:ro
+    command: ["/usr/bin/ngfw-mgmt"]
+    depends_on:
+      - engine
+
+  lan_client:
+    image: curlimages/curl:8.11.1
+    command: ["sleep", "infinity"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    networks:
+      lan_net:
+        ipv4_address: 172.31.0.3
+    depends_on:
+      - engine
+
+  lan_target:
+    image: python:3-alpine
+    command: ["python", "-m", "http.server", "80"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    networks:
+      lan_net:
+        ipv4_address: 172.31.0.4
+    depends_on:
+      - engine
+
+  wan_server:
+    image: python:3-alpine
+    command: ["python", "-m", "http.server", "8080"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    networks:
+      wan_net:
+        ipv4_address: 172.30.0.3
+    depends_on:
+      - engine
+
+networks:
+  wan_net:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/24
+  lan_net:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.31.0.0/24

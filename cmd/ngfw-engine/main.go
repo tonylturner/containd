@@ -87,6 +87,7 @@ func main() {
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
+	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
@@ -335,6 +336,18 @@ func getRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(snap)
+	}
+}
+
+func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		status := dpEngine.RulesetStatus()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
 	}
 }
 

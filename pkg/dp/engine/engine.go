@@ -6,29 +6,38 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/ids"
-	"github.com/containd/containd/pkg/dp/ics/modbus"
-	"github.com/containd/containd/pkg/dp/itdpi"
 	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/containd/containd/pkg/dp/ics/modbus"
+	"github.com/containd/containd/pkg/dp/ids"
+	"github.com/containd/containd/pkg/dp/itdpi"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture  *capture.Manager
-	ruleSnap atomic.Pointer[rules.Snapshot]
-	started  atomic.Bool
-	compiler *enforce.Compiler
-	applier  enforce.Applier
-	updater  enforce.Updater
-	dpiMgr   *dpi.Manager
-	eventStore *events.Store
+	capture       *capture.Manager
+	ruleSnap      atomic.Pointer[rules.Snapshot]
+	started       atomic.Bool
+	compiler      *enforce.Compiler
+	applier       enforce.Applier
+	updater       enforce.Updater
+	dpiMgr        *dpi.Manager
+	eventStore    *events.Store
+	rulesetStatus atomic.Pointer[RulesetStatus]
+}
+
+// RulesetStatus captures the last compiled/applied ruleset and any error.
+type RulesetStatus struct {
+	Ruleset   string    `json:"ruleset"`
+	AppliedAt time.Time `json:"appliedAt"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -94,21 +103,28 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
-	if e.compiler == nil {
-		e.ruleSnap.Store(&snap)
-		return nil
+	var compiled string
+	var applyErr error
+
+	if e.compiler != nil {
+		compiled, applyErr = e.compiler.CompileFirewall(&snap)
+		if applyErr != nil {
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
+		if e.applier == nil {
+			applyErr = errors.New("no applier configured")
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
+		if applyErr = e.applier.Apply(ctx, compiled); applyErr != nil {
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
 	}
-	ruleset, err := e.compiler.CompileFirewall(&snap)
-	if err != nil {
-		return err
-	}
-	if e.applier == nil {
-		return errors.New("no applier configured")
-	}
-	if err := e.applier.Apply(ctx, ruleset); err != nil {
-		return err
-	}
+
 	e.ruleSnap.Store(&snap)
+	e.setRulesetStatus(compiled, nil)
 	return nil
 }
 
@@ -274,4 +290,27 @@ func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules
 	default:
 		return nil
 	}
+}
+
+// RulesetStatus returns the last compiled/applied nftables ruleset snapshot.
+func (e *Engine) RulesetStatus() RulesetStatus {
+	if e == nil {
+		return RulesetStatus{}
+	}
+	ptr := e.rulesetStatus.Load()
+	if ptr == nil {
+		return RulesetStatus{}
+	}
+	return *ptr
+}
+
+func (e *Engine) setRulesetStatus(ruleset string, err error) {
+	st := &RulesetStatus{
+		Ruleset:   ruleset,
+		AppliedAt: time.Now().UTC(),
+	}
+	if err != nil {
+		st.Error = err.Error()
+	}
+	e.rulesetStatus.Store(st)
 }

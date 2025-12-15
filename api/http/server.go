@@ -28,6 +28,8 @@ import (
 	"github.com/containd/containd/pkg/cp/users"
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dhcpd"
+	"github.com/containd/containd/pkg/dp/enforce"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
@@ -48,6 +50,7 @@ type EngineClient interface {
 	ConfigureServices(ctx context.Context, services config.ServicesConfig) error
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
 }
 
 type TelemetryClient interface {
@@ -171,6 +174,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -1270,6 +1274,45 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		snap, err := compile.CompileSnapshot(cfg)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		comp := enforce.NewCompiler()
+		ruleset, err := comp.CompileFirewall(&snap)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		resp := gin.H{
+			"snapshot": snap,
+			"ruleset":  ruleset,
+		}
+		if engine != nil {
+			type rulesetStatusClient interface {
+				RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
+			}
+			if ec, ok := engine.(rulesetStatusClient); ok && ec != nil {
+				if st, err := ec.RulesetStatus(c.Request.Context()); err == nil {
+					resp["engineStatus"] = st
+				} else {
+					resp["engineStatusError"] = err.Error()
+				}
+			}
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 

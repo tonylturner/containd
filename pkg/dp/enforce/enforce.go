@@ -78,10 +78,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
-	buf.WriteString("    iifname \"lo\" accept\n")
-	buf.WriteString("    ct state { established, related } accept\n")
+	buf.WriteString("    iifname \"lo\" accept;\n")
+	buf.WriteString("    ct state { established, related } accept;\n")
 	// Allow management-plane to talk to engine internal API.
-	buf.WriteString("    tcp dport 8081 accept\n")
+	buf.WriteString("    tcp dport 8081 accept;\n")
 	// Local service allow rules (mgmt/ssh/vpn). Deterministic ordering.
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
@@ -93,17 +93,17 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		if line == "" {
 			continue
 		}
-		buf.WriteString("    " + line + "\n")
+		buf.WriteString("    " + line + ";\n")
 	}
 	buf.WriteString("  }\n")
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
-	buf.WriteString("    ct state { established, related } accept\n")
+	buf.WriteString("    ct state { established, related } accept;\n")
 	// Dynamic blocks first (verdict-driven).
-	buf.WriteString("    ip saddr @block_hosts drop\n")
-	buf.WriteString("    ip daddr @block_hosts drop\n")
-	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop\n")
+	buf.WriteString("    ip saddr @block_hosts drop;\n")
+	buf.WriteString("    ip daddr @block_hosts drop;\n")
+	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
@@ -112,7 +112,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		buf.WriteString("    " + line + "\n")
+		buf.WriteString("    " + line + ";\n")
 	}
 	buf.WriteString("  }\n")
 
@@ -152,15 +152,18 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 
 			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
 			parts := []string{
-				fmt.Sprintf("comment \"pf:%s\"", pf.ID),
 				fmt.Sprintf("iifname @%s", ingSet),
 			}
 			if len(pf.AllowedSources) > 0 {
 				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
 			}
-			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort))
-			parts = append(parts, fmt.Sprintf("dnat to %s:%d", dstIP, dstPort))
-			buf.WriteString("    " + strings.Join(parts, " ") + "\n")
+			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
+			if dstPort > 0 && dstPort != pf.ListenPort {
+				parts = append(parts, fmt.Sprintf("dnat ip to %s:%d", dstIP, dstPort))
+			} else {
+				parts = append(parts, fmt.Sprintf("dnat ip to %s", dstIP))
+			}
+			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
 		}
 		buf.WriteString("  }\n")
 	}
@@ -178,6 +181,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		buf.WriteString("  chain postrouting {\n")
 		buf.WriteString("    type nat hook postrouting priority srcnat;\n")
 		buf.WriteString("    policy accept;\n")
+		// Ensure DNAT'd traffic from wan -> lan returns via engine (SNAT/masq).
+		if len(snap.NAT.PortForwards) > 0 {
+			buf.WriteString("    iifname @zone_wan_ifaces oifname @zone_lan_ifaces masquerade;\n")
+		}
 		for _, z := range srcZones {
 			z = strings.TrimSpace(z)
 			if z == "" {
@@ -185,7 +192,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 			}
 			srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
 			egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
-			buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade\n", srcSet, egSet))
+			buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade;\n", srcSet, egSet))
 		}
 		buf.WriteString("  }\n")
 	}
@@ -203,7 +210,6 @@ func defaultPolicy(a rules.Action) string {
 
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error) {
 	parts := []string{}
-	parts = append(parts, fmt.Sprintf("comment \"%s\"", e.ID))
 
 	if len(e.SourceZones) > 0 {
 		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
@@ -262,7 +268,7 @@ func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]str
 		return "", fmt.Errorf("local input %s invalid port %d", r.ID, r.Port)
 	}
 
-	parts := []string{fmt.Sprintf("comment \"local:%s\"", r.ID)}
+	parts := []string{}
 	if len(r.Ifaces) > 0 {
 		ifs := append([]string(nil), r.Ifaces...)
 		sort.Strings(ifs)

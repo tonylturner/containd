@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/containd/containd/pkg/cp/config"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -94,6 +95,7 @@ type mockEngine struct {
 	lastRTR config.RoutingConfig
 	lastSvc config.ServicesConfig
 	state   []config.InterfaceState
+	ruleset dpengine.RulesetStatus
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -137,6 +139,10 @@ func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error 
 	m.applied = true
 	m.snap = snap
 	return m.err
+}
+
+func (m *mockEngine) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
+	return m.ruleset, nil
 }
 
 func TestGetConfigNotFound(t *testing.T) {

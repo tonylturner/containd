@@ -14,6 +14,7 @@ import (
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dhcpd"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
@@ -379,6 +380,31 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	var out []dpevents.FlowSummary
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// RulesetStatus fetches the last compiled/applied nftables ruleset status from the engine.
+func (c *HTTPClient) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
+	var out dpengine.RulesetStatus
+	if c.BaseURL == "" {
+		return out, fmt.Errorf("engine BaseURL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/ruleset_status", nil)
+	if err != nil {
+		return out, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return out, fmt.Errorf("engine ruleset_status status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, err
 	}
 	return out, nil
 }
