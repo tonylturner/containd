@@ -105,6 +105,47 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    ip daddr @block_hosts drop;\n")
 	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
 
+	// Allow DNATed flows (match on original dport to avoid bypass via direct LAN IP).
+	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
+		pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+		sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
+		for _, pf := range pfs {
+			if !pf.Enabled {
+				continue
+			}
+			ingress := strings.TrimSpace(pf.IngressZone)
+			if ingress == "" {
+				continue
+			}
+			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+			if proto != "tcp" && proto != "udp" {
+				continue
+			}
+			if pf.ListenPort < 1 || pf.ListenPort > 65535 {
+				continue
+			}
+			dstPort := pf.DestPort
+			if dstPort == 0 {
+				dstPort = pf.ListenPort
+			}
+			if dstPort < 1 || dstPort > 65535 {
+				continue
+			}
+			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+			parts := []string{
+				fmt.Sprintf("iifname @%s", ingSet),
+				"ct status dnat",
+				proto + " dport " + strconv.Itoa(dstPort),
+			}
+			if len(pf.AllowedSources) > 0 {
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+			}
+			// Accept after DNAT; proto match is implicit via ct original clause.
+			parts = append(parts, "accept")
+			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
+		}
+	}
+
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {

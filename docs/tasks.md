@@ -122,7 +122,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
   - [x] Compose: make mgmt share engine network namespace (interim) so UI/runtime/diagnostics see the same interfaces/IPs as the dataplane.
-  - [ ] Validate Dockerfiles with runtime smoke scripts.
+  - [x] Validate Dockerfiles with runtime smoke scripts (`smoketest` wrapper; NAT/FW/routing/DNAT rule-order coverage).
   - [x] Document compose usage in README and `docs/mkdocs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
   - [x] Add compose UX helpers (checked-in `.env.example`, ignore `.env`, `scripts/containd` connection helper).
