@@ -33,6 +33,7 @@ UI serving:
 Containers:
 - Build appliance image (single container, default): `docker build -f Dockerfile.mgmt -t containd/containd:dev .`
 - Compose (combined containd) + prints connection info: `bash scripts/containd up --build`
+- Override mode if needed: `CONTAIND_MODE=engine docker compose up` (engine-only) or `CONTAIND_MODE=mgmt` (mgmt-only).
 - Publish (example): `docker tag containd/containd:dev ghcr.io/you/containd:dev && docker push ghcr.io/you/containd:dev`
 
 Consume published image:

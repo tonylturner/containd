@@ -21,8 +21,7 @@ export default function ServicesOverviewPage() {
             Forward unified events to external collectors.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Configured forwarders:{" "}
-            {(status?.syslog as any)?.configured_forwarders ?? 0}
+            Forwarders: {(status?.syslog as any)?.configured_forwarders ?? 0}
           </p>
           <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
@@ -34,7 +33,11 @@ export default function ServicesOverviewPage() {
             Envoy forward proxy and Nginx reverse proxy.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Status available via Monitoring and CLI.
+            Envoy: {(status?.proxy as any)?.envoy_running ? "running" : "stopped"}{" "}
+            {(status?.proxy as any)?.envoy_last_error && `(error=${(status?.proxy as any)?.envoy_last_error})`}
+            <br />
+            Nginx: {(status?.proxy as any)?.nginx_running ? "running" : "stopped"}{" "}
+            {(status?.proxy as any)?.nginx_last_error && `(error=${(status?.proxy as any)?.nginx_last_error})`}
           </p>
           <Link href="/proxies/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
@@ -46,9 +49,11 @@ export default function ServicesOverviewPage() {
             Unbound resolver managed by containd.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}{" "}
-            {((status?.dns as any)?.configured_upstreams ?? 0) > 0 &&
-              `(upstreams=${(status?.dns as any)?.configured_upstreams ?? 0})`}
+            Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}, running:{" "}
+            {(status?.dns as any)?.running ? "yes" : "no"}
+            <br />
+            Upstreams: {(status?.dns as any)?.configured_upstreams ?? 0}{" "}
+            {(status?.dns as any)?.last_error && `(error=${(status?.dns as any)?.last_error})`}
           </p>
           <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
@@ -60,9 +65,11 @@ export default function ServicesOverviewPage() {
             OpenNTPD client managed by containd.
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}{" "}
-            {((status?.ntp as any)?.servers_count ?? 0) > 0 &&
-              `(servers=${(status?.ntp as any)?.servers_count ?? 0})`}
+            Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}, running:{" "}
+            {(status?.ntp as any)?.running ? "yes" : "no"}
+            <br />
+            Servers: {(status?.ntp as any)?.servers_count ?? 0}{" "}
+            {(status?.ntp as any)?.last_error && `(error=${(status?.ntp as any)?.last_error})`}
           </p>
           <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →

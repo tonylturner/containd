@@ -102,6 +102,21 @@ func Run(ctx context.Context, _ Options) error {
 	if cfg, err := store.Load(context.Background()); err == nil {
 		_ = serviceManager.Apply(context.Background(), cfg.Services)
 	}
+	if serviceManager != nil {
+		serviceManager.SetEventLister(func(limit int) []dpevents.Event {
+			var out []dpevents.Event
+			type eventLister interface {
+				ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+			}
+			if ec, ok := engineClient.(eventLister); ok && ec != nil {
+				if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
+					out = append(out, evs...)
+				}
+			}
+			out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+			return out
+		})
+	}
 	serveStaticUI(router)
 
 	httpLoopbackAddr := ensureLoopbackHTTPAddr(httpAddr)

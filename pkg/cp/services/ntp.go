@@ -2,25 +2,34 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
 )
 
-// NTPManager renders OpenNTPD client configuration from persistent NTPConfig.
-// Process supervision will land later; this manager only writes config files.
+// NTPManager renders and optionally supervises OpenNTPD client configuration.
 type NTPManager struct {
-	BaseDir string
+	BaseDir      string
+	Supervise    bool
+	OpenNTPDPath string
+	OnEvent      func(kind string, attrs map[string]any)
 
 	mu         sync.Mutex
 	lastCfg    config.NTPConfig
 	lastRender time.Time
 	lastError  string
+	lastStart  time.Time
+	lastStop   time.Time
+	lastExit   string
+	cmd        *exec.Cmd
 }
 
 func NewNTPManager(baseDir string) *NTPManager {
@@ -30,7 +39,20 @@ func NewNTPManager(baseDir string) *NTPManager {
 	if baseDir == "" {
 		baseDir = defaultServicesDir
 	}
-	return &NTPManager{BaseDir: baseDir}
+	supervise := true
+	if v := strings.TrimSpace(os.Getenv("CONTAIND_SUPERVISE_NTP")); v != "" && v != "1" && !strings.EqualFold(v, "true") {
+		supervise = false
+	}
+	openntpdPath, _ := detectBinary([]string{
+		strings.TrimSpace(os.Getenv("CONTAIND_OPENNTPD_PATH")),
+		"/usr/sbin/openntpd",
+		"/usr/bin/openntpd",
+	})
+	return &NTPManager{
+		BaseDir:      baseDir,
+		Supervise:    supervise,
+		OpenNTPDPath: openntpdPath,
+	}
 }
 
 func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
@@ -44,6 +66,7 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 	}
 	path := filepath.Join(m.BaseDir, "openntpd.conf")
 	if !cfg.Enabled {
+		m.stopLocked()
 		_ = os.Remove(path)
 		m.mu.Lock()
 		m.lastRender = time.Now().UTC()
@@ -74,10 +97,16 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 		m.mu.Unlock()
 		return err
 	}
+	if err := m.validate(ctx, path); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.lastRender = time.Now().UTC()
 	m.lastError = ""
 	m.mu.Unlock()
+	if m.Supervise {
+		m.startOrRestart(ctx, path)
+	}
 	return nil
 }
 
@@ -90,11 +119,114 @@ func (m *NTPManager) Current() config.NTPConfig {
 func (m *NTPManager) Status() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return map[string]any{
-		"enabled":        m.lastCfg.Enabled,
-		"servers_count":  len(m.lastCfg.Servers),
-		"last_render":    m.lastRender.Format(time.RFC3339Nano),
-		"last_error":     m.lastError,
-		"interval_seconds": m.lastCfg.IntervalSeconds,
+	running := m.cmd != nil && m.cmd.Process != nil
+	pid := 0
+	if running {
+		pid = m.cmd.Process.Pid
 	}
+	return map[string]any{
+		"enabled":          m.lastCfg.Enabled,
+		"servers_count":    len(m.lastCfg.Servers),
+		"last_render":      m.lastRender.Format(time.RFC3339Nano),
+		"last_error":       m.lastError,
+		"interval_seconds": m.lastCfg.IntervalSeconds,
+		"supervise":        m.Supervise,
+		"openntpd_path":    m.OpenNTPDPath,
+		"running":          running,
+		"pid":              pid,
+		"last_start":       m.lastStart,
+		"last_stop":        m.lastStop,
+		"last_exit":        m.lastExit,
+	}
+}
+
+func (m *NTPManager) validate(ctx context.Context, configPath string) error {
+	if !m.lastCfg.Enabled {
+		return nil
+	}
+	if m.OpenNTPDPath == "" {
+		// No binary available; skip validation but record the missing piece.
+		m.mu.Lock()
+		m.lastError = "openntpd binary not found (validation skipped)"
+		m.mu.Unlock()
+		m.emit("service.ntp.validate_skipped", map[string]any{"reason": "openntpd missing"})
+		return nil
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, m.OpenNTPDPath, "-n", "-f", configPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			err = fmt.Errorf("%v: %s", err, msg)
+		}
+		m.mu.Lock()
+		m.lastError = err.Error()
+		m.mu.Unlock()
+		m.emit("service.ntp.validate_failed", map[string]any{"error": err.Error()})
+		return err
+	}
+	return nil
+}
+
+func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.lastCfg.Enabled {
+		return
+	}
+	if m.OpenNTPDPath == "" {
+		m.lastError = "openntpd binary not found; supervision skipped"
+		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
+		return
+	}
+	if syscall.Geteuid() != 0 {
+		// OpenNTPD needs privileges to step the clock; avoid failing config applies when not root.
+		m.lastError = "openntpd supervision skipped (requires root/CAP_SYS_TIME)"
+		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
+		return
+	}
+	if m.cmd != nil && m.cmd.Process != nil {
+		_ = m.cmd.Process.Signal(os.Interrupt)
+		time.Sleep(50 * time.Millisecond)
+	}
+	cmd := exec.CommandContext(ctx, m.OpenNTPDPath, "-d", "-f", configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		m.lastError = err.Error()
+		m.emit("service.ntp.start_failed", map[string]any{"error": err.Error()})
+		return
+	}
+	m.cmd = cmd
+	m.lastError = ""
+	m.lastStart = time.Now().UTC()
+	m.emit("service.ntp.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	go func() {
+		err := cmd.Wait()
+		exit := "ok"
+		if err != nil {
+			exit = err.Error()
+		}
+		m.mu.Lock()
+		m.lastExit = exit
+		m.lastStop = time.Now().UTC()
+		m.mu.Unlock()
+		m.emit("service.ntp.exited", map[string]any{"pid": cmd.Process.Pid, "exit": exit})
+	}()
+}
+
+func (m *NTPManager) stopLocked() {
+	if m.cmd != nil && m.cmd.Process != nil {
+		_ = m.cmd.Process.Signal(os.Interrupt)
+		m.emit("service.ntp.stopped", map[string]any{"pid": m.cmd.Process.Pid})
+	}
+	m.cmd = nil
+}
+
+func (m *NTPManager) emit(kind string, attrs map[string]any) {
+	if m == nil || m.OnEvent == nil {
+		return
+	}
+	m.OnEvent(kind, attrs)
 }

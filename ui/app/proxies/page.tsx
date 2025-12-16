@@ -15,6 +15,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
   const canEdit = isAdmin();
+  const [status, setStatus] = useState<any>(null);
   const [forward, setForward] = useState<ForwardProxyConfig>({
     enabled: false,
     listenPort: 3128,
@@ -39,6 +40,8 @@ export default function ProxiesPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
+    const svc = (await api.getServicesStatus()) as any;
+    setStatus(svc?.proxy ?? null);
     const fp = await api.getForwardProxy();
     if (fp) {
       setForward({
@@ -146,6 +149,38 @@ export default function ProxiesPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <div className="mb-4 grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
+          <p className="mt-2 text-xs text-slate-400">
+            Running: {status?.envoy_running ? "yes" : "no"}{" "}
+            {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
+          </p>
+          {status?.envoy_last_error ? (
+            <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+              {status.envoy_last_error}
+            </div>
+          ) : null}
+          <p className="mt-2 text-xs text-slate-400">
+            Last start: {status?.envoy_last_start ? String(status.envoy_last_start) : "n/a"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
+          <p className="mt-2 text-xs text-slate-400">
+            Running: {status?.nginx_running ? "yes" : "no"}{" "}
+            {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
+          </p>
+          {status?.nginx_last_error ? (
+            <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+              {status.nginx_last_error}
+            </div>
+          ) : null}
+          <p className="mt-2 text-xs text-slate-400">
+            Last start: {status?.nginx_last_start ? String(status.nginx_last_start) : "n/a"}
+          </p>
+        </div>
+      </div>
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}

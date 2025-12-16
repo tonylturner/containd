@@ -13,13 +13,13 @@ This document tracks the high-level architecture for containd as it evolves.
 The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. IT DPI/telemetry is implemented natively in Go decoders for current scope.
 
 ## Packaging
-- Containers at repo root (`Dockerfile.engine`, `Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; goal is single `containd` binary with subcommands.
+- Containers at repo root (`Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
 - Host deployment to run `containd all` (or split commands); config DB default `data/config.db` (env `NGFW_CONFIG_DB`).
 
 ## Module boundaries (current)
 - `api/http`: `/api/v1` health, config load/save/validate/export/import, CRUD (zones/interfaces/rules), syslog settings (more to add: objects/assets, policies, identity, audit, services).
 - `pkg/cp/config`: config model + validation + SQLite store (candidate/commit/rollback not yet implemented).
-- `pkg/cp/services`: syslog manager stub; NTP/DNS pending; audit/identity placeholders.
+- `pkg/cp/services`: syslog/DNS/NTP/proxy/VPN managers render configs; optional supervision of embedded daemons (Envoy/Nginx/Unbound/OpenNTPD) with validation + service events; audit/identity placeholders.
 - `pkg/common/logging`: prefixed UTC loggers.
 - `pkg/cli`: command registry with API-backed show/set/delete for zones/interfaces/rules; more to add (commit/rollback/audit).
 - `pkg/dp/capture`: capture manager placeholder (NFQUEUE/AF_PACKET planned).

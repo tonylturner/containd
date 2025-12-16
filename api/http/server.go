@@ -162,6 +162,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), createOpenVPNClientHandler(store))
 		protected.GET("/services/vpn/openvpn/clients/:name", requireAdmin(), downloadOpenVPNClientHandler(store))
 		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
+		protected.GET("/services/av", getAVHandler(store))
+		protected.POST("/services/av", requireAdmin(), setAVHandler(store, services))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
 		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))

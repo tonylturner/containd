@@ -20,29 +20,13 @@ fi
 http_map="$(docker compose port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 https_map="$(docker compose port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 ssh_map="$(docker compose port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+engine_map="$(docker compose port "$service" 8081 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 
-# If the service shares another container's network namespace (network_mode: service:...),
-# the container itself has no networks/ports. In that case, we:
-# - show host port mappings from the engine service (where ports are published)
-# - show IPs from the network-namespace container.
-netns_cid="$cid"
-netmode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
-if [[ "${netmode}" == container:* ]]; then
-  netns_cid="${netmode#container:}"
-  # Port publishing must be done on the netns container (typically the engine).
-  if [[ -z "${http_map}" ]]; then http_map="$(docker compose port engine 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"; fi
-  if [[ -z "${https_map}" ]]; then https_map="$(docker compose port engine 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"; fi
-  if [[ -z "${ssh_map}" ]]; then ssh_map="$(docker compose port engine 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"; fi
-fi
-
-ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$netns_cid" 2>/dev/null | tr -d '\r' || true)"
+ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
 
 echo "------------------------------------------------------------"
 echo "containd connection helper"
 echo "Service: ${service} (container: ${cid:0:12})"
-if [[ "${netns_cid}" != "${cid}" ]]; then
-  echo "Network namespace: ${netns_cid:0:12}"
-fi
 echo ""
 echo "Tip: configuration is driven by .env"
 echo "  - Start from: .env.example"
@@ -83,6 +67,16 @@ if [[ -n "${ssh_map}" ]]; then
   echo "  then type: wizard or menu"
 else
   echo "SSH CLI (host published): not published (no 2222/tcp mapping)"
+fi
+
+echo ""
+if [[ -n "${engine_map}" ]]; then
+  if [[ "${engine_map%:*}" == "0.0.0.0" ]]; then
+    engine_map="localhost:${engine_map##*:}"
+  fi
+  echo "Engine API (host published): http://${engine_map}"
+else
+  echo "Engine API (host published): not published (8081 mapping disabled by default)"
 fi
 
 if [[ -n "${ips}" ]]; then

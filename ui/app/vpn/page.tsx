@@ -339,6 +339,28 @@ export default function VPNPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+          <div>
+            WireGuard enabled:{" "}
+            <span className="text-slate-100">{cfg.wireguard.enabled ? "yes" : "no"}</span>
+          </div>
+          <div>
+            OpenVPN running:{" "}
+            <span className="text-slate-100">{svcStatus?.openvpn_running ? "yes" : "no"}</span>
+            {svcStatus?.openvpn_pid ? <span className="text-slate-400"> (pid {svcStatus.openvpn_pid})</span> : null}
+          </div>
+          <div className="md:col-span-2">
+            OpenVPN config: <span className="text-slate-100">{svcStatus?.openvpn_config_path || "n/a"}</span>
+          </div>
+          {svcStatus?.openvpn_last_error ? (
+            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+              {svcStatus.openvpn_last_error}
+            </div>
+          ) : null}
+        </div>
+      </div>
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}

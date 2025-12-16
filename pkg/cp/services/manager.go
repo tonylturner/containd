@@ -27,6 +27,7 @@ type Manager struct {
 	Proxy  *ProxyManager
 	DHCP   *DHCPManager
 	VPN    *VPNManager
+	AV     *AVManager
 
 	telemetry *dpevents.Store
 }
@@ -49,18 +50,32 @@ func NewManager(opts ManagerOptions) *Manager {
 			Supervise: supervise,
 			EnvoyPath: opts.EnvoyPath,
 			NginxPath: opts.NginxPath,
+			OnEvent:   nil,
 		}),
 		DHCP: NewDHCPManager(opts.BaseDir),
 		VPN:  NewVPNManager(opts.BaseDir),
+		AV:   NewAVManager(),
 	}
 	// Reserve the high bit for management-plane service events to avoid ID collisions
 	// with dataplane telemetry IDs.
 	m.telemetry = dpevents.NewStoreWithIDBase(2048, 1<<63)
+	if m.Syslog != nil {
+		m.Syslog.OnEvent = m.recordServiceEvent
+	}
 	if m.DNS != nil {
 		m.DNS.OnEvent = m.recordServiceEvent
 	}
+	if m.Proxy != nil {
+		m.Proxy.OnEvent = m.recordServiceEvent
+	}
 	if m.VPN != nil {
 		m.VPN.OnEvent = m.recordServiceEvent
+	}
+	if m.NTP != nil {
+		m.NTP.OnEvent = m.recordServiceEvent
+	}
+	if m.AV != nil {
+		m.AV.OnEvent = m.recordServiceEvent
 	}
 	return m
 }
@@ -179,6 +194,11 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 			return err
 		}
 	}
+	if m.AV != nil {
+		if err := m.AV.Apply(ctx, cfg.AV); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -203,5 +223,16 @@ func (m *Manager) Status() any {
 	if m.VPN != nil {
 		out["vpn"] = m.VPN.Status()
 	}
+	if m.AV != nil {
+		out["av"] = m.AV.Status()
+	}
 	return out
+}
+
+// SetEventLister provides a function that returns recent events (newest-first) for syslog forwarding.
+func (m *Manager) SetEventLister(fn func(limit int) []dpevents.Event) {
+	if m == nil || m.Syslog == nil {
+		return
+	}
+	m.Syslog.SetEventLister(fn)
 }

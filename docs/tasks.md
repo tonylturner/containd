@@ -126,6 +126,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Document compose usage in README and `docs/mkdocs/deploy-host.md` (root-level assets; `deploy/` removed, single-container image workflow).
   - [x] Define image publish flow (registry targets, tags) and document pull/run commands.
   - [x] Add compose UX helpers (checked-in `.env.example`, ignore `.env`, `scripts/containd` connection helper).
+  - [x] Consolidate into single `containd` image/binary with subcommands; Dockerfile.mgmt builds combined appliance; Dockerfile.engine legacy/optional.
+  - [ ] Align CI/build jobs to single image (smoke harness against combined image) and retire legacy engine-only build path.
   - [ ] Add lab harness compose example(s) (sample hosts + enforced default routes via firewall) and document recommended topology patterns (internal networks, stable gateway IPs).
 - [ ] Observability/logging
   - [x] Add structured logging helper in `pkg/common`.
@@ -151,6 +153,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [ ] Metrics for steering + cache (queue depth, drops, cache hit rate, p95/p99 classify time).
 - [ ] IDS/IPS
   - [~] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack (IDS done, IPS pending).
+  - [ ] Plan antivirus/malware scanning hooks that avoid inline latency spikes (asynchronous file/event scanning, metadata-first) and draft ICAP integration for external scanners.
 
 - [ ] IT DPI + Proxies (per integrated spec)
   - [~] Service manager inside `containd` to supervise embedded daemons.

@@ -8,6 +8,9 @@ import { Shell } from "../../components/Shell";
 export default function EventsPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "service" | "dpi" | "firewall">(
+    "all",
+  );
 
   async function refresh() {
     setError(null);
@@ -35,6 +38,16 @@ export default function EventsPage() {
         >
           Refresh
         </button>
+        <select
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value as any)}
+        >
+          <option value="all">All</option>
+          <option value="service">Service events</option>
+          <option value="dpi">DPI/IDS</option>
+          <option value="firewall">Firewall</option>
+        </select>
       }
     >
       {error && (
@@ -49,7 +62,15 @@ export default function EventsPage() {
             No events yet. Enable DPI mock or capture to generate events.
           </div>
         )}
-        {events.map((ev) => (
+        {events
+          .filter((ev) => {
+            if (filter === "all") return true;
+            if (filter === "service") return ev.kind.startsWith("service.");
+            if (filter === "firewall") return ev.proto === "firewall";
+            if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
+            return true;
+          })
+          .map((ev) => (
           <div
             key={ev.id}
             className="rounded-xl border border-white/10 bg-black/30 p-4"
@@ -77,4 +98,3 @@ export default function EventsPage() {
     </Shell>
   );
 }
-

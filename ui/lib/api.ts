@@ -334,6 +334,7 @@ export type SyslogForwarder = {
 
 export type SyslogConfig = {
   forwarders: SyslogForwarder[];
+  format?: "rfc5424" | "json";
 };
 
 export type UserRole = "admin" | "view";

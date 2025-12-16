@@ -2,7 +2,7 @@
 
 This document is rendered from `docs/mkdocs/`.
 
-This repo ships a `docker-compose.yml` for running the management plane (`containd`) and engine (`engine`) together, with a `.env`-driven configuration.
+This repo ships a `docker-compose.yml` for running the combined appliance (`containd all`) with a `.env`-driven configuration. You can still run mgmt-only or engine-only by overriding the entrypoint/command or `CONTAIND_MODE`.
 
 ## Quickstart
 
@@ -32,15 +32,12 @@ Docker Compose automatically loads `.env` from the same directory as `docker-com
 
 ### Management ↔ Engine connectivity
 
-The management plane (`containd`) talks to the dataplane engine over the engine’s internal HTTP API.
+The management plane talks to the dataplane engine over the engine’s HTTP API. In combined mode, both run in one container:
 
-- `CONTAIND_ENGINE_URL`: base URL for the engine API (must include a scheme, e.g. `http://127.0.0.1:8081`).
+- `CONTAIND_MODE`: `all` (default), `mgmt`, or `engine`.
+- `CONTAIND_ENGINE_URL`: base URL for the engine API (must include a scheme). Defaults to `http://127.0.0.1:8081` inside the combined container.
 
-In the default compose file, `containd` runs in the same network namespace as the `engine` container
-(`network_mode: "service:engine"`). This makes “interface/IP reality” consistent for UI, CLI, and dataplane,
-but it also means:
-
-- Use `http://127.0.0.1:8081` for `CONTAIND_ENGINE_URL` (container-local loopback), not `http://engine:8081`.
+If you run split mgmt/engine containers, point `CONTAIND_ENGINE_URL` at the engine host and optionally publish the engine port on the engine container.
 
 ### Low ports (DNS / DHCP)
 
@@ -76,7 +73,9 @@ To override subnet matching (for custom lab topologies), set:
 - `CONTAIND_PUBLISH_HTTP_PORT`: host port for HTTP UI/API → container `8080`.
 - `CONTAIND_PUBLISH_HTTPS_PORT`: host port for HTTPS UI/API → container `8443`.
 - `CONTAIND_PUBLISH_SSH_PORT`: host port for SSH → container `2222`.
-- `CONTAIND_PUBLISH_ENGINE_PORT`: host port for engine API → container `8081`.
+- `CONTAIND_PUBLISH_ENGINE_PORT`: optional host port for engine API → container `8081` (only if you need external access to engine).
+
+Smoke harness: `docker-compose.smoke.yml` publishes the engine API on host `18081` to avoid collisions and drives the mgmt API on `18080`.
 
 ### Persistent data paths (inside container)
 

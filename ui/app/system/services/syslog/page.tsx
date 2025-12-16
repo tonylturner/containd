@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
+import { api, isAdmin, type ServicesStatus, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -10,6 +10,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 export default function SyslogPage() {
   const canEdit = isAdmin();
   const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [] });
+  const [status, setStatus] = useState<any>(null);
   const [newFwd, setNewFwd] = useState<SyslogForwarder>({
     address: "",
     port: 514,
@@ -19,6 +20,8 @@ export default function SyslogPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
+    const svc = (await api.getServicesStatus()) as ServicesStatus | any;
+    setStatus((svc as any)?.syslog ?? null);
     const s = await api.getSyslog();
     setCfg(s ?? { forwarders: [] });
   }
@@ -102,6 +105,26 @@ export default function SyslogPage() {
         <p className="mt-1 text-sm text-slate-300">
           Send unified events to external syslog collectors.
         </p>
+        <p className="mt-2 text-xs text-slate-400">
+          Active forwarders: {status?.configured_forwarders ?? 0}
+        </p>
+        <div className="mt-2 text-xs text-slate-400">
+          Log format:
+          <select
+            value={cfg.format ?? "rfc5424"}
+            disabled={!canEdit}
+            onChange={(e) =>
+              setCfg((c) => ({
+                ...c,
+                format: e.target.value as SyslogConfig["format"],
+              }))
+            }
+            className="ml-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+          >
+            <option value="rfc5424">RFC5424</option>
+            <option value="json">JSON</option>
+          </select>
+        </div>
 
         <div className="mt-4 grid gap-2 md:grid-cols-4">
           <input

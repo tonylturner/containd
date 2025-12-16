@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 // Config represents the management-plane persistent configuration.
@@ -114,10 +115,12 @@ type ServicesConfig struct {
 	Proxy  ProxyConfig  `json:"proxy,omitempty"`
 	DHCP   DHCPConfig   `json:"dhcp,omitempty"`
 	VPN    VPNConfig    `json:"vpn,omitempty"`
+	AV     AVConfig     `json:"av,omitempty"`
 }
 
 type SyslogConfig struct {
 	Forwarders []SyslogForwarder `json:"forwarders"`
+	Format     string            `json:"format,omitempty"` // rfc5424|json
 }
 
 type SyslogForwarder struct {
@@ -1110,6 +1113,47 @@ func validateServices(s ServicesConfig) error {
 	if err := validateVPN(s.VPN); err != nil {
 		return err
 	}
+	if err := validateAV(s.AV); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateAV(cfg AVConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if mode == "" {
+		mode = "icap"
+	}
+	switch mode {
+	case "icap", "clamav":
+	default:
+		return fmt.Errorf("services.av.mode must be icap or clamav")
+	}
+	fail := strings.ToLower(strings.TrimSpace(cfg.FailPolicy))
+	if fail == "" {
+		fail = "open"
+	}
+	if fail != "open" && fail != "closed" {
+		return fmt.Errorf("services.av.failPolicy must be open or closed")
+	}
+	if mode == "icap" {
+		if len(cfg.ICAP.Servers) == 0 {
+			return fmt.Errorf("services.av.icap.servers must not be empty when mode=icap")
+		}
+		for i, s := range cfg.ICAP.Servers {
+			if strings.TrimSpace(s.Address) == "" {
+				return fmt.Errorf("services.av.icap.servers[%d].address required", i)
+			}
+		}
+	}
+	if mode == "clamav" {
+		if strings.TrimSpace(cfg.ClamAV.SocketPath) == "" {
+			return fmt.Errorf("services.av.clamav.socketPath required when mode=clamav")
+		}
+	}
 	return nil
 }
 
@@ -1317,4 +1361,32 @@ func validateIDS(ids IDSConfig) error {
 		}
 	}
 	return nil
+}
+type AVConfig struct {
+	Enabled      bool          `json:"enabled"`
+	Mode         string        `json:"mode,omitempty"`         // icap|clamav
+	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
+	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
+	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // ICAP scan timeout
+	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // verdict cache TTL
+	ICAP         ICAPConfig    `json:"icap,omitempty"`
+	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
+}
+
+type ICAPConfig struct {
+	Servers []ICAPServer `json:"servers,omitempty"`
+	// Future: service-specific toggles (REQMOD/RESPMOD).
+}
+
+type ICAPServer struct {
+	Address string `json:"address"` // host:port
+	UseTLS  bool   `json:"useTls,omitempty"`
+	Service string `json:"service,omitempty"` // e.g., avscan or reqmod/respmod URI
+}
+
+type ClamAVConfig struct {
+	SocketPath       string `json:"socketPath,omitempty"`       // e.g., /var/run/clamav/clamd.sock
+	UpdateSchedule   string `json:"updateSchedule,omitempty"`   // cron-ish or interval string
+	CustomDefsPath   string `json:"customDefsPath,omitempty"`   // directory for custom .ndb/yara rules
+	FreshclamEnabled bool   `json:"freshclamEnabled,omitempty"` // enable automatic updates
 }

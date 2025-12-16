@@ -132,7 +132,7 @@ fi
 rm -f "$tmp_cfg_resp" "$tmp_cfg_err"
 
 # Bypass commit in the harness; push snapshot directly to engine.
-ENGINE=${ENGINE:-http://localhost:8081}
+ENGINE=${ENGINE:-http://localhost:18081}
 log "Fetching compiled snapshot from mgmt..."
 tmp_ruleset=$(mktemp)
 if ! $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$tmp_ruleset"; then
@@ -187,11 +187,8 @@ echo "$WAN_ROUTE" | grep -q "via 172.30.0.2" || { log "wan_server route not via 
 LAN_TGT_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route get 172.30.0.3 | tr -d '\r')
 echo "$LAN_TGT_ROUTE" | grep -q "via 172.31.0.2" || { log "lan_target route not via engine: $LAN_TGT_ROUTE"; exit 1; }
 
-log "Ensuring wan_server has curl for DNAT check..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "command -v curl >/dev/null || apk add --no-cache curl >/dev/null"
-
 log "Snapshotting DNAT counter before tests..."
-DNAT_PKTS_BEFORE=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}')
+DNAT_PKTS_BEFORE=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
 
 log "Testing LAN -> WAN HTTP (lan_client -> wan_server:8080)..."
 docker compose -f "$COMPOSE_FILE" exec -T lan_client curl -svf http://172.30.0.3:8080 >/tmp/lan_wan.out 2>/tmp/lan_wan.err
@@ -216,7 +213,7 @@ else
 fi
 
 log "Testing DNAT WAN:8081 -> LAN target:80 (from wan_server)..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server curl -svf http://172.30.0.2:8081 >/tmp/wan_dnat.out 2>/tmp/wan_dnat.err
+docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_dnat.out 2>/tmp/wan_dnat.err
 DNAT_STATUS=$?
 if [[ $DNAT_STATUS -ne 0 ]]; then
   log "WAN DNAT failed (exit $DNAT_STATUS):"; cat /tmp/wan_dnat.err; exit 1
@@ -224,7 +221,7 @@ fi
 pass "WAN DNAT success (first line: $(head -n1 /tmp/wan_dnat.out))"
 
 log "Testing WAN direct to LAN (should be blocked: wan_server -> 172.31.0.4:80)..."
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server curl -m 5 -sf http://172.31.0.4:80 >/tmp/wan_direct.out 2>/tmp/wan_direct.err; then
+if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.31.0.4:80" >/tmp/wan_direct.out 2>/tmp/wan_direct.err; then
   log "Unexpected allow: wan_server reached 172.31.0.4:80"; exit 1
 else
   pass "WAN direct to LAN HTTP correctly blocked"
@@ -238,10 +235,10 @@ else
 fi
 
 log "Checking nft counters for NAT and forward paths..."
-DNAT_PKTS_AFTER=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}')
-POST_PKTS=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd postrouting | awk '/masquerade/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}')
-FWD_LAN_WAN=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 8080/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}')
-FWD_WAN_DNAT=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 80/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}')
+DNAT_PKTS_AFTER=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+POST_PKTS=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd postrouting | awk '/masquerade/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+FWD_LAN_WAN=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 8080/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+FWD_WAN_DNAT=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 80/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
 if [[ -n "$DNAT_PKTS_BEFORE" && -n "$DNAT_PKTS_AFTER" ]]; then
   if (( DNAT_PKTS_AFTER <= DNAT_PKTS_BEFORE )); then
     log "DNAT counter did not increment (before=$DNAT_PKTS_BEFORE after=$DNAT_PKTS_AFTER)"; exit 1
@@ -257,7 +254,7 @@ docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del 172.30.0.0/24 
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del default || true
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable 172.30.0.0/24 || true
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable default || true
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server curl -m 5 -sf http://172.30.0.2:8081 >/tmp/wan_noroute.out 2>/tmp/wan_noroute.err; then
+if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_noroute.out 2>/tmp/wan_noroute.err; then
   log "Unexpected success with no route present"; exit 1
 else
   pass "No-route check passed (traffic failed as expected)"
@@ -278,7 +275,7 @@ else
 fi
 
 log "Re-testing DNAT after route restoration..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server curl -svf http://172.30.0.2:8081 >/tmp/wan_dnat2.out 2>/tmp/wan_dnat2.err
+docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_dnat2.out 2>/tmp/wan_dnat2.err
 if [[ $? -ne 0 ]]; then
   log "WAN DNAT after restore failed:"; cat /tmp/wan_dnat2.err; exit 1
 fi

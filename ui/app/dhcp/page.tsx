@@ -39,12 +39,15 @@ function textToPools(text: string): DHCPPool[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
+  const [status, setStatus] = useState<any>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
   const [leaseError, setLeaseError] = useState<string | null>(null);
 
   async function refresh() {
+    const svc = await api.getServicesStatus();
+    setStatus((svc as any)?.dhcp ?? null);
     const s = await api.getDHCP();
     setCfg(normalize(s));
   }
@@ -116,6 +119,28 @@ export default function DHCPPage() {
           {error}
         </div>
       )}
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+          <div>
+            Enabled: <span className="text-slate-100">{status?.enabled ? "yes" : "no"}</span>
+          </div>
+          <div>
+            Pools: <span className="text-slate-100">{status?.pools ?? 0}</span>
+          </div>
+          <div>
+            Listen ifaces: <span className="text-slate-100">{status?.listen_ifaces ?? 0}</span>
+          </div>
+          {status?.last_error ? (
+            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+              {status.last_error}
+            </div>
+          ) : null}
+          {status?.note ? (
+            <div className="md:col-span-2 text-xs text-slate-400">{status.note}</div>
+          ) : null}
+        </div>
+      </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-lg font-semibold text-white">DHCPv4 Server</h2>
