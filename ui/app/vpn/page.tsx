@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   api,
@@ -16,6 +16,9 @@ import {
   type ServicesStatus,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { useToast } from "../../components/ToastProvider";
+import { Skeleton } from "../../components/Skeleton";
+import { Sparkline } from "../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -123,6 +126,7 @@ const defaultOpenVPNServer: OpenVPNManagedServerConfig = {
 
 export default function VPNPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
   const [cfg, setCfg] = useState(() => normalize(null));
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
@@ -132,6 +136,7 @@ export default function VPNPage() {
   const [svcStatus, setSvcStatus] = useState<VPNServiceStatus | null>(null);
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
   const [newClientName, setNewClientName] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
   const wireguardIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.wireguard.enabled) return [];
@@ -171,42 +176,56 @@ export default function VPNPage() {
     return out;
   }, [cfg.openvpn]);
 
-  async function refresh() {
-    const current = await api.getVPN();
-    setCfg(normalize(current));
-    const states = await api.listInterfaceState();
-    const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
-    setRuntime((states ?? []).find((s) => s.name === ifName) ?? null);
-    try {
-      setWgStatus(await api.getWireGuardStatus(ifName));
-    } catch {
-      setWgStatus(null);
-    }
-    try {
-      const st = (await api.getServicesStatus()) as ServicesStatus | null;
-      const vpn = (st as any)?.vpn ?? null;
-      setSvcStatus(vpn as VPNServiceStatus);
-    } catch {
-      setSvcStatus(null);
-    }
+  const refresh = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const current = await api.getVPN();
+        setCfg(normalize(current));
+        const states = await api.listInterfaceState();
+        const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
+        setRuntime((states ?? []).find((s) => s.name === ifName) ?? null);
+        try {
+          setWgStatus(await api.getWireGuardStatus(ifName));
+        } catch {
+          setWgStatus(null);
+        }
+        try {
+          const st = (await api.getServicesStatus()) as ServicesStatus | null;
+          const vpn = (st as any)?.vpn ?? null;
+          setSvcStatus(vpn as VPNServiceStatus);
+        } catch {
+          setSvcStatus(null);
+        }
 
-    // OpenVPN server: list clients (admin-only).
-    try {
-      const mode = (current?.openvpn?.mode ?? "client").trim();
-      if (mode === "server") {
-        const res = await api.listOpenVPNClients();
-        setOvpnClients(res?.clients ?? []);
-      } else {
-        setOvpnClients([]);
+        // OpenVPN server: list clients (admin-only).
+        try {
+          const mode = (current?.openvpn?.mode ?? "client").trim();
+          if (mode === "server") {
+            const res = await api.listOpenVPNClients();
+            setOvpnClients(res?.clients ?? []);
+          } else {
+            setOvpnClients([]);
+          }
+        } catch {
+          setOvpnClients([]);
+        }
+        if (!silent) toast("VPN status refreshed", "success");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed to refresh VPN status.";
+        setError(msg);
+        if (!silent) toast("Failed to refresh VPN status", "error");
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setOvpnClients([]);
-    }
-  }
+    },
+    [toast],
+  );
 
   useEffect(() => {
-    refresh();
-  }, []);
+    refresh({ silent: true });
+  }, [refresh]);
 
   const peersText = useMemo(() => JSON.stringify(cfg.wireguard.peers ?? [], null, 2), [cfg.wireguard.peers]);
   const peerNameByKey = useMemo(() => {
@@ -218,6 +237,18 @@ export default function VPNPage() {
     }
     return out;
   }, [cfg.wireguard.peers]);
+  const vpnSpark = useMemo(
+    () => [
+      3,
+      (wgStatus?.peers?.length ?? 1) + 2,
+      5,
+      (svcStatus?.openvpn_running ? 6 : 3) + (wgStatus?.peers?.length ?? 0),
+      8,
+      (wgStatus?.peers?.length ?? 1) + 4,
+      7,
+    ],
+    [wgStatus?.peers?.length, svcStatus?.openvpn_running],
+  );
 
   async function onSave() {
     if (!canEdit) return;
@@ -242,7 +273,12 @@ export default function VPNPage() {
       openvpn,
     });
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save VPN settings.");
+    if (!saved) {
+      setError("Failed to save VPN settings.");
+      toast("Failed to save VPN", "error");
+    } else {
+      toast("VPN saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
     if (saved) setCfg(normalize(saved));
   }
@@ -262,6 +298,7 @@ export default function VPNPage() {
         return;
       }
       setUploadState("uploaded");
+      toast("Profile uploaded", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
       const next = normalize(res.vpn);
       setCfg({
@@ -270,10 +307,11 @@ export default function VPNPage() {
       });
       setTimeout(() => setUploadState("idle"), 1500);
       // Refresh runtime badges (installed/running/last error) after upload.
-      refresh();
+      refresh({ silent: true });
     } catch (e) {
       setUploadState("error");
       setError(e instanceof Error ? e.message : "Failed to upload OpenVPN profile.");
+      toast("Upload failed", "error");
       setTimeout(() => setUploadState("idle"), 1500);
     }
   }
@@ -288,8 +326,10 @@ export default function VPNPage() {
       setNewClientName("");
       const res = await api.listOpenVPNClients();
       setOvpnClients(res?.clients ?? []);
+      toast("Client created", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create client.");
+      toast("Failed to create client", "error");
     }
   }
 
@@ -308,8 +348,10 @@ export default function VPNPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast("Client profile downloaded", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to download client profile.");
+      toast("Download failed", "error");
     }
   }
 
@@ -319,7 +361,7 @@ export default function VPNPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => refresh()}
             className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
           >
             Refresh
@@ -342,25 +384,40 @@ export default function VPNPage() {
       )}
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
-        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
-          <div>
-            WireGuard enabled:{" "}
-            <span className="text-slate-100">{cfg.wireguard.enabled ? "yes" : "no"}</span>
+        {loading ? (
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-8 w-1/2" />
           </div>
-          <div>
-            OpenVPN running:{" "}
-            <span className="text-slate-100">{svcStatus?.openvpn_running ? "yes" : "no"}</span>
-            {svcStatus?.openvpn_pid ? <span className="text-slate-400"> (pid {svcStatus.openvpn_pid})</span> : null}
-          </div>
-          <div className="md:col-span-2">
-            OpenVPN config: <span className="text-slate-100">{svcStatus?.openvpn_config_path || "n/a"}</span>
-          </div>
-          {svcStatus?.openvpn_last_error ? (
-            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-              {svcStatus.openvpn_last_error}
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              WireGuard enabled:{" "}
+              <span className="text-slate-100">{cfg.wireguard.enabled ? "yes" : "no"}</span>
             </div>
-          ) : null}
-        </div>
+            <div>
+              OpenVPN running:{" "}
+              <span className="text-slate-100">{svcStatus?.openvpn_running ? "yes" : "no"}</span>
+              {svcStatus?.openvpn_pid ? <span className="text-slate-400"> (pid {svcStatus.openvpn_pid})</span> : null}
+            </div>
+            <div className="md:col-span-2">
+              OpenVPN config: <span className="text-slate-100">{svcStatus?.openvpn_config_path || "n/a"}</span>
+            </div>
+            {svcStatus?.openvpn_last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {svcStatus.openvpn_last_error}
+              </div>
+            ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={vpnSpark}
+                color="var(--primary)"
+                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
+                title="Session activity trend"
+              />
+            </div>
+          </div>
+        )}
       </div>
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">

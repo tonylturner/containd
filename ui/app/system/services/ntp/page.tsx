@@ -6,6 +6,7 @@ import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -41,6 +42,10 @@ export default function NTPPage() {
 
   const serversText = useMemo(
     () => (cfg.servers ?? []).join("\n"),
+    [cfg.servers],
+  );
+  const ntpSpark = useMemo(
+    () => [2, 3, 5, (cfg.servers?.length ?? 1) + 4, 6, 5, 7],
     [cfg.servers],
   );
 
@@ -123,6 +128,14 @@ export default function NTPPage() {
                 {status.last_error}
               </div>
             ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={ntpSpark}
+                color="var(--teal)"
+                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                title="NTP sync trend (simulated)"
+              />
+            </div>
           </div>
         )}
       </div>

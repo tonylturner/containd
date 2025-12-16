@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { useToast } from "../../components/ToastProvider";
+import { Skeleton } from "../../components/Skeleton";
+import { Sparkline } from "../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -38,42 +41,60 @@ function textToPools(text: string): DHCPPool[] {
 
 export default function DHCPPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
   const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
   const [status, setStatus] = useState<any>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
   const [leaseError, setLeaseError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [leasesLoading, setLeasesLoading] = useState(false);
 
-  async function refresh() {
-    const svc = await api.getServicesStatus();
-    setStatus((svc as any)?.dhcp ?? null);
-    const s = await api.getDHCP();
-    setCfg(normalize(s));
-  }
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const svc = await api.getServicesStatus();
+      setStatus((svc as any)?.dhcp ?? null);
+      const s = await api.getDHCP();
+      setCfg(normalize(s));
+      toast("DHCP status refreshed", "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to refresh DHCP status.");
+      toast("Failed to refresh DHCP status", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
-  async function refreshLeases() {
+  const refreshLeases = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     setLeaseError(null);
+    setLeasesLoading(true);
     try {
       const r = await api.listDHCPLeases();
       setLeases(r?.leases ?? []);
+      if (!silent) toast("Leases updated", "success");
     } catch (e) {
       setLeaseError(e instanceof Error ? e.message : "Failed to load DHCP leases.");
       setLeases([]);
+      if (!silent) toast("Failed to load leases", "error");
+    } finally {
+      setLeasesLoading(false);
     }
-  }
+  }, [toast]);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     refreshLeases();
     const t = window.setInterval(() => {
-      refreshLeases();
+      refreshLeases({ silent: true });
     }, 10_000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [refreshLeases]);
 
   const listenIfacesText = useMemo(() => (cfg.listenIfaces ?? []).join(", "), [cfg.listenIfaces]);
   const dnsServersText = useMemo(() => (cfg.dnsServers ?? []).join(", "), [cfg.dnsServers]);
@@ -85,7 +106,12 @@ export default function DHCPPage() {
     setSaveState("saving");
     const saved = await api.setDHCP(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save DHCP settings.");
+    if (!saved) {
+      setError("Failed to save DHCP settings.");
+      toast("Failed to save DHCP", "error");
+    } else {
+      toast("DHCP saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
     if (saved) setCfg(normalize(saved));
   }
@@ -121,25 +147,40 @@ export default function DHCPPage() {
       )}
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
-        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
-          <div>
-            Enabled: <span className="text-slate-100">{status?.enabled ? "yes" : "no"}</span>
+        {loading ? (
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-8 w-1/2" />
           </div>
-          <div>
-            Pools: <span className="text-slate-100">{status?.pools ?? 0}</span>
-          </div>
-          <div>
-            Listen ifaces: <span className="text-slate-100">{status?.listen_ifaces ?? 0}</span>
-          </div>
-          {status?.last_error ? (
-            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-              {status.last_error}
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              Enabled: <span className="text-slate-100">{status?.enabled ? "yes" : "no"}</span>
             </div>
-          ) : null}
-          {status?.note ? (
-            <div className="md:col-span-2 text-xs text-slate-400">{status.note}</div>
-          ) : null}
-        </div>
+            <div>
+              Pools: <span className="text-slate-100">{status?.pools ?? 0}</span>
+            </div>
+            <div>
+              Listen ifaces: <span className="text-slate-100">{status?.listen_ifaces ?? 0}</span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {status.last_error}
+              </div>
+            ) : null}
+            {status?.note ? (
+              <div className="md:col-span-2 text-xs text-slate-400">{status.note}</div>
+            ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={[3, 6, 5, leases.length || 4, 7, 9, Math.max(leases.length, 5)]}
+                color="var(--teal)"
+                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                title="Lease churn (simulated trend)"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
@@ -277,8 +318,8 @@ export default function DHCPPage() {
             <p className="mt-1 text-sm text-slate-300">Leases issued by the embedded DHCP server (best-effort).</p>
           </div>
           <button
-            onClick={refreshLeases}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            onClick={() => refreshLeases()}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
           >
             Refresh
           </button>
@@ -291,36 +332,44 @@ export default function DHCPPage() {
         )}
 
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
-          <table className="w-full text-left text-sm text-slate-200">
-            <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-3 py-2">Iface</th>
-                <th className="px-3 py-2">IP</th>
-                <th className="px-3 py-2">MAC</th>
-                <th className="px-3 py-2">Hostname</th>
-                <th className="px-3 py-2">Expires</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leases.length === 0 ? (
-                <tr className="border-t border-white/10">
-                  <td colSpan={5} className="px-3 py-3 text-sm text-slate-400">
-                    No leases.
-                  </td>
+          {leasesLoading ? (
+            <div className="space-y-2 p-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm text-slate-200">
+              <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Iface</th>
+                  <th className="px-3 py-2">IP</th>
+                  <th className="px-3 py-2">MAC</th>
+                  <th className="px-3 py-2">Hostname</th>
+                  <th className="px-3 py-2">Expires</th>
                 </tr>
-              ) : (
-                leases.map((l) => (
-                  <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-white/10">
-                    <td className="px-3 py-2 font-mono text-xs">{l.iface}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{l.ip}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{l.mac}</td>
-                    <td className="px-3 py-2">{l.hostname || "—"}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{l.expiresAt}</td>
+              </thead>
+              <tbody>
+                {leases.length === 0 ? (
+                  <tr className="border-t border-white/10">
+                    <td colSpan={5} className="px-3 py-3 text-sm text-slate-400">
+                      No leases.
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  leases.map((l) => (
+                    <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-white/10">
+                      <td className="px-3 py-2 font-mono text-xs">{l.iface}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{l.ip}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{l.mac}</td>
+                      <td className="px-3 py-2">{l.hostname || "—"}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{l.expiresAt}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </Shell>

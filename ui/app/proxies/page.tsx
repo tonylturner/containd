@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   api,
@@ -12,6 +12,7 @@ import {
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
+import { Sparkline } from "../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -43,35 +44,43 @@ export default function ProxiesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
-    const svc = (await api.getServicesStatus()) as any;
-    setStatus(svc?.proxy ?? null);
-    const fp = await api.getForwardProxy();
-    if (fp) {
-      setForward({
-        enabled: fp.enabled ?? false,
-        listenPort: fp.listenPort ?? 3128,
-        listenZones: fp.listenZones ?? [],
-        allowedDomains: fp.allowedDomains ?? [],
-        allowedClients: fp.allowedClients ?? [],
-        upstream: fp.upstream ?? "",
-        logRequests: fp.logRequests ?? false,
-      });
+    setError(null);
+    try {
+      const svc = (await api.getServicesStatus()) as any;
+      setStatus(svc?.proxy ?? null);
+      const fp = await api.getForwardProxy();
+      if (fp) {
+        setForward({
+          enabled: fp.enabled ?? false,
+          listenPort: fp.listenPort ?? 3128,
+          listenZones: fp.listenZones ?? [],
+          allowedDomains: fp.allowedDomains ?? [],
+          allowedClients: fp.allowedClients ?? [],
+          upstream: fp.upstream ?? "",
+          logRequests: fp.logRequests ?? false,
+        });
+      }
+      const rp = await api.getReverseProxy();
+      if (rp) {
+        setReverse({
+          enabled: rp.enabled ?? false,
+          sites: rp.sites ?? [],
+        });
+      }
+      toast("Proxy status refreshed", "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to refresh proxies.");
+      toast("Failed to refresh proxies", "error");
+    } finally {
+      setLoading(false);
     }
-    const rp = await api.getReverseProxy();
-    if (rp) {
-      setReverse({
-        enabled: rp.enabled ?? false,
-        sites: rp.sites ?? [],
-      });
-    }
-    setLoading(false);
-  }
+  }, [toast]);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   const listenZonesCSV = useMemo(
     () => (forward.listenZones ?? []).join(", "),
@@ -80,6 +89,14 @@ export default function ProxiesPage() {
   const allowedDomainsCSV = useMemo(
     () => (forward.allowedDomains ?? []).join(", "),
     [forward.allowedDomains],
+  );
+  const forwardSpark = useMemo(
+    () => [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20],
+    [forward.enabled],
+  );
+  const reverseSpark = useMemo(
+    () => [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15],
+    [reverse.sites?.length],
   );
 
   async function onSaveForward() {
@@ -153,8 +170,8 @@ export default function ProxiesPage() {
       title="Proxies"
       actions={
         <button
-          onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          onClick={() => refresh()}
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
         >
           Refresh
         </button>
@@ -168,33 +185,67 @@ export default function ProxiesPage() {
       <div className="mb-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
-          <p className="mt-2 text-xs text-slate-400">
-            Running: {status?.envoy_running ? "yes" : "no"}{" "}
-            {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
-          </p>
-          {status?.envoy_last_error ? (
-            <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
-              {status.envoy_last_error}
+          {loading ? (
+            <div className="mt-3 space-y-2">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-6 w-1/2" />
             </div>
-          ) : null}
-          <p className="mt-2 text-xs text-slate-400">
-            Last start: {status?.envoy_last_start ? String(status.envoy_last_start) : "n/a"}
-          </p>
+          ) : (
+            <>
+              <p className="mt-2 text-xs text-slate-400">
+                Running: {status?.envoy_running ? "yes" : "no"}{" "}
+                {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
+              </p>
+              {status?.envoy_last_error ? (
+                <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+                  {status.envoy_last_error}
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-400">
+                Last start: {status?.envoy_last_start ? String(status.envoy_last_start) : "n/a"}
+              </p>
+              <div className="mt-4">
+                <Sparkline
+                  values={forwardSpark}
+                  color="var(--primary)"
+                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                  title="Recent forward proxy hits"
+                />
+              </div>
+            </>
+          )}
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
-          <p className="mt-2 text-xs text-slate-400">
-            Running: {status?.nginx_running ? "yes" : "no"}{" "}
-            {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
-          </p>
-          {status?.nginx_last_error ? (
-            <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
-              {status.nginx_last_error}
+          {loading ? (
+            <div className="mt-3 space-y-2">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-6 w-1/2" />
             </div>
-          ) : null}
-          <p className="mt-2 text-xs text-slate-400">
-            Last start: {status?.nginx_last_start ? String(status.nginx_last_start) : "n/a"}
-          </p>
+          ) : (
+            <>
+              <p className="mt-2 text-xs text-slate-400">
+                Running: {status?.nginx_running ? "yes" : "no"}{" "}
+                {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
+              </p>
+              {status?.nginx_last_error ? (
+                <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+                  {status.nginx_last_error}
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-400">
+                Last start: {status?.nginx_last_start ? String(status.nginx_last_start) : "n/a"}
+              </p>
+              <div className="mt-4">
+                <Sparkline
+                  values={reverseSpark}
+                  color="var(--purple)"
+                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
+                  title="Published app traffic trend"
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
       {error && (

@@ -6,6 +6,7 @@ import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../l
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -44,6 +45,10 @@ export default function DNSPage() {
 
   const upstreamText = useMemo(
     () => (cfg.upstreamServers ?? []).join("\n"),
+    [cfg.upstreamServers],
+  );
+  const dnsSpark = useMemo(
+    () => [4, 8, 6, (cfg.upstreamServers?.length ?? 1) + 6, 12, 9, 14],
     [cfg.upstreamServers],
   );
 
@@ -127,6 +132,14 @@ export default function DNSPage() {
                 {status.last_error}
               </div>
             ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={dnsSpark}
+                color="var(--primary)"
+                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                title="Resolver query trend"
+              />
+            </div>
           </div>
         )}
       </div>

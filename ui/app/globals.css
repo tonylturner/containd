@@ -15,6 +15,10 @@
   --success: #10b981;
   --warning: #fbbf24;
   --error: #ef4444;
+  --purple: #8b5cf6;
+  --teal: #06b6d4;
+  --pink: #ec4899;
+  --orange: #f97316;
   --card-shadow: rgba(0, 0, 0, 0.5);
   background-color: var(--bg);
   color: var(--text);
