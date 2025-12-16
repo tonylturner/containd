@@ -61,6 +61,7 @@ function Badge({ tone, children, title }: { tone: "ok" | "warn" | "off" | "info"
 type VPNServiceStatus = {
   openvpn_installed?: boolean;
   openvpn_running?: boolean;
+  openvpn_pid?: number;
   openvpn_config_path?: string;
   openvpn_last_error?: string;
 };

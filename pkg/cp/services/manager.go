@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -162,6 +163,14 @@ func (m *Manager) Validate(ctx context.Context, cfg config.ServicesConfig) error
 	return nil
 }
 
+// StartAVWorker starts the AV scan worker in the background.
+func (m *Manager) StartAVWorker(ctx context.Context) {
+	if m == nil || m.AV == nil {
+		return
+	}
+	m.AV.StartWorker(ctx)
+}
+
 // Apply updates in-memory configs and renders service config files.
 func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 	if m.Syslog != nil {
@@ -202,6 +211,14 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 	return nil
 }
 
+// TriggerAVUpdate runs a freshclam update once (best-effort) when available.
+func (m *Manager) TriggerAVUpdate(ctx context.Context) error {
+	if m == nil || m.AV == nil {
+		return fmt.Errorf("av manager unavailable")
+	}
+	return m.AV.RunFreshclamNow(ctx)
+}
+
 // Status returns a basic status bundle for UI/CLI.
 func (m *Manager) Status() any {
 	out := map[string]any{}
@@ -227,6 +244,14 @@ func (m *Manager) Status() any {
 		out["av"] = m.AV.Status()
 	}
 	return out
+}
+
+// CustomDefsPath proxies to AV manager for API handlers.
+func (m *Manager) CustomDefsPath() string {
+	if m == nil || m.AV == nil {
+		return ""
+	}
+	return m.AV.CustomDefsPath()
 }
 
 // SetEventLister provides a function that returns recent events (newest-first) for syslog forwarding.

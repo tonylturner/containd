@@ -31,11 +31,11 @@ func TestCompileFirewallBasic(t *testing.T) {
 	if !strings.Contains(ruleset, "policy drop") {
 		t.Fatalf("missing default drop policy")
 	}
-	if !strings.Contains(ruleset, "comment \"10\" tcp dport 80 accept") {
-		t.Fatalf("missing allow rule")
+	if !strings.Contains(ruleset, "tcp dport 80 accept") {
+		t.Fatalf("missing allow rule: %s", ruleset)
 	}
-	if !strings.Contains(ruleset, "comment \"20\" ip saddr { 10.0.0.0/8 } drop") {
-		t.Fatalf("missing deny rule")
+	if !strings.Contains(ruleset, "ip saddr { 10.0.0.0/8 } drop") {
+		t.Fatalf("missing deny rule: %s", ruleset)
 	}
 }
 

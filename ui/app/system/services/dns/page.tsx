@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
+import { useToast } from "../../../../components/ToastProvider";
+import { Skeleton } from "../../../../components/Skeleton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function DNSPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
   const [status, setStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<DNSConfig>({
     enabled: false,
@@ -18,8 +21,10 @@ export default function DNSPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function refresh() {
+    setLoading(true);
     const svc = (await api.getServicesStatus()) as ServicesStatus | any;
     setStatus((svc as any)?.dns ?? null);
     const s = await api.getDNS();
@@ -30,6 +35,7 @@ export default function DNSPage() {
       upstreamServers: s?.upstreamServers ?? [],
       cacheSizeMB: s?.cacheSizeMB ?? 0,
     });
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -47,9 +53,14 @@ export default function DNSPage() {
     setSaveState("saving");
     const saved = await api.setDNS(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save DNS settings.");
+    if (!saved) {
+      setError("Failed to save DNS settings.");
+      toast("Failed to save DNS settings", "error");
+    } else {
+      setCfg(saved);
+      toast("DNS settings saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(saved);
     await refresh();
   }
 
@@ -88,30 +99,36 @@ export default function DNSPage() {
 
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
-        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
-          <div>
-            Installed:{" "}
-            <span className="text-slate-100">
-              {status?.installed ? "yes" : "no"}
-            </span>
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
           </div>
-          <div>
-            Running:{" "}
-            <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
-            {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
-          </div>
-          <div className="md:col-span-2">
-            Config:{" "}
-            <span className="text-slate-100">
-              {status?.config_path ?? "(unknown)"}
-            </span>
-          </div>
-          {status?.last_error ? (
-            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-              {status.last_error}
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              Installed:{" "}
+              <span className="text-slate-100">
+                {status?.installed ? "yes" : "no"}
+              </span>
             </div>
-          ) : null}
-        </div>
+            <div>
+              Running:{" "}
+              <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
+            </div>
+            <div className="md:col-span-2">
+              Config:{" "}
+              <span className="text-slate-100">
+                {status?.config_path ?? "(unknown)"}
+              </span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {status.last_error}
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">

@@ -1139,6 +1139,10 @@ func validateAV(cfg AVConfig) error {
 	if fail != "open" && fail != "closed" {
 		return fmt.Errorf("services.av.failPolicy must be open or closed")
 	}
+	// Default to fail-open for ICS traffic unless explicitly disabled.
+	if !cfg.FailOpenICS {
+		// keep as provided; default handled in manager
+	}
 	if mode == "icap" {
 		if len(cfg.ICAP.Servers) == 0 {
 			return fmt.Errorf("services.av.icap.servers must not be empty when mode=icap")
@@ -1362,15 +1366,20 @@ func validateIDS(ids IDSConfig) error {
 	}
 	return nil
 }
+
 type AVConfig struct {
 	Enabled      bool          `json:"enabled"`
-	Mode         string        `json:"mode,omitempty"`         // icap|clamav
-	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
-	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
-	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // ICAP scan timeout
-	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // verdict cache TTL
+	Mode         string        `json:"mode,omitempty"`            // icap|clamav
+	FailPolicy   string        `json:"failPolicy,omitempty"`      // open|closed
+	FailOpenICS  bool          `json:"failOpenIcs,omitempty"`     // force fail-open for ICS protocols
+	BlockTTL     int           `json:"blockTtlSeconds,omitempty"` // seconds to keep dynamic blocks on malware
+	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"`    // 0 = unlimited
+	TimeoutSec   int           `json:"timeoutSec,omitempty"`      // ICAP scan timeout
+	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`        // verdict cache TTL
 	ICAP         ICAPConfig    `json:"icap,omitempty"`
 	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
+	HTTPDownload bool          `json:"httpDownload,omitempty"` // scan HTTP responses
+	HTTPUpload   bool          `json:"httpUpload,omitempty"`   // scan HTTP requests/uploads
 }
 
 type ICAPConfig struct {

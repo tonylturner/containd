@@ -337,6 +337,28 @@ export type SyslogConfig = {
   format?: "rfc5424" | "json";
 };
 
+export type ClamAVConfig = {
+  socketPath?: string;
+  updateSchedule?: string;
+  customDefsPath?: string;
+  freshclamEnabled?: boolean;
+};
+
+export type AVConfig = {
+  enabled: boolean;
+  mode?: "icap" | "clamav";
+  failPolicy?: "open" | "closed";
+  failOpenIcs?: boolean;
+  blockTtlSeconds?: number;
+  maxSizeBytes?: number;
+  timeoutSec?: number;
+  cacheTtl?: string;
+  icap?: {
+    servers?: { address: string; useTls?: boolean; service?: string }[];
+  };
+  clamav?: ClamAVConfig;
+};
+
 export type UserRole = "admin" | "view";
 
 export type User = {
@@ -534,6 +556,8 @@ export type FlowSummary = {
   transport?: string;
   application?: string;
   eventCount: number;
+  avDetected?: boolean;
+  avBlocked?: boolean;
 };
 
 export type ForwardProxyConfig = {
@@ -879,6 +903,24 @@ export const api = {
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
+  getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
+  setAV: (cfg: AVConfig) => postJSON<AVConfig>("/api/v1/services/av", cfg),
+  runAVUpdate: () => postJSON<{ status: string }>("/api/v1/services/av/update", {}),
+  listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
+  uploadAVDef: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/v1/services/av/defs", {
+      method: "POST",
+      body: form,
+    });
+    return res.ok;
+  },
+  deleteAVDef: async (file: string) => {
+    const params = new URLSearchParams({ file });
+    const res = await fetch(`/api/v1/services/av/defs?${params.toString()}`, { method: "DELETE" });
+    return res.ok;
+  },
   getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
   setDNS: (cfg: DNSConfig) => postJSON<DNSConfig>("/api/v1/services/dns", cfg),
   getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),

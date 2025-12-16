@@ -84,4 +84,3 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	}
 	return out, nil
 }
-

@@ -55,6 +55,39 @@ RUN set -eux; \
   cp --parents /usr/sbin/openntpd /out; \
   ldd /usr/sbin/openntpd | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
 
+FROM debian:bookworm-slim AS clamav
+RUN apt-get update && apt-get install -y --no-install-recommends clamav clamav-daemon clamav-freshclam ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+  mkdir -p /out; \
+  cp --parents /usr/sbin/clamd /out; \
+  cp --parents /usr/bin/freshclam /out; \
+  ldd /usr/sbin/clamd | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
+  ldd /usr/bin/freshclam | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
+  mkdir -p /out/etc/clamav /out/var/lib/clamav /out/var/run/clamav; \
+  printf '%s\n' \
+    "User root" \
+    "Foreground yes" \
+    "PidFile /var/run/clamav/clamd.pid" \
+    "LocalSocket /var/run/clamav/clamd.ctl" \
+    "LocalSocketMode 666" \
+    "FixStaleSocket yes" \
+    "DatabaseDirectory /var/lib/clamav" \
+    "LogTime yes" \
+    "ScanMail no" \
+    "ScanArchive yes" \
+    "MaxFileSize 100M" \
+    "MaxScanSize 200M" \
+    "TCPSocket 0" \
+    > /out/etc/clamav/clamd.conf; \
+  printf '%s\n' \
+    "DatabaseDirectory /var/lib/clamav" \
+    "Foreground yes" \
+    "DatabaseOwner root" \
+    "DNSDatabaseInfo current.cvd.clamav.net" \
+    "CompressLocalDatabase yes" \
+    > /out/etc/clamav/freshclam.conf; \
+  chown -R 65532:65532 /out/var/lib/clamav /out/var/run/clamav
+
 FROM alpine:3.20 AS tini
 RUN apk add --no-cache curl && \
     curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-static && \
@@ -86,6 +119,7 @@ COPY --from=unbound /out/ /
 COPY --from=nftables /out/ /
 COPY --from=openvpn /out/ /
 COPY --from=openntpd /out/ /
+COPY --from=clamav /out/ /
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 EXPOSE 8080
 ENTRYPOINT ["/sbin/tini", "--", "/usr/bin/containd"]

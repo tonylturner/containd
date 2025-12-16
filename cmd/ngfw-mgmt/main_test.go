@@ -43,4 +43,3 @@ func TestMgmtAllowedOnInterface_UnknownDefaultsAllow(t *testing.T) {
 		t.Fatalf("expected allow for empty iface (localhost/unknown)")
 	}
 }
-

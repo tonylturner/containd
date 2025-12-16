@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
+import { useToast } from "../../../../components/ToastProvider";
+import { Skeleton } from "../../../../components/Skeleton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function NTPPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
   const [status, setStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
@@ -17,8 +20,10 @@ export default function NTPPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function refresh() {
+    setLoading(true);
     const svc = (await api.getServicesStatus()) as any;
     setStatus(svc?.ntp ?? null);
     const s = await api.getNTP();
@@ -27,6 +32,7 @@ export default function NTPPage() {
       servers: s?.servers ?? [],
       intervalSeconds: s?.intervalSeconds ?? 0,
     });
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -44,7 +50,12 @@ export default function NTPPage() {
     setSaveState("saving");
     const saved = await api.setNTP(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save NTP settings.");
+    if (!saved) {
+      setError("Failed to save NTP settings.");
+      toast("Failed to save NTP settings", "error");
+    } else {
+      toast("NTP settings saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
     if (saved) setCfg(saved);
   }
@@ -84,30 +95,36 @@ export default function NTPPage() {
 
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
-        <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
-          <div>
-            Running:{" "}
-            <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
-            {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
           </div>
-          <div>
-            Last start:{" "}
-            <span className="text-slate-100">
-              {status?.last_start ?? "n/a"}
-            </span>
-          </div>
-          <div className="md:col-span-2">
-            Binary:{" "}
-            <span className="text-slate-100">
-              {status?.openntpd_path || "not found"}
-            </span>
-          </div>
-          {status?.last_error ? (
-            <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-              {status.last_error}
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              Running:{" "}
+              <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
             </div>
-          ) : null}
-        </div>
+            <div>
+              Last start:{" "}
+              <span className="text-slate-100">
+                {status?.last_start ?? "n/a"}
+              </span>
+            </div>
+            <div className="md:col-span-2">
+              Binary:{" "}
+              <span className="text-slate-100">
+                {status?.openntpd_path || "not found"}
+              </span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {status.last_error}
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">

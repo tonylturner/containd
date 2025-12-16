@@ -118,6 +118,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add Operations > Diagnostics page (graphical wrappers for `diag ping`, `diag traceroute`, `diag tcptraceroute`, plus interface connectivity probe).
     - [x] Add Interface Connectivity self-test mode (temporary listener) for TCP/UDP interface↔interface validation when no services are listening.
   - [x] Add in-app documentation (MkDocs Material) behind Help icon.
+  - [ ] Enforce `linear-dashboard-cursor-rule.md` for all UI work (strict palette, Linear-style dashboard) and continue UX polish (loading states, AV badges/links).
+  - [ ] Add dashboard KPI cards/sparklines using prescribed palette; apply skeletons/toasts across services pages (DNS/NTP/DHCP/VPN/Proxies), standardize buttons/badges to palette, and remove remaining hardcoded colors.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -133,7 +135,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add structured logging helper in `pkg/common`.
   - [x] Use helper in both binaries.
   - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
-  - [ ] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events.
+  - [~] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events (basic pipeline + format toggle done; error surfacing/richer events pending).
   - [ ] Add Prometheus metrics endpoint and telemetry sampling controls.
   - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations
@@ -153,7 +155,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [ ] Metrics for steering + cache (queue depth, drops, cache hit rate, p95/p99 classify time).
 - [ ] IDS/IPS
   - [~] Implement native IDS rules on DPI events; IPS verdicts update nftables sets and conntrack (IDS done, IPS pending).
-  - [ ] Plan antivirus/malware scanning hooks that avoid inline latency spikes (asynchronous file/event scanning, metadata-first) and draft ICAP integration for external scanners.
+  - [~] Plan antivirus/malware scanning hooks that avoid inline latency spikes (asynchronous file/event scanning, metadata-first) and draft ICAP integration for external scanners (mode selection, fail-open/closed, sizing/timeout in config).
+  - [~] Implement AV pipeline: ICAP client, async queue + verdict cache, optional embedded ClamAV supervision + freshclam/custom defs, policy hooks for file-bearing traffic; emit `service.av.*` events and surface in UI (HTTP preview → AV queue → block_flow on malware; ICS fail-open honored).
+  - [ ] AV UX hardening: custom defs upload/list/delete, dashboard counters, Services overview block TTL, “update now” feedback, and flow/event badges (partially done; delete/upload UI in place).
 
 - [ ] IT DPI + Proxies (per integrated spec)
   - [~] Service manager inside `containd` to supervise embedded daemons.

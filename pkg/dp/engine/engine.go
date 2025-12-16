@@ -31,6 +31,7 @@ type Engine struct {
 	dpiMgr        *dpi.Manager
 	eventStore    *events.Store
 	rulesetStatus atomic.Pointer[RulesetStatus]
+	avSink        AVSink
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -64,6 +65,7 @@ func New(cfg Config) (*Engine, error) {
 		itdpi.NewDNSDecoder(),
 		itdpi.NewTLSDecoder(),
 		itdpi.NewHTTPDecoder(),
+		itdpi.NewICSMarker(),
 		itdpi.NewPortDetector(),
 	)
 	if cfg.Enforce.Enabled {
@@ -239,6 +241,40 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	if e == nil || e.eventStore == nil {
 		return
 	}
+	for i := range evs {
+		evs[i] = itdpi.MarkICS(evs[i])
+	}
+	// Push HTTP previews to AV sink (if configured).
+	if e.avSink != nil {
+		src, dst := srcDestStrings(state)
+		for _, ev := range evs {
+			if ev.Proto != "http" {
+				continue
+			}
+			if ev.Kind != "request" && ev.Kind != "response" {
+				continue
+			}
+			preview, _ := ev.Attributes["preview"].([]byte)
+			hash, _ := ev.Attributes["hash"].(string)
+			if len(preview) == 0 {
+				continue
+			}
+			ics := isICSEvent(ev.Proto, ev.Kind)
+			task := AVScanTask{
+				Hash:      hash,
+				Direction: ev.Kind,
+				Proto:     "http",
+				Source:    src,
+				Dest:      dst,
+				FlowID:    ev.FlowID,
+				Preview:   preview,
+				ICS:       ics,
+			}
+			e.avSink.EnqueueAVScan(context.Background(), task)
+			// Drop preview from telemetry to avoid large payloads.
+			delete(ev.Attributes, "preview")
+		}
+	}
 	e.eventStore.Record(state, pkt, evs)
 	// Evaluate IDS rules over DPI events and record alerts.
 	snap := e.ruleSnap.Load()
@@ -257,6 +293,31 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 // Events returns the telemetry event store.
 func (e *Engine) Events() *events.Store {
 	return e.eventStore
+}
+
+// AVSink returns the currently configured AV sink, if any.
+func (e *Engine) AVSink() AVSink {
+	if e == nil {
+		return nil
+	}
+	return e.avSink
+}
+
+// Updater returns the dynamic nftables updater when enforcement is enabled.
+func (e *Engine) Updater() enforce.Updater {
+	if e == nil {
+		return nil
+	}
+	return e.updater
+}
+
+func isICSEvent(proto, kind string) bool {
+	switch strings.ToLower(proto) {
+	case "modbus", "dnp3", "iec104", "s7", "ics":
+		return true
+	}
+	_ = kind
+	return false
 }
 
 // Evaluate applies the current rule snapshot to a simple context.

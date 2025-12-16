@@ -10,11 +10,14 @@ import {
   type ReverseProxySite,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { useToast } from "../../components/ToastProvider";
+import { Skeleton } from "../../components/Skeleton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
   const [status, setStatus] = useState<any>(null);
   const [forward, setForward] = useState<ForwardProxyConfig>({
     enabled: false,
@@ -38,8 +41,10 @@ export default function ProxiesPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function refresh() {
+    setLoading(true);
     const svc = (await api.getServicesStatus()) as any;
     setStatus(svc?.proxy ?? null);
     const fp = await api.getForwardProxy();
@@ -61,6 +66,7 @@ export default function ProxiesPage() {
         sites: rp.sites ?? [],
       });
     }
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -82,7 +88,12 @@ export default function ProxiesPage() {
     setSaveState("saving");
     const saved = await api.setForwardProxy(forward);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save forward proxy settings.");
+    if (!saved) {
+      setError("Failed to save forward proxy settings.");
+      toast("Failed to save forward proxy settings", "error");
+    } else {
+      toast("Forward proxy saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
   }
 
@@ -92,7 +103,12 @@ export default function ProxiesPage() {
     setSaveState("saving");
     const saved = await api.setReverseProxy(reverse);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save reverse proxy settings.");
+    if (!saved) {
+      setError("Failed to save reverse proxy settings.");
+      toast("Failed to save reverse proxy settings", "error");
+    } else {
+      toast("Reverse proxy saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
   }
 

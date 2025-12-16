@@ -5,18 +5,23 @@ import { useEffect, useState } from "react";
 
 import { api, type ServicesStatus } from "../../../lib/api";
 import { Shell } from "../../../components/Shell";
+import { Skeleton } from "../../../components/Skeleton";
 
 export default function ServicesOverviewPage() {
   const [status, setStatus] = useState<ServicesStatus | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getServicesStatus().then((s) => setStatus(s));
+    api.getServicesStatus().then((s) => {
+      setStatus(s);
+      setLoading(false);
+    });
   }, []);
 
   return (
     <Shell title="Services">
       <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Syslog">
+        <Card title="Syslog" loading={loading}>
           <p className="text-sm text-slate-200">
             Forward unified events to external collectors.
           </p>
@@ -28,7 +33,7 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="Proxies">
+        <Card title="Proxies" loading={loading}>
           <p className="text-sm text-slate-200">
             Envoy forward proxy and Nginx reverse proxy.
           </p>
@@ -44,7 +49,7 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="DNS">
+        <Card title="DNS" loading={loading}>
           <p className="text-sm text-slate-200">
             Unbound resolver managed by containd.
           </p>
@@ -60,7 +65,7 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="NTP">
+        <Card title="NTP" loading={loading}>
           <p className="text-sm text-slate-200">
             OpenNTPD client managed by containd.
           </p>
@@ -76,7 +81,7 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="DHCP">
+        <Card title="DHCP" loading={loading}>
           <p className="text-sm text-slate-200">
             LAN DHCP server configuration.
           </p>
@@ -90,7 +95,7 @@ export default function ServicesOverviewPage() {
           </Link>
         </Card>
 
-        <Card title="VPN">
+        <Card title="VPN" loading={loading}>
           <p className="text-sm text-slate-200">
             WireGuard (preferred) and OpenVPN (optional).
           </p>
@@ -103,6 +108,33 @@ export default function ServicesOverviewPage() {
             Configure →
           </Link>
         </Card>
+
+        <Card title="Antivirus / ICAP" loading={loading}>
+          <p className="text-sm text-slate-200">
+            Optional async AV via ICAP or embedded ClamAV (non-blocking).
+          </p>
+          <p className="mt-2 text-xs text-slate-400">
+            Mode: {(status?.av as any)?.mode ?? "icap"}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
+            <br />
+            Block TTL: {(status?.av as any)?.block_ttl ?? "600"}s{" "}
+            {(status?.av as any)?.freshclam_last && `freshclam ${ (status?.av as any)?.freshclam_last }`}
+            {(status?.av as any)?.clamav_custom_defs && (
+              <>
+                <br />
+                Custom defs: {(status?.av as any)?.clamav_custom_defs}
+              </>
+            )}
+            {(status?.av as any)?.last_render && (
+              <>
+                <br />
+                Last update: {(status?.av as any)?.last_render}
+              </>
+            )}
+          </p>
+          <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+            Configure →
+          </Link>
+        </Card>
       </div>
     </Shell>
   );
@@ -111,16 +143,18 @@ export default function ServicesOverviewPage() {
 function Card({
   title,
   children,
+  loading = false,
 }: {
   title: string;
   children: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
         {title}
       </p>
-      <div className="mt-3">{children}</div>
+      <div className="mt-3">{loading ? <Skeleton className="h-16 w-full" /> : children}</div>
     </div>
   );
 }

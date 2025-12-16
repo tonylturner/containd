@@ -3,6 +3,8 @@ package itdpi
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -36,6 +38,10 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil
 	}
+	preview := pkt.Payload
+	if len(preview) > 4096 {
+		preview = preview[:4096]
+	}
 	// HTTP/2 cleartext preface.
 	if bytes.HasPrefix(pkt.Payload, []byte("PRI * HTTP/2.0")) {
 		ev := dpi.Event{
@@ -46,6 +52,8 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 				"transport": pkt.Proto,
 				"src_port":  pkt.SrcPort,
 				"dst_port":  pkt.DstPort,
+				"preview":   preview,
+				"hash":      hashBytes(preview),
 			},
 			Timestamp: time.Now().UTC(),
 		}
@@ -63,10 +71,12 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 			status = parts[1]
 		}
 		attrs := map[string]any{
-			"status":     status,
-			"transport":  pkt.Proto,
-			"src_port":   pkt.SrcPort,
-			"dst_port":   pkt.DstPort,
+			"status":    status,
+			"transport": pkt.Proto,
+			"src_port":  pkt.SrcPort,
+			"dst_port":  pkt.DstPort,
+			"preview":   preview,
+			"hash":      hashBytes(preview),
 		}
 		ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "response", Attributes: attrs, Timestamp: now}
 		return []dpi.Event{ev}, nil
@@ -106,6 +116,8 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 		"transport":  pkt.Proto,
 		"src_port":   pkt.SrcPort,
 		"dst_port":   pkt.DstPort,
+		"preview":    preview,
+		"hash":       hashBytes(preview),
 	}
 	ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "request", Attributes: attrs, Timestamp: now}
 	return []dpi.Event{ev}, nil
@@ -155,4 +167,12 @@ func looksLikeHTTPLine(l string) bool {
 		}
 	}
 	return false
+}
+
+func hashBytes(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])
 }

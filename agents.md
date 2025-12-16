@@ -20,6 +20,7 @@ Authoritative, consolidated instructions for building **containd / ICS‑NGFW** 
 - **Single Go binary** `containd` with subcommands: `engine`, `mgmt`, `all` (default).
 - **Single Docker image** `containd` containing the binary and built UI assets; entrypoint `containd all`.
 - Container capabilities: `CAP_NET_ADMIN`, `CAP_NET_RAW`; avoid `SYS_ADMIN`. Run mgmt/UI/SSH non‑root; isolate privileged DP operations in code.
+- **Frontend styling guardrail**: all UI work must follow `linear-dashboard-cursor-rule.md` (Linear-style dashboard, fixed palette, Tailwind/shadcn), keep dark-mode-first but support light; no new colors outside that palette.
 
 **Embedded daemons (optional, native UX):**
 - Forward proxy: **Envoy** explicit forward proxy (Apache‑2.0).
@@ -118,6 +119,7 @@ No raw daemon config editing exposed as the primary UX.
 ## 7. Management UX
 
 - **Commercial‑style dashboard** with system status, traffic/session charts, top apps/protocols, IDS alerts, OT/ICS panels (PLC access, Modbus read/write), and proxy panels.
+- **UI theme**: Linear-inspired analytics dashboard per `linear-dashboard-cursor-rule.md` (strict palette, high contrast, subtle motion, responsive, WCAG AA).
 - **Left‑nav appliance UI** with entry points for config and monitoring.
 - **Web console** in UI using the same CLI engine as SSH (xterm.js + WebSocket), audited like SSH.
 

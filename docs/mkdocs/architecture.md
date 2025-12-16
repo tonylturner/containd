@@ -10,7 +10,7 @@ This document tracks the high-level architecture for containd as it evolves.
 - **Management plane (`containd mgmt` + UI + CLI`)**: REST API (`api/http`), UI serving, CLI/SSH (planned), config lifecycle (candidate/commit/rollback/export/import), audit, dashboards.
 
 ## Integrated daemons (per `agents.md`)
-The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), and OpenNTPD (NTP). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. IT DPI/telemetry is implemented natively in Go decoders for current scope.
+The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), OpenNTPD (NTP), and ClamAV (AV/Freshclam). containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. IT DPI/telemetry is implemented natively in Go decoders for current scope.
 
 ## Packaging
 - Containers at repo root (`Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
@@ -19,14 +19,14 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 ## Module boundaries (current)
 - `api/http`: `/api/v1` health, config load/save/validate/export/import, CRUD (zones/interfaces/rules), syslog settings (more to add: objects/assets, policies, identity, audit, services).
 - `pkg/cp/config`: config model + validation + SQLite store (candidate/commit/rollback not yet implemented).
-- `pkg/cp/services`: syslog/DNS/NTP/proxy/VPN managers render configs; optional supervision of embedded daemons (Envoy/Nginx/Unbound/OpenNTPD) with validation + service events; audit/identity placeholders.
+- `pkg/cp/services`: syslog/DNS/NTP/proxy/VPN/AV managers render configs; optional supervision of embedded daemons (Envoy/Nginx/Unbound/OpenNTPD/ClamAV) with validation + service events; audit/identity placeholders.
 - `pkg/common/logging`: prefixed UTC loggers.
 - `pkg/cli`: command registry with API-backed show/set/delete for zones/interfaces/rules; more to add (commit/rollback/audit).
 - `pkg/dp/capture`: capture manager placeholder (NFQUEUE/AF_PACKET planned).
 - `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity placeholders).
 - `pkg/dp/engine`: harness to start capture, swap/apply rule snapshots, evaluate contexts, and apply verdict-driven updates.
 - `pkg/dp/enforce`: nftables compile/apply skeleton with dynamic block sets.
-- `pkg/dp/dpi`: selective DPI framework and decoder manager.
+- `pkg/dp/dpi`: selective DPI framework and decoder manager; HTTP previews feed AV queue; ICS marker tags OT protocols for AV fail-open.
 - `pkg/dp/ics`: ICS protocol decoders (Modbus/TCP skeleton added).
 - `pkg/dp/verdict`: verdict types/actions used by enforcement paths.
 - Placeholders remain for `pkg/dp/ids` and `ebpf/`.
@@ -34,7 +34,7 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 ## Flow of control (current/target)
 1) Management plane receives config via API; persisted in SQLite; candidate/commit/rollback model to be added; audit every change.
 2) Control plane compiles policies to nftables rulesets/sets and DP rule snapshots; engine hot-swaps snapshots.
-3) Kernel enforces fast path; selective capture feeds userspace for DPI/IDS; IPS verdicts update nftables sets/conntrack.
+3) Kernel enforces fast path; selective capture feeds userspace for DPI/IDS; IPS/AV verdicts update nftables sets/conntrack (AV blocks flows on malware; ICS can be fail-open).
 4) Services (syslog/NTP/DNS) managed via control-plane services package (syslog stub now).
 
 ## Upcoming work

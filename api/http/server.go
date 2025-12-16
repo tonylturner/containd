@@ -84,6 +84,14 @@ type ServicesApplier interface {
 	Apply(ctx context.Context, cfg config.ServicesConfig) error
 }
 
+type AVUpdater interface {
+	TriggerAVUpdate(ctx context.Context) error
+}
+
+type AVDefsManager interface {
+	CustomDefsPath() string
+}
+
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
 func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
 	return NewServerWithEngineAndServices(store, auditStore, engine, nil, nil)
@@ -164,6 +172,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
 		protected.GET("/services/av", getAVHandler(store))
 		protected.POST("/services/av", requireAdmin(), setAVHandler(store, services))
+		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(services))
+		protected.GET("/services/av/defs", listAVDefsHandler(store, services))
+		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(store, services))
+		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(store, services))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
 		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
@@ -630,6 +642,160 @@ func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 		}
 		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.NTP)
+	}
+}
+
+func getAVHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.AV)
+	}
+}
+
+func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var avCfg config.AVConfig
+		if err := c.ShouldBindJSON(&avCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			next := cfg.Services
+			next.AV = avCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		cfg.Services.AV = avCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.av.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.AV)
+	}
+}
+
+func triggerAVUpdateHandler(services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		updater, ok := services.(AVUpdater)
+		if !ok || updater == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "av updater not available"})
+			return
+		}
+		if err := updater.TriggerAVUpdate(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"status": "freshclam started"})
+	}
+}
+
+func listAVDefsHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusOK, gin.H{"files": []string{}})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var files []string
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			files = append(files, e.Name())
+		}
+		c.JSON(http.StatusOK, gin.H{"files": files, "path": path})
+	}
+}
+
+func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required", "detail": err.Error()})
+			return
+		}
+		name := filepath.Base(file.Filename)
+		dst := filepath.Join(path, name)
+		if err := c.SaveUploadedFile(file, dst); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "uploaded", "file": name})
+	}
+}
+
+func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		file := strings.TrimSpace(c.Query("file"))
+		if file == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file query parameter required"})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		target := filepath.Join(path, filepath.Base(file))
+		if err := os.Remove(target); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted", "file": filepath.Base(file)})
 	}
 }
 

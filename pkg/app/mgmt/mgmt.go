@@ -116,6 +116,7 @@ func Run(ctx context.Context, _ Options) error {
 			out = append(out, serviceManager.ListTelemetryEvents(limit)...)
 			return out
 		})
+		serviceManager.StartAVWorker(context.Background())
 	}
 	serveStaticUI(router)
 

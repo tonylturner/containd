@@ -1,6 +1,7 @@
 package events
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,20 +23,23 @@ type Event struct {
 	SrcPort    uint16         `json:"srcPort,omitempty"`
 	DstPort    uint16         `json:"dstPort,omitempty"`
 	Transport  string         `json:"transport,omitempty"` // tcp/udp
+	Hash       string         `json:"hash,omitempty"`      // optional content hash for AV events
 }
 
 // FlowSummary is a coarse flow rollup derived from events.
 type FlowSummary struct {
-	FlowID     string    `json:"flowId"`
-	FirstSeen  time.Time `json:"firstSeen"`
-	LastSeen   time.Time `json:"lastSeen"`
-	SrcIP      string    `json:"srcIp,omitempty"`
-	DstIP      string    `json:"dstIp,omitempty"`
-	SrcPort    uint16    `json:"srcPort,omitempty"`
-	DstPort    uint16    `json:"dstPort,omitempty"`
-	Transport  string    `json:"transport,omitempty"`
-	Application string   `json:"application,omitempty"`
-	EventCount uint64    `json:"eventCount"`
+	FlowID      string    `json:"flowId"`
+	FirstSeen   time.Time `json:"firstSeen"`
+	LastSeen    time.Time `json:"lastSeen"`
+	SrcIP       string    `json:"srcIp,omitempty"`
+	DstIP       string    `json:"dstIp,omitempty"`
+	SrcPort     uint16    `json:"srcPort,omitempty"`
+	DstPort     uint16    `json:"dstPort,omitempty"`
+	Transport   string    `json:"transport,omitempty"`
+	Application string    `json:"application,omitempty"`
+	EventCount  uint64    `json:"eventCount"`
+	AvDetected  bool      `json:"avDetected,omitempty"`
+	AvBlocked   bool      `json:"avBlocked,omitempty"`
 }
 
 // Store holds a bounded ring buffer of recent events.
@@ -152,14 +156,14 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		f, ok := byFlow[ev.FlowID]
 		if !ok {
 			f = &FlowSummary{
-				FlowID:    ev.FlowID,
-				FirstSeen: ev.Timestamp,
-				LastSeen:  ev.Timestamp,
-				SrcIP:     ev.SrcIP,
-				DstIP:     ev.DstIP,
-				SrcPort:   ev.SrcPort,
-				DstPort:   ev.DstPort,
-				Transport: ev.Transport,
+				FlowID:      ev.FlowID,
+				FirstSeen:   ev.Timestamp,
+				LastSeen:    ev.Timestamp,
+				SrcIP:       ev.SrcIP,
+				DstIP:       ev.DstIP,
+				SrcPort:     ev.SrcPort,
+				DstPort:     ev.DstPort,
+				Transport:   ev.Transport,
 				Application: ev.Proto,
 			}
 			byFlow[ev.FlowID] = f
@@ -173,6 +177,12 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		f.EventCount++
 		if f.Application == "" {
 			f.Application = ev.Proto
+		}
+		if strings.EqualFold(ev.Kind, "service.av.detected") {
+			f.AvDetected = true
+		}
+		if strings.EqualFold(ev.Kind, "service.av.block_flow") {
+			f.AvBlocked = true
 		}
 	}
 	out := make([]FlowSummary, 0, len(byFlow))
