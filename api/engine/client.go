@@ -5,12 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
+	"github.com/containd/containd/pkg/dp/conntrack"
+	"github.com/containd/containd/pkg/dp/dhcpd"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -99,6 +105,162 @@ func (c *HTTPClient) ConfigureInterfaces(ctx context.Context, ifaces []config.In
 	return nil
 }
 
+func (c *HTTPClient) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(ifaces)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/interfaces?mode=replace", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine interfaces(replace) status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(routing)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/routing", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine routing status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(routing)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/routing?mode=replace", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine routing(replace) status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	body, err := json.Marshal(services)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/services", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
+		}
+		return fmt.Errorf("engine services status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error) {
+	if c.BaseURL == "" {
+		return netcfg.WireGuardStatus{}, fmt.Errorf("engine BaseURL is empty")
+	}
+	u := c.BaseURL + "/internal/wireguard/status"
+	if strings.TrimSpace(iface) != "" {
+		u += "?iface=" + url.QueryEscape(strings.TrimSpace(iface))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return netcfg.WireGuardStatus{}, fmt.Errorf("engine wireguard status %d: %s", resp.StatusCode, detail)
+		}
+		return netcfg.WireGuardStatus{}, fmt.Errorf("engine wireguard status %d", resp.StatusCode)
+	}
+	var out netcfg.WireGuardStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return netcfg.WireGuardStatus{}, err
+	}
+	return out, nil
+}
+
+func (c *HTTPClient) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
+	if c.BaseURL == "" {
+		return nil, fmt.Errorf("engine BaseURL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/interfaces/state", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine interfaces state status %d", resp.StatusCode)
+	}
+	var out []config.InterfaceState
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListEvents fetches recent normalized events from the engine.
 func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error) {
 	u := c.BaseURL + "/internal/events"
@@ -124,6 +286,79 @@ func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Even
 	return out, nil
 }
 
+func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+	u := c.BaseURL + "/internal/conntrack"
+	if limit > 0 {
+		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("engine conntrack status %d", resp.StatusCode)
+	}
+	var out struct {
+		Entries []conntrack.Entry `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Entries, nil
+}
+
+func (c *HTTPClient) ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error) {
+	u := c.BaseURL + "/internal/dhcp/leases"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("engine dhcp leases status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out struct {
+		Leases []dhcpd.Lease `json:"leases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Leases, nil
+}
+
+func (c *HTTPClient) DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error {
+	u := c.BaseURL + "/internal/conntrack"
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("engine conntrack delete status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
 // ListFlows fetches recent flow summaries derived from events.
 func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error) {
 	u := c.BaseURL + "/internal/flows"
@@ -145,6 +380,31 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	var out []dpevents.FlowSummary
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// RulesetStatus fetches the last compiled/applied nftables ruleset status from the engine.
+func (c *HTTPClient) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
+	var out dpengine.RulesetStatus
+	if c.BaseURL == "" {
+		return out, fmt.Errorf("engine BaseURL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/ruleset_status", nil)
+	if err != nil {
+		return out, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return out, fmt.Errorf("engine ruleset_status status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, err
 	}
 	return out, nil
 }

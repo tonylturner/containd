@@ -31,7 +31,15 @@ go.work.sum
 .cache/
 .gocache/
 gocache/
+.gomodcache/
+.gopath/
 bin/
+ngfw-engine
+ngfw-mgmt
+
+# MkDocs
+site/
+ui/public/docs/
 
 # Node/Next.js
 node_modules/

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Convenience wrapper to build the smoke harness and run the smoke-forward test.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_ROOT"
+
+export COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.smoke.yml}
+export BASE=${BASE:-http://localhost:18080/api/v1}
+export TOKEN=${TOKEN:-devtoken}
+
+./scripts/smoke-forward.sh

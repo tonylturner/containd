@@ -9,7 +9,17 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/ngfw-engine ./cmd/ngfw-engine
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM debian:bookworm-slim AS nft
+RUN apt-get update && apt-get install -y --no-install-recommends nftables ca-certificates && rm -rf /var/lib/apt/lists/*
+# Stage the nft binary and its shared library dependencies (for distroless runtime).
+RUN set -eux; \
+  mkdir -p /out; \
+  cp --parents /usr/sbin/nft /out; \
+  ldd /usr/sbin/nft | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
+
+# Distroless base (dynamic) is required to run the nftables binary.
+FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=builder /out/ngfw-engine /usr/bin/ngfw-engine
+COPY --from=nft /out/ /
 EXPOSE 8081
 ENTRYPOINT ["/usr/bin/ngfw-engine"]

@@ -6,22 +6,92 @@ import {
   api,
   isAdmin,
   type FirewallRule,
+  type Gateway,
+  type Interface,
+  type InterfaceState,
   type Protocol,
+  type RoutingConfig,
+  type StaticRoute,
   type Zone,
   type ICSPredicate,
+  type NATConfig,
+  type PortForward,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+
+function ip4ToInt(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  const nums = parts.map((p) => Number(p));
+  if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null;
+  return ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
+}
+
+function intToIP4(n: number): string {
+  const v = n >>> 0;
+  return `${(v >>> 24) & 255}.${(v >>> 16) & 255}.${(v >>> 8) & 255}.${v & 255}`;
+}
+
+function maskFromPrefix(prefix: number): number | null {
+  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return null;
+  if (prefix === 0) return 0;
+  return (0xffffffff << (32 - prefix)) >>> 0;
+}
+
+function firstHostInCIDR(cidr: string): string | null {
+  const raw = cidr.trim();
+  const slash = raw.lastIndexOf("/");
+  if (slash <= 0) return null;
+  const ip = raw.slice(0, slash);
+  const pfx = Number(raw.slice(slash + 1));
+  const ipInt = ip4ToInt(ip);
+  const mask = maskFromPrefix(pfx);
+  if (ipInt == null || mask == null) return null;
+  const net = ipInt & mask;
+  const first = (net + 1) >>> 0;
+  return intToIP4(first);
+}
+
+function pickWanIface(ifs: Interface[]): Interface | null {
+  const byName = ifs.find((i) => i.name === "wan");
+  if (byName) return byName;
+  const byZone = ifs.find((i) => (i.zone || "").toLowerCase() === "wan");
+  return byZone ?? null;
+}
+
+function pickWanCIDR(state: InterfaceState | null): string | null {
+  if (!state) return null;
+  for (const addr of state.addrs || []) {
+    const s = String(addr);
+    if (!s.includes("/")) continue;
+    if (s.includes(":")) continue;
+    if (s.startsWith("169.254.")) continue;
+    return s;
+  }
+  return null;
+}
 
 export default function FirewallPage() {
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [nat, setNat] = useState<NATConfig>({ enabled: false });
+  const [routing, setRouting] = useState<RoutingConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
+  const [quickStarting, setQuickStarting] = useState(false);
 
   async function refresh() {
-    const [r, z] = await Promise.all([api.listFirewallRules(), api.listZones()]);
+    const [r, z, n, rt] = await Promise.all([
+      api.listFirewallRules(),
+      api.listZones(),
+      api.getNAT(),
+      api.getRouting(),
+    ]);
     setRules(r ?? []);
     setZones(z ?? []);
+    setNat(n ?? { enabled: false });
+    setRouting(rt);
   }
 
   useEffect(() => {
@@ -59,16 +129,160 @@ export default function FirewallPage() {
     refresh();
   }
 
+  const outboundStatus = (() => {
+    const isDefaultDst = (dst: string) => {
+      const d = dst.trim().toLowerCase();
+      return d === "default" || d === "0.0.0.0/0";
+    };
+    const hasDefaultRoute = !!(routing?.routes ?? []).find((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
+
+    const natEnabled = !!nat.enabled;
+    const natEgress = (nat.egressZone || "wan").trim() === "wan";
+    const natSources = new Set((nat.sourceZones ?? []).map((z) => z.trim()).filter(Boolean));
+    const natHasLan = natSources.has("lan") || natSources.has("mgmt");
+
+    const hasAllowLanWan = rules.some((r) => {
+      if (r.action !== "ALLOW") return false;
+      const src = new Set((r.sourceZones ?? []).map((z) => z.trim()).filter(Boolean));
+      const dst = new Set((r.destZones ?? []).map((z) => z.trim()).filter(Boolean));
+      return (src.has("lan") || src.has("mgmt")) && dst.has("wan");
+    });
+
+    return {
+      hasDefaultRoute,
+      natEnabled,
+      natEgress,
+      natHasLan,
+      hasAllowLanWan,
+      ok: hasDefaultRoute && natEnabled && natEgress && natHasLan && hasAllowLanWan,
+    };
+  })();
+
+  async function quickStartLanWanOutbound() {
+    if (!isAdmin()) return;
+    setError(null);
+    setNotice(null);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "This will attempt to enable outbound Internet for LAN/MGMT → WAN by:\n\n• creating/updating a WAN gateway + default route (best-effort)\n• enabling SNAT (masquerade) for LAN+MGMT out WAN\n• creating an ALLOW firewall rule for LAN+MGMT → WAN\n\nContinue?",
+      )
+    ) {
+      return;
+    }
+    setQuickStarting(true);
+    try {
+      // 1) Routing: best-effort WAN gateway + default route.
+      const [ifs, states, routing] = await Promise.all([
+        api.listInterfaces(),
+        api.listInterfaceState(),
+        api.getRouting(),
+      ]);
+      const wanIface = pickWanIface(ifs ?? []);
+      if (!wanIface) throw new Error("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
+      const wanState = (states ?? []).find((s) => s.name === wanIface.name) ?? null;
+      const wanCIDR = pickWanCIDR(wanState);
+      if (!wanCIDR) {
+        throw new Error(
+          `Could not determine WAN IPv4 address for '${wanIface.name}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
+        );
+      }
+      const inferredGw = firstHostInCIDR(wanCIDR);
+      if (!inferredGw) throw new Error(`Could not infer a WAN gateway from '${wanCIDR}'.`);
+
+      const gwName = "wan-gw";
+      const nextGateway: Gateway = {
+        name: gwName,
+        address: inferredGw,
+        iface: wanIface.name,
+        description: "Auto (WAN) from OS address",
+      };
+
+      const nextRouting: RoutingConfig = {
+        gateways: routing?.gateways ?? [],
+        routes: routing?.routes ?? [],
+        rules: routing?.rules ?? [],
+      };
+
+      const existingGwIdx = (nextRouting.gateways ?? []).findIndex((g) => g.name === gwName);
+      nextRouting.gateways =
+        existingGwIdx >= 0
+          ? (nextRouting.gateways ?? []).map((g, i) => (i === existingGwIdx ? nextGateway : g))
+          : [...(nextRouting.gateways ?? []), nextGateway];
+
+      const isDefaultDst = (dst: string) => {
+        const d = dst.trim().toLowerCase();
+        return d === "default" || d === "0.0.0.0/0";
+      };
+      const routes = nextRouting.routes ?? [];
+      const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
+      const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: wanIface.name, table: 0 };
+      nextRouting.routes =
+        existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
+
+      const routingUpdated = await api.setRouting(nextRouting);
+      if (!routingUpdated) throw new Error("Failed to update routing configuration.");
+
+      // 2) NAT: enable SNAT masquerade for LAN+MGMT out WAN.
+      const sourceZones = new Set([...(nat.sourceZones ?? []), "lan", "mgmt"]);
+      const natNext: NATConfig = {
+        ...nat,
+        enabled: true,
+        egressZone: nat.egressZone || "wan",
+        sourceZones: Array.from(sourceZones),
+      };
+      const natUpdated = await api.setNAT(natNext);
+      if (!natUpdated) throw new Error("Failed to update NAT configuration.");
+
+      // 3) Firewall rule: allow LAN+MGMT to WAN.
+      const allowID = "allow-lan-wan";
+      const existing = rules.find((r) => r.id === allowID) ?? null;
+      const allowRule: FirewallRule = {
+        id: allowID,
+        description: "Quick start: allow LAN/MGMT to WAN",
+        sourceZones: ["lan", "mgmt"],
+        destZones: ["wan"],
+        action: "ALLOW",
+      };
+      if (!existing) {
+        const created = await api.createFirewallRule(allowRule);
+        if (!created) throw new Error("Failed to create the LAN→WAN allow rule.");
+      } else {
+        const updated = await api.updateFirewallRule(allowID, allowRule);
+        if (!updated) throw new Error("Failed to update the LAN→WAN allow rule.");
+      }
+
+      setNotice(`Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT → WAN), and firewall allow rule '${allowID}'.`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQuickStarting(false);
+    }
+  }
+
   return (
     <Shell
       title="Firewall Rules"
       actions={
-        <button
-          onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin() && (
+            <button
+              onClick={quickStartLanWanOutbound}
+              disabled={quickStarting}
+              className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15 disabled:opacity-50"
+              title="Best-effort: default route + SNAT + allow rule for LAN/MGMT → WAN"
+            >
+              {quickStarting ? "Enabling..." : "Quick start (LAN→WAN)"}
+            </button>
+          )}
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          >
+            Refresh
+          </button>
+        </div>
       }
     >
       {!isAdmin() && (
@@ -76,11 +290,102 @@ export default function FirewallPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="font-semibold text-white">Outbound readiness</div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span
+              className={
+                outboundStatus.hasDefaultRoute
+                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
+              }
+            >
+              default route
+            </span>
+            <span
+              className={
+                outboundStatus.natEnabled
+                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
+              }
+            >
+              snat enabled
+            </span>
+            <span
+              className={
+                outboundStatus.natEgress
+                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
+              }
+            >
+              egress=wan
+            </span>
+            <span
+              className={
+                outboundStatus.natHasLan
+                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
+              }
+            >
+              src includes lan/mgmt
+            </span>
+            <span
+              className={
+                outboundStatus.hasAllowLanWan
+                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
+                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
+              }
+            >
+              allow lan→wan
+            </span>
+          </div>
+        </div>
+        {!outboundStatus.ok && (
+          <div className="mt-2 text-xs text-slate-400">
+            To reach the Internet from LAN, you typically need a default route, a LAN→WAN allow rule, and SNAT out WAN. Use{" "}
+            <span className="font-semibold text-slate-200">Quick start (LAN→WAN)</span> to auto-configure these.
+          </div>
+        )}
+      </div>
       {error && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>
       )}
+      {notice && (
+        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+          {notice}
+        </div>
+      )}
+
+      <NATCard
+        zones={zones}
+        nat={nat}
+        onSave={async (cfg) => {
+          setError(null);
+          const ok = await api.setNAT(cfg);
+          if (!ok) {
+            setError("Failed to update NAT (check zones).");
+            return;
+          }
+          refresh();
+        }}
+      />
+
+      <PortForwardsCard
+        zones={zones}
+        nat={nat}
+        onSave={async (cfg) => {
+          setError(null);
+          const ok = await api.setNAT(cfg);
+          if (!ok) {
+            setError("Failed to update port forwards (check zones/ports).");
+            return;
+          }
+          refresh();
+        }}
+      />
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
@@ -173,6 +478,167 @@ export default function FirewallPage() {
         />
       )}
     </Shell>
+  );
+}
+
+function NATCard({
+  zones,
+  nat,
+  onSave,
+}: {
+  zones: Zone[];
+  nat: NATConfig;
+  onSave: (cfg: NATConfig) => void;
+}) {
+  const [enabled, setEnabled] = useState(!!nat.enabled);
+  const [egressZone, setEgressZone] = useState(nat.egressZone ?? "");
+  const [sourceZones, setSourceZones] = useState<string[]>(
+    nat.sourceZones ?? [],
+  );
+
+  useEffect(() => {
+    setEnabled(!!nat.enabled);
+    setEgressZone(nat.egressZone ?? "");
+    setSourceZones(nat.sourceZones ?? []);
+  }, [nat.enabled, nat.egressZone, nat.sourceZones]);
+
+  const zoneNames = (zones ?? []).map((z) => z.name).filter(Boolean);
+  zoneNames.sort();
+
+  const dirty =
+    enabled !== !!nat.enabled ||
+    egressZone !== (nat.egressZone ?? "") ||
+    JSON.stringify((sourceZones ?? []).slice().sort()) !==
+      JSON.stringify(((nat.sourceZones ?? []) as string[]).slice().sort());
+
+  return (
+    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-white">NAT</div>
+          <div className="text-xs text-slate-400">
+            Source NAT (masquerade) for forwarded traffic. Changes apply on{" "}
+            <span className="font-mono">commit</span>.
+          </div>
+        </div>
+        <span
+          className={
+            enabled
+              ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
+              : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+          }
+        >
+          {enabled ? "ENABLED" : "DISABLED"}
+        </span>
+      </div>
+
+      <div className="grid gap-4 p-4 md:grid-cols-3">
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            Enable
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              disabled={!isAdmin()}
+              onClick={() => setEnabled((v) => !v)}
+              className={
+                "rounded-lg border px-3 py-1.5 text-sm " +
+                (enabled
+                  ? "border-mint/30 bg-mint/10 text-mint"
+                  : "border-white/10 bg-white/5 text-slate-200") +
+                (!isAdmin() ? " opacity-50" : "")
+              }
+            >
+              {enabled ? "On" : "Off"}
+            </button>
+            <div className="text-xs text-slate-400">
+              When enabled, defaults to <span className="font-mono">wan</span>{" "}
+              egress and <span className="font-mono">lan, dmz</span> sources if
+              empty.
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            Egress Zone
+          </div>
+          <select
+            disabled={!isAdmin()}
+            value={egressZone}
+            onChange={(e) => setEgressZone(e.target.value)}
+            className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200"
+          >
+            <option value="">(default: wan)</option>
+            {zoneNames.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            Source Zones
+          </div>
+          <div className="mt-2 grid max-h-32 gap-1 overflow-auto pr-1 text-sm">
+            {zoneNames.length === 0 && (
+              <div className="text-xs text-slate-400">No zones defined.</div>
+            )}
+            {zoneNames.map((z) => {
+              const checked = sourceZones.includes(z);
+              return (
+                <label key={z} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    disabled={!isAdmin()}
+                    checked={checked}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setSourceZones((prev) => {
+                        const p = prev ?? [];
+                        if (next) return Array.from(new Set([...p, z]));
+                        return p.filter((x) => x !== z);
+                      });
+                    }}
+                  />
+                  <span className="text-slate-200">{z}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            Leave empty to use default sources.
+          </div>
+        </div>
+      </div>
+
+      {isAdmin() && (
+        <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+          <button
+            disabled={!dirty}
+            onClick={() =>
+              onSave({
+                enabled,
+                egressZone: egressZone.trim() || undefined,
+                sourceZones:
+                  (sourceZones ?? []).map((z) => z.trim()).filter(Boolean) ||
+                  undefined,
+              })
+            }
+            className={
+              "rounded-lg px-3 py-1.5 text-sm " +
+              (dirty
+                ? "bg-mint/20 text-mint hover:bg-mint/30"
+                : "bg-white/5 text-slate-500")
+            }
+          >
+            Save NAT
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -382,6 +848,270 @@ function EditRuleModal({
           >
             Save changes
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PortForwardsCard({
+  zones,
+  nat,
+  onSave,
+}: {
+  zones: Zone[];
+  nat: NATConfig;
+  onSave: (cfg: NATConfig) => void;
+}) {
+  const [items, setItems] = useState<PortForward[]>(nat.portForwards ?? []);
+  const [newIngress, setNewIngress] = useState("wan");
+  const [newProto, setNewProto] = useState<"tcp" | "udp">("tcp");
+  const [newListen, setNewListen] = useState("");
+  const [newDestIp, setNewDestIp] = useState("");
+  const [newDestPort, setNewDestPort] = useState("");
+  const [newSources, setNewSources] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setItems(nat.portForwards ?? []);
+  }, [nat.portForwards]);
+
+  const zoneNames = (zones ?? []).map((z) => z.name).filter(Boolean);
+  zoneNames.sort();
+
+  const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
+
+  function normalize(pf: PortForward): PortForward {
+    return {
+      ...pf,
+      id: pf.id.trim(),
+      ingressZone: pf.ingressZone.trim(),
+      destIp: pf.destIp.trim(),
+      allowedSources: (pf.allowedSources ?? []).map((s) => s.trim()).filter(Boolean),
+      description: pf.description?.trim() || undefined,
+    };
+  }
+
+  function validatePort(v: string): number | null {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0 || n > 65535) return null;
+    return Math.trunc(n);
+  }
+
+  async function add() {
+    setError(null);
+    const lp = validatePort(newListen);
+    if (!lp) {
+      setError("Listen port must be 1-65535.");
+      return;
+    }
+    if (!newDestIp.trim()) {
+      setError("Destination IP is required.");
+      return;
+    }
+    const dp = newDestPort.trim() ? validatePort(newDestPort) ?? undefined : undefined;
+    if (newDestPort.trim() && !dp) {
+      setError("Destination port must be 1-65535.");
+      return;
+    }
+    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `pf-${Date.now()}`;
+    const pf: PortForward = normalize({
+      id,
+      enabled: true,
+      ingressZone: newIngress,
+      proto: newProto,
+      listenPort: lp,
+      destIp: newDestIp,
+      destPort: dp,
+      allowedSources: newSources
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      description: newDesc.trim() || undefined,
+    });
+    setItems((prev) => [...prev, pf]);
+    setNewListen("");
+    setNewDestIp("");
+    setNewDestPort("");
+    setNewSources("");
+    setNewDesc("");
+  }
+
+  async function save() {
+    setError(null);
+    onSave({ ...nat, portForwards: items });
+  }
+
+  function toggle(id: string, enabled: boolean) {
+    setItems((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
+  }
+
+  function remove(id: string) {
+    setItems((prev) => prev.filter((p) => p.id !== id));
+  }
+
+  return (
+    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-white">Port forwarding</div>
+          <div className="text-xs text-slate-400">
+            DNAT (prerouting). You still need a matching firewall allow rule.
+          </div>
+        </div>
+        {isAdmin() && (
+          <button
+            onClick={save}
+            disabled={!dirty}
+            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+          >
+            Save
+          </button>
+        )}
+      </div>
+
+      <div className="p-4">
+        {!isAdmin() && (
+          <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+            View-only mode: port forwarding changes are disabled.
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+            {error}
+          </div>
+        )}
+
+        {isAdmin() && (
+          <div className="grid gap-2 md:grid-cols-6">
+            <select
+              value={newIngress}
+              onChange={(e) => setNewIngress(e.target.value)}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            >
+              {zoneNames.map((z) => (
+                <option key={z} value={z}>
+                  ingress:{z}
+                </option>
+              ))}
+            </select>
+            <select
+              value={newProto}
+              onChange={(e) => setNewProto(e.target.value as "tcp" | "udp")}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            >
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+            </select>
+            <input
+              value={newListen}
+              onChange={(e) => setNewListen(e.target.value)}
+              placeholder="listen port"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+            <input
+              value={newDestIp}
+              onChange={(e) => setNewDestIp(e.target.value)}
+              placeholder="dest ip"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+            <input
+              value={newDestPort}
+              onChange={(e) => setNewDestPort(e.target.value)}
+              placeholder="dest port (opt)"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+            <button
+              onClick={add}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+            >
+              Add
+            </button>
+
+            <input
+              value={newSources}
+              onChange={(e) => setNewSources(e.target.value)}
+              placeholder="sources CIDR (comma) (opt)"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
+            />
+            <input
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              placeholder="description (opt)"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
+            />
+          </div>
+        )}
+
+        <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <table className="w-full text-sm">
+            <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+              <tr>
+                <th className="px-4 py-3">Ingress</th>
+                <th className="px-4 py-3">Proto</th>
+                <th className="px-4 py-3">Listen</th>
+                <th className="px-4 py-3">Destination</th>
+                <th className="px-4 py-3">Sources</th>
+                <th className="px-4 py-3">Enabled</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 && (
+                <tr>
+                  <td className="px-4 py-4 text-slate-400" colSpan={7}>
+                    No port forwards configured.
+                  </td>
+                </tr>
+              )}
+              {items.map((pf) => (
+                <tr key={pf.id} className="border-t border-white/5">
+                  <td className="px-4 py-3 text-slate-200">{pf.ingressZone}</td>
+                  <td className="px-4 py-3 text-slate-200">{pf.proto}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-white">
+                    {pf.listenPort}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-white">
+                    {pf.destIp}
+                    {pf.destPort ? `:${pf.destPort}` : ""}
+                  </td>
+                  <td className="px-4 py-3 text-slate-200">
+                    {(pf.allowedSources ?? []).join(", ") || "any"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={
+                        pf.enabled
+                          ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
+                          : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+                      }
+                    >
+                      {pf.enabled ? "on" : "off"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {isAdmin() && (
+                      <>
+                        <button
+                          onClick={() => toggle(pf.id, !pf.enabled)}
+                          className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                        >
+                          {pf.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          onClick={() => remove(pf.id)}
+                          className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

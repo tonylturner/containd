@@ -4,11 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
+import { useToast } from "../../../../components/ToastProvider";
+import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function NTPPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
+  const [status, setStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
     servers: [],
@@ -16,14 +21,19 @@ export default function NTPPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function refresh() {
+    setLoading(true);
+    const svc = (await api.getServicesStatus()) as any;
+    setStatus(svc?.ntp ?? null);
     const s = await api.getNTP();
     setCfg({
       enabled: s?.enabled ?? false,
       servers: s?.servers ?? [],
       intervalSeconds: s?.intervalSeconds ?? 0,
     });
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -34,6 +44,10 @@ export default function NTPPage() {
     () => (cfg.servers ?? []).join("\n"),
     [cfg.servers],
   );
+  const ntpSpark = useMemo(
+    () => [2, 3, 5, (cfg.servers?.length ?? 1) + 4, 6, 5, 7],
+    [cfg.servers],
+  );
 
   async function onSave() {
     if (!canEdit) return;
@@ -41,7 +55,12 @@ export default function NTPPage() {
     setSaveState("saving");
     const saved = await api.setNTP(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save NTP settings.");
+    if (!saved) {
+      setError("Failed to save NTP settings.");
+      toast("Failed to save NTP settings", "error");
+    } else {
+      toast("NTP settings saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
     if (saved) setCfg(saved);
   }
@@ -78,6 +97,48 @@ export default function NTPPage() {
           {error}
         </div>
       )}
+
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              Running:{" "}
+              <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
+            </div>
+            <div>
+              Last start:{" "}
+              <span className="text-slate-100">
+                {status?.last_start ?? "n/a"}
+              </span>
+            </div>
+            <div className="md:col-span-2">
+              Binary:{" "}
+              <span className="text-slate-100">
+                {status?.openntpd_path || "not found"}
+              </span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {status.last_error}
+              </div>
+            ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={ntpSpark}
+                color="var(--teal)"
+                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                title="NTP sync trend (simulated)"
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-lg font-semibold text-white">Client</h2>

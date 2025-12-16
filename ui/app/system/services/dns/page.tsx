@@ -2,13 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type DNSConfig } from "../../../../lib/api";
+import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
+import { useToast } from "../../../../components/ToastProvider";
+import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function DNSPage() {
   const canEdit = isAdmin();
+  const toast = useToast();
+  const [status, setStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<DNSConfig>({
     enabled: false,
     listenPort: 53,
@@ -17,8 +22,12 @@ export default function DNSPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function refresh() {
+    setLoading(true);
+    const svc = (await api.getServicesStatus()) as ServicesStatus | any;
+    setStatus((svc as any)?.dns ?? null);
     const s = await api.getDNS();
     setCfg({
       enabled: s?.enabled ?? false,
@@ -27,6 +36,7 @@ export default function DNSPage() {
       upstreamServers: s?.upstreamServers ?? [],
       cacheSizeMB: s?.cacheSizeMB ?? 0,
     });
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -37,6 +47,10 @@ export default function DNSPage() {
     () => (cfg.upstreamServers ?? []).join("\n"),
     [cfg.upstreamServers],
   );
+  const dnsSpark = useMemo(
+    () => [4, 8, 6, (cfg.upstreamServers?.length ?? 1) + 6, 12, 9, 14],
+    [cfg.upstreamServers],
+  );
 
   async function onSave() {
     if (!canEdit) return;
@@ -44,9 +58,15 @@ export default function DNSPage() {
     setSaveState("saving");
     const saved = await api.setDNS(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save DNS settings.");
+    if (!saved) {
+      setError("Failed to save DNS settings.");
+      toast("Failed to save DNS settings", "error");
+    } else {
+      setCfg(saved);
+      toast("DNS settings saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(saved);
+    await refresh();
   }
 
   return (
@@ -81,6 +101,48 @@ export default function DNSPage() {
           {error}
         </div>
       )}
+
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+            <div>
+              Installed:{" "}
+              <span className="text-slate-100">
+                {status?.installed ? "yes" : "no"}
+              </span>
+            </div>
+            <div>
+              Running:{" "}
+              <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
+            </div>
+            <div className="md:col-span-2">
+              Config:{" "}
+              <span className="text-slate-100">
+                {status?.config_path ?? "(unknown)"}
+              </span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+                {status.last_error}
+              </div>
+            ) : null}
+            <div className="md:col-span-2">
+              <Sparkline
+                values={dnsSpark}
+                color="var(--primary)"
+                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                title="Resolver query trend"
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-lg font-semibold text-white">Resolver</h2>
@@ -153,7 +215,7 @@ export default function DNSPage() {
               className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
             <p className="mt-1 text-xs text-slate-400">
-              Leave empty to use root hints (recursive mode).
+              Recommended: set one or more upstream servers for forward-only mode.
             </p>
           </div>
         </div>

@@ -129,6 +129,8 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
   const res = await fetch(url, {
     ...init,
     credentials: "include",
+    // Avoid stale UI after writes: these endpoints are dynamic appliance state.
+    cache: "no-store",
   });
 
   if (res.status === 401 && !ENV_TOKEN) {
@@ -141,6 +143,7 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
           ...init,
           headers: { ...h, Authorization: `Bearer ${fallback}` },
           credentials: "include",
+          cache: "no-store",
         });
         await captureAuthError(retry);
         updateSessionTokenFromResponse(retry);
@@ -190,14 +193,69 @@ export type Zone = {
 export type Interface = {
   name: string;
   device?: string;
+  type?: string;
+  parent?: string;
+  vlanId?: number;
+  members?: string[];
   zone?: string;
+  addressMode?: string;
   addresses?: string[];
+  gateway?: string;
   access?: {
     mgmt?: boolean;
     http?: boolean;
     https?: boolean;
     ssh?: boolean;
   };
+};
+
+export type InterfaceState = {
+  name: string;
+  index: number;
+  up: boolean;
+  mtu: number;
+  mac: string;
+  addrs: string[];
+};
+
+export type StaticRoute = {
+  dst: string;
+  gateway?: string;
+  iface?: string;
+  table?: number;
+  metric?: number;
+};
+
+export type Gateway = {
+  name: string;
+  address: string;
+  iface?: string;
+  description?: string;
+};
+
+export type PolicyRule = {
+  priority?: number;
+  src?: string;
+  dst?: string;
+  table: number;
+};
+
+export type RoutingConfig = {
+  gateways?: Gateway[];
+  routes?: StaticRoute[];
+  rules?: PolicyRule[];
+};
+
+export type OSRoute = {
+  dst: string;
+  gateway?: string;
+  iface?: string;
+  metric?: number;
+};
+
+export type OSRoutingSnapshot = {
+  routes: OSRoute[];
+  defaultRoute?: OSRoute;
 };
 
 export type Protocol = {
@@ -224,6 +282,25 @@ export type FirewallRule = {
   protocols?: Protocol[];
   ics?: ICSPredicate;
   action: "ALLOW" | "DENY";
+};
+
+export type NATConfig = {
+  enabled: boolean;
+  egressZone?: string;
+  sourceZones?: string[];
+  portForwards?: PortForward[];
+};
+
+export type PortForward = {
+  id: string;
+  enabled: boolean;
+  description?: string;
+  ingressZone: string;
+  proto: "tcp" | "udp";
+  listenPort: number;
+  destIp: string;
+  destPort?: number;
+  allowedSources?: string[];
 };
 
 export type Asset = {
@@ -257,6 +334,29 @@ export type SyslogForwarder = {
 
 export type SyslogConfig = {
   forwarders: SyslogForwarder[];
+  format?: "rfc5424" | "json";
+};
+
+export type ClamAVConfig = {
+  socketPath?: string;
+  updateSchedule?: string;
+  customDefsPath?: string;
+  freshclamEnabled?: boolean;
+};
+
+export type AVConfig = {
+  enabled: boolean;
+  mode?: "icap" | "clamav";
+  failPolicy?: "open" | "closed";
+  failOpenIcs?: boolean;
+  blockTtlSeconds?: number;
+  maxSizeBytes?: number;
+  timeoutSec?: number;
+  cacheTtl?: string;
+  icap?: {
+    servers?: { address: string; useTls?: boolean; service?: string }[];
+  };
+  clamav?: ClamAVConfig;
 };
 
 export type UserRole = "admin" | "view";
@@ -317,6 +417,120 @@ export type NTPConfig = {
   intervalSeconds?: number;
 };
 
+export type DHCPPool = {
+  iface: string;
+  start: string;
+  end: string;
+};
+
+export type DHCPConfig = {
+  enabled?: boolean;
+  listenIfaces?: string[];
+  pools?: DHCPPool[];
+  leaseSeconds?: number;
+  router?: string;
+  dnsServers?: string[];
+  domain?: string;
+  authoritative?: boolean;
+};
+
+export type DHCPLease = {
+  iface: string;
+  mac: string;
+  ip: string;
+  expiresAt: string;
+  hostname?: string;
+};
+
+export type WGPeer = {
+  name?: string;
+  publicKey: string;
+  allowedIPs?: string[];
+  endpoint?: string;
+  persistentKeepalive?: number;
+};
+
+export type WireGuardConfig = {
+  enabled?: boolean;
+  interface?: string;
+  listenPort?: number;
+  addressCIDR?: string;
+  privateKey?: string;
+  peers?: WGPeer[];
+};
+
+export type OpenVPNConfig = {
+  enabled?: boolean;
+  mode?: string;
+  configPath?: string;
+  managed?: OpenVPNManagedClientConfig;
+  server?: OpenVPNManagedServerConfig;
+};
+
+export type OpenVPNManagedClientConfig = {
+  remote?: string;
+  port?: number;
+  proto?: string;
+  username?: string;
+  password?: string;
+  ca?: string;
+  cert?: string;
+  key?: string;
+};
+
+export type OpenVPNManagedServerConfig = {
+  listenPort?: number;
+  proto?: string;
+  tunnelCIDR?: string;
+  publicEndpoint?: string;
+  pushDNS?: string[];
+  pushRoutes?: string[];
+  clientToClient?: boolean;
+};
+
+export type VPNConfig = {
+  wireguard?: WireGuardConfig;
+  openvpn?: OpenVPNConfig;
+};
+
+export type OpenVPNProfileUploadResponse = {
+  configPath: string;
+  vpn: VPNConfig;
+};
+
+export type WireGuardPeerStatus = {
+  publicKey: string;
+  endpoint?: string;
+  lastHandshake?: string;
+  rxBytes?: number;
+  txBytes?: number;
+  allowedIPs?: string[];
+};
+
+export type WireGuardStatus = {
+  interface: string;
+  present: boolean;
+  publicKey?: string;
+  listenPort?: number;
+  peers?: WireGuardPeerStatus[];
+};
+
+export type ConntrackEntry = {
+  proto: string;
+  state?: string;
+  src?: string;
+  dst?: string;
+  sport?: string;
+  dport?: string;
+  replySrc?: string;
+  replyDst?: string;
+  replySport?: string;
+  replyDport?: string;
+  mark?: string;
+  assured?: boolean;
+  timeoutSecs?: number;
+};
+
 export type TelemetryEvent = {
   id: number;
   flowId: string;
@@ -342,6 +556,8 @@ export type FlowSummary = {
   transport?: string;
   application?: string;
   eventCount: number;
+  avDetected?: boolean;
+  avBlocked?: boolean;
 };
 
 export type ForwardProxyConfig = {
@@ -414,6 +630,7 @@ export type ConfigBundle = {
   firewall?: {
     defaultAction?: "ALLOW" | "DENY";
     rules?: FirewallRule[];
+    nat?: NATConfig;
   };
   services?: unknown;
 };
@@ -596,12 +813,26 @@ export const api = {
     deleteJSON(`/api/v1/zones/${encodeURIComponent(name)}`),
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
+  listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
+  assignInterfaces: (mode: "auto" | "explicit", mappings?: Record<string, string>) =>
+    postJSON<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
+      mode,
+      mappings: mappings ?? {},
+    }),
+  reconcileInterfacesReplace: () =>
+    postJSON<{ status: string }>("/api/v1/interfaces/reconcile", { confirm: "REPLACE" }),
   createInterface: (i: Interface) =>
     postJSON<Interface>("/api/v1/interfaces", i),
   updateInterface: (name: string, i: Partial<Interface>) =>
     patchJSON<Interface>(`/api/v1/interfaces/${encodeURIComponent(name)}`, i),
   deleteInterface: (name: string) =>
     deleteJSON(`/api/v1/interfaces/${encodeURIComponent(name)}`),
+
+  getRouting: () => getJSON<RoutingConfig>("/api/v1/routing"),
+  getOSRouting: () => getJSON<OSRoutingSnapshot>("/api/v1/routing/os"),
+  setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
+  reconcileRoutingReplace: () =>
+    postJSON<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
 
   listFirewallRules: () => getJSON<FirewallRule[]>("/api/v1/firewall/rules"),
   createFirewallRule: (r: FirewallRule) =>
@@ -610,6 +841,8 @@ export const api = {
     patchJSON<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
   deleteFirewallRule: (id: string) =>
     deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+  getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
+  setNAT: (cfg: NATConfig) => postJSON<NATConfig>("/api/v1/firewall/nat", cfg),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),
@@ -670,14 +903,55 @@ export const api = {
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
+  getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
+  setAV: (cfg: AVConfig) => postJSON<AVConfig>("/api/v1/services/av", cfg),
+  runAVUpdate: () => postJSON<{ status: string }>("/api/v1/services/av/update", {}),
+  listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
+  uploadAVDef: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/v1/services/av/defs", {
+      method: "POST",
+      body: form,
+    });
+    return res.ok;
+  },
+  deleteAVDef: async (file: string) => {
+    const params = new URLSearchParams({ file });
+    const res = await fetch(`/api/v1/services/av/defs?${params.toString()}`, { method: "DELETE" });
+    return res.ok;
+  },
   getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
   setDNS: (cfg: DNSConfig) => postJSON<DNSConfig>("/api/v1/services/dns", cfg),
   getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
   setNTP: (cfg: NTPConfig) => postJSON<NTPConfig>("/api/v1/services/ntp", cfg),
+  getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
+  setDHCP: (cfg: DHCPConfig) => postJSON<DHCPConfig>("/api/v1/services/dhcp", cfg),
+  listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
+  getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
+  setVPN: (cfg: VPNConfig) => postJSON<VPNConfig>("/api/v1/services/vpn", cfg),
+  uploadOpenVPNProfile: (name: string, ovpn: string) =>
+    postJSON<OpenVPNProfileUploadResponse>("/api/v1/services/vpn/openvpn/profile", { name, ovpn }),
+  listOpenVPNClients: () =>
+    getJSON<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients"),
+  createOpenVPNClient: (name: string) =>
+    postJSON<{ name: string }>("/api/v1/services/vpn/openvpn/clients", { name }),
+  downloadOpenVPNClientURL: (name: string) =>
+    `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
+  getWireGuardStatus: (iface?: string) =>
+    getJSON<WireGuardStatus>(
+      `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,
+    ),
 
   // Telemetry
   listEvents: (limit = 500) =>
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
   listFlows: (limit = 200) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+
+  // Sessions / Conntrack
+  listConntrack: (limit = 200) =>
+    getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
+  killConntrack: (req: { proto: string; src: string; dst: string; sport?: number; dport?: number }) =>
+    postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
 };

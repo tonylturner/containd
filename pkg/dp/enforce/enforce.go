@@ -73,13 +73,78 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_service;\n")
 	buf.WriteString("    flags timeout;\n")
 	buf.WriteString("  }\n")
+	// INPUT: traffic destined to the appliance itself.
+	// Keep this minimal for now; mgmt/UI runs in a separate container in dev.
+	buf.WriteString("  chain input {\n")
+	buf.WriteString("    type filter hook input priority 0;\n")
+	buf.WriteString("    policy drop;\n")
+	buf.WriteString("    iifname \"lo\" accept;\n")
+	buf.WriteString("    ct state { established, related } accept;\n")
+	// Allow management-plane to talk to engine internal API.
+	buf.WriteString("    tcp dport 8081 accept;\n")
+	// Local service allow rules (mgmt/ssh/vpn). Deterministic ordering.
+	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
+	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
+	for _, lr := range locals {
+		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
+		if err != nil {
+			return "", err
+		}
+		if line == "" {
+			continue
+		}
+		buf.WriteString("    " + line + ";\n")
+	}
+	buf.WriteString("  }\n")
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
+	buf.WriteString("    ct state { established, related } accept;\n")
 	// Dynamic blocks first (verdict-driven).
-	buf.WriteString("    ip saddr @block_hosts drop\n")
-	buf.WriteString("    ip daddr @block_hosts drop\n")
-	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop\n")
+	buf.WriteString("    ip saddr @block_hosts drop;\n")
+	buf.WriteString("    ip daddr @block_hosts drop;\n")
+	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
+
+	// Allow DNATed flows (match on original dport to avoid bypass via direct LAN IP).
+	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
+		pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+		sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
+		for _, pf := range pfs {
+			if !pf.Enabled {
+				continue
+			}
+			ingress := strings.TrimSpace(pf.IngressZone)
+			if ingress == "" {
+				continue
+			}
+			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+			if proto != "tcp" && proto != "udp" {
+				continue
+			}
+			if pf.ListenPort < 1 || pf.ListenPort > 65535 {
+				continue
+			}
+			dstPort := pf.DestPort
+			if dstPort == 0 {
+				dstPort = pf.ListenPort
+			}
+			if dstPort < 1 || dstPort > 65535 {
+				continue
+			}
+			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+			parts := []string{
+				fmt.Sprintf("iifname @%s", ingSet),
+				"ct status dnat",
+				proto + " dport " + strconv.Itoa(dstPort),
+			}
+			if len(pf.AllowedSources) > 0 {
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+			}
+			// Accept after DNAT; proto match is implicit via ct original clause.
+			parts = append(parts, "accept")
+			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
+		}
+	}
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
@@ -88,9 +153,91 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		buf.WriteString("    " + line + "\n")
+		buf.WriteString("    " + line + ";\n")
 	}
 	buf.WriteString("  }\n")
+
+	// PREROUTING NAT: DNAT port forwards (simple destination NAT).
+	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
+		entries := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+		sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+		buf.WriteString("  chain prerouting {\n")
+		buf.WriteString("    type nat hook prerouting priority dstnat;\n")
+		buf.WriteString("    policy accept;\n")
+		for _, pf := range entries {
+			if !pf.Enabled {
+				continue
+			}
+			ingress := strings.TrimSpace(pf.IngressZone)
+			if ingress == "" {
+				continue
+			}
+			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+			if proto != "tcp" && proto != "udp" {
+				continue
+			}
+			if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
+				continue
+			}
+			dstIP := strings.TrimSpace(pf.DestIP)
+			if net.ParseIP(dstIP) == nil {
+				continue
+			}
+			dstPort := pf.DestPort
+			if dstPort == 0 {
+				dstPort = pf.ListenPort
+			}
+			if dstPort < 1 || dstPort > 65535 {
+				continue
+			}
+
+			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+			parts := []string{
+				fmt.Sprintf("iifname @%s", ingSet),
+			}
+			if len(pf.AllowedSources) > 0 {
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+			}
+			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
+			if dstPort > 0 && dstPort != pf.ListenPort {
+				parts = append(parts, fmt.Sprintf("dnat ip to %s:%d", dstIP, dstPort))
+			} else {
+				parts = append(parts, fmt.Sprintf("dnat ip to %s", dstIP))
+			}
+			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
+		}
+		buf.WriteString("  }\n")
+	}
+
+	// POSTROUTING NAT: source NAT (masquerade) for common lab/appliance setups.
+	if snap.NAT.Enabled && len(snap.ZoneIfaces) > 0 {
+		egress := strings.TrimSpace(snap.NAT.EgressZone)
+		if egress == "" {
+			egress = "wan"
+		}
+		srcZones := snap.NAT.SourceZones
+		if len(srcZones) == 0 {
+			srcZones = []string{"lan", "dmz"}
+		}
+		buf.WriteString("  chain postrouting {\n")
+		buf.WriteString("    type nat hook postrouting priority srcnat;\n")
+		buf.WriteString("    policy accept;\n")
+		// Ensure DNAT'd traffic from wan -> lan returns via engine (SNAT/masq).
+		if len(snap.NAT.PortForwards) > 0 {
+			buf.WriteString("    iifname @zone_wan_ifaces oifname @zone_lan_ifaces masquerade;\n")
+		}
+		for _, z := range srcZones {
+			z = strings.TrimSpace(z)
+			if z == "" {
+				continue
+			}
+			srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
+			egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
+			buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade;\n", srcSet, egSet))
+		}
+		buf.WriteString("  }\n")
+	}
+
 	buf.WriteString("}\n")
 	return buf.String(), nil
 }
@@ -104,7 +251,6 @@ func defaultPolicy(a rules.Action) string {
 
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error) {
 	parts := []string{}
-	parts = append(parts, fmt.Sprintf("comment \"%s\"", e.ID))
 
 	if len(e.SourceZones) > 0 {
 		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
@@ -151,6 +297,36 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 	default:
 		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 	}
+	return strings.Join(parts, " "), nil
+}
+
+func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {
+	proto := strings.ToLower(strings.TrimSpace(r.Proto))
+	if proto != "tcp" && proto != "udp" {
+		return "", fmt.Errorf("local input %s invalid proto %q", r.ID, r.Proto)
+	}
+	if r.Port < 1 || r.Port > 65535 {
+		return "", fmt.Errorf("local input %s invalid port %d", r.ID, r.Port)
+	}
+
+	parts := []string{}
+	if len(r.Ifaces) > 0 {
+		ifs := append([]string(nil), r.Ifaces...)
+		sort.Strings(ifs)
+		for i, v := range ifs {
+			ifs[i] = fmt.Sprintf("\"%s\"", v)
+		}
+		parts = append(parts, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
+	} else if strings.TrimSpace(r.Zone) != "" {
+		z := strings.TrimSpace(r.Zone)
+		if len(zoneIfaces[z]) == 0 {
+			// No interfaces for this zone -> rule never matches, omit.
+			return "", nil
+		}
+		setName := "zone_" + sanitizeIdent(z) + "_ifaces"
+		parts = append(parts, fmt.Sprintf("iifname @%s", setName))
+	}
+	parts = append(parts, proto, fmt.Sprintf("dport %d", r.Port), "accept")
 	return strings.Join(parts, " "), nil
 }
 

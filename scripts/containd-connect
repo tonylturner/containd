@@ -20,6 +20,8 @@ fi
 http_map="$(docker compose port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 https_map="$(docker compose port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 ssh_map="$(docker compose port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+engine_map="$(docker compose port "$service" 8081 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+
 ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
 
 echo "------------------------------------------------------------"
@@ -65,6 +67,16 @@ if [[ -n "${ssh_map}" ]]; then
   echo "  then type: wizard or menu"
 else
   echo "SSH CLI (host published): not published (no 2222/tcp mapping)"
+fi
+
+echo ""
+if [[ -n "${engine_map}" ]]; then
+  if [[ "${engine_map%:*}" == "0.0.0.0" ]]; then
+    engine_map="localhost:${engine_map##*:}"
+  fi
+  echo "Engine API (host published): http://${engine_map}"
+else
+  echo "Engine API (host published): not published (8081 mapping disabled by default)"
 fi
 
 if [[ -n "${ips}" ]]; then

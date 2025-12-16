@@ -6,10 +6,12 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,8 +24,14 @@ import (
 	"github.com/containd/containd/pkg/cp/compile"
 	"github.com/containd/containd/pkg/cp/config"
 	cpids "github.com/containd/containd/pkg/cp/ids"
+	cpservices "github.com/containd/containd/pkg/cp/services"
 	"github.com/containd/containd/pkg/cp/users"
+	"github.com/containd/containd/pkg/dp/conntrack"
+	"github.com/containd/containd/pkg/dp/dhcpd"
+	"github.com/containd/containd/pkg/dp/enforce"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -36,7 +44,13 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 type EngineClient interface {
 	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
 	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
+	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
+	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
+	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
+	ConfigureServices(ctx context.Context, services config.ServicesConfig) error
+	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
 }
 
 type TelemetryClient interface {
@@ -44,10 +58,38 @@ type TelemetryClient interface {
 	ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error)
 }
 
+type ConntrackClient interface {
+	ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error)
+}
+
+type ConntrackKiller interface {
+	DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error
+}
+
+type DHCPLeasesClient interface {
+	ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error)
+}
+
+type WireGuardStatusClient interface {
+	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
+}
+
+type ServicesValidator interface {
+	Validate(ctx context.Context, cfg config.ServicesConfig) error
+}
+
 // ServicesApplier is an optional interface for applying services config
 // (syslog/proxies/etc.) when commits are made.
 type ServicesApplier interface {
 	Apply(ctx context.Context, cfg config.ServicesConfig) error
+}
+
+type AVUpdater interface {
+	TriggerAVUpdate(ctx context.Context) error
+}
+
+type AVDefsManager interface {
+	CustomDefsPath() string
 }
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
@@ -114,20 +156,39 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
 		protected.GET("/services/syslog", getSyslogHandler(store))
-		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store))
+		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
 		protected.GET("/services/dns", getDNSHandler(store))
-		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store))
+		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
-		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store))
+		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store, services))
+		protected.GET("/services/dhcp", getDHCPHandler(store))
+		protected.POST("/services/dhcp", requireAdmin(), setDHCPHandler(store, services, engine))
+		protected.GET("/services/vpn", getVPNHandler(store))
+		protected.POST("/services/vpn", requireAdmin(), setVPNHandler(store, services, engine))
+		protected.POST("/services/vpn/openvpn/profile", requireAdmin(), uploadOpenVPNProfileHandler(store, services, engine))
+		protected.GET("/services/vpn/openvpn/clients", requireAdmin(), listOpenVPNClientsHandler(store))
+		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), createOpenVPNClientHandler(store))
+		protected.GET("/services/vpn/openvpn/clients/:name", requireAdmin(), downloadOpenVPNClientHandler(store))
+		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
+		protected.GET("/services/av", getAVHandler(store))
+		protected.POST("/services/av", requireAdmin(), setAVHandler(store, services))
+		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(services))
+		protected.GET("/services/av/defs", listAVDefsHandler(store, services))
+		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(store, services))
+		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(store, services))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
-		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
+		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
-		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
+		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
 		protected.GET("/services/status", getServicesStatusHandler(services))
-		protected.GET("/events", listEventsHandler(engine))
+		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/conntrack", listConntrackHandler(engine))
+		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
+		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -137,9 +198,18 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
 		protected.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
 		protected.GET("/interfaces", listInterfacesHandler(store))
-		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
-		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store))
-		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store))
+		protected.GET("/interfaces/state", interfaceStateHandler(store, engine))
+		protected.POST("/interfaces/assign", requireAdmin(), interfacesAssignHandler(store, engine, services))
+		protected.POST("/interfaces/reconcile", requireAdmin(), interfacesReconcileHandler(store, engine))
+		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store, engine, services))
+		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store, engine, services))
+		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
+		protected.GET("/routing", getRoutingHandler(store))
+		protected.GET("/routing/os", getOSRoutingHandler())
+		protected.POST("/routing", requireAdmin(), setRoutingHandler(store, engine, services))
+		protected.POST("/routing/reconcile", requireAdmin(), routingReconcileHandler(store, engine))
+		protected.GET("/firewall/nat", getFirewallNATHandler(store))
+		protected.POST("/firewall/nat", requireAdmin(), setFirewallNATHandler(store))
 		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
@@ -159,6 +229,25 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	}
 
 	return r
+}
+
+func dhcpLeasesHandler(engine any) gin.HandlerFunc {
+	type resp struct {
+		Leases []dhcpd.Lease `json:"leases"`
+	}
+	return func(c *gin.Context) {
+		cl, ok := engine.(DHCPLeasesClient)
+		if !ok || cl == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "engine dhcp leases not available"})
+			return
+		}
+		leases, err := cl.ListDHCPLeases(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, resp{Leases: leases})
+	}
 }
 
 func healthHandler(c *gin.Context) {
@@ -393,6 +482,12 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
 			return err
 		}
+		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
+			return err
+		}
+		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
+			return err
+		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			return err
 		}
@@ -437,7 +532,7 @@ func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setSyslogHandler(store config.Store) gin.HandlerFunc {
+func setSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var syslogCfg config.SyslogConfig
 		if err := c.ShouldBindJSON(&syslogCfg); err != nil {
@@ -454,6 +549,12 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
@@ -469,7 +570,7 @@ func getDNSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setDNSHandler(store config.Store) gin.HandlerFunc {
+func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dnsCfg config.DNSConfig
 		if err := c.ShouldBindJSON(&dnsCfg); err != nil {
@@ -481,10 +582,24 @@ func setDNSHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			next := cfg.Services
+			next.DNS = dnsCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		cfg.Services.DNS = dnsCfg
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.dns.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.DNS)
@@ -502,7 +617,7 @@ func getNTPHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setNTPHandler(store config.Store) gin.HandlerFunc {
+func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ntpCfg config.NTPConfig
 		if err := c.ShouldBindJSON(&ntpCfg); err != nil {
@@ -519,8 +634,597 @@ func setNTPHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.NTP)
+	}
+}
+
+func getAVHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.AV)
+	}
+}
+
+func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var avCfg config.AVConfig
+		if err := c.ShouldBindJSON(&avCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			next := cfg.Services
+			next.AV = avCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		cfg.Services.AV = avCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.av.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.AV)
+	}
+}
+
+func triggerAVUpdateHandler(services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		updater, ok := services.(AVUpdater)
+		if !ok || updater == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "av updater not available"})
+			return
+		}
+		if err := updater.TriggerAVUpdate(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"status": "freshclam started"})
+	}
+}
+
+func listAVDefsHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusOK, gin.H{"files": []string{}})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var files []string
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			files = append(files, e.Name())
+		}
+		c.JSON(http.StatusOK, gin.H{"files": files, "path": path})
+	}
+}
+
+func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required", "detail": err.Error()})
+			return
+		}
+		name := filepath.Base(file.Filename)
+		dst := filepath.Join(path, name)
+		if err := c.SaveUploadedFile(file, dst); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "uploaded", "file": name})
+	}
+}
+
+func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		file := strings.TrimSpace(c.Query("file"))
+		if file == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file query parameter required"})
+			return
+		}
+		path := "/data/clamav/custom"
+		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
+			path = am.CustomDefsPath()
+		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
+			path = cfg.Services.AV.ClamAV.CustomDefsPath
+		}
+		target := filepath.Join(path, filepath.Base(file))
+		if err := os.Remove(target); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted", "file": filepath.Base(file)})
+	}
+}
+
+func getDHCPHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.DHCP)
+	}
+}
+
+func setDHCPHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var dhcpCfg config.DHCPConfig
+		if err := c.ShouldBindJSON(&dhcpCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.DHCP = dhcpCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.dhcp.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.DHCP)
+	}
+}
+
+func getVPNHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Services.VPN)
+	}
+}
+
+func setVPNHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var vpnCfg config.VPNConfig
+		if err := c.ShouldBindJSON(&vpnCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.VPN = vpnCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Services.VPN)
+	}
+}
+
+func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+	type req struct {
+		Name string `json:"name"`
+		OVPN string `json:"ovpn"`
+	}
+	return func(c *gin.Context) {
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			name = "client"
+		}
+		name = sanitizeProfileName(name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile name"})
+			return
+		}
+		ovpn := strings.TrimSpace(r.OVPN)
+		if ovpn == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ovpn content is empty"})
+			return
+		}
+		if len(ovpn) > 1_000_000 {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "ovpn content too large"})
+			return
+		}
+		if err := ensureOpenVPNConfigForegroundString(ovpn); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Persist under /data so it survives container restarts.
+		base := "/data/openvpn/profiles"
+		if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
+			base = v
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		path := filepath.Join(base, name+".ovpn")
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(ovpn+"\n"), 0o600); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			_ = os.Remove(tmp)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Services.VPN.OpenVPN.ConfigPath = path
+		// Explicit profile uploads are considered "advanced" mode; prefer them over managed config.
+		cfg.Services.VPN.OpenVPN.Managed = nil
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if engine != nil {
+			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name})
+		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
+	}
+}
+
+func sanitizeProfileName(in string) string {
+	in = strings.ToLower(strings.TrimSpace(in))
+	var b strings.Builder
+	for _, r := range in {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			// drop
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}
+
+func ensureOpenVPNConfigForegroundString(s string) error {
+	lines := strings.Split(s, "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if fields[0] == "daemon" {
+			return fmt.Errorf("openvpn profile contains 'daemon' directive; remove it (supervisor requires foreground)")
+		}
+	}
+	return nil
+}
+
+func openVPNBaseDir() string {
+	base := "/data/openvpn"
+	if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
+		base = v
+		if strings.HasSuffix(base, "/profiles") {
+			base = filepath.Dir(base)
+		}
+	}
+	return base
+}
+
+func openVPNManagedServerPKIDir() string {
+	return filepath.Join(openVPNBaseDir(), "managed", "server", "pki")
+}
+
+func openVPNManagedServerClientsDir() string {
+	return filepath.Join(openVPNManagedServerPKIDir(), "clients")
+}
+
+func listOpenVPNClientsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		dir := openVPNManagedServerClientsDir()
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			// If missing, treat as empty.
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusOK, gin.H{"clients": []string{}})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var out []string
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".crt") {
+				out = append(out, strings.TrimSuffix(name, ".crt"))
+			}
+		}
+		sort.Strings(out)
+		c.JSON(http.StatusOK, gin.H{"clients": out})
+	}
+}
+
+func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Name string `json:"name"`
+	}
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		pkiDir := openVPNManagedServerPKIDir()
+		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Ensure server cert exists too, so the PKI is complete.
+		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
+		clientCertPath, _, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.create", Target: clientName})
+		c.JSON(http.StatusOK, gin.H{"name": clientName})
+	}
+}
+
+func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		ovpn := cfg.Services.VPN.OpenVPN
+		if !ovpn.Enabled || strings.TrimSpace(ovpn.Mode) != "server" || ovpn.Server == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn server is not configured"})
+			return
+		}
+		publicEndpoint := strings.TrimSpace(ovpn.Server.PublicEndpoint)
+		if publicEndpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "openvpn.server.publicEndpoint is required to generate client profiles"})
+			return
+		}
+		proto := strings.ToLower(strings.TrimSpace(ovpn.Server.Proto))
+		if proto == "" {
+			proto = "udp"
+		}
+		port := ovpn.Server.ListenPort
+		if port == 0 {
+			port = 1194
+		}
+
+		pkiDir := openVPNManagedServerPKIDir()
+		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
+		clientCertPath, clientKeyPath, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		caPEM, err := os.ReadFile(caCertPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		certPEM, err := os.ReadFile(clientCertPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		keyPEM, err := os.ReadFile(clientKeyPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		var b strings.Builder
+		b.WriteString("client\n")
+		b.WriteString("dev tun\n")
+		b.WriteString("nobind\n")
+		b.WriteString("persist-key\n")
+		b.WriteString("persist-tun\n")
+		b.WriteString("remote " + publicEndpoint + " " + strconv.Itoa(port) + "\n")
+		if proto == "tcp" {
+			b.WriteString("proto tcp-client\n")
+		} else {
+			b.WriteString("proto udp\n")
+		}
+		b.WriteString("remote-cert-tls server\n")
+		b.WriteString("verb 3\n")
+		writeInlineBlock(&b, "ca", caPEM)
+		writeInlineBlock(&b, "cert", certPEM)
+		writeInlineBlock(&b, "key", keyPEM)
+
+		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.download", Target: clientName})
+		c.Header("Content-Type", "application/x-openvpn-profile")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", clientName+".ovpn"))
+		c.String(http.StatusOK, b.String())
+	}
+}
+
+func writeInlineBlock(b *strings.Builder, tag string, pemBytes []byte) {
+	b.WriteString("<" + tag + ">\n")
+	b.Write(pemBytes)
+	if len(pemBytes) == 0 || pemBytes[len(pemBytes)-1] != '\n' {
+		b.WriteString("\n")
+	}
+	b.WriteString("</" + tag + ">\n")
+}
+
+func getWireGuardStatusHandler(engine any) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cl, ok := engine.(WireGuardStatusClient)
+		if !ok || cl == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "engine wireguard status not available"})
+			return
+		}
+		iface := strings.TrimSpace(c.Query("iface"))
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		st, err := cl.GetWireGuardStatus(ctx, iface)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, st)
 	}
 }
 
@@ -535,7 +1239,7 @@ func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
+func setForwardProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var forwardCfg config.ForwardProxyConfig
 		if err := c.ShouldBindJSON(&forwardCfg); err != nil {
@@ -551,6 +1255,12 @@ func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
@@ -568,7 +1278,7 @@ func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
+func setReverseProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var reverseCfg config.ReverseProxyConfig
 		if err := c.ShouldBindJSON(&reverseCfg); err != nil {
@@ -584,6 +1294,12 @@ func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
@@ -604,25 +1320,52 @@ func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
 	}
 }
 
-func listEventsHandler(engine EngineClient) gin.HandlerFunc {
+func listEventsHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tc, ok := engine.(TelemetryClient)
-		if !ok || tc == nil {
-			c.JSON(http.StatusOK, []dpevents.Event{})
-			return
-		}
 		limit := 500
 		if q := c.Query("limit"); q != "" {
 			if v, err := strconv.Atoi(q); err == nil && v > 0 {
 				limit = v
 			}
 		}
-		evs, err := tc.ListEvents(c.Request.Context(), limit)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
+
+		var out []dpevents.Event
+		var engineErr error
+
+		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
+			evs, err := tc.ListEvents(c.Request.Context(), limit)
+			if err != nil {
+				engineErr = err
+			} else {
+				out = append(out, evs...)
+			}
 		}
-		c.JSON(http.StatusOK, evs)
+
+		if s, ok := services.(interface {
+			ListTelemetryEvents(limit int) []dpevents.Event
+		}); ok && s != nil {
+			out = append(out, s.ListTelemetryEvents(limit)...)
+		}
+
+		if engineErr != nil && len(out) > 0 {
+			// Surface the error as a synthetic event so operators can see it in the UI.
+			out = append(out, dpevents.Event{
+				Proto:     "system",
+				Kind:      "system.engine.telemetry_error",
+				Timestamp: time.Now().UTC(),
+				Attributes: map[string]any{
+					"error": engineErr.Error(),
+				},
+			})
+		}
+
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Timestamp.After(out[j].Timestamp)
+		})
+		if limit > 0 && len(out) > limit {
+			out = out[:limit]
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }
 
@@ -648,6 +1391,49 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
+func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cc, ok := engine.(ConntrackClient)
+		if !ok || cc == nil {
+			c.JSON(http.StatusOK, []conntrack.Entry{})
+			return
+		}
+		limit := 200
+		if q := c.Query("limit"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		ents, err := cc.ListConntrack(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, ents)
+	}
+}
+
+func killConntrackHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ck, ok := engine.(ConntrackKiller)
+		if !ok || ck == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "conntrack delete not supported"})
+			return
+		}
+		var req conntrack.DeleteRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		if err := ck.DeleteConntrack(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "conntrack.delete", Target: "dataplane"})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	}
+}
+
 func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -656,6 +1442,45 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		snap, err := compile.CompileSnapshot(cfg)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		comp := enforce.NewCompiler()
+		ruleset, err := comp.CompileFirewall(&snap)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		resp := gin.H{
+			"snapshot": snap,
+			"ruleset":  ruleset,
+		}
+		if engine != nil {
+			type rulesetStatusClient interface {
+				RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
+			}
+			if ec, ok := engine.(rulesetStatusClient); ok && ec != nil {
+				if st, err := ec.RulesetStatus(c.Request.Context()); err == nil {
+					resp["engineStatus"] = st
+				} else {
+					resp["engineStatusError"] = err.Error()
+				}
+			}
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -721,8 +1546,13 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 	}
 	return func(c *gin.Context) {
 		var r req
-		if err := c.ShouldBindJSON(&r); err != nil || r.Line == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing line"})
+		if err := c.ShouldBindJSON(&r); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			return
+		}
+		// Treat blank input as a no-op; the UI console may send empty lines.
+		if strings.TrimSpace(r.Line) == "" {
+			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
 		loopbackHostPort := func(addr string, defaultPort string) string {
@@ -802,6 +1632,39 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, resp{Output: buf.String()})
+	}
+}
+
+func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Firewall.NAT)
+	}
+}
+
+func setFirewallNATHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var nat config.NATConfig
+		if err := c.ShouldBindJSON(&nat); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid NAT payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Firewall.NAT = nat
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "firewall.nat.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.Firewall.NAT)
 	}
 }
 
@@ -1073,7 +1936,379 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func createInterfaceHandler(store config.Store) gin.HandlerFunc {
+func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Ensure config exists (so default interfaces are seeded).
+		if _, err := loadOrInitConfig(c.Request.Context(), store); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, []config.InterfaceState{})
+			return
+		}
+		st, err := engine.ListInterfaceState(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, st)
+	}
+}
+
+func interfacesAssignHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Mode     string            `json:"mode"`
+			Mappings map[string]string `json:"mappings"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		mode := strings.ToLower(strings.TrimSpace(req.Mode))
+		if mode == "" {
+			if len(req.Mappings) > 0 {
+				mode = "explicit"
+			}
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		state, err := engine.ListInterfaceState(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		deviceSet := map[string]struct{}{}
+		type candidate struct {
+			name   string
+			index  int
+			hasMAC bool
+		}
+		candidates := make([]candidate, 0, len(state))
+		for _, st := range state {
+			if strings.TrimSpace(st.Name) == "" {
+				continue
+			}
+			deviceSet[st.Name] = struct{}{}
+			if st.Name != "lo" && isAutoAssignableDevice(st.Name, st.MAC) {
+				mac := strings.TrimSpace(strings.ToLower(st.MAC))
+				hasMAC := mac != "" && mac != "00:00:00:00:00:00"
+				candidates = append(candidates, candidate{name: st.Name, index: st.Index, hasMAC: hasMAC})
+			}
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			// Prefer NICs with a real MAC if we have it.
+			if candidates[i].hasMAC != candidates[j].hasMAC {
+				return candidates[i].hasMAC
+			}
+			// Prefer kernel index ordering when available; fall back to name.
+			if candidates[i].index > 0 && candidates[j].index > 0 && candidates[i].index != candidates[j].index {
+				return candidates[i].index < candidates[j].index
+			}
+			return candidates[i].name < candidates[j].name
+		})
+
+		ifaceByName := map[string]*config.Interface{}
+		for i := range cfg.Interfaces {
+			ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
+		}
+
+		assignments := map[string]string{}
+		switch mode {
+		case "auto":
+			// Assign default logical interfaces to detected kernel interfaces.
+			//
+			// Note: In Docker-based lab mode, interface numbering (eth0/eth1/...) can vary depending
+			// on network attach order. To keep the appliance UX stable, try to match interface roles
+			// by the IPv4 subnets currently present on each interface (configurable via env vars,
+			// defaulting to this repo's docker-compose subnets). Fall back to index ordering.
+			order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
+			subnetByLogical := map[string]string{
+				"wan":  envOrDefault("CONTAIND_AUTO_WAN_SUBNET", "192.168.240.0/24"),
+				"dmz":  envOrDefault("CONTAIND_AUTO_DMZ_SUBNET", "192.168.241.0/24"),
+				"lan1": envOrDefault("CONTAIND_AUTO_LAN1_SUBNET", "192.168.242.0/24"),
+				"lan2": envOrDefault("CONTAIND_AUTO_LAN2_SUBNET", "192.168.243.0/24"),
+				"lan3": envOrDefault("CONTAIND_AUTO_LAN3_SUBNET", "192.168.244.0/24"),
+				"lan4": envOrDefault("CONTAIND_AUTO_LAN4_SUBNET", "192.168.245.0/24"),
+				"lan5": envOrDefault("CONTAIND_AUTO_LAN5_SUBNET", "192.168.246.0/24"),
+				"lan6": envOrDefault("CONTAIND_AUTO_LAN6_SUBNET", "192.168.247.0/24"),
+			}
+			needed := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; ok {
+					needed++
+				}
+			}
+			if needed == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "no default interfaces present"})
+				return
+			}
+			if len(candidates) < needed {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)})
+				return
+			}
+
+			stateByName := map[string]config.InterfaceState{}
+			for _, st := range state {
+				if strings.TrimSpace(st.Name) == "" {
+					continue
+				}
+				stateByName[st.Name] = st
+			}
+			usedDev := map[string]bool{}
+
+			// Prefer the kernel's default-route egress device for WAN when available.
+			// This avoids confusing assignments in container labs where extra virtual/tunnel
+			// interfaces may exist but are not the actual "uplink".
+			if wanIface, ok := ifaceByName["wan"]; ok && wanIface != nil {
+				defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
+				if defDev != "" && !usedDev[defDev] {
+					if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+						assignments["wan"] = defDev
+						usedDev[defDev] = true
+					}
+				}
+			}
+
+			// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
+			// prefer those exact/prefix matches next.
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				if _, already := assignments[logical]; already {
+					continue
+				}
+				for _, cand := range candidates {
+					if usedDev[cand.name] {
+						continue
+					}
+					if cand.name == logical || strings.HasPrefix(cand.name, logical) {
+						assignments[logical] = cand.name
+						usedDev[cand.name] = true
+						break
+					}
+				}
+			}
+
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				if _, already := assignments[logical]; already {
+					continue
+				}
+				cidr := strings.TrimSpace(subnetByLogical[logical])
+				if cidr == "" {
+					continue
+				}
+				for _, cand := range candidates {
+					if usedDev[cand.name] {
+						continue
+					}
+					st, ok := stateByName[cand.name]
+					if !ok {
+						continue
+					}
+					if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
+						assignments[logical] = cand.name
+						usedDev[cand.name] = true
+						break
+					}
+				}
+			}
+
+			remaining := make([]candidate, 0, len(candidates))
+			for _, cand := range candidates {
+				if usedDev[cand.name] {
+					continue
+				}
+				remaining = append(remaining, cand)
+			}
+			idx := 0
+			for _, logical := range order {
+				if _, ok := ifaceByName[logical]; !ok {
+					continue
+				}
+				if _, already := assignments[logical]; already {
+					continue
+				}
+				if idx >= len(remaining) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "not enough eligible kernel interfaces to complete auto-assign"})
+					return
+				}
+				assignments[logical] = remaining[idx].name
+				idx++
+			}
+		case "explicit":
+			if len(req.Mappings) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "mappings required"})
+				return
+			}
+			for k, v := range req.Mappings {
+				k = strings.TrimSpace(k)
+				v = strings.TrimSpace(v)
+				if k == "" {
+					continue
+				}
+				// Allow clearing via empty/none.
+				if strings.EqualFold(v, "none") || v == "-" {
+					v = ""
+				}
+				assignments[k] = v
+			}
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be auto or explicit"})
+			return
+		}
+
+		used := map[string]string{} // device -> logical
+		for logical, dev := range assignments {
+			if _, ok := ifaceByName[logical]; !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown interface: " + logical})
+				return
+			}
+			if dev == "" {
+				continue
+			}
+			if _, ok := deviceSet[dev]; !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown kernel device: " + dev})
+				return
+			}
+			if prev, ok := used[dev]; ok && prev != logical {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("device %s already assigned to %s", dev, prev)})
+				return
+			}
+			used[dev] = logical
+		}
+
+		for logical, dev := range assignments {
+			ifaceByName[logical].Device = dev
+		}
+
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config"})
+		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
+	}
+}
+
+func isAutoAssignableDevice(name string, mac string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || name == "lo" {
+		return false
+	}
+	// In appliance mode we want "real" NIC-like devices, not tunnels/virtual plumbing.
+	// Users can still explicitly bind to these if they want.
+	skipPrefixes := []string{
+		"erspan", "gre", "gretap", "ipip", "sit", "ip6tnl",
+		"tun", "tap",
+		"veth", "br", "docker", "cni", "flannel", "calico",
+		"vxlan", "geneve",
+		"wg", "tailscale",
+		"virbr", "vmnet", "utun",
+		"dummy", "ifb", "nlmon",
+	}
+	for _, p := range skipPrefixes {
+		if strings.HasPrefix(name, p) {
+			return false
+		}
+	}
+	return true
+}
+
+func envOrDefault(key, def string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return false
+	}
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil || ipnet == nil {
+		return false
+	}
+	for _, a := range addrs {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		var ip net.IP
+		if strings.Contains(a, "/") {
+			var ipnet2 *net.IPNet
+			ip, ipnet2, err = net.ParseCIDR(a)
+			if err != nil || ipnet2 == nil {
+				continue
+			}
+		} else {
+			ip = net.ParseIP(a)
+			if ip == nil {
+				continue
+			}
+		}
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue
+		}
+		if ip4[0] == 169 && ip4[1] == 254 {
+			continue
+		}
+		if ipnet.Contains(ip4) {
+			return true
+		}
+	}
+	return false
+}
+
+func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Confirm string `json:"confirm"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Confirm) != "REPLACE" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "confirm required: set {\"confirm\":\"REPLACE\"}"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "interfaces.reconcile", Target: "engine"})
+		c.JSON(http.StatusOK, gin.H{"status": "reconciled"})
+	}
+}
+
+func createInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var iface config.Interface
 		if err := c.ShouldBindJSON(&iface); err != nil || iface.Name == "" {
@@ -1096,11 +2331,18 @@ func createInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "interfaces.create", Target: iface.Name})
 		c.JSON(http.StatusOK, iface)
 	}
 }
 
-func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
+func deleteInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -1124,11 +2366,18 @@ func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "interfaces.delete", Target: name})
 		c.Status(http.StatusNoContent)
 	}
 }
 
-func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
+func updateInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
 		var iface config.Interface
@@ -1178,8 +2427,78 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if engine != nil {
+			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
 		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
 		c.JSON(http.StatusOK, iface)
+	}
+}
+
+func getRoutingHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Routing)
+	}
+}
+
+func setRoutingHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var routingCfg config.RoutingConfig
+		if err := c.ShouldBindJSON(&routingCfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cfg.Routing = routingCfg
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "routing.set", Target: "config"})
+		c.JSON(http.StatusOK, cfg.Routing)
+	}
+}
+
+func routingReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req struct {
+			Confirm string `json:"confirm"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Confirm) != "REPLACE" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "confirm required: set {\"confirm\":\"REPLACE\"}"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ConfigureRoutingReplace(c.Request.Context(), cfg.Routing); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "routing.reconcile", Target: "engine"})
+		c.JSON(http.StatusOK, gin.H{"status": "reconciled"})
 	}
 }
 
@@ -1372,6 +2691,11 @@ func autoBindDefaultInterfaceDevices(cfg *config.Config) {
 			continue
 		}
 		if len(si.HardwareAddr) == 0 {
+			continue
+		}
+		// Keep the same "no tunnels/virtual" approach as interfaces auto-assign.
+		// (We don't have MAC strings here; HardwareAddr presence already helps.)
+		if !isAutoAssignableDevice(si.Name, si.HardwareAddr.String()) {
 			continue
 		}
 		candidates = append(candidates, sysIface{idx: si.Index, name: si.Name})

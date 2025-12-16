@@ -1,21 +1,24 @@
 # containd
 
-`containd` is an open-source next-generation firewall purpose-built for ICS/OT environments. This repository follows the agent specification in `agents.md` and evolves through staged phases.
+`containd` is an open-source next-generation firewall purpose-built for ICS/OT environments. This repository follows the agent specification in `agents.md` and evolves through staged phases. Product/operator docs live under `docs/mkdocs/` and the roadmap is tracked in `docs/tasks.md`.
 
 ## Current status
 
 - Phase 0 scaffolding with Go entrypoints for `ngfw-engine` and `ngfw-mgmt`.
-- Placeholder Next.js app directory under `ui/` for the upcoming web UI.
-- Deployment stubs for container builds and docs placeholders.
+- Next.js UI in `ui/` (static export embedded into the appliance image).
+- Docker Compose workflow for local appliance bring-up (HTTP+HTTPS UI/API and SSH console).
 
 ## Running the skeleton
 
 ```bash
-# Management plane API (uses Gin)
-go run ./cmd/ngfw-mgmt
+# Combined appliance (default)
+go run ./cmd/containd all
 
-# Data plane stub
-go run ./cmd/ngfw-engine
+# Management plane only
+go run ./cmd/containd mgmt
+
+# Data plane only
+go run ./cmd/containd engine
 ```
 
 Health endpoints:
@@ -29,8 +32,8 @@ UI serving:
 
 Containers:
 - Build appliance image (single container, default): `docker build -f Dockerfile.mgmt -t containd/containd:dev .`
-- Build engine-only image: `docker build -f Dockerfile.engine -t containd/containd-engine:dev .`
-- Compose (mgmt + engine) + prints connection info: `bash scripts/containd up --build`
+- Compose (combined containd) + prints connection info: `bash scripts/containd up --build`
+- Override mode if needed: `CONTAIND_MODE=engine docker compose up` (engine-only) or `CONTAIND_MODE=mgmt` (mgmt-only).
 - Publish (example): `docker tag containd/containd:dev ghcr.io/you/containd:dev && docker push ghcr.io/you/containd:dev`
 
 Consume published image:
@@ -52,3 +55,8 @@ Defaults:
 - SSH: `ssh -p ${CONTAIND_PUBLISH_SSH_PORT:-2222} containd@localhost` (password `containd` until you enroll a key)
 
 Next steps: flesh out control plane models, data plane capture/flow tracking, and the full UI/CLI experience per `agents.md`.
+
+## Docs
+
+- `docs/mkdocs/` – operator/product documentation
+- `docs/tasks.md` – roadmap/task tracker

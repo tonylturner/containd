@@ -15,6 +15,19 @@ jobs:
       - name: Go test
         run: go test ./...
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install MkDocs deps
+        run: pip install -r docs/requirements-mkdocs.txt
+      - name: Build docs
+        run: mkdocs build -f mkdocs.yml -d /tmp/containd-docs
+
   ui-lint:
     runs-on: ubuntu-latest
     steps:
@@ -39,7 +52,7 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [go, ui-lint]
+    needs: [go, docs, ui-lint]
     steps:
       - uses: actions/checkout@v4
       - name: Build mgmt image

@@ -6,29 +6,39 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/ids"
-	"github.com/containd/containd/pkg/dp/ics/modbus"
-	"github.com/containd/containd/pkg/dp/itdpi"
 	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/containd/containd/pkg/dp/ics/modbus"
+	"github.com/containd/containd/pkg/dp/ids"
+	"github.com/containd/containd/pkg/dp/itdpi"
 	"github.com/containd/containd/pkg/dp/rules"
 	"github.com/containd/containd/pkg/dp/verdict"
 )
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture  *capture.Manager
-	ruleSnap atomic.Pointer[rules.Snapshot]
-	started  atomic.Bool
-	compiler *enforce.Compiler
-	applier  enforce.Applier
-	updater  enforce.Updater
-	dpiMgr   *dpi.Manager
-	eventStore *events.Store
+	capture       *capture.Manager
+	ruleSnap      atomic.Pointer[rules.Snapshot]
+	started       atomic.Bool
+	compiler      *enforce.Compiler
+	applier       enforce.Applier
+	updater       enforce.Updater
+	dpiMgr        *dpi.Manager
+	eventStore    *events.Store
+	rulesetStatus atomic.Pointer[RulesetStatus]
+	avSink        AVSink
+}
+
+// RulesetStatus captures the last compiled/applied ruleset and any error.
+type RulesetStatus struct {
+	Ruleset   string    `json:"ruleset"`
+	AppliedAt time.Time `json:"appliedAt"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -55,6 +65,7 @@ func New(cfg Config) (*Engine, error) {
 		itdpi.NewDNSDecoder(),
 		itdpi.NewTLSDecoder(),
 		itdpi.NewHTTPDecoder(),
+		itdpi.NewICSMarker(),
 		itdpi.NewPortDetector(),
 	)
 	if cfg.Enforce.Enabled {
@@ -94,21 +105,28 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
-	if e.compiler == nil {
-		e.ruleSnap.Store(&snap)
-		return nil
+	var compiled string
+	var applyErr error
+
+	if e.compiler != nil {
+		compiled, applyErr = e.compiler.CompileFirewall(&snap)
+		if applyErr != nil {
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
+		if e.applier == nil {
+			applyErr = errors.New("no applier configured")
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
+		if applyErr = e.applier.Apply(ctx, compiled); applyErr != nil {
+			e.setRulesetStatus(compiled, applyErr)
+			return applyErr
+		}
 	}
-	ruleset, err := e.compiler.CompileFirewall(&snap)
-	if err != nil {
-		return err
-	}
-	if e.applier == nil {
-		return errors.New("no applier configured")
-	}
-	if err := e.applier.Apply(ctx, ruleset); err != nil {
-		return err
-	}
+
 	e.ruleSnap.Store(&snap)
+	e.setRulesetStatus(compiled, nil)
 	return nil
 }
 
@@ -223,6 +241,40 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	if e == nil || e.eventStore == nil {
 		return
 	}
+	for i := range evs {
+		evs[i] = itdpi.MarkICS(evs[i])
+	}
+	// Push HTTP previews to AV sink (if configured).
+	if e.avSink != nil {
+		src, dst := srcDestStrings(state)
+		for _, ev := range evs {
+			if ev.Proto != "http" {
+				continue
+			}
+			if ev.Kind != "request" && ev.Kind != "response" {
+				continue
+			}
+			preview, _ := ev.Attributes["preview"].([]byte)
+			hash, _ := ev.Attributes["hash"].(string)
+			if len(preview) == 0 {
+				continue
+			}
+			ics := isICSEvent(ev.Proto, ev.Kind)
+			task := AVScanTask{
+				Hash:      hash,
+				Direction: ev.Kind,
+				Proto:     "http",
+				Source:    src,
+				Dest:      dst,
+				FlowID:    ev.FlowID,
+				Preview:   preview,
+				ICS:       ics,
+			}
+			e.avSink.EnqueueAVScan(context.Background(), task)
+			// Drop preview from telemetry to avoid large payloads.
+			delete(ev.Attributes, "preview")
+		}
+	}
 	e.eventStore.Record(state, pkt, evs)
 	// Evaluate IDS rules over DPI events and record alerts.
 	snap := e.ruleSnap.Load()
@@ -241,6 +293,31 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 // Events returns the telemetry event store.
 func (e *Engine) Events() *events.Store {
 	return e.eventStore
+}
+
+// AVSink returns the currently configured AV sink, if any.
+func (e *Engine) AVSink() AVSink {
+	if e == nil {
+		return nil
+	}
+	return e.avSink
+}
+
+// Updater returns the dynamic nftables updater when enforcement is enabled.
+func (e *Engine) Updater() enforce.Updater {
+	if e == nil {
+		return nil
+	}
+	return e.updater
+}
+
+func isICSEvent(proto, kind string) bool {
+	switch strings.ToLower(proto) {
+	case "modbus", "dnp3", "iec104", "s7", "ics":
+		return true
+	}
+	_ = kind
+	return false
 }
 
 // Evaluate applies the current rule snapshot to a simple context.
@@ -274,4 +351,27 @@ func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules
 	default:
 		return nil
 	}
+}
+
+// RulesetStatus returns the last compiled/applied nftables ruleset snapshot.
+func (e *Engine) RulesetStatus() RulesetStatus {
+	if e == nil {
+		return RulesetStatus{}
+	}
+	ptr := e.rulesetStatus.Load()
+	if ptr == nil {
+		return RulesetStatus{}
+	}
+	return *ptr
+}
+
+func (e *Engine) setRulesetStatus(ruleset string, err error) {
+	st := &RulesetStatus{
+		Ruleset:   ruleset,
+		AppliedAt: time.Now().UTC(),
+	}
+	if err != nil {
+		st.Error = err.Error()
+	}
+	e.rulesetStatus.Store(st)
 }

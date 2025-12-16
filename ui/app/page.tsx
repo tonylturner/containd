@@ -6,6 +6,8 @@ import Link from "next/link";
 import { fetchHealth, type HealthResponse, api } from "../lib/api";
 import { Shell } from "../components/Shell";
 import { Console } from "../components/Console";
+import { Skeleton } from "../components/Skeleton";
+import { KPI } from "../components/KPI";
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -17,6 +19,8 @@ export default function Home() {
   const [eventStats, setEventStats] = useState<{
     idsAlerts: number;
     modbusWrites: number;
+    avDetections: number;
+    avBlocks: number;
     totalEvents: number;
   } | null>(null);
   const [servicesStatus, setServicesStatus] = useState<Record<string, unknown> | null>(null);
@@ -41,13 +45,15 @@ export default function Home() {
       setFlowCount(flows?.length ?? 0);
       const evs = events ?? [];
       const idsAlerts = evs.filter((e) => e.proto === "ids" && e.kind === "alert").length;
+      const avDetections = evs.filter((e) => e.kind === "service.av.detected").length;
+      const avBlocks = evs.filter((e) => e.kind === "service.av.block_flow").length;
       const modbusWrites = evs.filter(
         (e) =>
           e.proto === "modbus" &&
           e.kind === "request" &&
           (e.attributes as any)?.is_write === true,
       ).length;
-      setEventStats({ idsAlerts, modbusWrites, totalEvents: evs.length });
+      setEventStats({ idsAlerts, modbusWrites, avDetections, avBlocks, totalEvents: evs.length });
       setServicesStatus(services);
     });
     return () => {
@@ -59,28 +65,43 @@ export default function Home() {
     <Shell title="Dashboard">
       <div className="grid gap-4 md:grid-cols-3">
         <DashboardCard title="System information">
-          <div className="space-y-1 text-sm">
-            <KeyValue label="Hostname" value="containd" />
-            <KeyValue label="Build" value={health?.build ?? "dev"} />
-            <KeyValue label="Component" value={health?.component ?? "mgmt"} />
-            <KeyValue
-              label="Updated"
-              value={
-                health?.time
-                  ? new Date(health.time).toLocaleString()
-                  : "—"
-              }
-            />
-          </div>
+          {health ? (
+            <div className="space-y-1 text-sm">
+              <KeyValue label="Hostname" value="containd" />
+              <KeyValue label="Build" value={health?.build ?? "dev"} />
+              <KeyValue label="Component" value={health?.component ?? "mgmt"} />
+              <KeyValue
+                label="Updated"
+                value={
+                  health?.time
+                    ? new Date(health.time).toLocaleString()
+                    : "—"
+                }
+              />
+            </div>
+          ) : (
+            <Skeleton className="h-20 w-full" />
+          )}
         </DashboardCard>
 
         <DashboardCard title="Services">
-          <ServicesWidget status={servicesStatus} />
+          {servicesStatus ? <ServicesWidget status={servicesStatus} /> : <Skeleton className="h-20 w-full" />}
         </DashboardCard>
 
         <DashboardCard title="Traffic">
-          <TrafficWidget flowCount={flowCount} totalEvents={eventStats?.totalEvents ?? 0} />
+          {eventStats ? (
+            <TrafficWidget flowCount={flowCount} totalEvents={eventStats?.totalEvents ?? 0} />
+          ) : (
+            <Skeleton className="h-20 w-full" />
+          )}
         </DashboardCard>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-4">
+        <KPI label="Flows" value={flowCount ?? "—"} hint="Active flows" />
+        <KPI label="Events" value={eventStats?.totalEvents ?? "—"} hint="Recent telemetry" accent="primary" />
+        <KPI label="AV detections" value={eventStats?.avDetections ?? 0} accent="error" />
+        <KPI label="IDS alerts" value={eventStats?.idsAlerts ?? 0} accent="warning" />
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -182,11 +203,12 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
   const proxy = status?.["proxy"] as any;
   const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
   const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
+  const avEnabled = (status?.["av"] as any)?.enabled;
   const chips: Array<{ label: string; ok: boolean; hint?: string }> = [
     { label: "IPS", ok: true, hint: "native IDS/IPS" },
     { label: "Web Filter", ok: false },
-    { label: "AV", ok: false },
-    { label: "VPN", ok: false },
+    { label: "AV", ok: !!avEnabled },
+    { label: "VPN", ok: (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running },
     { label: "Updates", ok: true },
     { label: "Proxy", ok: envoyActive || nginxActive },
     { label: "Syslog", ok: !!syslogConfigured },
@@ -253,10 +275,12 @@ function TrafficWidget({
 function ViolationsWidget({
   stats,
 }: {
-  stats: { idsAlerts: number; modbusWrites: number; totalEvents: number } | null;
+  stats: { idsAlerts: number; modbusWrites: number; avDetections: number; avBlocks: number; totalEvents: number } | null;
 }) {
   const idsAlerts = stats?.idsAlerts ?? 0;
   const modbusWrites = stats?.modbusWrites ?? 0;
+  const avDetections = stats?.avDetections ?? 0;
+  const avBlocks = stats?.avBlocks ?? 0;
   return (
     <div className="grid grid-cols-2 gap-3 text-sm">
       <div className="rounded-xl bg-black/30 p-4">
@@ -275,6 +299,24 @@ function ViolationsWidget({
         <div className="text-3xl font-bold text-white">{modbusWrites}</div>
         <Link href="/events/" className="text-xs text-slate-300 hover:text-white">
           Events →
+        </Link>
+      </div>
+      <div className="rounded-xl bg-black/30 p-4">
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          AV detections
+        </div>
+        <div className="text-3xl font-bold text-red">{avDetections}</div>
+        <Link href="/events/?filter=service&av=1" className="text-xs text-blue-300 hover:text-blue-200">
+          Events →
+        </Link>
+      </div>
+      <div className="rounded-xl bg-black/30 p-4">
+        <div className="text-xs uppercase tracking-wide text-slate-300">
+          AV blocks
+        </div>
+        <div className="text-3xl font-bold text-red">{avBlocks}</div>
+        <Link href="/flows/?av=1" className="text-xs text-blue-300 hover:text-blue-200">
+          Flows →
         </Link>
       </div>
     </div>

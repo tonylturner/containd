@@ -29,6 +29,7 @@ type ProxyOptions struct {
 	Supervise bool
 	EnvoyPath string
 	NginxPath string
+	OnEvent   func(kind string, attrs map[string]any)
 }
 
 // ProxyManager renders Envoy (forward) and Nginx (reverse) configs from persistent models.
@@ -40,16 +41,18 @@ type ProxyManager struct {
 	NginxPath string
 	CertsDir  string
 
-	mu       sync.Mutex
-	lastCfg  config.ProxyConfig
-	envoyCmd *exec.Cmd
-	nginxCmd *exec.Cmd
+	OnEvent func(kind string, attrs map[string]any)
+
+	mu             sync.Mutex
+	lastCfg        config.ProxyConfig
+	envoyCmd       *exec.Cmd
+	nginxCmd       *exec.Cmd
 	lastEnvoyError string
 	lastNginxError string
 	lastEnvoyStart time.Time
 	lastNginxStart time.Time
 	lastRender     time.Time
-	logger   *log.Logger
+	logger         *log.Logger
 }
 
 func NewProxyManager(opts ProxyOptions) *ProxyManager {
@@ -79,6 +82,7 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 		NginxPath: nginxPath,
 		CertsDir:  certsDir,
 		logger:    logging.New("[services/proxy]"),
+		OnEvent:   opts.OnEvent,
 	}
 }
 
@@ -94,6 +98,12 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 		return err
 	}
 	if err := m.renderReverse(cfg.Reverse); err != nil {
+		return err
+	}
+	if err := m.validateForward(ctx, cfg.Forward); err != nil {
+		return err
+	}
+	if err := m.validateReverse(ctx, cfg.Reverse); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -127,12 +137,12 @@ func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
 	tpl := template.Must(template.New("envoyForward").Parse(envoyForwardTemplate))
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
-		"ListenPort": port,
-		"Domains":    string(domainsJSON),
-		"LogRequests": cfg.LogRequests,
-		"Upstream":   cfg.Upstream,
-		"HasUpstream": cfg.Upstream != "",
-		"ListenZones": cfg.ListenZones,
+		"ListenPort":     port,
+		"Domains":        string(domainsJSON),
+		"LogRequests":    cfg.LogRequests,
+		"Upstream":       cfg.Upstream,
+		"HasUpstream":    cfg.Upstream != "",
+		"ListenZones":    cfg.ListenZones,
 		"HasListenZones": len(cfg.ListenZones) > 0,
 	}); err != nil {
 		return err
@@ -172,6 +182,61 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
+func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardProxyConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	configPath := filepath.Join(m.BaseDir, "envoy-forward.yaml")
+	if _, err := os.Stat(configPath); err != nil {
+		return fmt.Errorf("envoy config missing: %w", err)
+	}
+	if _, err := os.Stat(m.EnvoyPath); err != nil {
+		// Do not fail hard when binary is missing; supervision will log a clearer error.
+		return nil
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	testCmd := exec.CommandContext(testCtx, m.EnvoyPath, "--mode", "validate", "-c", configPath)
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			err = fmt.Errorf("%v: %s", err, msg)
+		}
+		m.mu.Lock()
+		m.lastEnvoyError = err.Error()
+		m.mu.Unlock()
+		m.emit("service.envoy.validate_failed", map[string]any{"error": err.Error()})
+		return err
+	}
+	return nil
+}
+
+func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReverseProxyConfig) error {
+	if !cfg.Enabled || len(cfg.Sites) == 0 {
+		return nil
+	}
+	configPath := filepath.Join(m.BaseDir, "nginx-reverse.conf")
+	if _, err := os.Stat(configPath); err != nil {
+		return fmt.Errorf("nginx config missing: %w", err)
+	}
+	if _, err := os.Stat(m.NginxPath); err != nil {
+		return nil
+	}
+	testCmd := exec.CommandContext(ctx, m.NginxPath, "-t", "-c", configPath)
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			err = fmt.Errorf("%v: %s", err, msg)
+		}
+		m.mu.Lock()
+		m.lastNginxError = err.Error()
+		m.mu.Unlock()
+		m.emit("service.nginx.validate_failed", map[string]any{"error": err.Error()})
+		return err
+	}
+	return nil
+}
+
 func (m *ProxyManager) ensureProcesses(ctx context.Context, cfg config.ProxyConfig) {
 	if cfg.Forward.Enabled {
 		m.startOrRestartEnvoy(ctx)
@@ -209,11 +274,13 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	if err := cmd.Start(); err != nil {
 		m.lastEnvoyError = err.Error()
 		m.logger.Printf("failed to start envoy: %v", err)
+		m.emit("service.envoy.start_failed", map[string]any{"error": err.Error()})
 		return
 	}
 	m.envoyCmd = cmd
 	m.lastEnvoyError = ""
 	m.lastEnvoyStart = time.Now().UTC()
+	m.emit("service.envoy.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -222,6 +289,7 @@ func (m *ProxyManager) stopEnvoy() {
 	defer m.mu.Unlock()
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
 		_ = m.envoyCmd.Process.Signal(os.Interrupt)
+		m.emit("service.envoy.stopped", map[string]any{"pid": m.envoyCmd.Process.Pid})
 	}
 	m.envoyCmd = nil
 }
@@ -241,10 +309,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		return
 	}
 	// Validate config before restart.
-	testCmd := exec.CommandContext(ctx, m.NginxPath, "-t", "-c", configPath)
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		m.lastNginxError = fmt.Sprintf("nginx config test failed: %v: %s", err, strings.TrimSpace(string(out)))
-		m.logger.Printf("%s", m.lastNginxError)
+	if err := m.validateReverse(ctx, m.lastCfg.Reverse); err != nil {
 		return
 	}
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
@@ -257,11 +322,13 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	if err := cmd.Start(); err != nil {
 		m.lastNginxError = err.Error()
 		m.logger.Printf("failed to start nginx: %v", err)
+		m.emit("service.nginx.start_failed", map[string]any{"error": err.Error()})
 		return
 	}
 	m.nginxCmd = cmd
 	m.lastNginxError = ""
 	m.lastNginxStart = time.Now().UTC()
+	m.emit("service.nginx.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -270,6 +337,7 @@ func (m *ProxyManager) stopNginx() {
 	defer m.mu.Unlock()
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		_ = m.nginxCmd.Process.Signal(os.Interrupt)
+		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid})
 	}
 	m.nginxCmd = nil
 }
@@ -288,20 +356,26 @@ func (m *ProxyManager) Status() map[string]any {
 		nginxPID = m.nginxCmd.Process.Pid
 	}
 	return map[string]any{
-		"forward_enabled": m.lastCfg.Forward.Enabled,
-		"reverse_enabled": m.lastCfg.Reverse.Enabled,
-		"envoy_path":      m.EnvoyPath,
-		"nginx_path":      m.NginxPath,
-		"envoy_running":   envoyRunning,
-		"nginx_running":   nginxRunning,
-		"envoy_pid":       envoyPID,
-		"nginx_pid":       nginxPID,
+		"forward_enabled":  m.lastCfg.Forward.Enabled,
+		"reverse_enabled":  m.lastCfg.Reverse.Enabled,
+		"envoy_path":       m.EnvoyPath,
+		"nginx_path":       m.NginxPath,
+		"envoy_running":    envoyRunning,
+		"nginx_running":    nginxRunning,
+		"envoy_pid":        envoyPID,
+		"nginx_pid":        nginxPID,
 		"envoy_last_start": m.lastEnvoyStart,
 		"nginx_last_start": m.lastNginxStart,
 		"envoy_last_error": m.lastEnvoyError,
 		"nginx_last_error": m.lastNginxError,
 		"last_render":      m.lastRender,
 		"rendered_files":   m.DescribeRendered(),
+	}
+}
+
+func (m *ProxyManager) emit(kind string, attrs map[string]any) {
+	if m.OnEvent != nil {
+		m.OnEvent(kind, attrs)
 	}
 }
 

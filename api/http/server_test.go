@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/containd/containd/pkg/cp/config"
+	dpengine "github.com/containd/containd/pkg/dp/engine"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -90,6 +91,11 @@ type mockEngine struct {
 	err     error
 	lastDP  config.DataPlaneConfig
 	lastIf  []config.Interface
+	lastRT  config.RoutingConfig
+	lastRTR config.RoutingConfig
+	lastSvc config.ServicesConfig
+	state   []config.InterfaceState
+	ruleset dpengine.RulesetStatus
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -102,10 +108,41 @@ func (m *mockEngine) ConfigureInterfaces(ctx context.Context, ifaces []config.In
 	return nil
 }
 
+func (m *mockEngine) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
+	m.lastIf = append([]config.Interface(nil), ifaces...)
+	return nil
+}
+
+func (m *mockEngine) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
+	m.lastRT = routing
+	return nil
+}
+
+func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
+	m.lastRTR = routing
+	return nil
+}
+
+func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+	m.lastSvc = services
+	return nil
+}
+
+func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
+	if m.state != nil {
+		return m.state, nil
+	}
+	return []config.InterfaceState{{Name: "eth0", Index: 1, Up: true, Addrs: []string{"192.0.2.1/24"}}}, nil
+}
+
 func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	m.applied = true
 	m.snap = snap
 	return m.err
+}
+
+func (m *mockEngine) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
+	return m.ruleset, nil
 }
 
 func TestGetConfigNotFound(t *testing.T) {
@@ -208,6 +245,157 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for duplicate, got %d", rec.Code)
+	}
+}
+
+func TestGetAndSetFirewallNAT(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	// GET returns default (disabled) NAT config.
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodGet, "/api/v1/firewall/nat", nil)
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var nat config.NATConfig
+		if err := json.Unmarshal(rec.Body.Bytes(), &nat); err != nil {
+			t.Fatalf("invalid JSON response: %v", err)
+		}
+		if nat.Enabled {
+			t.Fatalf("expected nat disabled by default, got enabled")
+		}
+	}
+
+	// POST updates NAT config (valid zones).
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"wan","sourceZones":["lan","dmz"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// POST with unknown egress zone fails validation.
+	{
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"nope","sourceZones":["lan"]}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestAssignInterfacesAuto(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "lo", Index: 1, Up: true},
+			{Name: "eth0", Index: 2, Up: true},
+			{Name: "eth1", Index: 3, Up: true},
+			{Name: "eth2", Index: 4, Up: true},
+			{Name: "eth3", Index: 5, Up: true},
+			{Name: "eth4", Index: 6, Up: true},
+			{Name: "eth5", Index: 7, Up: true},
+			{Name: "eth6", Index: 8, Up: true},
+			{Name: "eth7", Index: 9, Up: true},
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(eng.lastIf) == 0 {
+		t.Fatalf("expected interfaces applied to engine")
+	}
+	foundWAN := false
+	for _, iface := range eng.lastIf {
+		if iface.Name == "wan" {
+			foundWAN = true
+			if iface.Device != "eth0" {
+				t.Fatalf("expected wan device eth0, got %q", iface.Device)
+			}
+		}
+	}
+	if !foundWAN {
+		t.Fatalf("expected wan interface in engine config")
+	}
+}
+
+func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "lo", Index: 1, Up: true},
+			// Deliberately scramble numbering vs expected "wan/dmz/lan..." order.
+			{Name: "eth0", Index: 2, Up: true, Addrs: []string{"192.168.245.2/24"}}, // should become lan4
+			{Name: "eth1", Index: 3, Up: true, Addrs: []string{"192.168.240.2/24"}}, // should become wan
+			{Name: "eth2", Index: 4, Up: true, Addrs: []string{"192.168.241.2/24"}}, // dmz
+			{Name: "eth3", Index: 5, Up: true, Addrs: []string{"192.168.242.2/24"}}, // lan1
+			{Name: "eth4", Index: 6, Up: true, Addrs: []string{"192.168.243.2/24"}}, // lan2
+			{Name: "eth5", Index: 7, Up: true, Addrs: []string{"192.168.244.2/24"}}, // lan3
+			{Name: "eth6", Index: 8, Up: true, Addrs: []string{"192.168.246.2/24"}}, // lan5
+			{Name: "eth7", Index: 9, Up: true, Addrs: []string{"192.168.247.2/24"}}, // lan6
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got := map[string]string{}
+	for _, iface := range eng.lastIf {
+		if iface.Name == "" || iface.Device == "" {
+			continue
+		}
+		got[iface.Name] = iface.Device
+	}
+	if got["wan"] != "eth1" {
+		t.Fatalf("expected wan device eth1 (subnet match), got %q", got["wan"])
+	}
+	if got["dmz"] != "eth2" {
+		t.Fatalf("expected dmz device eth2 (subnet match), got %q", got["dmz"])
+	}
+	if got["lan4"] != "eth0" {
+		t.Fatalf("expected lan4 device eth0 (subnet match), got %q", got["lan4"])
+	}
+}
+
+func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
+	m := &mockStore{}
+	eng := &mockEngine{
+		state: []config.InterfaceState{
+			{Name: "eth0", Index: 2, Up: true},
+			{Name: "eth1", Index: 3, Up: true},
+			{Name: "eth2", Index: 4, Up: true},
+			{Name: "eth3", Index: 5, Up: true},
+			{Name: "eth4", Index: 6, Up: true},
+			{Name: "eth5", Index: 7, Up: true},
+			{Name: "eth6", Index: 8, Up: true},
+			{Name: "eth7", Index: 9, Up: true},
+		},
+	}
+	s := NewServerWithEngine(m, nil, eng)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"explicit","mappings":{"wan":"eth0","dmz":"eth0"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
