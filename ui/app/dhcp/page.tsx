@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool } from "../../lib/api";
+import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
@@ -20,6 +20,7 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
     domain: cfg?.domain ?? "",
     authoritative: cfg?.authoritative ?? true,
     pools: cfg?.pools ?? [],
+    reservations: cfg?.reservations ?? [],
   };
 }
 
@@ -39,6 +40,22 @@ function textToPools(text: string): DHCPPool[] {
     .filter((p) => p.iface && p.start && p.end);
 }
 
+function reservationsToText(reservations: DHCPReservation[]): string {
+  return reservations.map((r) => `${r.iface},${r.mac},${r.ip}`).join("\n");
+}
+
+function textToReservations(text: string): DHCPReservation[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [iface, mac, ip] = l.split(",").map((s) => s.trim());
+      return { iface: iface || "", mac: mac || "", ip: ip || "" };
+    })
+    .filter((r) => r.iface && r.mac && r.ip);
+}
+
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
@@ -50,6 +67,8 @@ export default function DHCPPage() {
   const [leaseError, setLeaseError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [leasesLoading, setLeasesLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -60,6 +79,7 @@ export default function DHCPPage() {
       const s = await api.getDHCP();
       setCfg(normalize(s));
       toast("DHCP status refreshed", "success");
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to refresh DHCP status.");
       toast("Failed to refresh DHCP status", "error");
@@ -96,9 +116,18 @@ export default function DHCPPage() {
     return () => window.clearInterval(t);
   }, [refreshLeases]);
 
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
+
   const listenIfacesText = useMemo(() => (cfg.listenIfaces ?? []).join(", "), [cfg.listenIfaces]);
   const dnsServersText = useMemo(() => (cfg.dnsServers ?? []).join(", "), [cfg.dnsServers]);
   const poolsText = useMemo(() => poolsToText(cfg.pools ?? []), [cfg.pools]);
+  const reservationsText = useMemo(() => reservationsToText(cfg.reservations ?? []), [cfg.reservations]);
 
   async function onSave() {
     if (!canEdit) return;
@@ -132,6 +161,15 @@ export default function DHCPPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto
+          </label>
         </div>
       }
     >
@@ -145,6 +183,9 @@ export default function DHCPPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
@@ -161,7 +202,16 @@ export default function DHCPPage() {
               Pools: <span className="text-slate-100">{status?.pools ?? 0}</span>
             </div>
             <div>
+              Reservations: <span className="text-slate-100">{status?.reservations ?? 0}</span>
+            </div>
+            <div>
               Listen ifaces: <span className="text-slate-100">{status?.listen_ifaces ?? 0}</span>
+            </div>
+            <div>
+              Rate: <span className="text-slate-100">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
+            <div>
+              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             {status?.last_error ? (
               <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
@@ -297,6 +347,21 @@ export default function DHCPPage() {
               Format: <span className="font-mono">iface,start,end</span>. Pools are validated on save.
             </p>
           </div>
+
+          <div className="md:col-span-2">
+            <label className="text-xs uppercase tracking-wide text-slate-400">Reservations (one per line)</label>
+            <textarea
+              rows={6}
+              value={reservationsText}
+              disabled={!canEdit}
+              onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
+              placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Format: <span className="font-mono">iface,mac,ip</span>. Reserved IP must fall inside the pool for that interface.
+            </p>
+          </div>
         </div>
 
         <p className="mt-3 text-xs text-slate-400">
@@ -317,12 +382,20 @@ export default function DHCPPage() {
             <h2 className="text-lg font-semibold text-white">Active Leases</h2>
             <p className="mt-1 text-sm text-slate-300">Leases issued by the embedded DHCP server (best-effort).</p>
           </div>
-          <button
-            onClick={() => refreshLeases()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href="/events?filter=service&kind=service.dhcp.reservation"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            >
+              Reservation events
+            </a>
+            <button
+              onClick={() => refreshLeases()}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         {leaseError && (

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -67,6 +68,9 @@ type VPNServiceStatus = {
   openvpn_pid?: number;
   openvpn_config_path?: string;
   openvpn_last_error?: string;
+  openvpn_mode?: string;
+  openvpn_server_tunnel?: string;
+  openvpn_server_endpoint?: string;
 };
 
 function hasNonEmptyString(v: unknown): v is string {
@@ -137,6 +141,8 @@ export default function VPNPage() {
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
   const [newClientName, setNewClientName] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   const wireguardIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.wireguard.enabled) return [];
@@ -218,6 +224,7 @@ export default function VPNPage() {
         if (!silent) toast("Failed to refresh VPN status", "error");
       } finally {
         setLoading(false);
+        setLastUpdated(new Date());
       }
     },
     [toast],
@@ -226,6 +233,14 @@ export default function VPNPage() {
   useEffect(() => {
     refresh({ silent: true });
   }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh({ silent: true });
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const peersText = useMemo(() => JSON.stringify(cfg.wireguard.peers ?? [], null, 2), [cfg.wireguard.peers]);
   const peerNameByKey = useMemo(() => {
@@ -374,6 +389,15 @@ export default function VPNPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto
+          </label>
         </div>
       }
     >
@@ -382,6 +406,9 @@ export default function VPNPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
@@ -399,6 +426,23 @@ export default function VPNPage() {
               OpenVPN running:{" "}
               <span className="text-slate-100">{svcStatus?.openvpn_running ? "yes" : "no"}</span>
               {svcStatus?.openvpn_pid ? <span className="text-slate-400"> (pid {svcStatus.openvpn_pid})</span> : null}
+            </div>
+            {svcStatus?.openvpn_mode === "server" ? (
+              <>
+                <div>
+                  Server tunnel: <span className="text-slate-100">{svcStatus?.openvpn_server_tunnel || "n/a"}</span>
+                </div>
+                <div>
+                  Public endpoint:{" "}
+                  <span className="text-slate-100">{svcStatus?.openvpn_server_endpoint || "n/a"}</span>
+                </div>
+              </>
+            ) : null}
+            <div className="md:col-span-2">
+              Rate: <span className="text-slate-100">{typeof (svcStatus as any)?.rate_per_min === "number" ? (svcStatus as any)?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
+            <div className="md:col-span-2">
+              Errors: <span className="text-amber-300">{typeof (svcStatus as any)?.errors_rate_per_min === "number" ? (svcStatus as any)?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               OpenVPN config: <span className="text-slate-100">{svcStatus?.openvpn_config_path || "n/a"}</span>
@@ -431,7 +475,13 @@ export default function VPNPage() {
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-gradient-to-br from-mint/25 to-sky/10">
-                <img src="/icons/wireguard.svg" alt="WireGuard" className="h-6 w-6 invert opacity-90 drop-shadow" />
+                <Image
+                  src="/icons/wireguard.svg"
+                  alt="WireGuard"
+                  width={24}
+                  height={24}
+                  className="h-6 w-6 invert opacity-90 drop-shadow"
+                />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white">WireGuard</h2>
@@ -641,7 +691,13 @@ export default function VPNPage() {
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-gradient-to-br from-amber/25 to-rose/10">
-                <img src="/icons/openvpn.svg" alt="OpenVPN" className="h-6 w-6 invert opacity-90 drop-shadow" />
+                <Image
+                  src="/icons/openvpn.svg"
+                  alt="OpenVPN"
+                  width={24}
+                  height={24}
+                  className="h-6 w-6 invert opacity-90 drop-shadow"
+                />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white">OpenVPN</h2>

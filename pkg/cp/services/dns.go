@@ -11,8 +11,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"strconv"
 
+	commonlog "github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 // DNSManager renders Unbound configuration from persistent DNSConfig.
@@ -24,6 +27,7 @@ type DNSManager struct {
 	Supervise     bool
 	UnboundPath   string
 	CheckConfPath string
+	ControlPath   string
 	OnEvent       func(kind string, attrs map[string]any)
 
 	mu         sync.Mutex
@@ -33,9 +37,24 @@ type DNSManager struct {
 	lastStart  time.Time
 	lastStop   time.Time
 	lastExit   string
+	lastConf   string
 
 	cmd     *exec.Cmd
 	running bool
+
+	statsCancel context.CancelFunc
+	lastStats   map[string]int64
+	log        *zap.SugaredLogger
+}
+
+// RecordQueries increments DNS traffic counters (success/errors) for telemetry.
+func (m *DNSManager) RecordQueries(success int, failures int) {
+	if success > 0 && m.OnEvent != nil {
+		m.OnEvent("service.dns.queries", map[string]any{"count": success})
+	}
+	if failures > 0 && m.OnEvent != nil {
+		m.OnEvent("service.dns.query_failed", map[string]any{"error_count": failures})
+	}
 }
 
 func NewDNSManager(baseDir string) *DNSManager {
@@ -60,13 +79,33 @@ func NewDNSManager(baseDir string) *DNSManager {
 		"/usr/sbin/unbound-checkconf",
 		"/usr/bin/unbound-checkconf",
 	})
+	controlPath, _ := detectBinary([]string{
+		strings.TrimSpace(os.Getenv("CONTAIND_UNBOUND_CONTROL_PATH")),
+		"/usr/sbin/unbound-control",
+		"/usr/bin/unbound-control",
+	})
 
 	return &DNSManager{
 		BaseDir:       baseDir,
 		Supervise:     supervise,
 		UnboundPath:   unboundPath,
 		CheckConfPath: checkConfPath,
+		ControlPath:   controlPath,
+		lastStats:     map[string]int64{},
+		log:           newDNSLogger(),
 	}
+}
+
+func newDNSLogger() *zap.SugaredLogger {
+	lg, err := commonlog.NewZap("dns", "dns", commonlog.Options{
+		FilePath: "/data/logs/dns.log",
+		JSON:     true,
+		Level:    "info",
+	})
+	if err != nil {
+		return zap.NewNop().Sugar()
+	}
+	return lg
 }
 
 func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
@@ -77,6 +116,10 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
+	}
+	if m.UnboundPath == "" {
+		m.log.Warnw("unbound binary not found; skipping enable", "path", m.UnboundPath)
+		return fmt.Errorf("unbound binary not found; set CONTAIND_UNBOUND_PATH or install unbound")
 	}
 	path := filepath.Join(m.BaseDir, "unbound.conf")
 	if !cfg.Enabled {
@@ -132,12 +175,13 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.mu.Unlock()
-		m.emit("service.dns.render_failed", map[string]any{"error": err.Error()})
+		m.emit("service.dns.render_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return err
 	}
 	m.mu.Lock()
 	m.lastRender = time.Now().UTC()
 	m.lastError = ""
+	m.lastConf = path
 	m.mu.Unlock()
 
 	if m.Supervise && m.UnboundPath != "" {
@@ -145,9 +189,10 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 			m.mu.Lock()
 			m.lastError = err.Error()
 			m.mu.Unlock()
-			m.emit("service.dns.start_failed", map[string]any{"error": err.Error()})
+			m.emit("service.dns.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
 			return err
 		}
+		m.startStatsPoller()
 	}
 
 	return nil
@@ -273,7 +318,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 			if msg == "" {
 				msg = err.Error()
 			}
-			go m.emit("service.dns.validate_failed", map[string]any{"error": msg})
+			go m.emit("service.dns.validate_failed", map[string]any{"error": msg, "error_count": 1})
 			return fmt.Errorf("unbound-checkconf failed: %s", msg)
 		}
 	}
@@ -281,7 +326,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 	if m.running && m.cmd != nil && m.cmd.Process != nil {
 		// Best-effort reload (SIGHUP). If it fails, restart.
 		if err := m.cmd.Process.Signal(syscall.SIGHUP); err == nil {
-			go m.emit("service.dns.reloaded", map[string]any{"pid": m.cmd.Process.Pid})
+			go m.emit("service.dns.reloaded", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
 			return nil
 		}
 		_ = m.stopLockedNoLock()
@@ -297,7 +342,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 	m.running = true
 	m.lastStart = time.Now().UTC()
 	m.lastExit = ""
-	go m.emit("service.dns.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	go m.emit("service.dns.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 
 	go func() {
 		err := cmd.Wait()
@@ -315,7 +360,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 		if cmd.Process != nil {
 			pid = cmd.Process.Pid
 		}
-		go m.emit("service.dns.exited", map[string]any{"pid": pid, "exit": exit})
+		go m.emit("service.dns.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
 	}()
 
 	return nil
@@ -335,10 +380,14 @@ func (m *DNSManager) stopLockedNoLock() error {
 	}
 
 	_ = m.cmd.Process.Signal(syscall.SIGTERM)
-	go m.emit("service.dns.stopped", map[string]any{"pid": m.cmd.Process.Pid})
+	go m.emit("service.dns.stopped", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
 	m.running = false
 	m.cmd = nil
 	m.lastStop = time.Now().UTC()
+	if m.statsCancel != nil {
+		m.statsCancel()
+		m.statsCancel = nil
+	}
 	return nil
 }
 
@@ -350,4 +399,83 @@ func (m *DNSManager) emit(kind string, attrs map[string]any) {
 		attrs = map[string]any{}
 	}
 	m.OnEvent(kind, attrs)
+}
+
+// startStatsPoller periodically executes unbound-control stats_noreset (best-effort) and emits
+// query/error deltas into telemetry. It no-ops if control binary is unavailable.
+func (m *DNSManager) startStatsPoller() {
+	if m.ControlPath == "" {
+		return
+	}
+	if m.statsCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.statsCancel = cancel
+	ticker := time.NewTicker(15 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.pollStatsOnce(ctx)
+			}
+		}
+	}()
+}
+
+func (m *DNSManager) pollStatsOnce(ctx context.Context) {
+	if m.ControlPath == "" {
+		return
+	}
+	m.mu.Lock()
+	conf := m.lastConf
+	m.mu.Unlock()
+	args := []string{"stats_noreset"}
+	if strings.TrimSpace(conf) != "" {
+		args = append([]string{"-c", conf}, args...)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, m.ControlPath, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(out), "\n")
+	stats := map[string]int64{}
+	for _, ln := range lines {
+		parts := strings.SplitN(strings.TrimSpace(ln), "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		if err != nil {
+			continue
+		}
+		stats[parts[0]] = v
+	}
+	queries := stats["num.query.ipv4"] + stats["num.query.ipv6"]
+	errors := stats["num.answer.bogus"] + stats["num.answer.servfail"] + stats["num.answer.formerr"]
+
+	m.mu.Lock()
+	prevQ := m.lastStats["queries"]
+	prevE := m.lastStats["errors"]
+	m.lastStats["queries"] = queries
+	m.lastStats["errors"] = errors
+	m.mu.Unlock()
+
+	dq := queries - prevQ
+	de := errors - prevE
+	if dq < 0 {
+		dq = 0
+	}
+	if de < 0 {
+		de = 0
+	}
+	if dq > 0 || de > 0 {
+		m.RecordQueries(int(dq), int(de))
+	}
 }

@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	commonlog "github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 // AVManager handles antivirus configuration and async scan orchestration.
@@ -42,6 +44,7 @@ type AVManager struct {
 	maxCache int
 
 	queue *ScanQueue
+	log   *zap.SugaredLogger
 }
 
 type cachedVerdict struct {
@@ -67,7 +70,20 @@ func NewAVManager() *AVManager {
 		cache:         make(map[string]cachedVerdict),
 		maxCache:      1024,
 		queue:         NewScanQueue(2048),
+		log:           newAVLogger(),
 	}
+}
+
+func newAVLogger() *zap.SugaredLogger {
+	lg, err := commonlog.NewZap("av", "av", commonlog.Options{
+		FilePath: "/data/logs/av.log",
+		JSON:     true,
+		Level:    "info",
+	})
+	if err != nil {
+		return zap.NewNop().Sugar()
+	}
+	return lg
 }
 
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
@@ -182,6 +198,7 @@ func (m *AVManager) emit(kind string, attrs map[string]any) {
 		return
 	}
 	m.OnEvent(kind, attrs)
+	m.log.Infow("av event", "kind", kind, "attrs", attrs)
 }
 
 func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) {
@@ -258,6 +275,8 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 	if !m.lastCfg.Enabled {
 		return ScanResult{Verdict: "disabled", Error: nil}
 	}
+	// Count every scan attempt for telemetry.
+	m.emit("service.av.scan", map[string]any{"count": 1})
 	// Check cache.
 	key := task.Hash
 	if key != "" {
@@ -283,6 +302,7 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 				"proto":  task.Proto,
 				"source": task.Source,
 				"dest":   task.Dest,
+				"error_count": 1,
 			})
 		}
 		return ScanResult{Verdict: verdict, Error: nil}
@@ -303,6 +323,7 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 					"proto":  task.Proto,
 					"source": task.Source,
 					"dest":   task.Dest,
+					"error_count": 1,
 				})
 			}
 			return ScanResult{Verdict: verdict, Error: nil}
@@ -318,6 +339,7 @@ func (m *AVManager) handleScanError(err error, mode string, task ScanTask) ScanR
 	if err == nil {
 		return ScanResult{Verdict: "error", Error: fmt.Errorf("scan error unknown")}
 	}
+	m.emit("service.av.scan_error", map[string]any{"error": err.Error(), "mode": mode, "error_count": 1})
 	m.mu.Lock()
 	failPolicy := strings.ToLower(strings.TrimSpace(m.lastCfg.FailPolicy))
 	if failPolicy == "" {

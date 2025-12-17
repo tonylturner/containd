@@ -121,6 +121,8 @@ type ServicesConfig struct {
 type SyslogConfig struct {
 	Forwarders []SyslogForwarder `json:"forwarders"`
 	Format     string            `json:"format,omitempty"` // rfc5424|json
+	BatchSize  int               `json:"batchSize,omitempty"`
+	FlushEvery int               `json:"flushEvery,omitempty"` // seconds
 }
 
 type SyslogForwarder struct {
@@ -184,6 +186,7 @@ type DHCPConfig struct {
 	Enabled        bool       `json:"enabled"`
 	ListenIfaces   []string   `json:"listenIfaces,omitempty"`   // logical interface names (e.g. "lan2")
 	Pools          []DHCPPool `json:"pools,omitempty"`          // address pools per interface (optional)
+	Reservations   []DHCPReservation `json:"reservations,omitempty"` // MAC -> fixed IP per interface
 	LeaseSeconds   int        `json:"leaseSeconds,omitempty"`   // default lease time
 	Router         string     `json:"router,omitempty"`         // default gateway handed to clients
 	DNSServers     []string   `json:"dnsServers,omitempty"`     // DNS servers handed to clients
@@ -196,6 +199,13 @@ type DHCPPool struct {
 	Iface string `json:"iface"` // logical interface name
 	Start string `json:"start"` // start IPv4
 	End   string `json:"end"`   // end IPv4
+}
+
+// DHCPReservation pins a MAC to a specific IP on an interface.
+type DHCPReservation struct {
+	Iface string `json:"iface"` // logical interface name
+	MAC   string `json:"mac"`   // MAC address (normalized to lower-case)
+	IP    string `json:"ip"`    // IPv4 address
 }
 
 // VPNConfig defines VPN services managed by containd.
@@ -361,6 +371,14 @@ func DefaultConfig() *Config {
 		Firewall: FirewallConfig{
 			DefaultAction: ActionDeny,
 			Rules:         []Rule{allowMgmt},
+		},
+		Services: ServicesConfig{
+			Syslog: SyslogConfig{
+				Forwarders: []SyslogForwarder{},
+				Format:     "rfc5424",
+				BatchSize:  500,
+				FlushEvery: 2,
+			},
 		},
 	}
 }
@@ -1190,6 +1208,13 @@ func validateProxy(p ProxyConfig) error {
 }
 
 func validateDHCP(d DHCPConfig) error {
+	ipToUint32 := func(ip net.IP) uint32 {
+		ip4 := ip.To4()
+		if ip4 == nil {
+			return 0
+		}
+		return (uint32(ip4[0]) << 24) | (uint32(ip4[1]) << 16) | (uint32(ip4[2]) << 8) | uint32(ip4[3])
+	}
 	for _, n := range d.ListenIfaces {
 		if strings.TrimSpace(n) == "" {
 			return errors.New("dhcp listenIfaces cannot include empty")
@@ -1204,6 +1229,46 @@ func validateDHCP(d DHCPConfig) error {
 		}
 		if ip := net.ParseIP(strings.TrimSpace(p.End)); ip == nil || ip.To4() == nil {
 			return fmt.Errorf("dhcp pool %s end invalid: %q", p.Iface, p.End)
+		}
+	}
+	seenRes := map[string]struct{}{}
+	poolRanges := map[string][]struct{ start net.IP; end net.IP }{}
+	for _, p := range d.Pools {
+		iface := strings.TrimSpace(p.Iface)
+		start := net.ParseIP(strings.TrimSpace(p.Start)).To4()
+		end := net.ParseIP(strings.TrimSpace(p.End)).To4()
+		if iface != "" && start != nil && end != nil {
+			poolRanges[iface] = append(poolRanges[iface], struct{ start net.IP; end net.IP }{start: start, end: end})
+		}
+	}
+	for _, r := range d.Reservations {
+		if strings.TrimSpace(r.Iface) == "" {
+			return errors.New("dhcp reservation iface is required")
+		}
+		if _, err := net.ParseMAC(strings.ToLower(strings.TrimSpace(r.MAC))); err != nil {
+			return fmt.Errorf("dhcp reservation %s mac invalid: %v", r.Iface, err)
+		}
+		ip := net.ParseIP(strings.TrimSpace(r.IP))
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp reservation %s ip invalid: %q", r.Iface, r.IP)
+		}
+		key := strings.ToLower(strings.TrimSpace(r.Iface) + "|" + strings.ToLower(strings.TrimSpace(r.MAC)))
+		if _, ok := seenRes[key]; ok {
+			return fmt.Errorf("dhcp reservation duplicate for iface %s mac %s", r.Iface, r.MAC)
+		}
+		seenRes[key] = struct{}{}
+		if ranges, ok := poolRanges[strings.TrimSpace(r.Iface)]; ok {
+			inPool := false
+			for _, pr := range ranges {
+				ipv := ipToUint32(ip)
+				if ipv >= ipToUint32(pr.start) && ipv <= ipToUint32(pr.end) {
+					inPool = true
+					break
+				}
+			}
+			if !inPool {
+				return fmt.Errorf("dhcp reservation %s ip %s not in any pool for iface", r.Iface, r.IP)
+			}
 		}
 	}
 	if d.LeaseSeconds < 0 {

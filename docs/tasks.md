@@ -132,10 +132,11 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Align CI/build jobs to single image (smoke harness against combined image) and retire legacy engine-only build path.
   - [ ] Add lab harness compose example(s) (sample hosts + enforced default routes via firewall) and document recommended topology patterns (internal networks, stable gateway IPs).
 - [ ] Observability/logging
-  - [x] Add structured logging helper in `pkg/common`.
-  - [x] Use helper in both binaries.
+  - [x] Add structured logging helper in `pkg/common` (zap + stdout, optional rotation).
+  - [~] Migrate services/binaries to zap-based logging with per-service file targets and JSON/console toggle (proxy done; others pending).
   - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
-  - [~] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events (basic pipeline + format toggle done; error surfacing/richer events pending).
+  - [~] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events (RFC5424/JSON toggle, retry/backoff, counters, batch limit surfacing done; remaining: deeper backpressure metrics/queue sizing).
+  - [~] Standardize log retention/rotation defaults and document facility mapping for embedded daemons + services (zap defaults: 20MB/5 backups/7 days; per-service files under `/data/logs/`; env overrides: `CONTAIND_LOG_LEVEL`, `CONTAIND_LOG_LEVEL_<SERVICE>`, disable files via `CONTAIND_LOG_FILE=0`; forward logger output to remote syslog via `CONTAIND_LOG_SYSLOG_ADDR` + `CONTAIND_LOG_SYSLOG_PROTO`).
   - [ ] Add Prometheus metrics endpoint and telemetry sampling controls.
   - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations

@@ -12,7 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	commonlog "github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 // VPNManager persists VPN service configuration and supervises optional VPN daemons.
@@ -35,6 +37,7 @@ type VPNManager struct {
 	ovpnLastStop   time.Time
 	ovpnLastExit   string
 	ovpnLastError  string
+	log            *zap.SugaredLogger
 }
 
 func NewVPNManager(baseDir string) *VPNManager {
@@ -53,7 +56,24 @@ func NewVPNManager(baseDir string) *VPNManager {
 		"/usr/sbin/openvpn",
 		"/usr/bin/openvpn",
 	})
-	return &VPNManager{BaseDir: baseDir, SuperviseOpenVPN: supervise, OpenVPNPath: openvpnPath}
+	return &VPNManager{
+		BaseDir:          baseDir,
+		SuperviseOpenVPN: supervise,
+		OpenVPNPath:      openvpnPath,
+		log:              newVPNLogger(),
+	}
+}
+
+func newVPNLogger() *zap.SugaredLogger {
+	lg, err := commonlog.NewZap("vpn", "vpn", commonlog.Options{
+		FilePath: "/data/logs/vpn.log",
+		JSON:     true,
+		Level:    "info",
+	})
+	if err != nil {
+		return zap.NewNop().Sugar()
+	}
+	return lg
 }
 
 func (m *VPNManager) Apply(ctx context.Context, cfg config.VPNConfig) error {
@@ -83,18 +103,21 @@ func (m *VPNManager) Apply(ctx context.Context, cfg config.VPNConfig) error {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.mu.Unlock()
+		m.log.Errorw("failed to render vpn config", "error", err)
 		return err
 	}
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.mu.Unlock()
+		m.log.Errorw("failed to write vpn config", "path", path, "error", err)
 		return err
 	}
 	m.mu.Lock()
 	m.lastRender = time.Now().UTC()
 	m.lastError = ""
 	m.mu.Unlock()
+	m.log.Infow("rendered vpn config", "path", path)
 
 	// OpenVPN supervision (optional)
 	if cfg.OpenVPN.Enabled {
@@ -104,6 +127,7 @@ func (m *VPNManager) Apply(ctx context.Context, cfg config.VPNConfig) error {
 			m.ovpnLastError = err.Error()
 			m.mu.Unlock()
 			m.emit("service.vpn.openvpn.invalid", map[string]any{"error": err.Error()})
+			m.log.Errorw("openvpn config invalid", "error", err)
 			return err
 		}
 		if m.SuperviseOpenVPN && m.OpenVPNPath != "" {
@@ -111,7 +135,8 @@ func (m *VPNManager) Apply(ctx context.Context, cfg config.VPNConfig) error {
 				m.mu.Lock()
 				m.ovpnLastError = err.Error()
 				m.mu.Unlock()
-				m.emit("service.vpn.openvpn.start_failed", map[string]any{"error": err.Error()})
+				m.emit("service.vpn.openvpn.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
+				m.log.Errorw("failed to start openvpn", "error", err)
 				return err
 			}
 		}
@@ -156,6 +181,7 @@ func (m *VPNManager) Status() map[string]any {
 	return map[string]any{
 		"wireguard_enabled":   m.lastCfg.WireGuard.Enabled,
 		"openvpn_enabled":     m.lastCfg.OpenVPN.Enabled,
+		"openvpn_mode":        strings.TrimSpace(m.lastCfg.OpenVPN.Mode),
 		"wg_peers":            len(m.lastCfg.WireGuard.Peers),
 		"last_render":         m.lastRender.Format(time.RFC3339Nano),
 		"last_error":          m.lastError,
@@ -169,6 +195,18 @@ func (m *VPNManager) Status() map[string]any {
 		"openvpn_last_stop":   formatMaybe(m.ovpnLastStop),
 		"openvpn_last_exit":   m.ovpnLastExit,
 		"openvpn_last_error":  m.ovpnLastError,
+		"openvpn_server_tunnel": func() string {
+			if m.lastCfg.OpenVPN.Server == nil {
+				return ""
+			}
+			return strings.TrimSpace(m.lastCfg.OpenVPN.Server.TunnelCIDR)
+		}(),
+		"openvpn_server_endpoint": func() string {
+			if m.lastCfg.OpenVPN.Server == nil {
+				return ""
+			}
+			return strings.TrimSpace(m.lastCfg.OpenVPN.Server.PublicEndpoint)
+		}(),
 		"note":                "WireGuard is applied in-engine; OpenVPN is supervised in mgmt only when enabled, installed, and configured.",
 	}
 }
@@ -201,7 +239,8 @@ func (m *VPNManager) startOpenVPN(configPath string) error {
 	m.ovpnLastStart = time.Now().UTC()
 	m.ovpnLastExit = ""
 	m.ovpnLastError = ""
-	go m.emit("service.vpn.openvpn.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	m.log.Infow("started openvpn", "pid", cmd.Process.Pid, "config", configPath)
+	go m.emit("service.vpn.openvpn.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 
 	go func() {
 		err := cmd.Wait()
@@ -216,7 +255,8 @@ func (m *VPNManager) startOpenVPN(configPath string) error {
 		}
 		pid := pidOrZero(cmd)
 		exit := m.ovpnLastExit
-		go m.emit("service.vpn.openvpn.exited", map[string]any{"pid": pid, "exit": exit})
+		m.log.Infow("openvpn exited", "pid", pid, "exit", exit)
+		go m.emit("service.vpn.openvpn.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
 	}()
 
 	return nil
@@ -485,7 +525,8 @@ func (m *VPNManager) stopOpenVPNNoLock() error {
 		return nil
 	}
 	_ = m.ovpnCmd.Process.Signal(syscall.SIGTERM)
-	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": m.ovpnCmd.Process.Pid})
+	m.log.Infow("stopped openvpn", "pid", m.ovpnCmd.Process.Pid)
+	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": m.ovpnCmd.Process.Pid, "count": 1})
 	m.ovpnRunning = false
 	m.ovpnCmd = nil
 	m.ovpnLastStop = time.Now().UTC()

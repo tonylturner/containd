@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containd/containd/pkg/cp/config"
@@ -31,6 +32,18 @@ type Manager struct {
 	AV     *AVManager
 
 	telemetry *dpevents.Store
+	sparkMu   sync.Mutex
+	spark     map[string][]int        // primary metric per service (events/traffic)
+	counts    map[string]int          // primary totals
+	buckets   map[string][]sparkBucket
+	errSpark  map[string][]int        // error metric per service
+	errCounts map[string]int
+	errBks    map[string][]sparkBucket
+}
+
+type sparkBucket struct {
+	minute int64
+	count  int
 }
 
 func NewManager(opts ManagerOptions) *Manager {
@@ -60,6 +73,12 @@ func NewManager(opts ManagerOptions) *Manager {
 	// Reserve the high bit for management-plane service events to avoid ID collisions
 	// with dataplane telemetry IDs.
 	m.telemetry = dpevents.NewStoreWithIDBase(2048, 1<<63)
+	m.spark = make(map[string][]int)
+	m.counts = make(map[string]int)
+	m.buckets = make(map[string][]sparkBucket)
+	m.errSpark = make(map[string][]int)
+	m.errCounts = make(map[string]int)
+	m.errBks = make(map[string][]sparkBucket)
 	if m.Syslog != nil {
 		m.Syslog.OnEvent = m.recordServiceEvent
 	}
@@ -78,12 +97,55 @@ func NewManager(opts ManagerOptions) *Manager {
 	if m.AV != nil {
 		m.AV.OnEvent = m.recordServiceEvent
 	}
+	if m.DHCP != nil {
+		if setter, ok := any(m.DHCP).(interface {
+			SetMetricEmitter(func(service string, delta int))
+		}); ok {
+			setter.SetMetricEmitter(func(service string, delta int) {
+				m.IncrementServiceMetric(service, delta)
+			})
+		}
+	}
 	return m
 }
 
 func (m *Manager) recordServiceEvent(kind string, attrs map[string]any) {
 	if m == nil || m.telemetry == nil {
 		return
+	}
+	delta := 1
+	if v, ok := attrs["count"]; ok {
+		switch t := v.(type) {
+		case int:
+			delta = t
+		case int64:
+			delta = int(t)
+		case float64:
+			delta = int(t)
+		}
+	}
+	errDelta := 0
+	if v, ok := attrs["error_count"]; ok {
+		switch t := v.(type) {
+		case int:
+			errDelta = t
+		case int64:
+			errDelta = int(t)
+		case float64:
+			errDelta = int(t)
+		}
+	}
+	svc, isErr := canonicalServiceFromKind(kind)
+	if svc != "" {
+		m.incrementServiceMetric(svc, delta, false)
+		if isErr {
+			if errDelta == 0 {
+				errDelta = delta
+			}
+		}
+		if errDelta > 0 {
+			m.incrementServiceMetric(svc, errDelta, true)
+		}
 	}
 	ev := dpevents.Event{
 		Proto:      "system",
@@ -92,6 +154,45 @@ func (m *Manager) recordServiceEvent(kind string, attrs map[string]any) {
 		Timestamp:  time.Now().UTC(),
 	}
 	m.telemetry.Append(ev)
+}
+
+// IncrementServiceMetric allows service managers to bump a per-service counter that feeds
+// sparkline + rate telemetry (e.g., traffic volume or anomaly counts).
+func (m *Manager) IncrementServiceMetric(service string, delta int) {
+	m.incrementServiceMetric(service, delta, false)
+}
+
+func (m *Manager) incrementServiceMetric(service string, delta int, isErr bool) {
+	if delta == 0 {
+		return
+	}
+	m.sparkMu.Lock()
+	defer m.sparkMu.Unlock()
+	targetCounts := m.counts
+	targetBks := m.buckets
+	targetSpark := m.spark
+	if isErr {
+		targetCounts = m.errCounts
+		targetBks = m.errBks
+		targetSpark = m.errSpark
+	}
+	targetCounts[service] += delta
+	minute := time.Now().UTC().Unix() / 60
+	bks := targetBks[service]
+	if len(bks) > 0 && bks[len(bks)-1].minute == minute {
+		bks[len(bks)-1].count += delta
+	} else {
+		bks = append(bks, sparkBucket{minute: minute, count: delta})
+	}
+	if len(bks) > 7 {
+		bks = bks[len(bks)-7:]
+	}
+	targetBks[service] = bks
+	series := make([]int, len(bks))
+	for i, b := range bks {
+		series[i] = b.count
+	}
+	targetSpark[service] = series
 }
 
 // ListTelemetryEvents returns most-recent-first service/system events recorded by the manager.
@@ -223,27 +324,100 @@ func (m *Manager) TriggerAVUpdate(ctx context.Context) error {
 func (m *Manager) Status() any {
 	out := map[string]any{}
 	if m.Syslog != nil {
-		out["syslog"] = map[string]any{"configured_forwarders": len(m.Syslog.Current().Forwarders)}
+		out["syslog"] = m.decorateStatus("syslog", m.Syslog.Status())
 	}
 	if m.DNS != nil {
-		out["dns"] = m.DNS.Status()
+		out["dns"] = m.decorateStatus("dns", m.DNS.Status())
 	}
 	if m.NTP != nil {
-		out["ntp"] = m.NTP.Status()
+		out["ntp"] = m.decorateStatus("ntp", m.NTP.Status())
 	}
 	if m.Proxy != nil {
-		out["proxy"] = m.Proxy.Status()
+		out["proxy"] = m.decorateStatus("proxy", m.Proxy.Status())
 	}
 	if m.DHCP != nil {
-		out["dhcp"] = m.DHCP.Status()
+		out["dhcp"] = m.decorateStatus("dhcp", m.DHCP.Status())
 	}
 	if m.VPN != nil {
-		out["vpn"] = m.VPN.Status()
+		out["vpn"] = m.decorateStatus("vpn", m.VPN.Status())
 	}
 	if m.AV != nil {
-		out["av"] = m.AV.Status()
+		out["av"] = m.decorateStatus("av", m.AV.Status())
 	}
 	return out
+}
+
+func (m *Manager) decorateStatus(svc string, base any) any {
+	m.sparkMu.Lock()
+	spark := append([]int(nil), m.spark[svc]...)
+	count := m.counts[svc]
+	bks := append([]sparkBucket(nil), m.buckets[svc]...)
+	errSpark := append([]int(nil), m.errSpark[svc]...)
+	errCount := m.errCounts[svc]
+	errBks := append([]sparkBucket(nil), m.errBks[svc]...)
+	m.sparkMu.Unlock()
+	rate := 0.0
+	if len(bks) > 0 {
+		total := 0
+		first := bks[0].minute
+		last := bks[len(bks)-1].minute
+		for _, b := range bks {
+			total += b.count
+		}
+		minutes := float64((last - first) + 1)
+		if minutes <= 0 {
+			minutes = 1
+		}
+		rate = float64(total) / minutes
+	}
+	errRate := 0.0
+	if len(errBks) > 0 {
+		total := 0
+		first := errBks[0].minute
+		last := errBks[len(errBks)-1].minute
+		for _, b := range errBks {
+			total += b.count
+		}
+		minutes := float64((last - first) + 1)
+		if minutes <= 0 {
+			minutes = 1
+		}
+		errRate = float64(total) / minutes
+	}
+	if mp, ok := base.(map[string]any); ok {
+		mp["sparkline"] = spark
+		mp["count"] = count
+		mp["rate_per_min"] = rate
+		mp["errors_sparkline"] = errSpark
+		mp["errors_count"] = errCount
+		mp["errors_rate_per_min"] = errRate
+		return mp
+	}
+	return map[string]any{
+		"status":    base,
+		"sparkline": spark,
+		"count":     count,
+		"rate_per_min": rate,
+		"errors_sparkline": errSpark,
+		"errors_count":     errCount,
+		"errors_rate_per_min": errRate,
+	}
+}
+
+func canonicalServiceFromKind(kind string) (string, bool) {
+	parts := strings.Split(kind, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	svc := parts[1]
+	switch svc {
+	case "envoy", "nginx":
+		svc = "proxy"
+	case "openvpn":
+		svc = "vpn"
+	}
+	isErr := strings.Contains(kind, "fail") || strings.Contains(kind, "error")
+	return svc, isErr
 }
 
 // CustomDefsPath proxies to AV manager for API handlers.

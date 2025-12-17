@@ -43,6 +43,8 @@ export default function ProxiesPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -70,6 +72,7 @@ export default function ProxiesPage() {
         });
       }
       toast("Proxy status refreshed", "success");
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to refresh proxies.");
       toast("Failed to refresh proxies", "error");
@@ -81,6 +84,14 @@ export default function ProxiesPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const listenZonesCSV = useMemo(
     () => (forward.listenZones ?? []).join(", "),
@@ -169,12 +180,23 @@ export default function ProxiesPage() {
     <Shell
       title="Proxies"
       actions={
-        <button
-          onClick={() => refresh()}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => refresh()}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+          >
+            Refresh
+          </button>
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto-refresh
+          </label>
+        </div>
       }
     >
       {!canEdit && (
@@ -195,6 +217,12 @@ export default function ProxiesPage() {
               <p className="mt-2 text-xs text-slate-400">
                 Running: {status?.envoy_running ? "yes" : "no"}{" "}
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
+              </p>
+              <p className="text-xs text-slate-400">
+                Rate: {typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-amber-300">
+                Errors: {typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min
               </p>
               {status?.envoy_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
@@ -228,6 +256,12 @@ export default function ProxiesPage() {
                 Running: {status?.nginx_running ? "yes" : "no"}{" "}
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
               </p>
+              <p className="text-xs text-slate-400">
+                Rate: {typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-amber-300">
+                Errors: {typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
               {status?.nginx_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
                   {status.nginx_last_error}
@@ -253,6 +287,9 @@ export default function ProxiesPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
 
       <div className="grid gap-6 md:grid-cols-2">
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">

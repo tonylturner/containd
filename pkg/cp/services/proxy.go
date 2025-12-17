@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +13,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/containd/containd/pkg/common/logging"
+	commonlog "github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 // defaultServicesDir must be writable in the single-container appliance image.
@@ -52,7 +52,41 @@ type ProxyManager struct {
 	lastEnvoyStart time.Time
 	lastNginxStart time.Time
 	lastRender     time.Time
-	logger         *log.Logger
+	log            *zap.SugaredLogger
+
+	// Optional traffic emitters (e.g., access log tailers) can call these helpers.
+}
+
+// RecordForwardRequests increments the proxy traffic counter for Envoy forward proxy.
+func (m *ProxyManager) RecordForwardRequests(count int, errs int) {
+	if count < 0 {
+		count = 0
+	}
+	if errs < 0 {
+		errs = 0
+	}
+	if count > 0 {
+		m.emit("service.envoy.requests", map[string]any{"count": count})
+	}
+	if errs > 0 {
+		m.emit("service.envoy.errors", map[string]any{"error_count": errs})
+	}
+}
+
+// RecordReverseRequests increments the proxy traffic counter for Nginx reverse proxy.
+func (m *ProxyManager) RecordReverseRequests(count int, errs int) {
+	if count < 0 {
+		count = 0
+	}
+	if errs < 0 {
+		errs = 0
+	}
+	if count > 0 {
+		m.emit("service.nginx.requests", map[string]any{"count": count})
+	}
+	if errs > 0 {
+		m.emit("service.nginx.errors", map[string]any{"error_count": errs})
+	}
 }
 
 func NewProxyManager(opts ProxyOptions) *ProxyManager {
@@ -75,13 +109,21 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 	if nginxPath == "" {
 		nginxPath = "/usr/sbin/nginx"
 	}
+	lg, err := commonlog.NewZap("proxy", "proxy", commonlog.Options{
+		FilePath: "/data/logs/proxy.log",
+		JSON:     true,
+		Level:    "info",
+	})
+	if err != nil {
+		lg = zap.NewNop().Sugar()
+	}
 	return &ProxyManager{
 		BaseDir:   baseDir,
 		Supervise: opts.Supervise,
 		EnvoyPath: envoyPath,
 		NginxPath: nginxPath,
 		CertsDir:  certsDir,
-		logger:    logging.New("[services/proxy]"),
+		log:       lg,
 		OnEvent:   opts.OnEvent,
 	}
 }
@@ -205,7 +247,7 @@ func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardPr
 		m.mu.Lock()
 		m.lastEnvoyError = err.Error()
 		m.mu.Unlock()
-		m.emit("service.envoy.validate_failed", map[string]any{"error": err.Error()})
+		m.emit("service.envoy.validate_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return err
 	}
 	return nil
@@ -231,7 +273,7 @@ func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReversePr
 		m.mu.Lock()
 		m.lastNginxError = err.Error()
 		m.mu.Unlock()
-		m.emit("service.nginx.validate_failed", map[string]any{"error": err.Error()})
+		m.emit("service.nginx.validate_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return err
 	}
 	return nil
@@ -255,13 +297,13 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.EnvoyPath); err != nil {
 		m.lastEnvoyError = fmt.Sprintf("envoy binary not found at %s", m.EnvoyPath)
-		m.logger.Printf("%s; supervision skipped", m.lastEnvoyError)
+		m.log.Warnw("envoy binary not found; supervision skipped", "path", m.EnvoyPath)
 		return
 	}
 	configPath := filepath.Join(m.BaseDir, "envoy-forward.yaml")
 	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
 		m.lastEnvoyError = fmt.Sprintf("envoy config missing or empty at %s", configPath)
-		m.logger.Printf("%s; skipping start", m.lastEnvoyError)
+		m.log.Warnw("envoy config missing; skipping start", "config", configPath)
 		return
 	}
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
@@ -273,14 +315,14 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		m.lastEnvoyError = err.Error()
-		m.logger.Printf("failed to start envoy: %v", err)
-		m.emit("service.envoy.start_failed", map[string]any{"error": err.Error()})
+		m.log.Errorw("failed to start envoy", "error", err)
+		m.emit("service.envoy.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return
 	}
 	m.envoyCmd = cmd
 	m.lastEnvoyError = ""
 	m.lastEnvoyStart = time.Now().UTC()
-	m.emit("service.envoy.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	m.emit("service.envoy.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -289,7 +331,7 @@ func (m *ProxyManager) stopEnvoy() {
 	defer m.mu.Unlock()
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
 		_ = m.envoyCmd.Process.Signal(os.Interrupt)
-		m.emit("service.envoy.stopped", map[string]any{"pid": m.envoyCmd.Process.Pid})
+		m.emit("service.envoy.stopped", map[string]any{"pid": m.envoyCmd.Process.Pid, "count": 1})
 	}
 	m.envoyCmd = nil
 }
@@ -299,13 +341,13 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.NginxPath); err != nil {
 		m.lastNginxError = fmt.Sprintf("nginx binary not found at %s", m.NginxPath)
-		m.logger.Printf("%s; supervision skipped", m.lastNginxError)
+		m.log.Warnw("nginx binary missing; supervision skipped", "path", m.NginxPath)
 		return
 	}
 	configPath := filepath.Join(m.BaseDir, "nginx-reverse.conf")
 	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
 		m.lastNginxError = fmt.Sprintf("nginx config missing or empty at %s", configPath)
-		m.logger.Printf("%s; skipping start", m.lastNginxError)
+		m.log.Warnw("nginx config missing; skipping start", "config", configPath)
 		return
 	}
 	// Validate config before restart.
@@ -321,14 +363,14 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		m.lastNginxError = err.Error()
-		m.logger.Printf("failed to start nginx: %v", err)
-		m.emit("service.nginx.start_failed", map[string]any{"error": err.Error()})
+		m.log.Errorw("failed to start nginx", "error", err)
+		m.emit("service.nginx.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return
 	}
 	m.nginxCmd = cmd
 	m.lastNginxError = ""
 	m.lastNginxStart = time.Now().UTC()
-	m.emit("service.nginx.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	m.emit("service.nginx.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 	go func() { _ = cmd.Wait() }()
 }
 
@@ -337,7 +379,7 @@ func (m *ProxyManager) stopNginx() {
 	defer m.mu.Unlock()
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		_ = m.nginxCmd.Process.Signal(os.Interrupt)
-		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid})
+		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid, "count": 1})
 	}
 	m.nginxCmd = nil
 }

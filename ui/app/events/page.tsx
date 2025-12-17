@@ -13,6 +13,7 @@ function EventsInner() {
   const [filter, setFilter] = useState<"all" | "service" | "dpi" | "firewall">(
     "all",
   );
+  const [kindPrefix, setKindPrefix] = useState<string>("");
   const [onlyDetections, setOnlyDetections] = useState(false);
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -35,6 +36,10 @@ function EventsInner() {
     const avOnly = searchParams.get("av") === "1";
     if (type === "service" || type === "dpi" || type === "firewall") {
       setFilter(type);
+    }
+    const kindPref = searchParams.get("kind");
+    if (kindPref) {
+      setKindPrefix(kindPref);
     }
     if (avOnly) setOnlyDetections(true);
     refresh();
@@ -63,6 +68,13 @@ function EventsInner() {
             <option value="dpi">DPI/IDS</option>
             <option value="firewall">Firewall</option>
           </select>
+          <input
+            type="text"
+            placeholder="Filter by kind prefix (e.g., service.dhcp.reservation)"
+            value={kindPrefix}
+            onChange={(e) => setKindPrefix(e.target.value)}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
+          />
           <label className="flex items-center gap-2 text-xs text-slate-200">
             <input
               type="checkbox"
@@ -95,6 +107,10 @@ function EventsInner() {
             if (filter === "firewall") return ev.proto === "firewall";
             if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
             return true;
+          })
+          .filter((ev) => {
+            if (!kindPrefix.trim()) return true;
+            return ev.kind.startsWith(kindPrefix.trim());
           })
           .filter((ev) => {
             if (!onlyDetections) return true;

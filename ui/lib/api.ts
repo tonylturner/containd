@@ -335,6 +335,8 @@ export type SyslogForwarder = {
 export type SyslogConfig = {
   forwarders: SyslogForwarder[];
   format?: "rfc5424" | "json";
+  batchSize?: number;
+  flushEvery?: number; // seconds
 };
 
 export type ClamAVConfig = {
@@ -423,10 +425,17 @@ export type DHCPPool = {
   end: string;
 };
 
+export type DHCPReservation = {
+  iface: string;
+  mac: string;
+  ip: string;
+};
+
 export type DHCPConfig = {
   enabled?: boolean;
   listenIfaces?: string[];
   pools?: DHCPPool[];
+  reservations?: DHCPReservation[];
   leaseSeconds?: number;
   router?: string;
   dnsServers?: string[];

@@ -155,8 +155,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
-		protected.GET("/services/syslog", getSyslogHandler(store))
-		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
+	protected.GET("/services/syslog", getSyslogHandler(store))
+	protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
+	protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store, services))
 		protected.GET("/services/dns", getDNSHandler(store))
 		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
@@ -247,6 +248,74 @@ func dhcpLeasesHandler(engine any) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, resp{Leases: leases})
+	}
+}
+
+type syslogPatch struct {
+	Action     string                 `json:"action,omitempty"`
+	Format     string                 `json:"format,omitempty"`
+	Forwarder  *config.SyslogForwarder `json:"forwarder,omitempty"`
+	BatchSize  int                    `json:"batchSize,omitempty"`
+	FlushEvery int                    `json:"flushEvery,omitempty"` // seconds
+}
+
+// patchSyslogHandler supports incremental updates (format set, forwarder add/del, batch/flush tweaks).
+func patchSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var patch syslogPatch
+		if err := c.ShouldBindJSON(&patch); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cur := cfg.Services.Syslog
+		if patch.Format != "" {
+			cur.Format = patch.Format
+		}
+		if patch.BatchSize > 0 {
+			cur.BatchSize = patch.BatchSize
+		}
+		if patch.FlushEvery > 0 {
+			cur.FlushEvery = patch.FlushEvery
+		}
+		if patch.Forwarder != nil {
+			f := *patch.Forwarder
+			if err := cpservices.ValidateSyslogForwarder(f); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			switch strings.ToLower(strings.TrimSpace(patch.Action)) {
+			case "add":
+				cur.Forwarders = append(cur.Forwarders, f)
+			case "del":
+				var next []config.SyslogForwarder
+				for _, existing := range cur.Forwarders {
+					if existing.Address == f.Address && existing.Port == f.Port {
+						continue
+					}
+					next = append(next, existing)
+				}
+				cur.Forwarders = next
+			default:
+				// no-op if action unknown
+			}
+		}
+		cfg.Services.Syslog = cur
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
 
