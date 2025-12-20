@@ -121,6 +121,8 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add in-app documentation (MkDocs Material) behind Help icon.
   - [ ] Enforce `linear-dashboard-cursor-rule.md` for all UI work (strict palette, Linear-style dashboard) and continue UX polish (loading states, AV badges/links).
   - [ ] Add dashboard KPI cards/sparklines using prescribed palette; apply skeletons/toasts across services pages (DNS/NTP/DHCP/VPN/Proxies), standardize buttons/badges to palette, and remove remaining hardcoded colors.
+  - [ ] Icon audit + usage pass: apply `ui/public/icons/*` to services, proxies, VPN, and system cards; remove off-palette icon fills.
+  - [ ] UX consolidation pass: reduce redundant screens (services status vs monitoring), add clearer entry points, and standardize empty/error states.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -147,6 +149,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] HTTPS defaults with self-signed cert and custom cert install/rotate (self-signed + TLS config endpoints wired; CA trust management WIP).
   - [x] Add SSH server integration points (admin-only console).
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
+  - [ ] User management upgrades: edit user profile fields, role management beyond admin/view, delete/deactivate users, and UI improvements.
 - [ ] ICS/OT features
   - [x] Asset model (ICS assets, criticality, tags) and policy references.
   - [~] ICS policy primitives (Modbus fields in policy; enforcement/matching pending).

@@ -12,6 +12,14 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: UserRole;
+  } | null>(null);
+  const [query, setQuery] = useState("");
 
   const [newUser, setNewUser] = useState<{
     username: string;
@@ -68,18 +76,36 @@ export default function UsersPage() {
     setTimeout(() => setSaveState("idle"), 1200);
   }
 
-  async function onUpdateRole(id: string, role: UserRole) {
+  function startEdit(user: User) {
+    setEditingUserId(user.id);
+    setEditDraft({
+      firstName: user.firstName ?? "",
+      lastName: user.lastName ?? "",
+      email: user.email ?? "",
+      role: user.role,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingUserId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEdit(id: string) {
+    if (!editDraft) return;
     setError(null);
     setSaveState("saving");
-    const updated = await api.updateUser(id, { role });
+    const updated = await api.updateUser(id, editDraft);
     if (!updated) {
       setSaveState("error");
-      setError("Failed to update role.");
+      setError("Failed to update user.");
       setTimeout(() => setSaveState("idle"), 1500);
       return;
     }
     await refresh();
     setSaveState("saved");
+    setEditingUserId(null);
+    setEditDraft(null);
     setTimeout(() => setSaveState("idle"), 1200);
   }
 
@@ -95,6 +121,24 @@ export default function UsersPage() {
       setTimeout(() => setSaveState("idle"), 1500);
       return;
     }
+    setSaveState("saved");
+    setTimeout(() => setSaveState("idle"), 1200);
+  }
+
+  async function onDeleteUser(user: User) {
+    if (!isAdmin()) return;
+    const confirmed = confirm(`Delete user ${user.username}? This cannot be undone.`);
+    if (!confirmed) return;
+    setError(null);
+    setSaveState("saving");
+    const ok = await api.deleteUser(user.id);
+    if (!ok) {
+      setSaveState("error");
+      setError("Failed to delete user. Ensure at least one admin remains.");
+      setTimeout(() => setSaveState("idle"), 1500);
+      return;
+    }
+    await refresh();
     setSaveState("saved");
     setTimeout(() => setSaveState("idle"), 1200);
   }
@@ -119,6 +163,15 @@ export default function UsersPage() {
             Manage local accounts and roles.
           </p>
 
+          <div className="mt-4">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search users (name, email, role)"
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+          </div>
+
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/30">
             <table className="w-full text-sm">
               <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-slate-300">
@@ -127,52 +180,149 @@ export default function UsersPage() {
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Updated</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!loading && users.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
                       No users found.
                     </td>
                   </tr>
                 )}
-                {users.map((u) => (
+                {users
+                  .filter((u) => {
+                    const q = query.trim().toLowerCase();
+                    if (!q) return true;
+                    const hay = [
+                      u.username,
+                      u.firstName,
+                      u.lastName,
+                      u.email,
+                      u.role,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                      .toLowerCase();
+                    return hay.includes(q);
+                  })
+                  .map((u) => (
                   <tr key={u.id} className="border-t border-white/5">
                     <td className="px-4 py-3 text-slate-200">{u.username}</td>
                     <td className="px-4 py-3 text-slate-200">
-                      {(u.firstName || "") + " " + (u.lastName || "")}
+                      {editingUserId === u.id && editDraft ? (
+                        <div className="grid gap-1">
+                          <input
+                            value={editDraft.firstName}
+                            onChange={(e) =>
+                              setEditDraft((d) => d ? { ...d, firstName: e.target.value } : d)
+                            }
+                            disabled={!isAdmin()}
+                            placeholder="first name"
+                            className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                          />
+                          <input
+                            value={editDraft.lastName}
+                            onChange={(e) =>
+                              setEditDraft((d) => d ? { ...d, lastName: e.target.value } : d)
+                            }
+                            disabled={!isAdmin()}
+                            placeholder="last name"
+                            className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                          />
+                        </div>
+                      ) : (
+                        (u.firstName || "") + " " + (u.lastName || "")
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-slate-200">{u.email ?? ""}</td>
+                    <td className="px-4 py-3 text-slate-200">
+                      {editingUserId === u.id && editDraft ? (
+                        <input
+                          value={editDraft.email}
+                          onChange={(e) =>
+                            setEditDraft((d) => d ? { ...d, email: e.target.value } : d)
+                          }
+                          disabled={!isAdmin()}
+                          placeholder="email"
+                          className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                        />
+                      ) : (
+                        u.email ?? ""
+                      )}
+                    </td>
                     <td className="px-4 py-3">
-                      <select
-                        value={u.role}
-                        onChange={(e) =>
-                          onUpdateRole(u.id, e.target.value as UserRole)
-                        }
-                        disabled={!isAdmin()}
-                        className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
-                      >
-                        <option value="view">view-only</option>
-                        <option value="admin">admin</option>
-                      </select>
+                      {editingUserId === u.id && editDraft ? (
+                        <select
+                          value={editDraft.role}
+                          onChange={(e) =>
+                            setEditDraft((d) => d ? { ...d, role: e.target.value as UserRole } : d)
+                          }
+                          disabled={!isAdmin()}
+                          className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+                        >
+                          <option value="view">view-only</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      ) : (
+                        <span className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200">
+                          {u.role}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-400">
+                      {formatTimestamp(u.updatedAt ?? u.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => onResetPassword(u.id)}
-                        disabled={!isAdmin()}
-                        className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20"
-                      >
-                        Reset password
-                      </button>
+                      {editingUserId === u.id ? (
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => saveEdit(u.id)}
+                            disabled={!isAdmin()}
+                            className="rounded-md bg-mint/20 px-2 py-1 text-xs text-mint hover:bg-mint/30"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => startEdit(u)}
+                            disabled={!isAdmin()}
+                            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => onResetPassword(u.id)}
+                            disabled={!isAdmin()}
+                            className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20"
+                          >
+                            Reset password
+                          </button>
+                          <button
+                            onClick={() => onDeleteUser(u)}
+                            disabled={!isAdmin()}
+                            className="rounded-md bg-[color:var(--error)]/10 px-2 py-1 text-xs text-[color:var(--error)] hover:bg-[color:var(--error)]/20"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -237,6 +387,9 @@ export default function UsersPage() {
               <option value="view">view-only</option>
               <option value="admin">admin</option>
             </select>
+            <p className="text-xs text-slate-400">
+              Admins can manage users and system settings; view-only accounts have read access.
+            </p>
             <input
               type="password"
               value={newUser.password}
@@ -259,4 +412,11 @@ export default function UsersPage() {
       </div>
     </Shell>
   );
+}
+
+function formatTimestamp(value?: string) {
+  if (!value) return "—";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return dt.toLocaleString();
 }

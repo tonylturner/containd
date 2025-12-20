@@ -203,14 +203,22 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
   const proxy = status?.["proxy"] as any;
   const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
   const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
+  const envoyRate =
+    typeof (status?.["envoy"] as any)?.rate_per_min === "number"
+      ? (status?.["envoy"] as any).rate_per_min
+      : null;
+  const nginxRate =
+    typeof (status?.["nginx"] as any)?.rate_per_min === "number"
+      ? (status?.["nginx"] as any).rate_per_min
+      : null;
   const avEnabled = (status?.["av"] as any)?.enabled;
-  const chips: Array<{ label: string; ok: boolean; hint?: string }> = [
+  const chips: Array<{ label: string; ok: boolean; hint?: string; icon?: string }> = [
     { label: "IPS", ok: true, hint: "native IDS/IPS" },
     { label: "Web Filter", ok: false },
     { label: "AV", ok: !!avEnabled },
-    { label: "VPN", ok: (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running },
+    { label: "VPN", ok: (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running, icon: "/icons/wireguard.svg" },
     { label: "Updates", ok: true },
-    { label: "Proxy", ok: envoyActive || nginxActive },
+    { label: "Proxy", ok: envoyActive || nginxActive, icon: "/icons/envoyproxy.svg" },
     { label: "Syslog", ok: !!syslogConfigured },
   ];
   return (
@@ -226,6 +234,9 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
             }
             title={c.hint}
           >
+            {c.icon && (
+              <img src={c.icon} alt="" className="mx-auto mb-1 h-4 w-4" />
+            )}
             {c.label}
           </div>
         ))}
@@ -233,6 +244,12 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
       <p className="mt-2 text-xs text-slate-400">
         Green = configured/active, red = off/unconfigured.
       </p>
+      {(envoyRate !== null || nginxRate !== null) && (
+        <p className="mt-2 text-xs text-slate-400">
+          Proxy rates: Envoy {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min, Nginx{" "}
+          {nginxRate !== null ? nginxRate.toFixed(1) : "0.0"} /min.
+        </p>
+      )}
     </div>
   );
 }
@@ -305,7 +322,7 @@ function ViolationsWidget({
         <div className="text-xs uppercase tracking-wide text-slate-300">
           AV detections
         </div>
-        <div className="text-3xl font-bold text-red">{avDetections}</div>
+        <div className="text-3xl font-bold text-[color:var(--error)]">{avDetections}</div>
         <Link href="/events/?filter=service&av=1" className="text-xs text-blue-300 hover:text-blue-200">
           Events →
         </Link>
@@ -314,7 +331,7 @@ function ViolationsWidget({
         <div className="text-xs uppercase tracking-wide text-slate-300">
           AV blocks
         </div>
-        <div className="text-3xl font-bold text-red">{avBlocks}</div>
+        <div className="text-3xl font-bold text-[color:var(--error)]">{avBlocks}</div>
         <Link href="/flows/?av=1" className="text-xs text-blue-300 hover:text-blue-200">
           Flows →
         </Link>

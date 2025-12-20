@@ -101,7 +101,7 @@ function FlowsInner() {
               <tr
                 key={f.flowId}
                 className={`border-t border-white/10 hover:bg-white/5 ${
-                  f.avBlocked ? "bg-red/10" : f.avDetected ? "bg-amber/10" : ""
+                  f.avBlocked ? "bg-[color:var(--error)]/10" : f.avDetected ? "bg-amber/10" : ""
                 }`}
               >
                 <td className="px-4 py-3 font-mono text-xs text-slate-200">
@@ -122,7 +122,7 @@ function FlowsInner() {
                 <td className="px-4 py-3 text-right text-slate-100">
                   {f.eventCount}
                   {(f.avDetected || f.avBlocked) && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-red/20 px-2 py-0.5 text-[10px] font-semibold text-red">
+                    <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--error)]/20 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--error)]">
                       {f.avBlocked ? "AV blocked" : "AV detected"}
                     </span>
                   )}

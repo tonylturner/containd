@@ -813,6 +813,8 @@ export const api = {
       `/api/v1/users/${encodeURIComponent(id)}/password`,
       { password },
     ),
+  deleteUser: (id: string) =>
+    deleteJSON(`/api/v1/users/${encodeURIComponent(id)}`),
 
   listZones: () => getJSON<Zone[]>("/api/v1/zones"),
   createZone: (z: Zone) => postJSON<Zone>("/api/v1/zones", z),

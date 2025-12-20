@@ -5,23 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
-function DockerIcon({
-  className,
-}: {
-  className?: string;
-}) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden
-      className={className ?? "h-4 w-4"}
-      fill="currentColor"
-    >
-      <path d="M22 11.5c-.3-1.4-1.4-2.4-2.8-2.4h-2V7c0-.6-.4-1-1-1h-2V4c0-.6-.4-1-1-1H9c-.6 0-1 .4-1 1v2H6c-.6 0-1 .4-1 1v2H3c-.6 0-1 .4-1 1 0 6 4.9 11 11 11 4.6 0 8.6-2.8 10.2-6.9.2-.5 0-1-.5-1.1-.4-.2-.9-.3-1.7-.3h-2.2zM9 5h3v2H9V5zm-2 3h3v2H7V8zm5 0h3v2h-3V8zM5 9h1v1H5V9zm0 2h3v2H5v-2zm5 0h3v2H10v-2zm5 0h3v2h-3v-2zm0 3h2.1c.5 0 1 .1 1.4.1C17 18 13.7 20 10 20 6 20 2.7 16.9 2.1 13H15v1z" />
-    </svg>
-  );
-}
-
 function firstIPv4CIDR(addrs: string[] | null | undefined): string | null {
   for (const a of addrs ?? []) {
     const s = a.trim();
@@ -751,7 +734,7 @@ function InterfaceRow({
           const hasNetwork = network !== "—";
           return (
             <span className="relative inline-flex items-center justify-center rounded-md border border-white/10 bg-white/5 p-1 text-slate-200 group">
-              <DockerIcon className={hasNetwork ? "h-4 w-4 text-[#2496ED]" : "h-4 w-4 text-slate-500"} />
+              <img src="/icons/docker.svg" alt="Docker" className="h-4 w-4" />
               <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-white/10 bg-black/90 px-3 py-2 text-xs text-slate-200 opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
                 <div className="font-semibold text-white">Network</div>
                 <div className="mt-1 text-slate-200">

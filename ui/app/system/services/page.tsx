@@ -145,6 +145,11 @@ export default function ServicesOverviewPage() {
           rate={rate("proxy")}
           errorsRate={errRate("proxy")}
         >
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            <img src="/icons/envoyproxy.svg" alt="" className="h-4 w-4" />
+            <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
+            <span>Envoy + Nginx</span>
+          </div>
           <p className="text-sm text-slate-200">
             Envoy forward proxy and Nginx reverse proxy.
           </p>
@@ -287,6 +292,11 @@ export default function ServicesOverviewPage() {
           rate={rate("vpn")}
           errorsRate={errRate("vpn")}
         >
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            <img src="/icons/wireguard.svg" alt="" className="h-4 w-4" />
+            <img src="/icons/openvpn.svg" alt="" className="h-4 w-4" />
+            <span>WireGuard + OpenVPN</span>
+          </div>
           <p className="text-sm text-slate-200">
             WireGuard (preferred) and OpenVPN (optional).
           </p>

@@ -33,6 +33,23 @@ export default function MonitoringOverviewPage() {
   ).length;
   const dpiCount = events.filter((ev) => ev.proto !== "ids").length;
 
+  const envoyRate =
+    typeof (services as any)?.envoy?.rate_per_min === "number"
+      ? (services as any).envoy.rate_per_min
+      : null;
+  const envoyErrors =
+    typeof (services as any)?.envoy?.errors_rate_per_min === "number"
+      ? (services as any).envoy.errors_rate_per_min
+      : null;
+  const nginxRate =
+    typeof (services as any)?.nginx?.rate_per_min === "number"
+      ? (services as any).nginx.rate_per_min
+      : null;
+  const nginxErrors =
+    typeof (services as any)?.nginx?.errors_rate_per_min === "number"
+      ? (services as any).nginx.errors_rate_per_min
+      : null;
+
   return (
     <Shell title="Monitoring Overview">
       <div className="grid gap-4 md:grid-cols-3">
@@ -57,6 +74,86 @@ export default function MonitoringOverviewPage() {
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Card title="Proxy Telemetry">
+          <div className="space-y-2 text-xs text-slate-300">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-slate-400">
+                <img src="/icons/envoyproxy.svg" alt="" className="h-4 w-4" />
+                Envoy
+              </span>
+              <span>
+                {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min
+                {envoyErrors !== null && (
+                  <span className="text-amber-300"> · {envoyErrors.toFixed(1)} err/min</span>
+                )}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-slate-400">
+                <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
+                Nginx
+              </span>
+              <span>
+                {nginxRate !== null ? nginxRate.toFixed(1) : "0.0"} /min
+                {nginxErrors !== null && (
+                  <span className="text-amber-300"> · {nginxErrors.toFixed(1)} err/min</span>
+                )}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Counts derived from access logs when enabled.
+            </div>
+          </div>
+        </Card>
+        <Card title="Services Summary">
+          {!services && (
+            <div className="text-sm text-slate-400">Unavailable.</div>
+          )}
+          {services && (
+            <div className="space-y-2 text-xs text-slate-300">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">DNS</span>
+                <span>
+                  {(services as any)?.dns?.running ? "running" : "stopped"}
+                  {(services as any)?.dns?.enabled ? " · enabled" : ""}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">NTP</span>
+                <span>
+                  {(services as any)?.ntp?.running ? "running" : "stopped"}
+                  {(services as any)?.ntp?.enabled ? " · enabled" : ""}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">DHCP</span>
+                <span>
+                  {(services as any)?.dhcp?.enabled ? "enabled" : "off"}
+                  {typeof (services as any)?.dhcp?.listen_ifaces === "number" &&
+                    (services as any).dhcp.listen_ifaces > 0 &&
+                    ` · ifaces ${(services as any).dhcp.listen_ifaces}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">VPN</span>
+                <span>
+                  {(services as any)?.vpn?.wireguard_enabled ? "wg on" : "wg off"}
+                  {(services as any)?.vpn?.openvpn_running ? " · ovpn running" : ""}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">AV</span>
+                <span>
+                  {(services as any)?.av?.enabled ? "enabled" : "off"}
+                  {(services as any)?.av?.mode ? ` · ${(services as any).av.mode}` : ""}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Detail pages provide full configuration and runtime state.
+              </div>
+            </div>
+          )}
+        </Card>
         <Card title="Recent Alerts">
           {alertCount === 0 && (
             <div className="text-sm text-slate-400">No alerts.</div>
@@ -74,16 +171,6 @@ export default function MonitoringOverviewPage() {
                 </div>
               </div>
             ))}
-        </Card>
-        <Card title="Services Status">
-          {!services && (
-            <div className="text-sm text-slate-400">Unavailable.</div>
-          )}
-          {services && (
-            <pre className="overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-slate-200">
-              {JSON.stringify(services, null, 2)}
-            </pre>
-          )}
         </Card>
       </div>
     </Shell>
@@ -106,4 +193,3 @@ function Card({
     </div>
   );
 }
-

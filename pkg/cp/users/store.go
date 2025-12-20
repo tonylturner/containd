@@ -19,6 +19,7 @@ import (
 var (
 	ErrNotFound      = errors.New("user not found")
 	ErrUsernameTaken = errors.New("username already exists")
+	ErrLastAdmin     = errors.New("cannot delete last admin")
 )
 
 type User struct {
@@ -43,6 +44,7 @@ type Store interface {
 	GetByID(ctx context.Context, id string) (*StoredUser, error)
 	Create(ctx context.Context, u User, password string) (*User, error)
 	Update(ctx context.Context, id string, patch User) (*User, error)
+	Delete(ctx context.Context, id string) error
 	SetPassword(ctx context.Context, id string, password string) error
 	EnsureDefaultAdmin(ctx context.Context) error
 	CreateSession(ctx context.Context, userID string, idleTTL time.Duration, maxTTL time.Duration) (*Session, error)
@@ -295,6 +297,45 @@ func (s *SQLiteStore) Update(ctx context.Context, id string, patch User) (*User,
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 	return &u, nil
+}
+
+func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
+	existing, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing.Role == "admin" {
+		var adminCount int
+		row := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE role = 'admin'`)
+		if err := row.Scan(&adminCount); err != nil {
+			return fmt.Errorf("count admins: %w", err)
+		}
+		if adminCount <= 1 {
+			return ErrLastAdmin
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("delete sessions: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("delete user: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		_ = tx.Rollback()
+		return ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {

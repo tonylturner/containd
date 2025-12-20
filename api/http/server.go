@@ -224,6 +224,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
 		protected.PATCH("/users/:id", requireAdmin(), updateUserHandler(userStore))
 		protected.POST("/users/:id/password", requireAdmin(), setUserPasswordHandler(userStore))
+		protected.DELETE("/users/:id", requireAdmin(), deleteUserHandler(userStore))
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)
 		}
