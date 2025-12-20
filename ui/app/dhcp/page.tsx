@@ -7,6 +7,7 @@ import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
+import { InfoTip } from "../../components/InfoTip";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -260,108 +261,131 @@ export default function DHCPPage() {
               className="h-4 w-4"
             />
             Authoritative
+            <InfoTip label="When enabled, this DHCP server takes full authority for the subnet (recommended in lab deployments)." />
           </label>
 
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">Listen Interfaces (CSV)</label>
-            <input
-              value={listenIfacesText}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({
-                  ...c,
-                  listenIfaces: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
-              placeholder="lan2, lan3"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
+          <details className="md:col-span-2 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <summary className="cursor-pointer text-sm text-slate-200">
+              Advanced options
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Listen Interfaces (CSV)
+                  <InfoTip label="Comma-separated interfaces where DHCP listens (e.g., lan2, lan3)." />
+                </label>
+                <input
+                  value={listenIfacesText}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setCfg((c) => ({
+                      ...c,
+                      listenIfaces: e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    }))
+                  }
+                  placeholder="lan2, lan3"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
 
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">Lease Seconds</label>
-            <input
-              type="number"
-              value={cfg.leaseSeconds ?? 3600}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Lease Seconds
+                  <InfoTip label="How long clients keep their IPs before renewal (default 3600)." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.leaseSeconds ?? 3600}
+                  disabled={!canEdit}
+                  onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
 
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">Router (Gateway)</label>
-            <input
-              value={cfg.router ?? ""}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
-              placeholder="192.168.1.1"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Router (Gateway)
+                  <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
+                </label>
+                <input
+                  value={cfg.router ?? ""}
+                  disabled={!canEdit}
+                  onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
+                  placeholder="192.168.1.1"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
 
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">DNS Servers (CSV)</label>
-            <input
-              value={dnsServersText}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({
-                  ...c,
-                  dnsServers: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
-              placeholder="192.168.1.1, 1.1.1.1"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  DNS Servers (CSV)
+                  <InfoTip label="DNS servers handed to clients (leave empty to use the firewall DNS)." />
+                </label>
+                <input
+                  value={dnsServersText}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setCfg((c) => ({
+                      ...c,
+                      dnsServers: e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    }))
+                  }
+                  placeholder="192.168.1.1, 1.1.1.1"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-slate-400">Domain (optional)</label>
-            <input
-              value={cfg.domain ?? ""}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
-              placeholder="lab.local"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Domain (optional)
+                  <InfoTip label="Optional search domain handed to clients." />
+                </label>
+                <input
+                  value={cfg.domain ?? ""}
+                  disabled={!canEdit}
+                  onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
+                  placeholder="lab.local"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-slate-400">Pools (one per line)</label>
-            <textarea
-              rows={6}
-              value={poolsText}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, pools: textToPools(e.target.value) }))}
-              placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
-            />
-            <p className="mt-1 text-xs text-slate-400">
-              Format: <span className="font-mono">iface,start,end</span>. Pools are validated on save.
-            </p>
-          </div>
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Pools (one per line)
+                  <InfoTip label="Format: iface,start,end (validated on save)." />
+                </label>
+                <textarea
+                  rows={6}
+                  value={poolsText}
+                  disabled={!canEdit}
+                  onChange={(e) => setCfg((c) => ({ ...c, pools: textToPools(e.target.value) }))}
+                  placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+                />
+              </div>
 
-          <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-slate-400">Reservations (one per line)</label>
-            <textarea
-              rows={6}
-              value={reservationsText}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
-              placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
-            />
-            <p className="mt-1 text-xs text-slate-400">
-              Format: <span className="font-mono">iface,mac,ip</span>. Reserved IP must fall inside the pool for that interface.
-            </p>
-          </div>
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Reservations (one per line)
+                  <InfoTip label="Format: iface,mac,ip (must fall inside pool for that iface)." />
+                </label>
+                <textarea
+                  rows={6}
+                  value={reservationsText}
+                  disabled={!canEdit}
+                  onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
+                  placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+                />
+              </div>
+            </div>
+          </details>
         </div>
 
         <p className="mt-3 text-xs text-slate-400">

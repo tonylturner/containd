@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
@@ -32,6 +32,39 @@ export default function MonitoringOverviewPage() {
     (ev) => ev.proto === "ids" && ev.kind === "alert",
   ).length;
   const dpiCount = events.filter((ev) => ev.proto !== "ids").length;
+  const protoSeries = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const ev of events) {
+      const key = (ev.proto || "unknown").toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const max = Math.max(1, ...entries.map(([, c]) => c));
+    const colorFor = (proto: string) => {
+      switch (proto) {
+        case "ids":
+          return "var(--warning)";
+        case "firewall":
+          return "var(--primary)";
+        case "dns":
+          return "var(--teal)";
+        case "modbus":
+          return "var(--orange)";
+        case "http":
+          return "var(--purple)";
+        case "tls":
+          return "var(--primary-hover)";
+        default:
+          return "var(--pink)";
+      }
+    };
+    return entries.map(([proto, count]) => ({
+      proto,
+      count,
+      pct: Math.round((count / max) * 100),
+      color: colorFor(proto),
+    }));
+  }, [events]);
 
   const envoyRate =
     typeof (services as any)?.envoy?.rate_per_min === "number"
@@ -50,8 +83,58 @@ export default function MonitoringOverviewPage() {
       ? (services as any).nginx.errors_rate_per_min
       : null;
 
+  const serviceCards = services
+    ? [
+        {
+          key: "dns",
+          label: "DNS",
+          icon: "/icons/envoyproxy.svg",
+          status: (services as any)?.dns?.running ? "running" : "stopped",
+          hint: "Unbound resolver",
+        },
+        {
+          key: "ntp",
+          label: "NTP",
+          icon: "/icons/envoyproxy.svg",
+          status: (services as any)?.ntp?.running ? "running" : "stopped",
+          hint: "OpenNTPD client",
+        },
+        {
+          key: "dhcp",
+          label: "DHCP",
+          icon: "/icons/envoyproxy.svg",
+          status: (services as any)?.dhcp?.enabled ? "enabled" : "off",
+          hint: "LAN leases",
+        },
+        {
+          key: "vpn",
+          label: "VPN",
+          icon: "/icons/wireguard.svg",
+          status:
+            (services as any)?.vpn?.wireguard_enabled || (services as any)?.vpn?.openvpn_running
+              ? "active"
+              : "off",
+          hint: "WireGuard/OpenVPN",
+        },
+        {
+          key: "proxy",
+          label: "Proxies",
+          icon: "/icons/nginx.svg",
+          status: (services as any)?.proxy?.envoy_running || (services as any)?.proxy?.nginx_running ? "running" : "stopped",
+          hint: "Envoy + Nginx",
+        },
+        {
+          key: "av",
+          label: "AV",
+          icon: "/icons/envoyproxy.svg",
+          status: (services as any)?.av?.enabled ? "enabled" : "off",
+          hint: "ICAP/ClamAV",
+        },
+      ]
+    : [];
+
   return (
-    <Shell title="Monitoring Overview">
+    <Shell title="Operations Center">
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Flows">
           <div className="text-3xl font-bold text-white">{flows.length}</div>
@@ -73,84 +156,65 @@ export default function MonitoringOverviewPage() {
         </Card>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <Card title="Proxy Telemetry">
-          <div className="space-y-2 text-xs text-slate-300">
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <Card title="Services Health">
+          <div className="space-y-3 text-xs text-slate-300">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-slate-400">
-                <img src="/icons/envoyproxy.svg" alt="" className="h-4 w-4" />
-                Envoy
+                <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
+                Proxies
               </span>
               <span>
                 {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min
+                {nginxRate !== null && (
+                  <span className="text-slate-500"> · nginx {nginxRate.toFixed(1)}/min</span>
+                )}
                 {envoyErrors !== null && (
                   <span className="text-amber-300"> · {envoyErrors.toFixed(1)} err/min</span>
                 )}
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-slate-400">
-                <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
-                Nginx
-              </span>
-              <span>
-                {nginxRate !== null ? nginxRate.toFixed(1) : "0.0"} /min
-                {nginxErrors !== null && (
-                  <span className="text-amber-300"> · {nginxErrors.toFixed(1)} err/min</span>
-                )}
-              </span>
+            <div className="grid grid-cols-2 gap-2">
+              {serviceCards.slice(0, 4).map((svc) => (
+                <div
+                  key={svc.key}
+                  className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2"
+                >
+                  <span className="flex items-center gap-2 text-slate-300">
+                    <img src={svc.icon} alt="" className="h-4 w-4" />
+                    {svc.label}
+                  </span>
+                  <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] text-slate-200">
+                    {svc.status}
+                  </span>
+                </div>
+              ))}
             </div>
-            <div className="text-[11px] text-slate-500">
-              Counts derived from access logs when enabled.
-            </div>
+            <Link href="/system/services/" className="text-xs text-slate-300 hover:text-white">
+              Configure services →
+            </Link>
           </div>
         </Card>
-        <Card title="Services Summary">
-          {!services && (
-            <div className="text-sm text-slate-400">Unavailable.</div>
+        <Card title="Top Protocols">
+          {protoSeries.length === 0 && (
+            <div className="text-sm text-slate-400">No telemetry yet.</div>
           )}
-          {services && (
+          {protoSeries.length > 0 && (
             <div className="space-y-2 text-xs text-slate-300">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">DNS</span>
-                <span>
-                  {(services as any)?.dns?.running ? "running" : "stopped"}
-                  {(services as any)?.dns?.enabled ? " · enabled" : ""}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">NTP</span>
-                <span>
-                  {(services as any)?.ntp?.running ? "running" : "stopped"}
-                  {(services as any)?.ntp?.enabled ? " · enabled" : ""}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">DHCP</span>
-                <span>
-                  {(services as any)?.dhcp?.enabled ? "enabled" : "off"}
-                  {typeof (services as any)?.dhcp?.listen_ifaces === "number" &&
-                    (services as any).dhcp.listen_ifaces > 0 &&
-                    ` · ifaces ${(services as any).dhcp.listen_ifaces}`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">VPN</span>
-                <span>
-                  {(services as any)?.vpn?.wireguard_enabled ? "wg on" : "wg off"}
-                  {(services as any)?.vpn?.openvpn_running ? " · ovpn running" : ""}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">AV</span>
-                <span>
-                  {(services as any)?.av?.enabled ? "enabled" : "off"}
-                  {(services as any)?.av?.mode ? ` · ${(services as any).av.mode}` : ""}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Detail pages provide full configuration and runtime state.
-              </div>
+              {protoSeries.map((row) => (
+                <div key={row.proto} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="uppercase text-slate-400">{row.proto}</span>
+                    <span>{row.count}</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-white/5">
+                    <div
+                      className="h-2 rounded-full"
+                      style={{ width: `${row.pct}%`, background: row.color }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </Card>

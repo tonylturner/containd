@@ -20,6 +20,7 @@ import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
+import { InfoTip } from "../../components/InfoTip";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -531,7 +532,10 @@ export default function VPNPage() {
                 />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-slate-400">Listen Port</label>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Listen Port
+                  <InfoTip label="UDP port WireGuard listens on (default 51820)." />
+                </label>
                 <input
                   type="number"
                   value={cfg.wireguard.listenPort ?? 51820}
@@ -548,20 +552,23 @@ export default function VPNPage() {
             </div>
 
             <div>
-              <label className="text-xs uppercase tracking-wide text-slate-400">Address (CIDR)</label>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Address (CIDR)
+                <InfoTip label="VPN client network. Policy can target vpn:wireguard." />
+              </label>
               <input
                 value={cfg.wireguard.addressCIDR ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
               />
-              <p className="mt-1 text-[11px] text-slate-400">
-                This is the VPN client network used for policy targeting (e.g. firewall rules can match <span className="font-mono">vpn:wireguard</span>).
-              </p>
             </div>
 
             <div>
-              <label className="text-xs uppercase tracking-wide text-slate-400">Private Key (base64)</label>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Private Key (base64)
+                <InfoTip label="Server private key. Stored in config; export redaction handled elsewhere." />
+              </label>
               <input
                 value={cfg.wireguard.privateKey ?? ""}
                 disabled={!canEdit}
@@ -569,13 +576,13 @@ export default function VPNPage() {
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                 placeholder="(leave blank to set later)"
               />
-              <p className="mt-1 text-xs text-slate-400">
-                Stored in config today; encryption-at-rest/redaction is handled by the export pipeline.
-              </p>
             </div>
 
             <div>
-              <label className="text-xs uppercase tracking-wide text-slate-400">Peers (JSON)</label>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Peers (JSON)
+                <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
+              </label>
               <textarea
                 rows={8}
                 value={peersText}
@@ -590,9 +597,6 @@ export default function VPNPage() {
                 }}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
               />
-              <p className="mt-1 text-xs text-slate-400">
-                Example: <span className="font-mono">[{`{ "name": "laptop", "publicKey": "...", "allowedIPs": ["10.8.0.2/32"] }`}]</span>
-              </p>
             </div>
           </div>
         </div>
@@ -740,7 +744,7 @@ export default function VPNPage() {
               </select>
             </div>
 
-                {cfg.openvpn.mode === "client" ? (
+            {cfg.openvpn.mode === "client" ? (
               <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -775,7 +779,10 @@ export default function VPNPage() {
                   <div className="mt-3 grid gap-3">
                     <div className="grid gap-3 md:grid-cols-3">
                       <div className="md:col-span-2">
-                        <label className="text-xs uppercase tracking-wide text-slate-400">Remote</label>
+                        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                          Remote
+                          <InfoTip label="Hostname or IP address of the OpenVPN gateway." />
+                        </label>
                         <input
                           value={cfg.openvpn.managed.remote ?? ""}
                           disabled={!canEdit}
@@ -791,7 +798,6 @@ export default function VPNPage() {
                           className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                           placeholder="vpn.example.com"
                         />
-                        <p className="mt-1 text-[11px] text-slate-400">Hostname or IP address of the OpenVPN gateway.</p>
                       </div>
                       <div>
                         <label className="text-xs uppercase tracking-wide text-slate-400">Port</label>
@@ -838,7 +844,10 @@ export default function VPNPage() {
                         </select>
                       </div>
                       <div className="grid gap-2">
-                        <div className="text-xs uppercase tracking-wide text-slate-400">User/Pass (optional)</div>
+                        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                          User/Pass (optional)
+                          <InfoTip label="Only needed when the OpenVPN gateway requires username/password auth." />
+                        </div>
                         <div className="grid gap-2 md:grid-cols-2">
                           <input
                             value={cfg.openvpn.managed.username ?? ""}
@@ -883,6 +892,7 @@ export default function VPNPage() {
 
                     <PEMField
                       title="CA (PEM)"
+                      tip="Root CA certificate in PEM format."
                       value={cfg.openvpn.managed.ca ?? ""}
                       disabled={!canEdit}
                       onChange={(v) =>
@@ -894,6 +904,7 @@ export default function VPNPage() {
                     />
                     <PEMField
                       title="Client Cert (PEM)"
+                      tip="Client certificate for this appliance in PEM format."
                       value={cfg.openvpn.managed.cert ?? ""}
                       disabled={!canEdit}
                       onChange={(v) =>
@@ -908,6 +919,7 @@ export default function VPNPage() {
                     />
                     <PEMField
                       title="Client Key (PEM)"
+                      tip="Client private key in PEM format."
                       value={cfg.openvpn.managed.key ?? ""}
                       disabled={!canEdit}
                       onChange={(v) =>
@@ -922,9 +934,13 @@ export default function VPNPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 grid gap-2">
-                    <div>
-                      <label className="text-xs uppercase tracking-wide text-slate-400">Config Path</label>
+                  <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                    <summary className="cursor-pointer text-sm text-slate-200">Advanced profile path</summary>
+                    <div className="mt-3">
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Config Path
+                        <InfoTip label="Foreground OpenVPN config file; omit the daemon directive." />
+                      </label>
                       <input
                         value={cfg.openvpn.configPath ?? ""}
                         disabled={!canEdit}
@@ -934,11 +950,8 @@ export default function VPNPage() {
                         className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                         placeholder="/data/openvpn/profiles/client.ovpn"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
-                        Advanced: provide a foreground OpenVPN config file (no <span className="font-mono">daemon</span> directive).
-                      </p>
                     </div>
-                  </div>
+                  </details>
                 )}
 
                 <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-300">
@@ -966,18 +979,18 @@ export default function VPNPage() {
                   </div>
                 </div>
               </div>
-                ) : cfg.openvpn.mode === "server" ? (
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-xs uppercase tracking-wide text-slate-400">Server Configuration</div>
-                    <div className="mt-3 grid gap-3">
-                      <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-300">
-                        Enabling OpenVPN server automatically opens the listen port on the WAN zone (nftables input) so clients can connect.
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <div>
-                          <label className="text-xs uppercase tracking-wide text-slate-400">Listen Port</label>
-                          <input
-                            type="number"
+            ) : cfg.openvpn.mode === "server" ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <div className="text-xs uppercase tracking-wide text-slate-400">Server Configuration</div>
+                <div className="mt-3 grid gap-3">
+                  <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-300">
+                    Enabling OpenVPN server automatically opens the listen port on the WAN zone (nftables input) so clients can connect.
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div>
+                      <label className="text-xs uppercase tracking-wide text-slate-400">Listen Port</label>
+                      <input
+                        type="number"
                         value={cfg.openvpn.server?.listenPort ?? 1194}
                         disabled={!canEdit}
                         onChange={(e) =>
@@ -1010,7 +1023,10 @@ export default function VPNPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs uppercase tracking-wide text-slate-400">Tunnel CIDR</label>
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Tunnel CIDR
+                        <InfoTip label="Client address pool. Policy can target vpn:openvpn." />
+                      </label>
                       <input
                         value={cfg.openvpn.server?.tunnelCIDR ?? "10.9.0.0/24"}
                         disabled={!canEdit}
@@ -1025,14 +1041,14 @@ export default function VPNPage() {
                         }
                         className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                       />
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Client address pool. Firewall rules can match this network via <span className="font-mono">vpn:openvpn</span>.
-                      </p>
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs uppercase tracking-wide text-slate-400">Public Endpoint (for client profiles)</label>
+                    <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                      Public Endpoint (for client profiles)
+                      <InfoTip label="Used when generating downloadable .ovpn client profiles." />
+                    </label>
                     <input
                       value={cfg.openvpn.server?.publicEndpoint ?? ""}
                       disabled={!canEdit}
@@ -1048,9 +1064,6 @@ export default function VPNPage() {
                       className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                       placeholder="vpn.example.com"
                     />
-                    <p className="mt-1 text-xs text-slate-400">
-                      Used when generating downloadable <span className="font-mono">.ovpn</span> client profiles.
-                    </p>
                   </div>
 
                   <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -1199,11 +1212,13 @@ export default function VPNPage() {
 
 function PEMField({
   title,
+  tip,
   value,
   disabled,
   onChange,
 }: {
   title: string;
+  tip?: string;
   value: string;
   disabled: boolean;
   onChange: (next: string) => void;
@@ -1211,7 +1226,10 @@ function PEMField({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="text-xs uppercase tracking-wide text-slate-400">{title}</label>
+        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+          {title}
+          {tip ? <InfoTip label={tip} /> : null}
+        </label>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10">
           <input
             type="file"

@@ -8,6 +8,7 @@ import { Shell } from "../components/Shell";
 import { Console } from "../components/Console";
 import { Skeleton } from "../components/Skeleton";
 import { KPI } from "../components/KPI";
+import { InfoTip } from "../components/InfoTip";
 
 export default function Home() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -102,6 +103,58 @@ export default function Home() {
         <KPI label="Events" value={eventStats?.totalEvents ?? "—"} hint="Recent telemetry" accent="primary" />
         <KPI label="AV detections" value={eventStats?.avDetections ?? 0} accent="error" />
         <KPI label="IDS alerts" value={eventStats?.idsAlerts ?? 0} accent="warning" />
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <DashboardCard title="Quick Start">
+          <div className="grid gap-2 text-xs text-slate-300">
+            <QuickStartRow
+              href="/interfaces/"
+              icon="/icons/docker.svg"
+              title="Interfaces"
+              desc="Assign ports and zones"
+            />
+            <QuickStartRow
+              href="/firewall/"
+              icon="/icons/envoyproxy.svg"
+              title="Policies"
+              desc="Add allow/deny rules"
+            />
+            <QuickStartRow
+              href="/system/services/"
+              icon="/icons/nginx.svg"
+              title="Services"
+              desc="Enable DNS/VPN/Proxy"
+            />
+          </div>
+        </DashboardCard>
+        <DashboardCard title="Guided Setup">
+          <div className="space-y-3 text-xs text-slate-300">
+            <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+              <span>Default routes</span>
+              <InfoTip label="Adopt OS routes or define a WAN gateway so traffic flows through the appliance." />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+              <span>Management access</span>
+              <InfoTip label="Restrict UI access once onboarding is complete." />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+              <span>Policy baseline</span>
+              <InfoTip label="Start with default-deny and add explicit allow rules." />
+            </div>
+          </div>
+        </DashboardCard>
+        <DashboardCard title="Traffic Mix">
+          {eventStats ? (
+            <div className="space-y-2 text-xs text-slate-300">
+              <TrafficMeter label="Total events" value={eventStats.totalEvents} color="var(--primary)" />
+              <TrafficMeter label="IDS alerts" value={eventStats.idsAlerts} color="var(--warning)" />
+              <TrafficMeter label="AV detections" value={eventStats.avDetections} color="var(--error)" />
+            </div>
+          ) : (
+            <Skeleton className="h-20 w-full" />
+          )}
+        </DashboardCard>
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -250,6 +303,54 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
           {nginxRate !== null ? nginxRate.toFixed(1) : "0.0"} /min.
         </p>
       )}
+    </div>
+  );
+}
+
+function QuickStartRow({
+  href,
+  icon,
+  title,
+  desc,
+}: {
+  href: string;
+  icon: string;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 hover:bg-black/40"
+    >
+      <img src={icon} alt="" className="h-4 w-4" />
+      <div>
+        <div className="text-xs uppercase tracking-wide text-slate-300">{title}</div>
+        <div className="text-xs text-slate-400">{desc}</div>
+      </div>
+    </Link>
+  );
+}
+
+function TrafficMeter({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}) {
+  const width = Math.min(100, Math.max(6, Math.round((value / 200) * 100)));
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="uppercase text-slate-400">{label}</span>
+        <span>{value}</span>
+      </div>
+      <div className="h-2 w-full rounded-full bg-white/5">
+        <div className="h-2 rounded-full" style={{ width: `${width}%`, background: color }} />
+      </div>
     </div>
   );
 }

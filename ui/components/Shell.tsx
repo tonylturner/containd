@@ -63,12 +63,11 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
       defaultCollapsed: true,
     },
     {
-      label: "Monitoring",
+      label: "Operations Center",
       items: [
         { href: "/monitoring/", label: "Overview" },
-        { href: "/topology/", label: "Topology" },
+        { href: "/system/services/", label: "Services" },
         { href: "/alerts/", label: "IDS Alerts" },
-        { href: "/sessions/", label: "Sessions" },
         { href: "/flows/", label: "Flows" },
         { href: "/events/", label: "Events" },
         { href: "/audit/", label: "Audit Log" },
@@ -82,7 +81,6 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
       items: [
         { href: "/system/settings/", label: "System Settings" },
         { href: "/system/users/", label: "User Management" },
-        { href: "/system/services/", label: "Services" },
       ],
       defaultCollapsed: true,
     });

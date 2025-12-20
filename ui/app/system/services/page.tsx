@@ -8,6 +8,7 @@ import { Shell } from "../../../components/Shell";
 import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
 import { Sparkline } from "../../../components/Sparkline";
+import { InfoTip } from "../../../components/InfoTip";
 
 export default function ServicesOverviewPage() {
   const toast = useToast();
@@ -150,9 +151,10 @@ export default function ServicesOverviewPage() {
             <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
             <span>Envoy + Nginx</span>
           </div>
-          <p className="text-sm text-slate-200">
-            Envoy forward proxy and Nginx reverse proxy.
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>Envoy + Nginx proxies</span>
+            <InfoTip label="Forward proxy for outbound traffic and reverse proxy for published apps." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             Envoy: {(status?.proxy as any)?.envoy_running ? "running" : "stopped"}{" "}
             {(status?.proxy as any)?.envoy_last_error && `(error=${(status?.proxy as any)?.envoy_last_error})`}
@@ -195,9 +197,10 @@ export default function ServicesOverviewPage() {
           rate={rate("dns")}
           errorsRate={errRate("dns")}
         >
-          <p className="text-sm text-slate-200">
-            Unbound resolver managed by containd.
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>Unbound DNS resolver</span>
+            <InfoTip label="Embedded resolver with upstream forwarding and caching." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}, running:{" "}
             {(status?.dns as any)?.running ? "yes" : "no"}
@@ -228,9 +231,10 @@ export default function ServicesOverviewPage() {
           rate={rate("ntp")}
           errorsRate={errRate("ntp")}
         >
-          <p className="text-sm text-slate-200">
-            OpenNTPD client managed by containd.
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>OpenNTPD client</span>
+            <InfoTip label="Keeps system time in sync using configured NTP servers." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}, running:{" "}
             {(status?.ntp as any)?.running ? "yes" : "no"}
@@ -261,9 +265,10 @@ export default function ServicesOverviewPage() {
           rate={rate("dhcp")}
           errorsRate={errRate("dhcp")}
         >
-          <p className="text-sm text-slate-200">
-            LAN DHCP server configuration.
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>LAN DHCP server</span>
+            <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             Enabled: {(status?.dhcp as any)?.enabled ? "yes" : "no"}{" "}
             {((status?.dhcp as any)?.listen_ifaces ?? 0) > 0 &&
@@ -297,9 +302,10 @@ export default function ServicesOverviewPage() {
             <img src="/icons/openvpn.svg" alt="" className="h-4 w-4" />
             <span>WireGuard + OpenVPN</span>
           </div>
-          <p className="text-sm text-slate-200">
-            WireGuard (preferred) and OpenVPN (optional).
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>WireGuard + OpenVPN</span>
+            <InfoTip label="Secure remote access tunnels (WireGuard preferred; OpenVPN optional)." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             WireGuard: {(status?.vpn as any)?.wireguard_enabled ? "on" : "off"}{" "}
             {((status?.vpn as any)?.wg_peers ?? 0) > 0 &&
@@ -328,9 +334,10 @@ export default function ServicesOverviewPage() {
           rate={rate("av")}
           errorsRate={errRate("av")}
         >
-          <p className="text-sm text-slate-200">
-            Optional async AV via ICAP or embedded ClamAV (non-blocking).
-          </p>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <span>Async AV scanning</span>
+            <InfoTip label="Optional ICAP or embedded ClamAV scanning without inline latency spikes." />
+          </div>
           <p className="mt-2 text-xs text-slate-400">
             Mode: {(status?.av as any)?.mode ?? "icap"}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
             <br />
