@@ -135,16 +135,18 @@ func (m *Manager) recordServiceEvent(kind string, attrs map[string]any) {
 			errDelta = int(t)
 		}
 	}
-	svc, isErr := canonicalServiceFromKind(kind)
-	if svc != "" {
-		m.incrementServiceMetric(svc, delta, false)
-		if isErr {
-			if errDelta == 0 {
-				errDelta = delta
+	services, isErr := canonicalServicesFromKind(kind)
+	if len(services) > 0 {
+		for _, svc := range services {
+			m.incrementServiceMetric(svc, delta, false)
+			if isErr {
+				if errDelta == 0 {
+					errDelta = delta
+				}
 			}
-		}
-		if errDelta > 0 {
-			m.incrementServiceMetric(svc, errDelta, true)
+			if errDelta > 0 {
+				m.incrementServiceMetric(svc, errDelta, true)
+			}
 		}
 	}
 	ev := dpevents.Event{
@@ -335,6 +337,16 @@ func (m *Manager) Status() any {
 	if m.Proxy != nil {
 		out["proxy"] = m.decorateStatus("proxy", m.Proxy.Status())
 	}
+	if m.hasMetrics("envoy") {
+		out["envoy"] = m.decorateStatus("envoy", map[string]any{
+			"note": "Telemetry-only counters derived from proxy access logs.",
+		})
+	}
+	if m.hasMetrics("nginx") {
+		out["nginx"] = m.decorateStatus("nginx", map[string]any{
+			"note": "Telemetry-only counters derived from proxy access logs.",
+		})
+	}
 	if m.DHCP != nil {
 		out["dhcp"] = m.decorateStatus("dhcp", m.DHCP.Status())
 	}
@@ -404,20 +416,38 @@ func (m *Manager) decorateStatus(svc string, base any) any {
 	}
 }
 
-func canonicalServiceFromKind(kind string) (string, bool) {
+func canonicalServicesFromKind(kind string) ([]string, bool) {
 	parts := strings.Split(kind, ".")
 	if len(parts) < 2 {
-		return "", false
+		return nil, false
 	}
 	svc := parts[1]
 	switch svc {
 	case "envoy", "nginx":
-		svc = "proxy"
+		return []string{"proxy", svc}, strings.Contains(kind, "fail") || strings.Contains(kind, "error")
 	case "openvpn":
 		svc = "vpn"
 	}
 	isErr := strings.Contains(kind, "fail") || strings.Contains(kind, "error")
-	return svc, isErr
+	return []string{svc}, isErr
+}
+
+func (m *Manager) hasMetrics(service string) bool {
+	m.sparkMu.Lock()
+	defer m.sparkMu.Unlock()
+	if _, ok := m.counts[service]; ok {
+		return true
+	}
+	if _, ok := m.errCounts[service]; ok {
+		return true
+	}
+	if s, ok := m.spark[service]; ok && len(s) > 0 {
+		return true
+	}
+	if s, ok := m.errSpark[service]; ok && len(s) > 0 {
+		return true
+	}
+	return false
 }
 
 // CustomDefsPath proxies to AV manager for API handlers.

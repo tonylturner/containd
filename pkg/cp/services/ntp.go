@@ -255,6 +255,8 @@ func (m *NTPManager) stopLocked() {
 		_ = m.cmd.Process.Signal(os.Interrupt)
 		m.log.Infow("stopped openntpd", "pid", m.cmd.Process.Pid)
 		m.emit("service.ntp.stopped", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
+		m.lastStop = time.Now().UTC()
+		m.lastExit = "stopped"
 	}
 	m.cmd = nil
 }

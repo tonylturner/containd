@@ -1,13 +1,16 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -23,6 +26,8 @@ import (
 const defaultServicesDir = "/data/services"
 
 const defaultCertsDir = "/data/certs"
+const envoyAccessLogPath = "/data/logs/envoy-access.log"
+const nginxAccessLogPath = "/data/logs/nginx-access.log"
 
 type ProxyOptions struct {
 	BaseDir   string
@@ -51,10 +56,18 @@ type ProxyManager struct {
 	lastNginxError string
 	lastEnvoyStart time.Time
 	lastNginxStart time.Time
+	lastEnvoyStop  time.Time
+	lastNginxStop  time.Time
+	lastEnvoyExit  string
+	lastNginxExit  string
 	lastRender     time.Time
 	log            *zap.SugaredLogger
 
 	// Optional traffic emitters (e.g., access log tailers) can call these helpers.
+	envoyAccessCancel context.CancelFunc
+	envoyAccessPath   string
+	nginxAccessCancel context.CancelFunc
+	nginxAccessPath   string
 }
 
 // RecordForwardRequests increments the proxy traffic counter for Envoy forward proxy.
@@ -136,6 +149,9 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
 	}
+	if err := os.MkdirAll("/data/logs", 0o755); err != nil {
+		return err
+	}
 	if err := m.renderForward(cfg.Forward); err != nil {
 		return err
 	}
@@ -154,6 +170,7 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	if m.Supervise {
 		m.ensureProcesses(ctx, cfg)
 	}
+	m.syncAccessTailers(cfg)
 	return nil
 }
 
@@ -182,6 +199,7 @@ func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
 		"ListenPort":     port,
 		"Domains":        string(domainsJSON),
 		"LogRequests":    cfg.LogRequests,
+		"AccessLogPath":  envoyAccessLogPath,
 		"Upstream":       cfg.Upstream,
 		"HasUpstream":    cfg.Upstream != "",
 		"ListenZones":    cfg.ListenZones,
@@ -214,11 +232,16 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 
 	type tmplData struct {
 		config.ReverseProxyConfig
-		CertsDir string
+		CertsDir      string
+		AccessLogPath string
 	}
 
 	var buf bytes.Buffer
-	if err := tpl.Execute(&buf, tmplData{ReverseProxyConfig: cfg, CertsDir: m.CertsDir}); err != nil {
+	if err := tpl.Execute(&buf, tmplData{
+		ReverseProxyConfig: cfg,
+		CertsDir:           m.CertsDir,
+		AccessLogPath:      nginxAccessLogPath,
+	}); err != nil {
 		return err
 	}
 	return os.WriteFile(path, buf.Bytes(), 0o644)
@@ -322,8 +345,24 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	m.envoyCmd = cmd
 	m.lastEnvoyError = ""
 	m.lastEnvoyStart = time.Now().UTC()
+	m.lastEnvoyExit = ""
 	m.emit("service.envoy.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
-	go func() { _ = cmd.Wait() }()
+	pid := cmd.Process.Pid
+	go func(cmd *exec.Cmd, pid int) {
+		err := cmd.Wait()
+		exit := "exited"
+		if err != nil {
+			exit = err.Error()
+		}
+		m.mu.Lock()
+		if m.envoyCmd == cmd {
+			m.envoyCmd = nil
+			m.lastEnvoyStop = time.Now().UTC()
+			m.lastEnvoyExit = exit
+		}
+		m.mu.Unlock()
+		m.emit("service.envoy.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
+	}(cmd, pid)
 }
 
 func (m *ProxyManager) stopEnvoy() {
@@ -334,6 +373,7 @@ func (m *ProxyManager) stopEnvoy() {
 		m.emit("service.envoy.stopped", map[string]any{"pid": m.envoyCmd.Process.Pid, "count": 1})
 	}
 	m.envoyCmd = nil
+	m.lastEnvoyStop = time.Now().UTC()
 }
 
 func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
@@ -370,8 +410,24 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	m.nginxCmd = cmd
 	m.lastNginxError = ""
 	m.lastNginxStart = time.Now().UTC()
+	m.lastNginxExit = ""
 	m.emit("service.nginx.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
-	go func() { _ = cmd.Wait() }()
+	pid := cmd.Process.Pid
+	go func(cmd *exec.Cmd, pid int) {
+		err := cmd.Wait()
+		exit := "exited"
+		if err != nil {
+			exit = err.Error()
+		}
+		m.mu.Lock()
+		if m.nginxCmd == cmd {
+			m.nginxCmd = nil
+			m.lastNginxStop = time.Now().UTC()
+			m.lastNginxExit = exit
+		}
+		m.mu.Unlock()
+		m.emit("service.nginx.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
+	}(cmd, pid)
 }
 
 func (m *ProxyManager) stopNginx() {
@@ -382,6 +438,7 @@ func (m *ProxyManager) stopNginx() {
 		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid, "count": 1})
 	}
 	m.nginxCmd = nil
+	m.lastNginxStop = time.Now().UTC()
 }
 
 func (m *ProxyManager) Status() map[string]any {
@@ -408,6 +465,10 @@ func (m *ProxyManager) Status() map[string]any {
 		"nginx_pid":        nginxPID,
 		"envoy_last_start": m.lastEnvoyStart,
 		"nginx_last_start": m.lastNginxStart,
+		"envoy_last_stop":  m.lastEnvoyStop,
+		"nginx_last_stop":  m.lastNginxStop,
+		"envoy_last_exit":  m.lastEnvoyExit,
+		"nginx_last_exit":  m.lastNginxExit,
 		"envoy_last_error": m.lastEnvoyError,
 		"nginx_last_error": m.lastNginxError,
 		"last_render":      m.lastRender,
@@ -419,6 +480,152 @@ func (m *ProxyManager) emit(kind string, attrs map[string]any) {
 	if m.OnEvent != nil {
 		m.OnEvent(kind, attrs)
 	}
+}
+
+func (m *ProxyManager) syncAccessTailers(cfg config.ProxyConfig) {
+	if !m.Supervise {
+		m.stopEnvoyAccessTailer()
+		m.stopNginxAccessTailer()
+		return
+	}
+	if cfg.Forward.Enabled && cfg.Forward.LogRequests {
+		m.startEnvoyAccessTailer(envoyAccessLogPath)
+	} else {
+		m.stopEnvoyAccessTailer()
+	}
+	if cfg.Reverse.Enabled && len(cfg.Reverse.Sites) > 0 {
+		m.startNginxAccessTailer(nginxAccessLogPath)
+	} else {
+		m.stopNginxAccessTailer()
+	}
+}
+
+func (m *ProxyManager) startEnvoyAccessTailer(path string) {
+	m.mu.Lock()
+	if m.envoyAccessCancel != nil && m.envoyAccessPath == path {
+		m.mu.Unlock()
+		return
+	}
+	if m.envoyAccessCancel != nil {
+		m.envoyAccessCancel()
+		m.envoyAccessCancel = nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.envoyAccessCancel = cancel
+	m.envoyAccessPath = path
+	m.mu.Unlock()
+
+	go m.tailAccessLog(ctx, "envoy", path, m.RecordForwardRequests)
+}
+
+func (m *ProxyManager) stopEnvoyAccessTailer() {
+	m.mu.Lock()
+	if m.envoyAccessCancel != nil {
+		m.envoyAccessCancel()
+		m.envoyAccessCancel = nil
+		m.envoyAccessPath = ""
+	}
+	m.mu.Unlock()
+}
+
+func (m *ProxyManager) startNginxAccessTailer(path string) {
+	m.mu.Lock()
+	if m.nginxAccessCancel != nil && m.nginxAccessPath == path {
+		m.mu.Unlock()
+		return
+	}
+	if m.nginxAccessCancel != nil {
+		m.nginxAccessCancel()
+		m.nginxAccessCancel = nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.nginxAccessCancel = cancel
+	m.nginxAccessPath = path
+	m.mu.Unlock()
+
+	go m.tailAccessLog(ctx, "nginx", path, m.RecordReverseRequests)
+}
+
+func (m *ProxyManager) stopNginxAccessTailer() {
+	m.mu.Lock()
+	if m.nginxAccessCancel != nil {
+		m.nginxAccessCancel()
+		m.nginxAccessCancel = nil
+		m.nginxAccessPath = ""
+	}
+	m.mu.Unlock()
+}
+
+func (m *ProxyManager) tailAccessLog(ctx context.Context, service string, path string, record func(count int, errs int)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			m.emit("service."+service+".access_log_open_failed", map[string]any{"error": err.Error(), "error_count": 1})
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			_ = f.Close()
+			m.emit("service."+service+".access_log_seek_failed", map[string]any{"error": err.Error(), "error_count": 1})
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		reader := bufio.NewReader(f)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					select {
+					case <-ctx.Done():
+						_ = f.Close()
+						return
+					case <-time.After(250 * time.Millisecond):
+						continue
+					}
+				}
+				m.emit("service."+service+".access_log_read_failed", map[string]any{"error": err.Error(), "error_count": 1})
+				break
+			}
+			status := parseAccessStatus(line)
+			errs := 0
+			if status >= 400 {
+				errs = 1
+			}
+			record(1, errs)
+		}
+		_ = f.Close()
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func parseAccessStatus(line string) int {
+	idx := strings.Index(line, "status=")
+	if idx < 0 {
+		return 0
+	}
+	raw := strings.TrimSpace(line[idx+len("status="):])
+	end := 0
+	for end < len(raw) {
+		if raw[end] < '0' || raw[end] > '9' {
+			break
+		}
+		end++
+	}
+	if end == 0 {
+		return 0
+	}
+	val, err := strconv.Atoi(raw[:end])
+	if err != nil {
+		return 0
+	}
+	return val
 }
 
 // DescribeRendered returns a human-readable list of rendered files for debugging.
@@ -445,9 +652,13 @@ static_resources:
           stat_prefix: forward_proxy
           {{- if .LogRequests }}
           access_log:
-          - name: envoy.access_loggers.stdout
+          - name: envoy.access_loggers.file
             typed_config:
-              "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+              "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+              path: {{.AccessLogPath}}
+              log_format:
+                text_format_source:
+                  inline_string: "status=%RESPONSE_CODE%\n"
           {{- end }}
           route_config:
             name: local_route
@@ -491,6 +702,11 @@ admin:
 `
 
 const nginxReverseTemplate = `
+events {}
+
+http {
+  log_format containd_status "status=$status";
+  access_log {{ .AccessLogPath }} containd_status;
 {{- range .Sites }}
 {{- $site := . }}
 upstream {{$site.Name}}_upstream {
@@ -525,4 +741,5 @@ server {
   }
 }
 {{ end -}}
+}
 `

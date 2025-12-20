@@ -140,7 +140,7 @@ export default function ServicesOverviewPage() {
             values: series("proxy", [5, 7, (status as any)?.proxy?.envoy_running ? 9 : 6, 8, 10, 7]),
             color: "var(--purple)",
             background: "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
-            title: "Proxy traffic (simulated)",
+            title: "Proxy request volume",
           }}
           rate={rate("proxy")}
           errorsRate={errRate("proxy")}
@@ -160,6 +160,18 @@ export default function ServicesOverviewPage() {
                 Rate: {(rate("proxy") ?? 0).toFixed(1)} /min
               </>
             )}
+            <br />
+            Envoy rate: {typeof (status as any)?.envoy?.rate_per_min === "number" ? (status as any).envoy.rate_per_min.toFixed(1) : "0.0"} /min
+            {typeof (status as any)?.envoy?.errors_rate_per_min === "number" && (
+              <> · errors {(status as any).envoy.errors_rate_per_min.toFixed(1)}/min</>
+            )}
+            <br />
+            Nginx rate: {typeof (status as any)?.nginx?.rate_per_min === "number" ? (status as any).nginx.rate_per_min.toFixed(1) : "0.0"} /min
+            {typeof (status as any)?.nginx?.errors_rate_per_min === "number" && (
+              <> · errors {(status as any).nginx.errors_rate_per_min.toFixed(1)}/min</>
+            )}
+            <br />
+            Telemetry: access logs when enabled.
           </p>
           <Link href="/proxies/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →

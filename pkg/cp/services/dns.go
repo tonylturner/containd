@@ -384,6 +384,7 @@ func (m *DNSManager) stopLockedNoLock() error {
 	m.running = false
 	m.cmd = nil
 	m.lastStop = time.Now().UTC()
+	m.lastExit = "stopped"
 	if m.statsCancel != nil {
 		m.statsCancel()
 		m.statsCancel = nil

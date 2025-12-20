@@ -1165,6 +1165,10 @@ func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 			return
 		}
+		if strings.ContainsAny(name, "/\\ ") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name contains invalid characters"})
+			return
+		}
 		pkiDir := openVPNManagedServerPKIDir()
 		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
 		if err != nil {
@@ -1189,6 +1193,10 @@ func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		name := strings.TrimSpace(c.Param("name"))
 		if name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		if strings.ContainsAny(name, "/\\ ") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name contains invalid characters"})
 			return
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)

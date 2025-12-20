@@ -101,14 +101,24 @@ export default function ProxiesPage() {
     () => (forward.allowedDomains ?? []).join(", "),
     [forward.allowedDomains],
   );
-  const forwardSpark = useMemo(
-    () => [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20],
-    [forward.enabled],
-  );
-  const reverseSpark = useMemo(
-    () => [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15],
-    [reverse.sites?.length],
-  );
+  const forwardSpark = useMemo(() => {
+    if (Array.isArray(status?.envoy?.sparkline) && status.envoy.sparkline.length) {
+      return status.envoy.sparkline as number[];
+    }
+    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
+      return status.sparkline as number[];
+    }
+    return [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20];
+  }, [status, forward.enabled]);
+  const reverseSpark = useMemo(() => {
+    if (Array.isArray(status?.nginx?.sparkline) && status.nginx.sparkline.length) {
+      return status.nginx.sparkline as number[];
+    }
+    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
+      return status.sparkline as number[];
+    }
+    return [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15];
+  }, [status, reverse.sites?.length]);
 
   async function onSaveForward() {
     if (!canEdit) return;
@@ -219,10 +229,13 @@ export default function ProxiesPage() {
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
               </p>
               <p className="text-xs text-slate-400">
-                Rate: {typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min
+                Rate: {typeof status?.envoy?.rate_per_min === "number" ? status?.envoy?.rate_per_min.toFixed(1) : "0.0"} / min
               </p>
               <p className="text-xs text-amber-300">
-                Errors: {typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+                Errors: {typeof status?.envoy?.errors_rate_per_min === "number" ? status?.envoy?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-slate-500">
+                Telemetry: access logs when enabled.
               </p>
               {status?.envoy_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
@@ -237,7 +250,7 @@ export default function ProxiesPage() {
                   values={forwardSpark}
                   color="var(--primary)"
                   background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                  title="Recent forward proxy hits"
+                  title="Recent forward proxy requests"
                 />
               </div>
             </>
@@ -257,10 +270,13 @@ export default function ProxiesPage() {
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
               </p>
               <p className="text-xs text-slate-400">
-                Rate: {typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min
+                Rate: {typeof status?.nginx?.rate_per_min === "number" ? status?.nginx?.rate_per_min.toFixed(1) : "0.0"} / min
               </p>
               <p className="text-xs text-amber-300">
-                Errors: {typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+                Errors: {typeof status?.nginx?.errors_rate_per_min === "number" ? status?.nginx?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-slate-500">
+                Telemetry: access logs from published apps.
               </p>
               {status?.nginx_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
@@ -275,7 +291,7 @@ export default function ProxiesPage() {
                   values={reverseSpark}
                   color="var(--purple)"
                   background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
-                  title="Published app traffic trend"
+                  title="Recent reverse proxy requests"
                 />
               </div>
             </>

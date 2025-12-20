@@ -68,6 +68,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
   - [x] Implement DHCP client for `addressMode: dhcp` when no IPv4 is present (best-effort; Docker already preconfigures IPs).
+  - [ ] Add pcap forwarding: capture traffic on an interface and stream to an external sensor (e.g., Zeek) via TCP/UDP.
 - [ ] Rule engine skeleton
   - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.

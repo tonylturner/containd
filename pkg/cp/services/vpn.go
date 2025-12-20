@@ -530,6 +530,7 @@ func (m *VPNManager) stopOpenVPNNoLock() error {
 	m.ovpnRunning = false
 	m.ovpnCmd = nil
 	m.ovpnLastStop = time.Now().UTC()
+	m.ovpnLastExit = "stopped"
 	return nil
 }
 
