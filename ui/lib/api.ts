@@ -18,7 +18,7 @@ const AUTH_ERROR_KEY = "containd.auth.last_error";
 let redirectingToLogin = false;
 let authExpiredEmitted = false;
 
-function getSessionToken(): string | null {
+export function getSessionToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
     return sessionStorage.getItem(SESSION_TOKEN_KEY);
@@ -185,13 +185,71 @@ export type DataPlaneConfig = {
   dpiMock?: boolean;
 };
 
+export type PcapForwardTarget = {
+  interface?: string;
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  proto?: "tcp" | "udp";
+};
+
+export type PcapFilter = {
+  src?: string;
+  dst?: string;
+  proto?: "any" | "tcp" | "udp" | "icmp";
+};
+
+export type PcapConfig = {
+  enabled?: boolean;
+  interfaces?: string[];
+  snaplen?: number;
+  maxSizeMB?: number;
+  maxFiles?: number;
+  mode?: "rolling" | "once";
+  promisc?: boolean;
+  bufferMB?: number;
+  rotateSeconds?: number;
+  filePrefix?: string;
+  filter?: PcapFilter;
+  forwardTargets?: PcapForwardTarget[];
+};
+
+export type PcapStatus = {
+  running: boolean;
+  interfaces?: string[];
+  startedAt?: string;
+  lastError?: string;
+};
+
+export type PcapItem = {
+  name: string;
+  interface: string;
+  sizeBytes: number;
+  createdAt: string;
+  tags?: string[];
+  status?: string;
+};
+
+export type PcapReplayRequest = {
+  name: string;
+  interface: string;
+  ratePps?: number;
+};
+
+export type PcapTagRequest = {
+  name: string;
+  tags: string[];
+};
+
 export type Zone = {
   name: string;
+  alias?: string;
   description?: string;
 };
 
 export type Interface = {
   name: string;
+  alias?: string;
   device?: string;
   type?: string;
   parent?: string;
@@ -228,6 +286,7 @@ export type StaticRoute = {
 
 export type Gateway = {
   name: string;
+  alias?: string;
   address: string;
   iface?: string;
   description?: string;
@@ -270,6 +329,7 @@ export type ICSPredicate = {
   addresses?: string[];
   readOnly?: boolean;
   writeOnly?: boolean;
+  mode?: "enforce" | "learn";
 };
 
 export type FirewallRule = {
@@ -306,6 +366,7 @@ export type PortForward = {
 export type Asset = {
   id: string;
   name: string;
+  alias?: string;
   type?: string;
   zone?: string;
   ips?: string[];
@@ -682,6 +743,92 @@ export async function setDataPlane(
     return (await res.json()) as DataPlaneConfig;
   } catch {
     return null;
+  }
+}
+
+export async function getPcapConfig(): Promise<PcapConfig | null> {
+  return await getJSON<PcapConfig>("/api/v1/pcap/config");
+}
+
+export async function setPcapConfig(cfg: PcapConfig): Promise<PcapConfig | null> {
+  return await postJSON<PcapConfig>("/api/v1/pcap/config", cfg);
+}
+
+export async function startPcap(cfg: PcapConfig): Promise<PcapStatus | null> {
+  return await postJSON<PcapStatus>("/api/v1/pcap/start", cfg);
+}
+
+export async function stopPcap(): Promise<PcapStatus | null> {
+  return await postJSON<PcapStatus>("/api/v1/pcap/stop", {});
+}
+
+export async function getPcapStatus(): Promise<PcapStatus | null> {
+  return await getJSON<PcapStatus>("/api/v1/pcap/status");
+}
+
+export async function listPcaps(): Promise<PcapItem[]> {
+  const res = await getJSON<PcapItem[]>("/api/v1/pcap/list");
+  return res ?? [];
+}
+
+export async function uploadPcap(file: File): Promise<PcapItem | null> {
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const res = await fetchWithSession("/api/v1/pcap/upload", {
+      method: "POST",
+      headers: authHeaders(),
+      body: form,
+    });
+    if (handleUnauthorized(res) || !res.ok) return null;
+    return (await res.json()) as PcapItem;
+  } catch {
+    return null;
+  }
+}
+
+export function downloadPcapURL(name: string): string {
+  return `/api/v1/pcap/download/${encodeURIComponent(name)}`;
+}
+
+export async function deletePcap(name: string): Promise<boolean> {
+  try {
+    const res = await fetchWithSession(`/api/v1/pcap/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (handleUnauthorized(res)) return false;
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function tagPcap(req: PcapTagRequest): Promise<boolean> {
+  try {
+    const res = await fetchWithSession("/api/v1/pcap/tag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(req),
+    });
+    if (handleUnauthorized(res)) return false;
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function replayPcap(req: PcapReplayRequest): Promise<boolean> {
+  try {
+    const res = await fetchWithSession("/api/v1/pcap/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(req),
+    });
+    if (handleUnauthorized(res)) return false;
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

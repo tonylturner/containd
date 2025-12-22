@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { Sparkline } from "../../components/Sparkline";
 
 export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -65,6 +66,67 @@ export default function MonitoringOverviewPage() {
       color: colorFor(proto),
     }));
   }, [events]);
+  const activitySeries = useMemo(() => {
+    const buckets = 12;
+    const windowMs = 60 * 60 * 1000;
+    const now = Date.now();
+    const start = now - windowMs;
+    const bucketMs = windowMs / buckets;
+    const values = Array.from({ length: buckets }, () => 0);
+    for (const ev of events) {
+      const ts = new Date(ev.timestamp).getTime();
+      if (!Number.isFinite(ts) || ts < start || ts > now) continue;
+      const idx = Math.min(buckets - 1, Math.max(0, Math.floor((ts - start) / bucketMs)));
+      values[idx] += 1;
+    }
+    return values;
+  }, [events]);
+  const appSeries = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const flow of flows) {
+      const key = (flow.application || flow.transport || "unknown").toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const max = Math.max(1, ...entries.map(([, c]) => c));
+    const colorFor = (app: string) => {
+      switch (app) {
+        case "modbus":
+          return "var(--orange)";
+        case "ssh":
+          return "var(--teal)";
+        case "rdp":
+          return "var(--warning)";
+        case "http":
+        case "https":
+        case "tls":
+          return "var(--primary)";
+        default:
+          return "var(--primary-hover)";
+      }
+    };
+    return entries.map(([app, count]) => ({
+      app,
+      count,
+      pct: Math.round((count / max) * 100),
+      color: colorFor(app),
+    }));
+  }, [flows]);
+  const endpointStats = useMemo(() => {
+    const src = new Set<string>();
+    const dst = new Set<string>();
+    for (const f of flows) {
+      if (f.srcIp) src.add(f.srcIp);
+      if (f.dstIp) dst.add(f.dstIp);
+    }
+    const total = Math.max(1, src.size + dst.size);
+    return {
+      srcCount: src.size,
+      dstCount: dst.size,
+      srcPct: Math.round((src.size / total) * 100),
+      dstPct: Math.round((dst.size / total) * 100),
+    };
+  }, [flows]);
 
   const envoyRate =
     typeof (services as any)?.envoy?.rate_per_min === "number"
@@ -235,6 +297,73 @@ export default function MonitoringOverviewPage() {
                 </div>
               </div>
             ))}
+        </Card>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <Card title="Traffic Pulse">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>Last 60 min</span>
+            <span className="text-slate-300">{events.length.toLocaleString()} events</span>
+          </div>
+          <div className="mt-3">
+            <Sparkline values={activitySeries} color="var(--primary)" />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+            <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1">
+              DPI {dpiCount.toLocaleString()}
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1">
+              Alerts {alertCount.toLocaleString()}
+            </div>
+          </div>
+        </Card>
+        <Card title="Top Applications">
+          {appSeries.length === 0 && (
+            <div className="text-sm text-slate-400">No flow apps yet.</div>
+          )}
+          {appSeries.length > 0 && (
+            <div className="space-y-2 text-xs text-slate-300">
+              {appSeries.map((row) => (
+                <div key={row.app} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="uppercase text-slate-400">{row.app}</span>
+                    <span>{row.count}</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-white/5">
+                    <div
+                      className="h-2 rounded-full"
+                      style={{ width: `${row.pct}%`, background: row.color }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card title="Endpoints">
+          <div className="space-y-3 text-xs text-slate-300">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Sources</span>
+              <span className="text-white">{endpointStats.srcCount}</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-white/5">
+              <div
+                className="h-2 rounded-full"
+                style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Destinations</span>
+              <span className="text-white">{endpointStats.dstCount}</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-white/5">
+              <div
+                className="h-2 rounded-full"
+                style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}
+              />
+            </div>
+          </div>
         </Card>
       </div>
     </Shell>

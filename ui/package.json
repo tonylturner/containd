@@ -11,7 +11,9 @@
   "dependencies": {
     "next": "15.5.9",
     "react": "^19.2.1",
-    "react-dom": "^19.2.1"
+    "react-dom": "^19.2.1",
+    "xterm": "^5.5.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
     "@types/node": "20.12.7",

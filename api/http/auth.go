@@ -207,6 +207,11 @@ func bearerOrCookie(c *gin.Context) string {
 	if ck, err := c.Cookie("containd_token"); err == nil {
 		return ck
 	}
+	if strings.EqualFold(strings.TrimSpace(c.GetHeader("Upgrade")), "websocket") {
+		if tok := strings.TrimSpace(c.Query("token")); tok != "" {
+			return tok
+		}
+	}
 	return ""
 }
 

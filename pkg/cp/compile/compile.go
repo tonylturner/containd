@@ -22,10 +22,10 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	snap := dprules.Snapshot{
-		Version:  cfg.Version,
-		Firewall: make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
+		Version:    cfg.Version,
+		Firewall:   make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		LocalInput: make([]dprules.LocalServiceRule, 0, 8),
-		Default:  dprules.Action(cfg.Firewall.DefaultAction),
+		Default:    dprules.Action(cfg.Firewall.DefaultAction),
 		NAT: dprules.NATConfig{
 			Enabled:      cfg.Firewall.NAT.Enabled,
 			EgressZone:   cfg.Firewall.NAT.EgressZone,
@@ -85,6 +85,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 				Addresses:    append([]string(nil), r.ICS.Addresses...),
 				ReadOnly:     r.ICS.ReadOnly,
 				WriteOnly:    r.ICS.WriteOnly,
+				Mode:         r.ICS.Mode,
 			},
 		}
 		for _, p := range r.Protocols {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/cp/audit"
@@ -32,6 +34,7 @@ import (
 	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/netcfg"
+	"github.com/containd/containd/pkg/dp/pcap"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -51,6 +54,17 @@ type EngineClient interface {
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
+	PcapConfig(ctx context.Context) (config.PCAPConfig, error)
+	SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error)
+	StartPcap(ctx context.Context, cfg config.PCAPConfig) (pcap.Status, error)
+	StopPcap(ctx context.Context) (pcap.Status, error)
+	PcapStatus(ctx context.Context) (pcap.Status, error)
+	ListPcaps(ctx context.Context) ([]pcap.Item, error)
+	UploadPcap(ctx context.Context, filename string, r io.Reader) (pcap.Item, error)
+	DeletePcap(ctx context.Context, name string) error
+	TagPcap(ctx context.Context, req pcap.TagRequest) error
+	ReplayPcap(ctx context.Context, req pcap.ReplayRequest) error
+	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
 }
 
 type TelemetryClient interface {
@@ -155,9 +169,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
-	protected.GET("/services/syslog", getSyslogHandler(store))
-	protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
-	protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store, services))
+		protected.GET("/services/syslog", getSyslogHandler(store))
+		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
+		protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store, services))
 		protected.GET("/services/dns", getDNSHandler(store))
 		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
@@ -190,6 +204,17 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
+		protected.GET("/pcap/config", getPCAPConfigHandler(store))
+		protected.POST("/pcap/config", requireAdmin(), setPCAPConfigHandler(store, engine))
+		protected.POST("/pcap/start", requireAdmin(), startPCAPHandler(store, engine))
+		protected.POST("/pcap/stop", requireAdmin(), stopPCAPHandler(store, engine))
+		protected.GET("/pcap/status", getPCAPStatusHandler(engine))
+		protected.GET("/pcap/list", getPCAPListHandler(engine))
+		protected.POST("/pcap/upload", requireAdmin(), uploadPCAPHandler(engine))
+		protected.GET("/pcap/download/:name", downloadPCAPHandler(engine))
+		protected.DELETE("/pcap/:name", requireAdmin(), deletePCAPHandler(engine))
+		protected.POST("/pcap/tag", requireAdmin(), tagPCAPHandler(engine))
+		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -219,6 +244,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
+		protected.GET("/cli/ws", cliWSHandler(store))
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
 		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
@@ -253,11 +279,11 @@ func dhcpLeasesHandler(engine any) gin.HandlerFunc {
 }
 
 type syslogPatch struct {
-	Action     string                 `json:"action,omitempty"`
-	Format     string                 `json:"format,omitempty"`
+	Action     string                  `json:"action,omitempty"`
+	Format     string                  `json:"format,omitempty"`
 	Forwarder  *config.SyslogForwarder `json:"forwarder,omitempty"`
-	BatchSize  int                    `json:"batchSize,omitempty"`
-	FlushEvery int                    `json:"flushEvery,omitempty"` // seconds
+	BatchSize  int                     `json:"batchSize,omitempty"`
+	FlushEvery int                     `json:"flushEvery,omitempty"` // seconds
 }
 
 // patchSyslogHandler supports incremental updates (format set, forwarder add/del, batch/flush tweaks).
@@ -560,6 +586,18 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			return err
+		}
+		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
+			return err
+		}
+		if cfg.PCAP.Enabled {
+			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
+				return err
+			}
+		} else {
+			if _, err := engine.StopPcap(ctx); err != nil {
+				return err
+			}
 		}
 		snap, err := compile.CompileSnapshot(cfg)
 		if err != nil {
@@ -1633,77 +1671,7 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
-		loopbackHostPort := func(addr string, defaultPort string) string {
-			addr = strings.TrimSpace(addr)
-			port := defaultPort
-			if addr == "" {
-				return "127.0.0.1:" + port
-			}
-			if strings.HasPrefix(addr, ":") {
-				if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
-					port = p
-				}
-				return "127.0.0.1:" + port
-			}
-			if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
-				port = strings.TrimSpace(p)
-			}
-			return "127.0.0.1:" + port
-		}
-
-		// Prefer an in-process loopback URL rather than reusing the incoming
-		// request Host/scheme. This avoids:
-		// - HTTPS self-signed verification errors for internal calls
-		// - SSRF-style token exfiltration via crafted Host headers
-		baseURL := ""
-		var httpClient cli.HTTPClient
-		if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
-			enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-			enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
-
-			httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-			httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-
-			// Always prefer HTTP for internal calls when enabled.
-			if enableHTTP {
-				baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
-			} else if enableHTTPS {
-				baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
-				httpClient = &http.Client{
-					Timeout: 10 * time.Second,
-					Transport: &http.Transport{
-						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-					},
-				}
-			}
-		}
-		if baseURL == "" {
-			// Fallback (should be rare): infer from the request and keep the current Host.
-			scheme := "http"
-			if c.Request.TLS != nil {
-				scheme = "https"
-			}
-			if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
-				proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
-				if proto == "http" || proto == "https" {
-					scheme = proto
-				}
-			}
-			baseURL = scheme + "://" + c.Request.Host
-		}
-		apiClient := &cli.API{BaseURL: baseURL}
-		if httpClient != nil {
-			apiClient.Client = httpClient
-		}
-		// Pass through the caller's bearer token so in-app console commands
-		// can access the same protected endpoints as the UI session.
-		if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
-			apiClient.Token = strings.TrimSpace(h[len("bearer "):])
-		} else if ck, err := c.Cookie("containd_token"); err == nil && strings.TrimSpace(ck) != "" {
-			apiClient.Token = strings.TrimSpace(ck)
-		}
-		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
-		reg := cli.NewRegistry(store, apiClient)
+		ctx, reg := cliRegistryForRequest(c, store)
 		var buf bytes.Buffer
 		if err := reg.ParseAndExecute(ctx, r.Line, &buf); err != nil {
 			c.JSON(http.StatusOK, resp{Output: buf.String(), Error: err.Error()})
@@ -1711,6 +1679,139 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, resp{Output: buf.String()})
 	}
+}
+
+func cliWSHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Line string `json:"line"`
+	}
+	type resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error,omitempty"`
+	}
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			return strings.EqualFold(u.Host, r.Host)
+		},
+	}
+	return func(c *gin.Context) {
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		ctx, reg := cliRegistryForRequest(c, store)
+		_ = conn.WriteJSON(resp{Output: "containd in-app CLI. Type 'show version'."})
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			line := strings.TrimSpace(string(msg))
+			if strings.HasPrefix(line, "{") {
+				var r req
+				if err := json.Unmarshal(msg, &r); err == nil && strings.TrimSpace(r.Line) != "" {
+					line = r.Line
+				}
+			}
+			if strings.TrimSpace(line) == "" {
+				_ = conn.WriteJSON(resp{Output: ""})
+				continue
+			}
+			var buf bytes.Buffer
+			if err := reg.ParseAndExecute(ctx, line, &buf); err != nil {
+				_ = conn.WriteJSON(resp{Output: buf.String(), Error: err.Error()})
+				continue
+			}
+			_ = conn.WriteJSON(resp{Output: buf.String()})
+		}
+	}
+}
+
+func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context, *cli.Registry) {
+	loopbackHostPort := func(addr string, defaultPort string) string {
+		addr = strings.TrimSpace(addr)
+		port := defaultPort
+		if addr == "" {
+			return "127.0.0.1:" + port
+		}
+		if strings.HasPrefix(addr, ":") {
+			if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
+				port = p
+			}
+			return "127.0.0.1:" + port
+		}
+		if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
+			port = strings.TrimSpace(p)
+		}
+		return "127.0.0.1:" + port
+	}
+
+	// Prefer an in-process loopback URL rather than reusing the incoming
+	// request Host/scheme. This avoids:
+	// - HTTPS self-signed verification errors for internal calls
+	// - SSRF-style token exfiltration via crafted Host headers
+	baseURL := ""
+	var httpClient cli.HTTPClient
+	if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
+		enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
+		enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
+
+		httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+		httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+
+		// Always prefer HTTP for internal calls when enabled.
+		if enableHTTP {
+			baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
+		} else if enableHTTPS {
+			baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
+			httpClient = &http.Client{
+				Timeout: 10 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		}
+	}
+	if baseURL == "" {
+		// Fallback (should be rare): infer from the request and keep the current Host.
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
+			proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+			if proto == "http" || proto == "https" {
+				scheme = proto
+			}
+		}
+		baseURL = scheme + "://" + c.Request.Host
+	}
+	apiClient := &cli.API{BaseURL: baseURL}
+	if httpClient != nil {
+		apiClient.Client = httpClient
+	}
+	// Pass through the caller's bearer token so in-app console commands
+	// can access the same protected endpoints as the UI session.
+	if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		apiClient.Token = strings.TrimSpace(h[len("bearer "):])
+	} else if ck, err := c.Cookie("containd_token"); err == nil && strings.TrimSpace(ck) != "" {
+		apiClient.Token = strings.TrimSpace(ck)
+	}
+	ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
+	reg := cli.NewRegistry(store, apiClient)
+	return ctx, reg
 }
 
 func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
@@ -1772,6 +1873,237 @@ func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFun
 		}
 		auditLog(c, audit.Record{Action: "dataplane.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func getPCAPConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, cfg.PCAP)
+	}
+}
+
+func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req config.PCAPConfig
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP = req
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine != nil {
+			if _, err := engine.SetPcapConfig(c.Request.Context(), cfg.PCAP); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "pcap.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.PCAP)
+	}
+}
+
+func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP.Enabled = true
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "pcap start queued"})
+			return
+		}
+		status, err := engine.StartPcap(c.Request.Context(), cfg.PCAP)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.start", Target: "running"})
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func stopPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP.Enabled = false
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "pcap stop queued"})
+			return
+		}
+		status, err := engine.StopPcap(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.stop", Target: "running"})
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func getPCAPStatusHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusOK, pcap.Status{Running: false})
+			return
+		}
+		status, err := engine.PcapStatus(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func getPCAPListHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusOK, []pcap.Item{})
+			return
+		}
+		items, err := engine.ListPcaps(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, items)
+	}
+}
+
+func uploadPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		if err := c.Request.ParseMultipartForm(64 << 20); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+			return
+		}
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+			return
+		}
+		defer file.Close()
+		item, err := engine.UploadPcap(c.Request.Context(), header.Filename, file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.upload", Target: item.Name})
+		c.JSON(http.StatusOK, item)
+	}
+}
+
+func downloadPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		resp, err := engine.DownloadPcap(c.Request.Context(), name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		c.Header("Content-Type", resp.Header.Get("Content-Type"))
+		c.Header("Content-Length", resp.Header.Get("Content-Length"))
+		c.Header("Content-Disposition", resp.Header.Get("Content-Disposition"))
+		_, _ = io.Copy(c.Writer, resp.Body)
+	}
+}
+
+func deletePCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		if err := engine.DeletePcap(c.Request.Context(), name); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.delete", Target: name})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func tagPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req pcap.TagRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.TagPcap(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.tag", Target: req.Name})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func replayPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req pcap.ReplayRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ReplayPcap(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.replay", Target: req.Name})
+		c.Status(http.StatusAccepted)
 	}
 }
 

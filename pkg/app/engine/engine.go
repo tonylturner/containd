@@ -27,6 +27,7 @@ import (
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/flow"
 	"github.com/containd/containd/pkg/dp/netcfg"
+	"github.com/containd/containd/pkg/dp/pcap"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -109,11 +110,22 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	mux := http.NewServeMux()
+	pcapMgr := pcap.NewManager("/data/pcaps")
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
+	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/stop", pcapStopHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/status", pcapStatusHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/list", pcapListHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/upload", pcapUploadHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/download", pcapDownloadHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/tag", pcapTagHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/delete", pcapDeleteHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
@@ -582,6 +594,228 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+	}
+}
+
+func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(mgr.Config())
+			return
+		case http.MethodPost:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "failed to read body", http.StatusBadRequest)
+				return
+			}
+			var cfg config.PCAPConfig
+			if err := json.Unmarshal(body, &cfg); err != nil {
+				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			wasRunning := mgr.Status().Running
+			if err := mgr.Configure(cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if wasRunning {
+				_ = mgr.Stop()
+				if cfg.Enabled {
+					if err := mgr.Start(r.Context(), cfg); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(mgr.Config())
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}
+}
+
+func pcapStartHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		cfg := mgr.Config()
+		if r.ContentLength > 0 {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "failed to read body", http.StatusBadRequest)
+				return
+			}
+			if err := json.Unmarshal(body, &cfg); err != nil {
+				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if err := mgr.Start(r.Context(), cfg); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mgr.Status())
+	}
+}
+
+func pcapStopHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		_ = mgr.Stop()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mgr.Status())
+	}
+}
+
+func pcapStatusHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mgr.Status())
+	}
+}
+
+func pcapListHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		items, err := mgr.List()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(items)
+	}
+}
+
+func pcapUploadHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "file required", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		item, err := mgr.Upload(header.Filename, file)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(item)
+	}
+}
+
+func pcapDownloadHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		f, size, err := mgr.Open(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+		w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		_, _ = io.Copy(w, f)
+	}
+}
+
+func pcapTagHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req pcap.TagRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.Tag(req.Name, req.Tags); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func pcapDeleteHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.Delete(name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func pcapReplayHandler(mgr *pcap.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req pcap.ReplayRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" || req.Interface == "" {
+			http.Error(w, "name and interface required", http.StatusBadRequest)
+			return
+		}
+		go func() {
+			_ = mgr.Replay(context.Background(), req)
+		}()
+		w.WriteHeader(http.StatusAccepted)
 	}
 }
 

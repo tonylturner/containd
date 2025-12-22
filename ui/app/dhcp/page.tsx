@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -187,6 +188,12 @@ export default function DHCPPage() {
       <p className="mb-4 text-xs text-slate-400">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
       </p>
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+        <span>Related LAN services</span>
+        <Link href="/system/services/dns/" className="text-mint hover:text-mint/80">
+          DNS resolver →
+        </Link>
+      </div>
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
@@ -250,6 +257,7 @@ export default function DHCPPage() {
               className="h-4 w-4"
             />
             Enable DHCP server
+            <InfoTip label="Provides IPv4 leases on LAN interfaces when enabled." />
           </label>
 
           <label className="flex items-center gap-2 text-sm text-slate-200">

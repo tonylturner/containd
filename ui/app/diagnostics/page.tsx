@@ -141,9 +141,11 @@ export default function DiagnosticsPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((i) => {
         const dev = (i.device || i.name).trim();
+        const alias = i.alias?.trim();
         const st = byName.get(dev);
+        const baseLabel = `${i.name}${dev && dev !== i.name ? ` (${dev})` : ""}`;
         return {
-          label: `${i.name}${dev && dev !== i.name ? ` (${dev})` : ""}`,
+          label: alias ? `${alias} (${baseLabel})` : baseLabel,
           value: i.name,
           ip: firstIPv4(st?.addrs),
         };

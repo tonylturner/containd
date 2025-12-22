@@ -76,6 +76,11 @@ export default function ServicesOverviewPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
+  const dnsRunning = (status as any)?.dns?.running;
+  const dhcpEnabled = (status as any)?.dhcp?.enabled;
+  const vpnActive =
+    (status as any)?.vpn?.wireguard_enabled || (status as any)?.vpn?.openvpn_running;
+
   return (
     <Shell
       title="Services"
@@ -107,6 +112,48 @@ export default function ServicesOverviewPage() {
       <p className="mb-4 text-xs text-slate-400">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
       </p>
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-300">LAN Services</div>
+            <div className="mt-1 text-sm text-slate-200">Core connectivity helpers</div>
+          </div>
+          <Link href="/monitoring/" className="text-xs text-slate-300 hover:text-white">
+            View Ops →
+          </Link>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+            <span className="text-slate-200">DNS</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+              {dnsRunning ? "running" : "stopped"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+            <span className="text-slate-200">DHCP</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+              {dhcpEnabled ? "enabled" : "off"}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+            <span className="text-slate-200">VPN</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+              {vpnActive ? "active" : "off"}
+            </span>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
+          <Link href="/system/services/dns/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+            Configure DNS
+          </Link>
+          <Link href="/dhcp/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+            Configure DHCP
+          </Link>
+          <Link href="/vpn/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+            Configure VPN
+          </Link>
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card
           title="Syslog"

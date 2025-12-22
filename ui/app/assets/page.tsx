@@ -13,10 +13,13 @@ export default function AssetsPage() {
 
   const [id, setId] = useState("");
   const [name, setName] = useState("");
+  const [alias, setAlias] = useState("");
   const [type, setType] = useState("PLC");
   const [zone, setZone] = useState("");
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
+
+  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   async function refresh() {
     const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
@@ -37,6 +40,7 @@ export default function AssetsPage() {
     const created = await api.createAsset({
       id: id.trim(),
       name: name.trim(),
+      alias: alias.trim() || undefined,
       type,
       zone: zone || undefined,
       ips: ips
@@ -51,6 +55,7 @@ export default function AssetsPage() {
     }
     setId("");
     setName("");
+    setAlias("");
     setIps("");
     refresh();
   }
@@ -104,6 +109,12 @@ export default function AssetsPage() {
             placeholder="name"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
+          <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="alias (optional)"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+          />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
@@ -123,7 +134,7 @@ export default function AssetsPage() {
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>
@@ -162,6 +173,7 @@ export default function AssetsPage() {
             <tr>
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Alias</th>
               <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">IPs</th>
@@ -172,7 +184,7 @@ export default function AssetsPage() {
           <tbody>
             {assets.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={7}>
+                <td className="px-4 py-4 text-slate-400" colSpan={8}>
                   No assets configured.
                 </td>
               </tr>
@@ -183,8 +195,11 @@ export default function AssetsPage() {
                   {a.id}
                 </td>
                 <td className="px-4 py-3 text-slate-200">{a.name}</td>
+                <td className="px-4 py-3 text-slate-200">{a.alias || "—"}</td>
                 <td className="px-4 py-3 text-slate-200">{a.type || "—"}</td>
-                <td className="px-4 py-3 text-slate-200">{a.zone || "—"}</td>
+                <td className="px-4 py-3 text-slate-200">
+                  {a.zone ? zoneLabel(zones.find((z) => z.name === a.zone) ?? { name: a.zone }) : "—"}
+                </td>
                 <td className="px-4 py-3 text-slate-200">
                   {(a.ips ?? []).join(", ") || "—"}
                 </td>
@@ -239,6 +254,7 @@ function EditAssetModal({
   onSave: (patch: Partial<Asset>) => void;
 }) {
   const [name, setName] = useState(asset.name);
+  const [alias, setAlias] = useState(asset.alias ?? "");
   const [type, setType] = useState(asset.type ?? "PLC");
   const [zone, setZone] = useState(asset.zone ?? "");
   const [ips, setIps] = useState((asset.ips ?? []).join(", "));
@@ -247,10 +263,12 @@ function EditAssetModal({
   );
   const [tags, setTags] = useState((asset.tags ?? []).join(", "));
   const [description, setDescription] = useState(asset.description ?? "");
+  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   function save() {
     onSave({
       name: name.trim() || asset.name,
+      alias: alias.trim() || undefined,
       type,
       zone: zone || undefined,
       ips: ips
@@ -288,6 +306,12 @@ function EditAssetModal({
             placeholder="name"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
+          <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="alias (optional)"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
@@ -307,7 +331,7 @@ function EditAssetModal({
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>

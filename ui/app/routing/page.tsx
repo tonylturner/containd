@@ -88,6 +88,7 @@ export default function RoutingPage() {
   const [detecting, setDetecting] = useState(false);
 
   const [gwName, setGwName] = useState("");
+  const [gwAlias, setGwAlias] = useState("");
   const [gwAddr, setGwAddr] = useState("");
   const [gwIface, setGwIface] = useState("");
   const [gwDesc, setGwDesc] = useState("");
@@ -102,6 +103,13 @@ export default function RoutingPage() {
   const [ruleDst, setRuleDst] = useState("");
   const [ruleTable, setRuleTable] = useState("");
   const [rulePrio, setRulePrio] = useState("");
+
+  const gatewayLabel = (value?: string): string => {
+    if (!value) return "—";
+    const match = (cfg.gateways ?? []).find((g) => g.name === value);
+    if (!match) return value;
+    return match.alias ? `${match.alias} (${match.name})` : match.name;
+  };
 
   async function refresh() {
     const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
@@ -143,6 +151,7 @@ export default function RoutingPage() {
     }
     const nextGateway: Gateway = {
       name: gwName.trim(),
+      alias: gwAlias.trim() || undefined,
       address: gwAddr.trim(),
       iface: gwIface.trim() || undefined,
       description: gwDesc.trim() || undefined,
@@ -154,6 +163,7 @@ export default function RoutingPage() {
     };
     await save(next);
     setGwName("");
+    setGwAlias("");
     setGwAddr("");
     setGwIface("");
     setGwDesc("");
@@ -552,7 +562,7 @@ export default function RoutingPage() {
               <summary className="cursor-pointer text-sm text-slate-200">
                 Add gateway (advanced)
               </summary>
-              <div className="mt-3 grid gap-2 md:grid-cols-4">
+              <div className="mt-3 grid gap-2 md:grid-cols-5">
                 <label className="text-xs uppercase tracking-wide text-slate-400">
                   Name
                   <InfoTip label="Human-friendly name used by routes (e.g. isp1)." />
@@ -560,6 +570,16 @@ export default function RoutingPage() {
                     value={gwName}
                     onChange={(e) => setGwName(e.target.value)}
                     placeholder="isp1"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Alias
+                  <InfoTip label="Optional display name shown in selectors." />
+                  <input
+                    value={gwAlias}
+                    onChange={(e) => setGwAlias(e.target.value)}
+                    placeholder="primary ISP"
                     className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
                   />
                 </label>
@@ -583,7 +603,7 @@ export default function RoutingPage() {
                     className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
                   />
                 </label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 md:col-span-1">
                   <label className="flex-1 text-xs uppercase tracking-wide text-slate-400">
                     Description
                     <input
@@ -609,6 +629,7 @@ export default function RoutingPage() {
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
                   <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Alias</th>
                   <th className="px-4 py-3">Address</th>
                   <th className="px-4 py-3">Iface</th>
                   <th className="px-4 py-3">Description</th>
@@ -618,7 +639,7 @@ export default function RoutingPage() {
               <tbody>
                 {(cfg.gateways ?? []).length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
                       No gateways configured.
                     </td>
                   </tr>
@@ -626,6 +647,7 @@ export default function RoutingPage() {
                 {(cfg.gateways ?? []).map((g, idx) => (
                   <tr key={`${g.name}-${idx}`} className="border-t border-white/5">
                     <td className="px-4 py-3 font-medium text-white">{g.name}</td>
+                    <td className="px-4 py-3 text-slate-200">{g.alias || "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{g.address}</td>
                     <td className="px-4 py-3 text-slate-200">{g.iface || "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{g.description || "—"}</td>
@@ -693,7 +715,7 @@ export default function RoutingPage() {
                       <option value="">Pick gateway…</option>
                       {(cfg.gateways ?? []).map((g) => (
                         <option key={g.name} value={g.name}>
-                          {g.name} ({g.address})
+                          {g.alias ? `${g.alias} (${g.name})` : g.name} ({g.address})
                         </option>
                       ))}
                     </select>
@@ -766,7 +788,7 @@ export default function RoutingPage() {
                 {(cfg.routes ?? []).map((r, idx) => (
                   <tr key={`${r.dst}-${idx}`} className="border-t border-white/5">
                     <td className="px-4 py-3 font-medium text-white">{r.dst}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.gateway ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{gatewayLabel(r.gateway)}</td>
                     <td className="px-4 py-3 text-slate-200">{r.iface ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{r.table ?? 0}</td>
                     <td className="px-4 py-3 text-slate-200">{r.metric ?? "—"}</td>

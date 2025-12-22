@@ -1,179 +1,956 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  fetchDataPlane,
-  setDataPlane,
+  api,
   isAdmin,
-  type DataPlaneConfig,
+  deletePcap,
+  downloadPcapURL,
+  getPcapConfig,
+  getPcapStatus,
+  listPcaps,
+  replayPcap,
+  uploadPcap,
+  setPcapConfig,
+  startPcap,
+  stopPcap,
+  tagPcap,
+  type Interface,
+  type InterfaceState,
+  type PcapConfig,
+  type PcapForwardTarget,
+  type PcapItem,
+  type PcapStatus,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { InfoTip } from "../../components/InfoTip";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type CaptureMode = "once" | "rolling";
+type SaveState = "idle" | "starting" | "stopping";
 
-export default function DataPlanePage() {
+type PcapForwardRow = PcapForwardTarget & { interface: string };
+
+export default function PcapPage() {
   const canEdit = isAdmin();
-  const [config, setConfig] = useState<DataPlaneConfig>({
-    captureInterfaces: [],
-    enforcement: false,
-    enforceTable: "containd",
-    dpiMock: false,
+  const [ifaces, setIfaces] = useState<Interface[]>([]);
+  const [ifaceStates, setIfaceStates] = useState<InterfaceState[]>([]);
+  const [state, setState] = useState<SaveState>("idle");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [status, setStatus] = useState<PcapStatus | null>(null);
+  const [pcaps, setPcaps] = useState<PcapItem[]>([]);
+  const [pcapQuery, setPcapQuery] = useState("");
+  const [pcapTag, setPcapTag] = useState("");
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [ifaceFilter, setIfaceFilter] = useState<string>("all");
+  const [replayName, setReplayName] = useState("");
+  const [replayIface, setReplayIface] = useState("");
+  const [replayRate, setReplayRate] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [savedConfigJson, setSavedConfigJson] = useState<string | null>(null);
+  const dirtyRef = useRef(false);
+  const [settings, setSettings] = useState<PcapConfig>({
+    enabled: false,
+    interfaces: [],
+    snaplen: 262144,
+    maxSizeMB: 64,
+    maxFiles: 8,
+    mode: "rolling",
+    promisc: true,
+    bufferMB: 4,
+    rotateSeconds: 300,
+    filePrefix: "capture",
+    filter: { src: "", dst: "", proto: "any" },
+    forwardTargets: [],
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  const settingsSnapshot = useMemo(
+    () => JSON.stringify(normalizeConfig(settings)),
+    [settings],
+  );
+  const isDirty = savedConfigJson ? settingsSnapshot !== savedConfigJson : false;
+  useEffect(() => {
+    dirtyRef.current = isDirty;
+  }, [isDirty]);
 
   async function refresh() {
-    const dp = await fetchDataPlane();
-    if (dp) {
-      setConfig({
-        captureInterfaces: dp.captureInterfaces ?? [],
-        enforcement: dp.enforcement ?? false,
-        enforceTable: dp.enforceTable ?? "containd",
-        dpiMock: dp.dpiMock ?? false,
-      });
+    setRefreshing(true);
+    const [cfg, st, list] = await Promise.all([
+      getPcapConfig(),
+      getPcapStatus(),
+      listPcaps(),
+    ]);
+    if (cfg) {
+      const normalized = normalizeConfig(cfg);
+      const nextJson = JSON.stringify(normalized);
+      if (!dirtyRef.current) {
+        setSettings(normalized);
+      }
+      setSavedConfigJson(nextJson);
     }
+    setStatus(st);
+    setPcaps(list);
+    setLastRefresh(new Date());
+    setRefreshing(false);
   }
 
+  useEffect(() => {
+    api.listInterfaces().then((list) => setIfaces(list ?? []));
+    api.listInterfaceState().then((list) => setIfaceStates(list ?? []));
+  }, []);
   useEffect(() => {
     refresh();
   }, []);
 
-  const ifaceCSV = useMemo(
-    () => (config.captureInterfaces ?? []).join(", "),
-    [config.captureInterfaces],
-  );
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refresh();
+    }, 8000);
+    return () => clearInterval(timer);
+  }, []);
 
-  async function onSave() {
+  const ifaceOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    const osSet = new Set((ifaceStates ?? []).map((s) => s.name));
+    for (const iface of ifaces ?? []) {
+      const device = iface.device?.trim();
+      const alias = iface.alias?.trim();
+      const bound = !!device || osSet.has(iface.name);
+      if (!bound) continue;
+      const value = device || iface.name;
+      if (!value) continue;
+      const baseLabel = device ? `${iface.name} (${device})` : iface.name;
+      const label = alias ? `${alias} (${baseLabel})` : baseLabel;
+      options.set(value, label);
+    }
+    return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
+  }, [ifaces, ifaceStates]);
+
+  useEffect(() => {
+    setSettings((prev) => {
+      const existing = new Map((prev.forwardTargets ?? []).map((t) => [t.interface ?? "", t]));
+      const next = ifaceOptions.map((iface) => {
+        const current = existing.get(iface.value);
+        return (
+          current ?? {
+            interface: iface.value,
+            enabled: false,
+            host: "",
+            port: 9000,
+            proto: "udp" as const,
+          }
+        );
+      });
+      return { ...prev, forwardTargets: next };
+    });
+  }, [ifaceOptions]);
+
+  const bpfPreview = useMemo(() => {
+    const clauses: string[] = [];
+    const filter = settings.filter ?? {};
+    if (filter.proto && filter.proto !== "any") clauses.push(filter.proto);
+    if (filter.src?.trim()) clauses.push(`src host ${filter.src.trim()}`);
+    if (filter.dst?.trim()) clauses.push(`dst host ${filter.dst.trim()}`);
+    return clauses.length ? clauses.join(" and ") : "not set";
+  }, [settings.filter]);
+  const configIssues = useMemo(() => {
+    const issues: string[] = [];
+    if ((settings.interfaces ?? []).length === 0) issues.push("Select at least one interface to capture.");
+    if (ifaceOptions.length === 0) {
+      issues.push("No firewall interfaces are bound to OS devices. Set device bindings on the Interfaces page.");
+    }
+    if (ifaceStates.length > 0) {
+      const available = new Set(ifaceStates.map((i) => i.name));
+      const missing = (settings.interfaces ?? []).filter((name) => !available.has(name));
+      if (missing.length > 0) {
+        issues.push(`Interfaces not found in OS: ${missing.join(", ")}. Bind to a device in Interfaces or select a kernel interface.`);
+      }
+    }
+    if (!Number.isFinite(settings.snaplen) || (settings.snaplen ?? 0) <= 0) issues.push("Snaplen must be greater than 0.");
+    if (!Number.isFinite(settings.maxSizeMB) || (settings.maxSizeMB ?? 0) <= 0) issues.push("Max size must be greater than 0.");
+    if (!Number.isFinite(settings.maxFiles) || (settings.maxFiles ?? 0) <= 0) issues.push("Max files must be greater than 0.");
+    if (!Number.isFinite(settings.bufferMB) || (settings.bufferMB ?? 0) <= 0) issues.push("Buffer must be greater than 0.");
+    if (!Number.isFinite(settings.rotateSeconds) || (settings.rotateSeconds ?? 0) < 0) issues.push("Rotate interval must be 0 or greater.");
+    const badForward = (settings.forwardTargets ?? []).filter(
+      (t) => t.enabled && (!(t.host ?? "").trim() || !Number.isFinite(t.port) || (t.port ?? 0) <= 0),
+    );
+    if (badForward.length > 0) issues.push("Forwarding targets need a host and valid port when enabled.");
+    return issues;
+  }, [settings, ifaceStates, ifaceOptions.length]);
+  const isRunning = status?.running ?? settings.enabled ?? false;
+  const canStart = canEdit && configIssues.length === 0 && state === "idle" && !isRunning;
+  const captureSummary = useMemo(() => {
+    const ifaceLabel = (settings.interfaces ?? []).length ? (settings.interfaces ?? []).join(", ") : "no interfaces";
+    const rotation =
+      settings.mode === "rolling"
+        ? `${settings.maxFiles ?? 0} files @ ${settings.maxSizeMB ?? 0}MB`
+        : `${settings.maxSizeMB ?? 0}MB max`;
+    return `${ifaceLabel} · ${rotation} · snaplen ${settings.snaplen ?? 0}`;
+  }, [settings.interfaces, settings.mode, settings.maxFiles, settings.maxSizeMB, settings.snaplen]);
+  const filteredPcaps = useMemo(() => {
+    const q = pcapQuery.trim().toLowerCase();
+    if (!q) return pcaps;
+    return pcaps.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.interface.toLowerCase().includes(q) ||
+        (p.tags ?? []).some((t) => t.toLowerCase().includes(q)),
+    );
+  }, [pcaps, pcapQuery]);
+  const visiblePcaps = useMemo(() => {
+    if (ifaceFilter === "all") return filteredPcaps;
+    return filteredPcaps.filter((p) => p.interface === ifaceFilter);
+  }, [filteredPcaps, ifaceFilter]);
+  const totalSizeMB = useMemo(() => {
+    if (!pcaps.length) return 0;
+    const bytes = pcaps.reduce((sum, p) => sum + (p.sizeBytes ?? 0), 0);
+    return bytes / (1024 * 1024);
+  }, [pcaps]);
+  const ifaceStats = useMemo(() => {
+    const stats = new Map<string, { count: number; sizeBytes: number }>();
+    for (const p of pcaps) {
+      const key = p.interface || "unknown";
+      const current = stats.get(key) ?? { count: 0, sizeBytes: 0 };
+      current.count += 1;
+      current.sizeBytes += p.sizeBytes ?? 0;
+      stats.set(key, current);
+    }
+    return Array.from(stats.entries()).sort((a, b) => b[1].count - a[1].count);
+  }, [pcaps]);
+  const enabledForwarding = useMemo(() => {
+    return (settings.forwardTargets ?? [])
+      .filter((t) => t.enabled && t.host)
+      .map((t) => `${t.interface} → ${t.host}:${t.port ?? ""}`.trim());
+  }, [settings.forwardTargets]);
+  const runningSince = useMemo(() => {
+    if (!status?.startedAt) return "—";
+    const started = new Date(status.startedAt);
+    if (Number.isNaN(started.getTime())) return "—";
+    return started.toLocaleString();
+  }, [status?.startedAt]);
+
+  async function addTag(pcapName: string) {
+    const tag = pcapTag.trim();
+    if (!tag) return;
+    const item = pcaps.find((p) => p.name === pcapName);
+    const tags = Array.from(new Set([...(item?.tags ?? []), tag]));
+    const ok = await tagPcap({ name: pcapName, tags });
+    if (ok) {
+      setPcapTag("");
+      const list = await listPcaps();
+      setPcaps(list);
+    } else {
+      setNotice("Failed to update PCAP tags.");
+    }
+  }
+
+  function toggleIface(name: string) {
+    setSettings((prev) => {
+      const set = new Set(prev.interfaces ?? []);
+      if (set.has(name)) set.delete(name);
+      else set.add(name);
+      return { ...prev, interfaces: Array.from(set) };
+    });
+  }
+
+  function setAllInterfaces(on: boolean) {
+    setSettings((prev) => ({
+      ...prev,
+      interfaces: on ? ifaceOptions.map((opt) => opt.value) : [],
+    }));
+  }
+
+  function updateForwardTarget(iface: string, patch: Partial<PcapForwardRow>) {
+    setSettings((prev) => ({
+      ...prev,
+      forwardTargets: (prev.forwardTargets ?? []).map((t) =>
+        t.interface === iface ? { ...t, ...patch } : t,
+      ),
+    }));
+  }
+
+  async function startCapture() {
     if (!canEdit) return;
-    setSaveState("saving");
-    const saved = await setDataPlane(config);
-    setSaveState(saved ? "saved" : "error");
-    setTimeout(() => setSaveState("idle"), 1500);
+    if (configIssues.length > 0) {
+      setNotice("Fix capture settings before starting.");
+      return;
+    }
+    setState("starting");
+    const saved = await setPcapConfig(settings);
+    if (!saved) {
+      setNotice("Failed to save capture settings.");
+      setState("idle");
+      return;
+    }
+    setSavedConfigJson(JSON.stringify(normalizeConfig(saved)));
+    const st = await startPcap(saved);
+    if (!st) {
+      setNotice("Failed to start capture.");
+    } else {
+      setStatus(st);
+      setSettings((prev) => ({ ...prev, enabled: true }));
+    }
+    setState("idle");
+    await refresh();
+  }
+
+  async function stopCapture() {
+    if (!canEdit) return;
+    setState("stopping");
+    const st = await stopPcap();
+    if (!st) {
+      setNotice("Failed to stop capture.");
+    } else {
+      setStatus(st);
+      setSettings((prev) => ({ ...prev, enabled: false }));
+    }
+    setState("idle");
+    await refresh();
+  }
+
+  async function saveSettings() {
+    if (!canEdit) return;
+    if (configIssues.length > 0) {
+      setNotice("Fix capture settings before saving.");
+      return;
+    }
+    const saved = await setPcapConfig(settings);
+    if (!saved) {
+      setNotice("Failed to save capture settings.");
+      return;
+    }
+    setSettings(normalizeConfig(saved));
+    setSavedConfigJson(JSON.stringify(normalizeConfig(saved)));
+    setNotice("Capture settings saved.");
+    await refresh();
+  }
+
+  async function handleUpload(file: File | null) {
+    if (!file || !canEdit) return;
+    if (!file.name.toLowerCase().endsWith(".pcap")) {
+      setNotice("Only .pcap files are supported for upload.");
+      return;
+    }
+    setUploading(true);
+    const item = await uploadPcap(file);
+    if (!item) {
+      setNotice("Failed to upload PCAP.");
+    } else {
+      await refresh();
+    }
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = "";
+    }
+    setUploading(false);
   }
 
   return (
     <Shell
-      title="Dataplane"
+      title="PCAP"
       actions={
         <div className="flex items-center gap-2">
-          <button
-            onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-          >
-            Refresh
-          </button>
-          {canEdit && (
-            <button
-              onClick={onSave}
-              disabled={saveState === "saving"}
-              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-            >
-              {saveState === "saving" ? "Saving..." : "Save"}
-            </button>
+          {canEdit ? (
+            <>
+              <button
+                onClick={saveSettings}
+                disabled={state !== "idle"}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+              >
+                Save settings
+              </button>
+              <button
+                onClick={startCapture}
+                disabled={!canStart}
+                className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30 disabled:opacity-50"
+              >
+                {state === "starting" ? "Starting..." : "Start capture"}
+              </button>
+              <button
+                onClick={stopCapture}
+                disabled={state !== "idle" || !isRunning}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+              >
+                {state === "stopping" ? "Stopping..." : "Stop"}
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400">View-only</span>
           )}
         </div>
       }
     >
-      {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-          View-only mode: configuration changes are disabled.
+      {notice && (
+        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          {notice}
         </div>
       )}
-
-      <div className="space-y-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Enforcement</h2>
-              <p className="text-sm text-slate-300">
-                Apply compiled rules to nftables on the engine.
-              </p>
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-300">Capture Status</div>
+            <div className="mt-1 text-sm text-slate-200">
+              {isRunning ? "Running" : "Stopped"}
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={config.enforcement ?? false}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, enforcement: e.target.checked }))
-                }
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
-              />
-              Enabled
-            </label>
+          </div>
+          <span className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+            {isRunning ? "active" : "idle"}
+          </span>
+        </div>
+        <div className="mt-2 text-xs text-slate-400">{captureSummary}</div>
+        <div className="mt-2 text-xs text-slate-400">
+          Started: <span className="text-slate-300">{runningSince}</span>
+        </div>
+        <div className="mt-1 text-xs text-slate-400">
+          Active interfaces:{" "}
+          <span className="text-slate-300">
+            {(status?.interfaces ?? settings.interfaces ?? []).length
+              ? (status?.interfaces ?? settings.interfaces ?? []).join(", ")
+              : "none"}
+          </span>
+        </div>
+        {status?.lastError ? (
+          <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+            {status.lastError}
+          </div>
+        ) : null}
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <h2 className="text-lg font-semibold text-white">Capture setup</h2>
+        <p className="mt-1 text-sm text-slate-300">
+          Start/stop packet captures on selected interfaces and store PCAPs for replay.
+        </p>
+        {configIssues.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+            <div className="font-semibold">Capture checks</div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {configIssues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-4">
+          <div>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
+              <span>Interfaces</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setAllInterfaces(true)}
+                  disabled={!canEdit}
+                  className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setAllInterfaces(false)}
+                  disabled={!canEdit}
+                  className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 grid gap-2 md:grid-cols-4">
+              {ifaceOptions.map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={(settings.interfaces ?? []).includes(opt.value)}
+                    disabled={!canEdit}
+                    onChange={() => toggleIface(opt.value)}
+                    className="h-4 w-4 rounded border-white/20 bg-black/30"
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-200">
-              nftables table name
-            </label>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Mode
+                <InfoTip label="Rolling keeps the newest files; Once stops after max size." />
+              </label>
+              <select
+                value={settings.mode}
+                disabled={!canEdit}
+                onChange={(e) => setSettings((prev) => ({ ...prev, mode: e.target.value as CaptureMode }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              >
+                <option value="rolling">rolling</option>
+                <option value="once">once</option>
+              </select>
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Snaplen (bytes)
+                <InfoTip label="Max bytes captured per packet (higher = larger PCAPs)." />
+              </label>
+              <input
+                type="number"
+                value={settings.snaplen}
+                disabled={!canEdit}
+                onChange={(e) => setSettings((prev) => ({ ...prev, snaplen: Number(e.target.value) || 0 }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Max size (MB)
+                <InfoTip label="Max file size before rotation or stop." />
+              </label>
+              <input
+                type="number"
+                value={settings.maxSizeMB}
+                disabled={!canEdit}
+                onChange={(e) => setSettings((prev) => ({ ...prev, maxSizeMB: Number(e.target.value) || 0 }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Max files
+                <InfoTip label="How many files to keep when in rolling mode." />
+              </label>
+              <input
+                type="number"
+                value={settings.maxFiles}
+                disabled={!canEdit}
+                onChange={(e) => setSettings((prev) => ({ ...prev, maxFiles: Number(e.target.value) || 0 }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div className="md:col-span-2 rounded-xl border border-white/10 bg-black/30 p-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">Filters (tcpdump style)</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                <input
+                  value={settings.filter?.src ?? ""}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), src: e.target.value } }))
+                  }
+                  placeholder="src host 10.0.0.10"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+                <input
+                  value={settings.filter?.dst ?? ""}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), dst: e.target.value } }))
+                  }
+                  placeholder="dst host 10.0.0.20"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+                <select
+                  value={settings.filter?.proto ?? "any"}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      filter: { ...(prev.filter ?? {}), proto: e.target.value as "any" | "tcp" | "udp" | "icmp" },
+                    }))
+                  }
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                >
+                  <option value="any">any proto</option>
+                  <option value="tcp">tcp</option>
+                  <option value="udp">udp</option>
+                  <option value="icmp">icmp</option>
+                </select>
+              </div>
+              <div className="mt-2 text-xs text-slate-400">
+                Filter preview: <span className="font-mono text-slate-300">{bpfPreview}</span>
+              </div>
+            </div>
+          </div>
+
+          <details className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <summary className="cursor-pointer text-sm text-slate-200">Advanced capture options</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  File prefix
+                  <InfoTip label="Prefix for saved PCAP files." />
+                </label>
+                <input
+                  value={settings.filePrefix}
+                  disabled={!canEdit}
+                  onChange={(e) => setSettings((prev) => ({ ...prev, filePrefix: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Rotate interval (seconds)
+                  <InfoTip label="Rotate files on time in addition to size." />
+                </label>
+                <input
+                  type="number"
+                  value={settings.rotateSeconds}
+                  disabled={!canEdit}
+                  onChange={(e) => setSettings((prev) => ({ ...prev, rotateSeconds: Number(e.target.value) || 0 }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Buffer (MB)
+                  <InfoTip label="Capture buffer size before flush." />
+                </label>
+                <input
+                  type="number"
+                  value={settings.bufferMB}
+                  disabled={!canEdit}
+                  onChange={(e) => setSettings((prev) => ({ ...prev, bufferMB: Number(e.target.value) || 0 }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.promisc}
+                  disabled={!canEdit}
+                  onChange={(e) => setSettings((prev) => ({ ...prev, promisc: e.target.checked }))}
+                  className="h-4 w-4 rounded border-white/20 bg-black/30"
+                />
+                Promiscuous mode
+                <InfoTip label="Capture all traffic seen by the interface." />
+              </label>
+            </div>
+          </details>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">PCAP Forwarding (Remote Sensor)</div>
+                <p className="mt-1 text-sm text-slate-200">
+                  Stream captures per interface to a remote sensor (tap-style).
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-[11px] uppercase tracking-wide text-slate-500 md:grid-cols-[120px_1fr_120px_120px]">
+              <span>Interface</span>
+              <span>Sensor Host</span>
+              <span>Port</span>
+              <span>Proto</span>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {(settings.forwardTargets ?? []).map((target) => {
+                if (!target.interface) return null;
+                const iface = target.interface;
+                return (
+                <div
+                  key={iface}
+                  className="grid gap-2 rounded-lg border border-white/10 bg-black/30 p-3 md:grid-cols-[120px_1fr_120px_120px]"
+                >
+                  <label className="flex items-center gap-2 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={target.enabled}
+                      disabled={!canEdit}
+                      onChange={(e) => updateForwardTarget(iface, { enabled: e.target.checked })}
+                      className="h-4 w-4 rounded border-white/20 bg-black/30"
+                    />
+                    {iface}
+                  </label>
+                  <input
+                    value={target.host}
+                    disabled={!canEdit || !target.enabled}
+                    onChange={(e) => updateForwardTarget(iface, { host: e.target.value })}
+                    placeholder="sensor.example.local"
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                  />
+                  <input
+                    type="number"
+                    value={target.port}
+                    disabled={!canEdit || !target.enabled}
+                    onChange={(e) => updateForwardTarget(iface, { port: Number(e.target.value) || 0 })}
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                  />
+                  <select
+                    value={target.proto}
+                    disabled={!canEdit || !target.enabled}
+                    onChange={(e) => updateForwardTarget(iface, { proto: e.target.value as "tcp" | "udp" })}
+                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                  >
+                    <option value="udp">udp</option>
+                    <option value="tcp">tcp</option>
+                  </select>
+                </div>
+                );
+              })}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">
+              Streams PCAP data to remote collectors; configure one target per interface.
+            </div>
+            {enabledForwarding.length > 0 ? (
+              <div className="mt-2 text-xs text-slate-400">
+                Active forwarding: <span className="text-slate-300">{enabledForwarding.join(", ")}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-lg font-semibold text-white">Saved PCAPs</h2>
+          <p className="mt-1 text-sm text-slate-300">Download or replay captures from storage.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
-              type="text"
-              value={config.enforceTable ?? ""}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setConfig((c) => ({ ...c, enforceTable: e.target.value }))
-              }
-              placeholder="containd"
-              className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              value={pcapQuery}
+              onChange={(e) => setPcapQuery(e.target.value)}
+                placeholder="Search by name, iface, tag"
+                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:w-2/3"
+              />
+              <button
+                onClick={() => refresh()}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+              >
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </button>
+            <button
+              onClick={() => setPcapQuery("")}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+            >
+              Clear search
+            </button>
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={!canEdit || uploading}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 disabled:opacity-50"
+              >
+              {uploading ? "Uploading..." : "Upload PCAP"}
+            </button>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".pcap"
+              className="hidden"
+              onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
             />
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-200">
-              Capture interfaces
-            </label>
-            <p className="mt-1 text-xs text-slate-400">
-              Comma-separated Linux interface names to inspect (empty disables
-              capture).
-            </p>
-            <input
-              type="text"
-              value={ifaceCSV}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setConfig((c) => ({
-                  ...c,
-                  captureInterfaces: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
-              placeholder="eth0, eth1"
-              className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 p-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">DPI mock loop</h3>
-              <p className="text-xs text-slate-400">
-                Lab-only: emit synthetic Modbus events for visibility.
-              </p>
+          {lastRefresh ? (
+            <div className="mt-2 text-xs text-slate-500">
+              Last refreshed: {lastRefresh.toLocaleTimeString()} · Auto-refresh every 8s
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={config.dpiMock ?? false}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, dpiMock: e.target.checked }))
-                }
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
-              />
-              Enabled
-            </label>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-slate-300">
+              {pcaps.length} total
+            </span>
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-slate-300">
+              {totalSizeMB.toFixed(1)} MB stored
+            </span>
           </div>
+          {ifaceStats.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              <button
+                onClick={() => setIfaceFilter("all")}
+                className={`rounded-full px-2 py-0.5 ${ifaceFilter === "all" ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}
+              >
+                All interfaces
+              </button>
+              {ifaceStats.map(([iface, stats]) => (
+                <button
+                  key={iface}
+                  onClick={() => setIfaceFilter(iface)}
+                  className={`rounded-full px-2 py-0.5 ${ifaceFilter === iface ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}
+                >
+                  {iface} · {stats.count}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+            <table className="w-full text-left text-sm text-slate-200">
+              <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Name</th>
+                  <th className="px-3 py-2">Iface</th>
+                  <th className="px-3 py-2">Size</th>
+                  <th className="px-3 py-2">Tags</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visiblePcaps.length === 0 ? (
+                  <tr className="border-t border-white/10">
+                    <td colSpan={6} className="px-3 py-3 text-sm text-slate-400">
+                      No captures match your filters.
+                    </td>
+                  </tr>
+                ) : (
+                  visiblePcaps.map((p) => (
+                    <tr key={p.name} className="border-t border-white/10">
+                      <td className="px-3 py-2">
+                        <div className="font-mono text-xs text-slate-100">{p.name}</div>
+                        <div className="text-[11px] text-slate-400">{new Date(p.createdAt).toLocaleString()}</div>
+                      </td>
+                      <td className="px-3 py-2">{p.interface || "—"}</td>
+                      <td className="px-3 py-2">{(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {(p.tags ?? []).length ? (
+                            (p.tags ?? []).map((t) => (
+                              <span key={t} className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">
+                                {t}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-slate-500">—</span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <input
+                            value={pcapTag}
+                            onChange={(e) => setPcapTag(e.target.value)}
+                            placeholder="add tag"
+                            className="w-24 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                          />
+                          <button
+                            onClick={() => addTag(p.name)}
+                            disabled={!canEdit}
+                            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">{p.status}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <a
+                          href={downloadPcapURL(p.name)}
+                          className="mr-2 inline-flex rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                        >
+                          Download
+                        </a>
+                        <button
+                          onClick={() => void replayPcap({ name: p.name, interface: p.interface })}
+                          disabled={!canEdit}
+                          className="mr-2 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 disabled:opacity-50"
+                        >
+                          Replay
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!canEdit) return;
+                            const ok = await deletePcap(p.name);
+                            if (ok) {
+                              setPcaps(await listPcaps());
+                            } else {
+                              setNotice("Failed to delete PCAP.");
+                            }
+                          }}
+                          disabled={!canEdit}
+                          className="rounded-md border border-amber/30 bg-amber/10 px-2 py-1 text-xs text-amber disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <div className="flex items-center justify-end gap-3">
-          {saveState === "error" && (
-            <span className="text-sm text-amber">Save failed</span>
-          )}
-          {saveState === "saved" && (
-            <span className="text-sm text-mint">Saved</span>
-          )}
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-lg font-semibold text-white">Replay</h2>
+          <p className="mt-1 text-sm text-slate-300">Replay a saved PCAP back onto an interface.</p>
+          <div className="mt-4 grid gap-3">
+            <select
+              disabled={!canEdit}
+              value={replayName}
+              onChange={(e) => {
+                const next = e.target.value;
+                setReplayName(next);
+                const match = pcaps.find((p) => p.name === next);
+                if (match?.interface) {
+                  setReplayIface(match.interface);
+                }
+              }}
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-50"
+            >
+              <option value="">Select a PCAP</option>
+              {pcaps.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <select
+              disabled={!canEdit}
+              value={replayIface}
+              onChange={(e) => setReplayIface(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-50"
+            >
+              <option value="">Replay interface</option>
+              {ifaceOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <input
+              disabled={!canEdit}
+              value={replayRate}
+              onChange={(e) => setReplayRate(e.target.value)}
+              placeholder="Replay rate (pps)"
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-50"
+            />
+            <button
+              disabled={!canEdit || !replayName || !replayIface}
+              onClick={async () => {
+                const rate = replayRate.trim() ? Number(replayRate) : undefined;
+                const ok = await replayPcap({
+                  name: replayName,
+                  interface: replayIface,
+                  ratePps: Number.isFinite(rate) ? rate : undefined,
+                });
+                if (!ok) {
+                  setNotice("Failed to start replay.");
+                }
+              }}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 disabled:opacity-50"
+            >
+              Start replay
+            </button>
+          </div>
         </div>
       </div>
     </Shell>
   );
+}
+
+function normalizeConfig(cfg: PcapConfig): PcapConfig {
+  return {
+    enabled: cfg.enabled ?? false,
+    interfaces: cfg.interfaces ?? [],
+    snaplen: cfg.snaplen ?? 262144,
+    maxSizeMB: cfg.maxSizeMB ?? 64,
+    maxFiles: cfg.maxFiles ?? 8,
+    mode: cfg.mode ?? "rolling",
+    promisc: cfg.promisc ?? true,
+    bufferMB: cfg.bufferMB ?? 4,
+    rotateSeconds: cfg.rotateSeconds ?? 300,
+    filePrefix: cfg.filePrefix ?? "capture",
+    filter: {
+      src: cfg.filter?.src ?? "",
+      dst: cfg.filter?.dst ?? "",
+      proto: cfg.filter?.proto ?? "any",
+    },
+    forwardTargets: cfg.forwardTargets ?? [],
+  };
 }

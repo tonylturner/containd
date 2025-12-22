@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 import {
   api,
   isAdmin,
+  fetchDataPlane,
+  setDataPlane,
+  type DataPlaneConfig,
   type FirewallRule,
   type Gateway,
   type Interface,
@@ -18,6 +21,16 @@ import {
   type PortForward,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { InfoTip } from "../../components/InfoTip";
+
+function zoneLabel(zone: Zone): string {
+  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
+}
+
+function zoneName(zones: Zone[], name: string): string {
+  const match = zones.find((z) => z.name === name);
+  return match ? zoneLabel(match) : name;
+}
 
 function ip4ToInt(ip: string): number | null {
   const parts = ip.split(".");
@@ -76,22 +89,31 @@ export default function FirewallPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
   const [routing, setRouting] = useState<RoutingConfig | null>(null);
+  const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
+  const [dpiSaveState, setDpiSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
 
   async function refresh() {
-    const [r, z, n, rt] = await Promise.all([
+    const [r, z, n, rt, dp] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
       api.getNAT(),
       api.getRouting(),
+      fetchDataPlane(),
     ]);
     setRules(r ?? []);
     setZones(z ?? []);
     setNat(n ?? { enabled: false });
     setRouting(rt);
+    if (dp) {
+      setDpiConfig({
+        captureInterfaces: dp.captureInterfaces ?? [],
+        dpiMock: dp.dpiMock ?? false,
+      });
+    }
   }
 
   useEffect(() => {
@@ -127,6 +149,16 @@ export default function FirewallPage() {
     }
     setEditing(null);
     refresh();
+  }
+  async function saveDpiConfig() {
+    if (!isAdmin()) return;
+    setDpiSaveState("saving");
+    const saved = await setDataPlane({
+      captureInterfaces: dpiConfig.captureInterfaces ?? [],
+      dpiMock: dpiConfig.dpiMock ?? false,
+    });
+    setDpiSaveState(saved ? "saved" : "error");
+    setTimeout(() => setDpiSaveState("idle"), 1500);
   }
 
   const outboundStatus = (() => {
@@ -387,6 +419,62 @@ export default function FirewallPage() {
         }}
       />
 
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white">DPI capture (required for ICS filters)</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              DPI capture is configured here; PCAP storage is managed separately.
+            </p>
+          </div>
+          {isAdmin() && (
+            <button
+              onClick={saveDpiConfig}
+              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            >
+              {dpiSaveState === "saving" ? "Saving..." : "Save"}
+            </button>
+          )}
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+              Capture interfaces
+              <InfoTip label="Comma-separated interfaces to inspect for DPI (e.g., lan2, lan3)." />
+            </label>
+            <input
+              value={(dpiConfig.captureInterfaces ?? []).join(", ")}
+              disabled={!isAdmin()}
+              onChange={(e) =>
+                setDpiConfig((c) => ({
+                  ...c,
+                  captureInterfaces: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }))
+              }
+              placeholder="lan2, lan3"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              checked={dpiConfig.dpiMock ?? false}
+              disabled={!isAdmin()}
+              onChange={(e) => setDpiConfig((c) => ({ ...c, dpiMock: e.target.checked }))}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Safe learning lab mode (mock DPI)
+            <InfoTip label="Lab-only: emit synthetic Modbus events for learning and UI visibility." />
+          </label>
+        </div>
+        {!isAdmin() && (
+          <div className="mt-2 text-xs text-slate-400">View-only mode: DPI capture settings are read-only.</div>
+        )}
+      </div>
+
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
@@ -397,7 +485,7 @@ export default function FirewallPage() {
               <th className="px-4 py-3">Description</th>
               <th className="px-4 py-3">Zones</th>
               <th className="px-4 py-3">Protocols</th>
-              <th className="px-4 py-3">ICS</th>
+              <th className="px-4 py-3">ICS Filter</th>
               <th className="px-4 py-3">Action</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -419,8 +507,8 @@ export default function FirewallPage() {
                   {r.description || "—"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  {(r.sourceZones ?? []).join(", ") || "any"} →{" "}
-                  {(r.destZones ?? []).join(", ") || "any"}
+                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"} →{" "}
+                  {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
                   {(r.protocols ?? [])
@@ -428,11 +516,18 @@ export default function FirewallPage() {
                     .join(", ") || "any"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  {r.ics?.protocol
-                    ? `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(
-                        ",",
-                      ) || "*"}`
-                    : "—"}
+                  {r.ics?.protocol ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">
+                        {r.ics.mode === "learn" ? "safe learning" : "enforce"}
+                      </span>
+                      <span className="text-xs text-slate-300">
+                        {r.ics.protocol} fc={(r.ics.functionCode ?? []).join(",") || "*"}
+                      </span>
+                    </div>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span
@@ -502,8 +597,10 @@ function NATCard({
     setSourceZones(nat.sourceZones ?? []);
   }, [nat.enabled, nat.egressZone, nat.sourceZones]);
 
-  const zoneNames = (zones ?? []).map((z) => z.name).filter(Boolean);
-  zoneNames.sort();
+  const zoneOptions = (zones ?? [])
+    .map((z) => ({ value: z.name, label: zoneLabel(z) }))
+    .filter((z) => z.value);
+  zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
   const dirty =
     enabled !== !!nat.enabled ||
@@ -570,9 +667,9 @@ function NATCard({
             className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200"
           >
             <option value="">(default: wan)</option>
-            {zoneNames.map((z) => (
-              <option key={z} value={z}>
-                {z}
+            {zoneOptions.map((z) => (
+              <option key={z.value} value={z.value}>
+                {z.label}
               </option>
             ))}
           </select>
@@ -583,13 +680,13 @@ function NATCard({
             Source Zones
           </div>
           <div className="mt-2 grid max-h-32 gap-1 overflow-auto pr-1 text-sm">
-            {zoneNames.length === 0 && (
+            {zoneOptions.length === 0 && (
               <div className="text-xs text-slate-400">No zones defined.</div>
             )}
-            {zoneNames.map((z) => {
-              const checked = sourceZones.includes(z);
+            {zoneOptions.map((z) => {
+              const checked = sourceZones.includes(z.value);
               return (
-                <label key={z} className="flex items-center gap-2">
+                <label key={z.value} className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     disabled={!isAdmin()}
@@ -598,12 +695,12 @@ function NATCard({
                       const next = e.target.checked;
                       setSourceZones((prev) => {
                         const p = prev ?? [];
-                        if (next) return Array.from(new Set([...p, z]));
-                        return p.filter((x) => x !== z);
+                        if (next) return Array.from(new Set([...p, z.value]));
+                        return p.filter((x) => x !== z.value);
                       });
                     }}
                   />
-                  <span className="text-slate-200">{z}</span>
+                  <span className="text-slate-200">{z.label}</span>
                 </label>
               );
             })}
@@ -672,6 +769,7 @@ function EditRuleModal({
   );
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
+  const [mode, setMode] = useState<"enforce" | "learn">(rule.ics?.mode ?? "learn");
 
   function save() {
     const protocols: Protocol[] = proto
@@ -692,6 +790,7 @@ function EditRuleModal({
           .filter(Boolean),
         readOnly,
         writeOnly,
+        mode,
       };
     }
     onSave({
@@ -736,7 +835,7 @@ function EditRuleModal({
             <option value="">Source zone (any)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>
@@ -748,7 +847,7 @@ function EditRuleModal({
             <option value="">Dest zone (any)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>
@@ -794,12 +893,27 @@ function EditRuleModal({
               onChange={(e) => setIcsEnabled(e.target.checked)}
               className="h-4 w-4 rounded border-white/20 bg-black/30"
             />
-            ICS (Modbus)
+            ICS filter (Modbus)
+            <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
+          <span className="text-xs text-slate-400 md:col-span-4">
+            ICS filters let you allow or block specific Modbus actions beyond basic L3/L4 rules.
+          </span>
+        <span className="text-xs text-slate-400 md:col-span-4">
+          Requires DPI capture to see Modbus traffic (configure above).
+        </span>
         </div>
 
         {icsEnabled && (
           <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1"
+            >
+              <option value="learn">safe learning</option>
+              <option value="enforce">enforce</option>
+            </select>
             <input
               value={functionCodes}
               onChange={(e) => setFunctionCodes(e.target.value)}
@@ -877,8 +991,10 @@ function PortForwardsCard({
     setItems(nat.portForwards ?? []);
   }, [nat.portForwards]);
 
-  const zoneNames = (zones ?? []).map((z) => z.name).filter(Boolean);
-  zoneNames.sort();
+  const zoneOptions = (zones ?? [])
+    .map((z) => ({ value: z.name, label: zoneLabel(z) }))
+    .filter((z) => z.value);
+  zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
   const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
 
@@ -990,9 +1106,9 @@ function PortForwardsCard({
               onChange={(e) => setNewIngress(e.target.value)}
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             >
-              {zoneNames.map((z) => (
-                <option key={z} value={z}>
-                  ingress:{z}
+              {zoneOptions.map((z) => (
+                <option key={z.value} value={z.value}>
+                  ingress:{z.label}
                 </option>
               ))}
             </select>
@@ -1067,7 +1183,7 @@ function PortForwardsCard({
               )}
               {items.map((pf) => (
                 <tr key={pf.id} className="border-t border-white/5">
-                  <td className="px-4 py-3 text-slate-200">{pf.ingressZone}</td>
+                  <td className="px-4 py-3 text-slate-200">{zoneName(zones, pf.ingressZone)}</td>
                   <td className="px-4 py-3 text-slate-200">{pf.proto}</td>
                   <td className="px-4 py-3 font-mono text-xs text-white">
                     {pf.listenPort}
@@ -1139,6 +1255,7 @@ function CreateRuleForm({
   const [addresses, setAddresses] = useState("0-100");
   const [readOnly, setReadOnly] = useState(false);
   const [writeOnly, setWriteOnly] = useState(false);
+  const [mode, setMode] = useState<"enforce" | "learn">("learn");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1166,6 +1283,7 @@ function CreateRuleForm({
           .filter(Boolean),
         readOnly,
         writeOnly,
+        mode,
       };
     }
     const rule: FirewallRule = {
@@ -1215,7 +1333,7 @@ function CreateRuleForm({
           <option value="">Source zone (any)</option>
           {zones.map((z) => (
             <option key={z.name} value={z.name}>
-              {z.name}
+              {zoneLabel(z)}
             </option>
           ))}
         </select>
@@ -1227,7 +1345,7 @@ function CreateRuleForm({
           <option value="">Dest zone (any)</option>
           {zones.map((z) => (
             <option key={z.name} value={z.name}>
-              {z.name}
+              {zoneLabel(z)}
             </option>
           ))}
         </select>
@@ -1276,12 +1394,27 @@ function CreateRuleForm({
             onChange={(e) => setIcsEnabled(e.target.checked)}
             className="h-4 w-4 rounded border-white/20 bg-black/30"
           />
-          ICS (Modbus) predicate
+          ICS filter (Modbus)
+          <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
+        <span className="text-xs text-slate-400 md:col-span-4">
+          ICS filters let you allow or block specific Modbus actions beyond basic L3/L4 rules.
+        </span>
+        <span className="text-xs text-slate-400 md:col-span-4">
+          Requires DPI capture to see Modbus traffic (configure above).
+        </span>
       </div>
 
       {icsEnabled && (
         <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1"
+          >
+            <option value="learn">safe learning</option>
+            <option value="enforce">enforce</option>
+          </select>
           <input
             value={functionCodes}
             onChange={(e) => setFunctionCodes(e.target.value)}

@@ -38,6 +38,7 @@ export default function InterfacesPage() {
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
+  const [alias, setAlias] = useState("");
   const [zone, setZone] = useState("");
   const [ifaceType, setIfaceType] = useState<"physical" | "bridge" | "vlan">("physical");
   const [members, setMembers] = useState("");
@@ -50,6 +51,8 @@ export default function InterfacesPage() {
   const [assigning, setAssigning] = useState(false);
   const [reconciling, setReconciling] = useState(false);
 
+  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
+
   async function refresh() {
     const [i, z, s] = await Promise.all([
       api.listInterfaces(),
@@ -61,7 +64,7 @@ export default function InterfacesPage() {
     setState(s ?? []);
     if (s === null) {
       setError(
-        "Unable to load interface runtime state from the dataplane (engine unreachable). Check CONTAIND_ENGINE_URL/NGFW_ENGINE_URL and restart.",
+        "Unable to load interface runtime state from the engine (engine unreachable). Check CONTAIND_ENGINE_URL/NGFW_ENGINE_URL and restart.",
       );
     }
   }
@@ -128,7 +131,11 @@ export default function InterfacesPage() {
       return;
     }
     setSaving(true);
-    const base: Interface = { name: name.trim(), zone: zone || undefined };
+    const base: Interface = {
+      name: name.trim(),
+      alias: alias.trim() || undefined,
+      zone: zone || undefined,
+    };
     const addrs = addresses
       .split(",")
       .map((s) => s.trim())
@@ -164,6 +171,7 @@ export default function InterfacesPage() {
       return;
     }
     setName("");
+    setAlias("");
     setZone("");
     setIfaceType("physical");
     setMembers("");
@@ -248,7 +256,7 @@ export default function InterfacesPage() {
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           <div className="font-semibold">Interface runtime state unavailable</div>
           <div className="mt-1 text-amber/90">
-            The UI can’t see OS/Docker-assigned addresses right now (the dataplane interface-state feed is empty). In the
+            The UI can’t see OS/Docker-assigned addresses right now (the engine interface-state feed is empty). In the
             current compose setup this usually means the management plane can’t reach the engine. Check{" "}
             <span className="font-semibold">CONTAIND_ENGINE_URL</span> in <span className="font-semibold">.env</span>{" "}
             (should be <span className="font-mono">http://127.0.0.1:8081</span> in shared-network-namespace mode) and then
@@ -272,6 +280,13 @@ export default function InterfacesPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name (e.g. tunnel1)"
+            disabled={!isAdmin()}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+          />
+          <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="alias (optional)"
             disabled={!isAdmin()}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
@@ -299,7 +314,7 @@ export default function InterfacesPage() {
             <option value="">(no zone)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>
@@ -344,7 +359,7 @@ export default function InterfacesPage() {
             </span>
           ) : ifaceType === "vlan" ? (
             <span>
-              VLAN creates a subinterface in the dataplane netns. Use <span className="font-semibold">parent</span> as a
+              VLAN creates a subinterface in the engine netns. Use <span className="font-semibold">parent</span> as a
               logical interface name (e.g. <span className="font-mono">wan</span>) or an OS device name (e.g.{" "}
               <span className="font-mono">eth0</span>).
             </span>
@@ -371,6 +386,7 @@ export default function InterfacesPage() {
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Alias</th>
               <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">Device</th>
               <th className="px-4 py-3">Link</th>
@@ -384,7 +400,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={9}>
+                <td className="px-4 py-4 text-slate-400" colSpan={10}>
                   No interfaces configured.
                 </td>
               </tr>
@@ -480,6 +496,7 @@ function InterfaceRow({
     typeof iface.vlanId === "number" ? String(iface.vlanId) : "",
   );
   const [device, setDevice] = useState(iface.device ?? "");
+  const [alias, setAlias] = useState(iface.alias ?? "");
   const [zone, setZone] = useState(iface.zone ?? "");
   const [mode, setMode] = useState((iface.addressMode ?? "static").toLowerCase());
   const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
@@ -518,9 +535,27 @@ function InterfaceRow({
     return "physical";
   }
 
+  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
+  const zoneDisplay = iface.zone
+    ? zoneLabel(zones.find((z) => z.name === iface.zone) ?? { name: iface.zone })
+    : "—";
+
   return (
     <tr className="border-t border-white/5">
       <td className="px-4 py-3 font-medium text-white">{iface.name}</td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            disabled={!canEdit}
+            placeholder="alias (optional)"
+            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white placeholder:text-slate-500"
+          />
+        ) : (
+          <span className="text-slate-200">{iface.alias || "—"}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {editing ? (
           <div className="space-y-2">
@@ -627,12 +662,12 @@ function InterfaceRow({
             <option value="">(no zone)</option>
             {zones.map((z) => (
               <option key={z.name} value={z.name}>
-                {z.name}
+                {zoneLabel(z)}
               </option>
             ))}
           </select>
         ) : (
-          <span className="text-slate-200">{iface.zone || "—"}</span>
+          <span className="text-slate-200">{zoneDisplay}</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -810,6 +845,7 @@ function InterfaceRow({
               onClick={async () => {
                 await onUpdate(iface.name, {
                   type: itype || undefined,
+                  alias: alias.trim() || undefined,
                   members:
                     itype === "bridge"
                       ? members
@@ -853,6 +889,7 @@ function InterfaceRow({
                 setParent(iface.parent ?? "");
                 setVlanId(typeof iface.vlanId === "number" ? String(iface.vlanId) : "");
                 setDevice(iface.device ?? "");
+                setAlias(iface.alias ?? "");
                 setZone(iface.zone ?? "");
                 setMode((iface.addressMode ?? "static").toLowerCase());
                 setAddresses((iface.addresses ?? []).join(", "));

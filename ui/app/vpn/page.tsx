@@ -957,9 +957,9 @@ export default function VPNPage() {
                 <div className="mt-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-300">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="text-slate-200">Import profile (advanced)</div>
-                      <div className="mt-0.5 text-[11px] text-slate-400">
-                        Uploads a .ovpn and sets Config Path automatically (clears managed config).
+                      <div className="flex items-center gap-2 text-slate-200">
+                        Import profile (advanced)
+                        <InfoTip label="Uploads a .ovpn and sets Config Path automatically (clears managed config)." />
                       </div>
                     </div>
                     <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10">
@@ -1087,7 +1087,10 @@ export default function VPNPage() {
 
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
-                      <label className="text-xs uppercase tracking-wide text-slate-400">Push DNS (comma-separated)</label>
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Push DNS (comma-separated)
+                        <InfoTip label="DNS servers sent to clients when they connect." />
+                      </label>
                       <input
                         value={(cfg.openvpn.server?.pushDNS ?? []).join(", ")}
                         disabled={!canEdit}
@@ -1111,7 +1114,10 @@ export default function VPNPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs uppercase tracking-wide text-slate-400">Push Routes (comma-separated CIDR)</label>
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Push Routes (comma-separated CIDR)
+                        <InfoTip label="Networks advertised to VPN clients for reachability." />
+                      </label>
                       <input
                         value={(cfg.openvpn.server?.pushRoutes ?? []).join(", ")}
                         disabled={!canEdit}
@@ -1139,9 +1145,9 @@ export default function VPNPage() {
                   <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <div className="text-slate-200">Client profiles</div>
-                        <div className="mt-0.5 text-[11px] text-slate-400">
-                          Generates ECDSA certs in the appliance and downloads an inline <span className="font-mono">.ovpn</span>.
+                        <div className="flex items-center gap-2 text-slate-200">
+                          Client profiles
+                          <InfoTip label="Generates ECDSA certs and downloads inline .ovpn profiles." />
                         </div>
                       </div>
                       <div className="flex items-center gap-2">

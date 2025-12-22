@@ -44,7 +44,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
         { href: "/interfaces/", label: "Interfaces" },
         { href: "/routing/", label: "Routing" },
         { href: "/firewall/", label: "Firewall Rules" },
-        { href: "/ics/", label: "ICS Policy" },
+        { href: "/ics/", label: "ICS Filters" },
         { href: "/ids/", label: "IDS Rules" },
         { href: "/assets/", label: "Assets" },
         { href: "/dhcp/", label: "DHCP" },
@@ -57,7 +57,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
     {
       label: "Operations",
       items: [
-        { href: "/dataplane/", label: "Dataplane" },
+        { href: "/dataplane/", label: "PCAP" },
         { href: "/diagnostics/", label: "Diagnostics" },
       ],
       defaultCollapsed: true,
