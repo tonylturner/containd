@@ -8,13 +8,14 @@ This document tracks the data-plane design and current scaffolding.
 - Capture manager (`pkg/dp/capture`): placeholder that validates interfaces and will host RX workers (NFQUEUE/AF_PACKET planned).
 - Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, and exposes `ShouldInspect` for selective DPI steering.
 - Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS/identity predicates stubbed.
+- Flow tracking (`pkg/dp/flow`): flow key/state scaffolding with timeouts and hashing tests.
 - Kernel programming (Linux):
   - Interface addressing + default routes applied via netlink (`pkg/dp/netcfg`).
   - Static routes + basic policy routing rules (PBR) applied via netlink (`routing` config).
-  - nftables rules compiled/applied for zone firewall and basic NAT (masquerade).
-  - Ownership loop in `ngfw-engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
+  - nftables rules compiled/applied for zone firewall, NAT masquerade, and basic DNAT/port-forwards.
+  - Ownership loop in `containd engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
 
-## Pipeline (planned)
+## Pipeline (current/target)
 1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.
 2) Selective capture (NFQUEUE/AF_PACKET) for DPI/IDS flows.
 3) Flow tracker (5-tuple + direction, timestamps, state) for enrichment and IDS.
@@ -30,8 +31,8 @@ This document tracks the data-plane design and current scaffolding.
 - Future extensions: ICS attributes (e.g., Modbus function code), identity, schedules, verdict sets for nftables and eBPF fast paths.
 
 ## Next steps
-- Implement capture workers and flow tracking.
-- Expand nftables compilation (DNAT/port-forwards, richer input policy, per-zone defaults).
+- Implement capture workers and DPI steering (NFQUEUE/AF_PACKET).
+- Expand nftables compilation (richer input policy, per-zone defaults, stricter DNAT validation).
 - Add routing reconcile/replace semantics and `show ip rule` support in CLI/UI.
 - Extend evaluator for ICS/identity-aware predicates.
 - Integrate DPI decoders into flow processing and rule context enrichment.

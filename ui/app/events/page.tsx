@@ -10,9 +10,10 @@ import { Shell } from "../../components/Shell";
 function EventsInner() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "service" | "dpi" | "firewall">(
+  const [filter, setFilter] = useState<"all" | "service" | "dpi" | "firewall" | "proxy">(
     "all",
   );
+  const [kindPrefix, setKindPrefix] = useState<string>("");
   const [onlyDetections, setOnlyDetections] = useState(false);
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -33,8 +34,12 @@ function EventsInner() {
   useEffect(() => {
     const type = searchParams.get("filter");
     const avOnly = searchParams.get("av") === "1";
-    if (type === "service" || type === "dpi" || type === "firewall") {
+    if (type === "service" || type === "dpi" || type === "firewall" || type === "proxy") {
       setFilter(type);
+    }
+    const kindPref = searchParams.get("kind");
+    if (kindPref) {
+      setKindPrefix(kindPref);
     }
     if (avOnly) setOnlyDetections(true);
     refresh();
@@ -53,6 +58,26 @@ function EventsInner() {
           >
             Refresh
           </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setFilter("proxy");
+                setKindPrefix("service.envoy");
+              }}
+              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+            >
+              Envoy
+            </button>
+            <button
+              onClick={() => {
+                setFilter("proxy");
+                setKindPrefix("service.nginx");
+              }}
+              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+            >
+              Nginx
+            </button>
+          </div>
           <select
             className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
             value={filter}
@@ -60,9 +85,17 @@ function EventsInner() {
           >
             <option value="all">All</option>
             <option value="service">Service events</option>
+            <option value="proxy">Proxy</option>
             <option value="dpi">DPI/IDS</option>
             <option value="firewall">Firewall</option>
           </select>
+          <input
+            type="text"
+            placeholder="Filter by kind prefix (e.g., service.dhcp.reservation)"
+            value={kindPrefix}
+            onChange={(e) => setKindPrefix(e.target.value)}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
+          />
           <label className="flex items-center gap-2 text-xs text-slate-200">
             <input
               type="checkbox"
@@ -80,6 +113,17 @@ function EventsInner() {
           {error}
         </div>
       )}
+      <div className="mb-3 flex flex-wrap gap-2 text-xs text-slate-300">
+        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+          Envoy events: {events.filter((e) => e.kind.startsWith("service.envoy.")).length}
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+          Nginx events: {events.filter((e) => e.kind.startsWith("service.nginx.")).length}
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+          Service events: {events.filter((e) => e.kind.startsWith("service.")).length}
+        </div>
+      </div>
 
       <div className="space-y-2">
         {loading && <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-slate-400">Loading…</div>}
@@ -92,9 +136,16 @@ function EventsInner() {
           .filter((ev) => {
             if (filter === "all") return true;
             if (filter === "service") return ev.kind.startsWith("service.");
+            if (filter === "proxy") {
+              return ev.kind.startsWith("service.envoy.") || ev.kind.startsWith("service.nginx.");
+            }
             if (filter === "firewall") return ev.proto === "firewall";
             if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
             return true;
+          })
+          .filter((ev) => {
+            if (!kindPrefix.trim()) return true;
+            return ev.kind.startsWith(kindPrefix.trim());
           })
           .filter((ev) => {
             if (!onlyDetections) return true;

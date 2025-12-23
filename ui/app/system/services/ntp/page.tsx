@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
@@ -22,8 +22,10 @@ export default function NTPPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     const svc = (await api.getServicesStatus()) as any;
     setStatus(svc?.ntp ?? null);
@@ -34,11 +36,20 @@ export default function NTPPage() {
       intervalSeconds: s?.intervalSeconds ?? 0,
     });
     setLoading(false);
-  }
+    setLastUpdated(new Date());
+  }, []);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const serversText = useMemo(
     () => (cfg.servers ?? []).join("\n"),
@@ -84,6 +95,15 @@ export default function NTPPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto
+          </label>
         </div>
       }
     >
@@ -97,6 +117,9 @@ export default function NTPPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
 
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
@@ -116,6 +139,12 @@ export default function NTPPage() {
               <span className="text-slate-100">
                 {status?.last_start ?? "n/a"}
               </span>
+            </div>
+            <div>
+              Rate: <span className="text-slate-100">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
+            <div>
+              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               Binary:{" "}

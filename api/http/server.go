@@ -3,13 +3,16 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +21,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/kballard/go-shellquote"
 
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/cp/audit"
@@ -32,6 +37,7 @@ import (
 	dpengine "github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
 	"github.com/containd/containd/pkg/dp/netcfg"
+	"github.com/containd/containd/pkg/dp/pcap"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -51,6 +57,17 @@ type EngineClient interface {
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
+	PcapConfig(ctx context.Context) (config.PCAPConfig, error)
+	SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error)
+	StartPcap(ctx context.Context, cfg config.PCAPConfig) (pcap.Status, error)
+	StopPcap(ctx context.Context) (pcap.Status, error)
+	PcapStatus(ctx context.Context) (pcap.Status, error)
+	ListPcaps(ctx context.Context) ([]pcap.Item, error)
+	UploadPcap(ctx context.Context, filename string, r io.Reader) (pcap.Item, error)
+	DeletePcap(ctx context.Context, name string) error
+	TagPcap(ctx context.Context, req pcap.TagRequest) error
+	ReplayPcap(ctx context.Context, req pcap.ReplayRequest) error
+	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
 }
 
 type TelemetryClient interface {
@@ -151,12 +168,17 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/config/candidate", getCandidateConfigHandler(store))
 		protected.POST("/config/candidate", requireAdmin(), saveCandidateConfigHandler(store))
 		protected.GET("/config/diff", diffConfigHandler(store))
+		protected.GET("/config/backups", listConfigBackupsHandler(store))
+		protected.POST("/config/backups", requireAdmin(), createConfigBackupHandler(store))
+		protected.GET("/config/backups/:id", downloadConfigBackupHandler(store))
+		protected.DELETE("/config/backups/:id", requireAdmin(), deleteConfigBackupHandler())
 		protected.POST("/config/commit", requireAdmin(), commitConfigHandler(store, engine, services))
 		protected.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
 		protected.GET("/services/syslog", getSyslogHandler(store))
 		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
+		protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store, services))
 		protected.GET("/services/dns", getDNSHandler(store))
 		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
@@ -189,6 +211,17 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
+		protected.GET("/pcap/config", getPCAPConfigHandler(store))
+		protected.POST("/pcap/config", requireAdmin(), setPCAPConfigHandler(store, engine))
+		protected.POST("/pcap/start", requireAdmin(), startPCAPHandler(store, engine))
+		protected.POST("/pcap/stop", requireAdmin(), stopPCAPHandler(store, engine))
+		protected.GET("/pcap/status", getPCAPStatusHandler(engine))
+		protected.GET("/pcap/list", getPCAPListHandler(engine))
+		protected.POST("/pcap/upload", requireAdmin(), uploadPCAPHandler(engine))
+		protected.GET("/pcap/download/:name", downloadPCAPHandler(engine))
+		protected.DELETE("/pcap/:name", requireAdmin(), deletePCAPHandler(engine))
+		protected.POST("/pcap/tag", requireAdmin(), tagPCAPHandler(engine))
+		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -218,11 +251,15 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
+		protected.GET("/cli/commands", cliCommandsHandler(store))
+		protected.GET("/cli/complete", cliCompleteHandler(store))
+		protected.GET("/cli/ws", cliWSHandler(store))
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
 		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
 		protected.PATCH("/users/:id", requireAdmin(), updateUserHandler(userStore))
 		protected.POST("/users/:id/password", requireAdmin(), setUserPasswordHandler(userStore))
+		protected.DELETE("/users/:id", requireAdmin(), deleteUserHandler(userStore))
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)
 		}
@@ -247,6 +284,74 @@ func dhcpLeasesHandler(engine any) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, resp{Leases: leases})
+	}
+}
+
+type syslogPatch struct {
+	Action     string                  `json:"action,omitempty"`
+	Format     string                  `json:"format,omitempty"`
+	Forwarder  *config.SyslogForwarder `json:"forwarder,omitempty"`
+	BatchSize  int                     `json:"batchSize,omitempty"`
+	FlushEvery int                     `json:"flushEvery,omitempty"` // seconds
+}
+
+// patchSyslogHandler supports incremental updates (format set, forwarder add/del, batch/flush tweaks).
+func patchSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var patch syslogPatch
+		if err := c.ShouldBindJSON(&patch); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		cur := cfg.Services.Syslog
+		if patch.Format != "" {
+			cur.Format = patch.Format
+		}
+		if patch.BatchSize > 0 {
+			cur.BatchSize = patch.BatchSize
+		}
+		if patch.FlushEvery > 0 {
+			cur.FlushEvery = patch.FlushEvery
+		}
+		if patch.Forwarder != nil {
+			f := *patch.Forwarder
+			if err := cpservices.ValidateSyslogForwarder(f); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			switch strings.ToLower(strings.TrimSpace(patch.Action)) {
+			case "add":
+				cur.Forwarders = append(cur.Forwarders, f)
+			case "del":
+				var next []config.SyslogForwarder
+				for _, existing := range cur.Forwarders {
+					if existing.Address == f.Address && existing.Port == f.Port {
+						continue
+					}
+					next = append(next, existing)
+				}
+				cur.Forwarders = next
+			default:
+				// no-op if action unknown
+			}
+		}
+		cfg.Services.Syslog = cur
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if services != nil {
+			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
 
@@ -360,6 +465,275 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 		}
 		auditLog(c, audit.Record{Action: "config.import", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "imported"})
+	}
+}
+
+type configBackupMeta struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Redacted  bool      `json:"redacted"`
+}
+
+type configBackupInfo struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Redacted  bool      `json:"redacted"`
+	Size      int64     `json:"size"`
+}
+
+type configBackupRequest struct {
+	Name     string `json:"name"`
+	Redacted bool   `json:"redacted"`
+}
+
+func configBackupDir() string {
+	if v := strings.TrimSpace(os.Getenv("NGFW_CONFIG_BACKUP_DIR")); v != "" {
+		return v
+	}
+	if dbPath := strings.TrimSpace(os.Getenv("NGFW_CONFIG_DB")); dbPath != "" {
+		return filepath.Join(filepath.Dir(dbPath), "config-backups")
+	}
+	return filepath.Join("data", "config-backups")
+}
+
+func configBackupPaths(id string) (string, string) {
+	dir := configBackupDir()
+	return filepath.Join(dir, id+".json"), filepath.Join(dir, id+".meta.json")
+}
+
+func newConfigBackupID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
+}
+
+func sanitizeBackupFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "containd-config-backup"
+	}
+	var out strings.Builder
+	out.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune(r)
+		case r >= '0' && r <= '9':
+			out.WriteRune(r)
+		case r == '-' || r == '_' || r == ' ':
+			out.WriteRune(r)
+		default:
+			out.WriteRune('_')
+		}
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func listConfigBackupsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dir := configBackupDir()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusOK, []configBackupInfo{})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		isAdmin := c.GetString(ctxRoleKey) == string(roleAdmin)
+		backups := make([]configBackupInfo, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".meta.json") {
+				continue
+			}
+			metaPath := filepath.Join(dir, entry.Name())
+			metaBytes, err := os.ReadFile(metaPath)
+			if err != nil {
+				continue
+			}
+			var meta configBackupMeta
+			if err := json.Unmarshal(metaBytes, &meta); err != nil {
+				continue
+			}
+			if !isAdmin && !meta.Redacted {
+				continue
+			}
+			jsonPath, _ := configBackupPaths(meta.ID)
+			info, err := os.Stat(jsonPath)
+			if err != nil {
+				continue
+			}
+			backups = append(backups, configBackupInfo{
+				ID:        meta.ID,
+				Name:      meta.Name,
+				CreatedAt: meta.CreatedAt,
+				Redacted:  meta.Redacted,
+				Size:      info.Size(),
+			})
+		}
+		sort.Slice(backups, func(i, j int) bool {
+			return backups[i].CreatedAt.After(backups[j].CreatedAt)
+		})
+		c.JSON(http.StatusOK, backups)
+	}
+}
+
+func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req configBackupRequest
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		cfg, err := store.Load(c.Request.Context())
+		if err != nil {
+			if errors.Is(err, config.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Redacted {
+			cfg = cfg.RedactedCopy()
+		}
+		if err := os.MkdirAll(configBackupDir(), 0o750); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		id, err := newConfigBackupID()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate backup id"})
+			return
+		}
+		now := time.Now().UTC()
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = fmt.Sprintf("Backup %s", now.Format("2006-01-02 15:04 UTC"))
+		}
+		meta := configBackupMeta{
+			ID:        id,
+			Name:      name,
+			CreatedAt: now,
+			Redacted:  req.Redacted,
+		}
+		jsonPath, metaPath := configBackupPaths(id)
+		tmpJSON := jsonPath + ".tmp"
+		tmpMeta := metaPath + ".tmp"
+		payload, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to serialize config"})
+			return
+		}
+		if err := os.WriteFile(tmpJSON, payload, 0o600); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup"})
+			return
+		}
+		metaBytes, err := json.Marshal(meta)
+		if err != nil {
+			_ = os.Remove(tmpJSON)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup metadata"})
+			return
+		}
+		if err := os.WriteFile(tmpMeta, metaBytes, 0o600); err != nil {
+			_ = os.Remove(tmpJSON)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup metadata"})
+			return
+		}
+		if err := os.Rename(tmpJSON, jsonPath); err != nil {
+			_ = os.Remove(tmpJSON)
+			_ = os.Remove(tmpMeta)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist backup"})
+			return
+		}
+		if err := os.Rename(tmpMeta, metaPath); err != nil {
+			_ = os.Remove(jsonPath)
+			_ = os.Remove(tmpMeta)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist backup metadata"})
+			return
+		}
+		info, _ := os.Stat(jsonPath)
+		auditLog(c, audit.Record{Action: "config.backup.create", Target: "running"})
+		c.JSON(http.StatusOK, configBackupInfo{
+			ID:        meta.ID,
+			Name:      meta.Name,
+			CreatedAt: meta.CreatedAt,
+			Redacted:  meta.Redacted,
+			Size:      info.Size(),
+		})
+	}
+}
+
+func downloadConfigBackupHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := strings.TrimSpace(c.Param("id"))
+		if id == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "backup id required"})
+			return
+		}
+		_, metaPath := configBackupPaths(id)
+		metaBytes, err := os.ReadFile(metaPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var meta configBackupMeta
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "backup metadata corrupted"})
+			return
+		}
+		if !meta.Redacted && c.GetString(ctxRoleKey) != string(roleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin role required for unredacted backup"})
+			return
+		}
+		jsonPath, _ := configBackupPaths(id)
+		f, err := os.Open(jsonPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer f.Close()
+		filename := sanitizeBackupFilename(meta.Name) + ".json"
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, f)
+	}
+}
+
+func deleteConfigBackupHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := strings.TrimSpace(c.Param("id"))
+		if id == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "backup id required"})
+			return
+		}
+		jsonPath, metaPath := configBackupPaths(id)
+		if err := os.Remove(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := os.Remove(jsonPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.backup.delete", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }
 
@@ -490,6 +864,18 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			return err
+		}
+		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
+			return err
+		}
+		if cfg.PCAP.Enabled {
+			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
+				return err
+			}
+		} else {
+			if _, err := engine.StopPcap(ctx); err != nil {
+				return err
+			}
 		}
 		snap, err := compile.CompileSnapshot(cfg)
 		if err != nil {
@@ -1096,6 +1482,10 @@ func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 			return
 		}
+		if strings.ContainsAny(name, "/\\ ") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name contains invalid characters"})
+			return
+		}
 		pkiDir := openVPNManagedServerPKIDir()
 		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
 		if err != nil {
@@ -1120,6 +1510,10 @@ func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		name := strings.TrimSpace(c.Param("name"))
 		if name == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		if strings.ContainsAny(name, "/\\ ") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name contains invalid characters"})
 			return
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -1555,77 +1949,7 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
-		loopbackHostPort := func(addr string, defaultPort string) string {
-			addr = strings.TrimSpace(addr)
-			port := defaultPort
-			if addr == "" {
-				return "127.0.0.1:" + port
-			}
-			if strings.HasPrefix(addr, ":") {
-				if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
-					port = p
-				}
-				return "127.0.0.1:" + port
-			}
-			if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
-				port = strings.TrimSpace(p)
-			}
-			return "127.0.0.1:" + port
-		}
-
-		// Prefer an in-process loopback URL rather than reusing the incoming
-		// request Host/scheme. This avoids:
-		// - HTTPS self-signed verification errors for internal calls
-		// - SSRF-style token exfiltration via crafted Host headers
-		baseURL := ""
-		var httpClient cli.HTTPClient
-		if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
-			enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-			enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
-
-			httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-			httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-
-			// Always prefer HTTP for internal calls when enabled.
-			if enableHTTP {
-				baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
-			} else if enableHTTPS {
-				baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
-				httpClient = &http.Client{
-					Timeout: 10 * time.Second,
-					Transport: &http.Transport{
-						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-					},
-				}
-			}
-		}
-		if baseURL == "" {
-			// Fallback (should be rare): infer from the request and keep the current Host.
-			scheme := "http"
-			if c.Request.TLS != nil {
-				scheme = "https"
-			}
-			if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
-				proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
-				if proto == "http" || proto == "https" {
-					scheme = proto
-				}
-			}
-			baseURL = scheme + "://" + c.Request.Host
-		}
-		apiClient := &cli.API{BaseURL: baseURL}
-		if httpClient != nil {
-			apiClient.Client = httpClient
-		}
-		// Pass through the caller's bearer token so in-app console commands
-		// can access the same protected endpoints as the UI session.
-		if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
-			apiClient.Token = strings.TrimSpace(h[len("bearer "):])
-		} else if ck, err := c.Cookie("containd_token"); err == nil && strings.TrimSpace(ck) != "" {
-			apiClient.Token = strings.TrimSpace(ck)
-		}
-		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
-		reg := cli.NewRegistry(store, apiClient)
+		ctx, reg := cliRegistryForRequest(c, store)
 		var buf bytes.Buffer
 		if err := reg.ParseAndExecute(ctx, r.Line, &buf); err != nil {
 			c.JSON(http.StatusOK, resp{Output: buf.String(), Error: err.Error()})
@@ -1633,6 +1957,805 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, resp{Output: buf.String()})
 	}
+}
+
+func cliCommandsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		_, reg := cliRegistryForRequest(c, store)
+		role := cli.RoleView
+		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
+			role = cli.RoleAdmin
+		}
+		c.JSON(http.StatusOK, reg.CommandsForRole(role))
+	}
+}
+
+func cliCompleteHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		line := c.Query("line")
+		if strings.TrimSpace(line) == "" {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		tokens, err := shellquote.Split(line)
+		if err != nil {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		if strings.HasSuffix(line, " ") {
+			tokens = append(tokens, "")
+		}
+		_, reg := cliRegistryForRequest(c, store)
+		role := cli.RoleView
+		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
+			role = cli.RoleAdmin
+		}
+		cmds := reg.CommandsForRole(role)
+		cmdName, args := matchCommandTokens(tokens, cmds)
+		if cmdName == "" {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		suggestions := completeCLIArgs(cmdName, args, cfg, cmds)
+		c.JSON(http.StatusOK, suggestions)
+	}
+}
+
+func cliWSHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Line string `json:"line"`
+	}
+	type resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error,omitempty"`
+	}
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			return strings.EqualFold(u.Host, r.Host)
+		},
+	}
+	return func(c *gin.Context) {
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		ctx, reg := cliRegistryForRequest(c, store)
+		_ = conn.WriteJSON(resp{Output: "containd in-app CLI. Type 'show version'."})
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			line := strings.TrimSpace(string(msg))
+			if strings.HasPrefix(line, "{") {
+				var r req
+				if err := json.Unmarshal(msg, &r); err == nil && strings.TrimSpace(r.Line) != "" {
+					line = r.Line
+				}
+			}
+			if strings.TrimSpace(line) == "" {
+				_ = conn.WriteJSON(resp{Output: ""})
+				continue
+			}
+			var buf bytes.Buffer
+			if err := reg.ParseAndExecute(ctx, line, &buf); err != nil {
+				_ = conn.WriteJSON(resp{Output: buf.String(), Error: err.Error()})
+				continue
+			}
+			_ = conn.WriteJSON(resp{Output: buf.String()})
+		}
+	}
+}
+
+func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context, *cli.Registry) {
+	loopbackHostPort := func(addr string, defaultPort string) string {
+		addr = strings.TrimSpace(addr)
+		port := defaultPort
+		if addr == "" {
+			return "127.0.0.1:" + port
+		}
+		if strings.HasPrefix(addr, ":") {
+			if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
+				port = p
+			}
+			return "127.0.0.1:" + port
+		}
+		if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
+			port = strings.TrimSpace(p)
+		}
+		return "127.0.0.1:" + port
+	}
+
+	// Prefer an in-process loopback URL rather than reusing the incoming
+	// request Host/scheme. This avoids:
+	// - HTTPS self-signed verification errors for internal calls
+	// - SSRF-style token exfiltration via crafted Host headers
+	baseURL := ""
+	var httpClient cli.HTTPClient
+	if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
+		enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
+		enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
+
+		httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+		httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+
+		// Always prefer HTTP for internal calls when enabled.
+		if enableHTTP {
+			baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
+		} else if enableHTTPS {
+			baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
+			httpClient = &http.Client{
+				Timeout: 10 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		}
+	}
+	if baseURL == "" {
+		// Fallback (should be rare): infer from the request and keep the current Host.
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
+			proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+			if proto == "http" || proto == "https" {
+				scheme = proto
+			}
+		}
+		baseURL = scheme + "://" + c.Request.Host
+	}
+	apiClient := &cli.API{BaseURL: baseURL}
+	if httpClient != nil {
+		apiClient.Client = httpClient
+	}
+	// Pass through the caller's bearer token so in-app console commands
+	// can access the same protected endpoints as the UI session.
+	if tok := strings.TrimSpace(bearerOrCookie(c)); tok != "" {
+		apiClient.Token = tok
+	}
+	ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
+	reg := cli.NewRegistry(store, apiClient)
+	return ctx, reg
+}
+
+func matchCommandTokens(tokens []string, available []string) (string, []string) {
+	if len(tokens) == 0 {
+		return "", nil
+	}
+	tokensForMatch := tokens
+	if len(tokensForMatch) > 0 && tokensForMatch[len(tokensForMatch)-1] == "" {
+		tokensForMatch = tokensForMatch[:len(tokensForMatch)-1]
+	}
+	availSet := map[string]struct{}{}
+	for _, a := range available {
+		availSet[a] = struct{}{}
+	}
+	for i := len(tokensForMatch); i > 0; i-- {
+		candidate := strings.ToLower(strings.Join(tokensForMatch[:i], " "))
+		if _, ok := availSet[candidate]; ok {
+			args := tokensForMatch[i:]
+			if len(tokens) > 0 && tokens[len(tokens)-1] == "" {
+				args = append(args, "")
+			}
+			return candidate, args
+		}
+	}
+	return "", nil
+}
+
+func completeCLIArgs(cmd string, args []string, cfg *config.Config, allCommands []string) []string {
+	prefix := ""
+	if len(args) > 0 {
+		prefix = args[len(args)-1]
+	}
+	argIndex := len(args) - 1
+	prev := ""
+	if len(args) >= 2 {
+		prev = strings.ToLower(strings.TrimSpace(args[len(args)-2]))
+	}
+	ifaces := interfaceNames(cfg)
+	zones := zoneNames(cfg)
+	rules := firewallRuleIDs(cfg)
+	portForwards := portForwardIDs(cfg)
+	gateways := gatewayAddresses(cfg)
+	switch cmd {
+	case "help":
+		if argIndex == 0 {
+			return filterPrefix(allCommands, prefix)
+		}
+	case "show help":
+		if argIndex == 0 {
+			return filterPrefix(filterCommandPrefix(allCommands, "show "), prefix)
+		}
+	case "set help":
+		if argIndex == 0 {
+			return filterPrefix(filterCommandPrefix(allCommands, "set "), prefix)
+		}
+	case "set zone":
+		if argIndex == 0 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set interface":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex >= 2 {
+			return filterPrefix([]string{"<cidr...>", "none"}, prefix)
+		}
+	case "set interface ip":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"static", "dhcp", "none"}, prefix)
+		}
+		if argIndex >= 2 && len(args) >= 2 && strings.EqualFold(strings.TrimSpace(args[1]), "static") {
+			return filterPrefix([]string{"<cidr>", "[gateway]"}, prefix)
+		}
+	case "set interface zone":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set interface bind":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set interface bridge":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			if len(ifaces) > 0 {
+				return filterPrefix(ifaces, prefix)
+			}
+			return filterPrefix([]string{"<members_csv>"}, prefix)
+		}
+		if argIndex >= 3 {
+			return filterPrefix([]string{"<cidr...>"}, prefix)
+		}
+	case "set interface vlan":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 3 {
+			return filterPrefix([]string{"<vlan_id>"}, prefix)
+		}
+		if argIndex >= 4 {
+			return filterPrefix([]string{"<cidr...>"}, prefix)
+		}
+	case "assign interfaces":
+		if argIndex >= 0 {
+			suggestions := append([]string{"auto"}, ifaceAssignHints(ifaces)...)
+			return filterPrefix(suggestions, prefix)
+		}
+	case "set firewall rule":
+		if argIndex == 0 {
+			return filterPrefix(rules, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"ALLOW", "DENY", "allow", "deny"}, prefix)
+		}
+		if argIndex == 2 || argIndex == 3 {
+			return filterPrefix(zones, prefix)
+		}
+	case "delete firewall rule":
+		if argIndex == 0 {
+			return filterPrefix(rules, prefix)
+		}
+	case "set port-forward del", "set port-forward enable", "set port-forward disable":
+		if argIndex == 0 {
+			return filterPrefix(portForwards, prefix)
+		}
+	case "set port-forward add":
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"tcp", "udp"}, prefix)
+		}
+		if prev == "sources" {
+			return filterPrefix([]string{"<cidr1,cidr2>"}, prefix)
+		}
+		if prev == "desc" {
+			return filterPrefix([]string{"<text>"}, prefix)
+		}
+	case "set dataplane":
+		if argIndex == 0 {
+			return filterPrefix([]string{"enforcement"}, prefix)
+		}
+		if argIndex == 1 && strings.EqualFold(strings.TrimSpace(args[0]), "enforcement") {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+		if argIndex >= 3 && strings.EqualFold(strings.TrimSpace(args[0]), "enforcement") {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set proxy forward":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+		if argIndex >= 2 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set proxy reverse":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+	case "set nat":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off"}, prefix)
+		}
+		if prev == "egress" {
+			if len(zones) > 0 {
+				return filterPrefix(append([]string{"default"}, zones...), prefix)
+			}
+			return filterPrefix([]string{"default", "<zone>"}, prefix)
+		}
+		if prev == "sources" {
+			if len(zones) > 0 {
+				return filterPrefix(append([]string{"default"}, zones...), prefix)
+			}
+			return filterPrefix([]string{"default", "<zone1,zone2>"}, prefix)
+		}
+		return filterPrefix(append([]string{"egress", "sources"}, zones...), prefix)
+	case "diag reach":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"tcp", "udp", "icmp"}, prefix)
+		}
+	case "diag capture":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set route add", "set route del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"default", "<dst>"}, prefix)
+		}
+		if prev == "via" || prev == "gw" || prev == "gateway" {
+			if len(gateways) > 0 {
+				return filterPrefix(gateways, prefix)
+			}
+			return filterPrefix([]string{"<gw>"}, prefix)
+		}
+		if prev == "dev" || prev == "iface" {
+			return filterPrefix(ifaces, prefix)
+		}
+		return filterPrefix([]string{"via", "dev", "iface", "table", "metric", "gw", "gateway"}, prefix)
+	case "set ip rule add":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<table>"}, prefix)
+		}
+		if prev == "src" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "dst" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "priority" {
+			return filterPrefix([]string{"<n>"}, prefix)
+		}
+		return filterPrefix([]string{"src", "dst", "priority"}, prefix)
+	case "set ip rule del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<table>"}, prefix)
+		}
+		if prev == "src" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "dst" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "priority" {
+			return filterPrefix([]string{"<n>"}, prefix)
+		}
+		return filterPrefix([]string{"src", "dst", "priority", "all"}, prefix)
+	case "set syslog format":
+		if argIndex == 0 {
+			return filterPrefix([]string{"rfc5424", "json"}, prefix)
+		}
+	case "set syslog forwarder add":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<address>"}, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"<port>"}, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"udp", "tcp"}, prefix)
+		}
+	case "set syslog forwarder del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<address>"}, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"<port>"}, prefix)
+		}
+	}
+	if hints := usageHints(cmd, argIndex, args); len(hints) > 0 {
+		return filterPrefix(hints, prefix)
+	}
+	return nil
+}
+
+func filterPrefix(candidates []string, prefix string) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	needle := strings.ToLower(strings.TrimSpace(prefix))
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(candidates))
+	for _, cand := range candidates {
+		c := strings.TrimSpace(cand)
+		if c == "" {
+			continue
+		}
+		if needle != "" && !strings.HasPrefix(strings.ToLower(c), needle) {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func interfaceNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Interfaces))
+	for _, iface := range cfg.Interfaces {
+		if strings.TrimSpace(iface.Name) != "" {
+			out = append(out, iface.Name)
+		}
+	}
+	return out
+}
+
+func zoneNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Zones))
+	for _, z := range cfg.Zones {
+		if strings.TrimSpace(z.Name) != "" {
+			out = append(out, z.Name)
+		}
+	}
+	return out
+}
+
+func firewallRuleIDs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Firewall.Rules))
+	for _, r := range cfg.Firewall.Rules {
+		if strings.TrimSpace(r.ID) != "" {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+func portForwardIDs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Firewall.NAT.PortForwards))
+	for _, pf := range cfg.Firewall.NAT.PortForwards {
+		if strings.TrimSpace(pf.ID) != "" {
+			out = append(out, pf.ID)
+		}
+	}
+	return out
+}
+
+func gatewayAddresses(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Routing.Gateways))
+	for _, gw := range cfg.Routing.Gateways {
+		if strings.TrimSpace(gw.Address) != "" {
+			out = append(out, gw.Address)
+		}
+	}
+	return out
+}
+
+func ifaceAssignHints(ifaces []string) []string {
+	out := make([]string, 0, len(ifaces))
+	for _, name := range ifaces {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		out = append(out, name+"=")
+	}
+	return out
+}
+
+func filterCommandPrefix(commands []string, prefix string) []string {
+	out := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, prefix) {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+func usageHints(cmd string, argIndex int, args []string) []string {
+	switch cmd {
+	case "convert sigma":
+		if argIndex == 0 {
+			return []string{"<sigma.yml>"}
+		}
+	case "factory reset":
+		if argIndex == 0 {
+			return []string{"NUCLEAR"}
+		}
+	case "commit confirmed":
+		if argIndex == 0 {
+			return []string{"<ttl_seconds>"}
+		}
+	case "import config":
+		if argIndex == 0 {
+			return []string{"<path>"}
+		}
+	case "export config":
+		if argIndex == 0 {
+			return []string{"<path>"}
+		}
+	case "diag ping":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"[count]"}
+		}
+	case "diag traceroute":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"[max_hops]"}
+		}
+	case "diag tcptraceroute":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+		if argIndex == 2 {
+			return []string{"[max_hops]"}
+		}
+	case "diag reach":
+		if argIndex == 0 {
+			return []string{"<src_iface>"}
+		}
+		if argIndex == 1 {
+			return []string{"<dst_host|dst_ip|dst_iface>"}
+		}
+		if argIndex == 2 {
+			return []string{"tcp", "udp", "icmp", "[tcp_port]"}
+		}
+		if argIndex == 3 {
+			return []string{"[port]"}
+		}
+	case "diag capture":
+		if argIndex == 0 {
+			return []string{"<iface>"}
+		}
+		if argIndex == 1 {
+			return []string{"[seconds]"}
+		}
+		if argIndex == 2 {
+			return []string{"[file]"}
+		}
+	case "diag routing reconcile", "diag interfaces reconcile":
+		if argIndex == 0 {
+			return []string{"REPLACE"}
+		}
+	case "set syslog format":
+		if argIndex == 0 {
+			return []string{"rfc5424", "json"}
+		}
+	case "set syslog forwarder add":
+		if argIndex == 0 {
+			return []string{"<address>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+		if argIndex == 2 {
+			return []string{"udp", "tcp"}
+		}
+	case "set syslog forwarder del":
+		if argIndex == 0 {
+			return []string{"<address>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+	case "set system hostname":
+		if argIndex == 0 {
+			return []string{"<name>"}
+		}
+	case "set system mgmt listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt http listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt https listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt http enable":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt https enable":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt redirect-http-to-https":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt hsts":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+		if argIndex == 1 {
+			return []string{"[max_age_seconds]"}
+		}
+	case "set system ssh listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system ssh allow-password":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system ssh authorized-keys-dir":
+		if argIndex == 0 {
+			return []string{"<dir>"}
+		}
+	case "set interface ip":
+		if argIndex == 2 && len(args) >= 2 && strings.EqualFold(strings.TrimSpace(args[1]), "static") {
+			return []string{"<cidr>", "[gateway]"}
+		}
+	case "set interface bind":
+		if argIndex == 1 {
+			return []string{"<os_iface>"}
+		}
+	case "set interface bridge":
+		if argIndex == 2 {
+			return []string{"<members_csv>"}
+		}
+	case "set interface vlan":
+		if argIndex == 3 {
+			return []string{"<vlan_id>"}
+		}
+	case "set firewall rule":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+		if argIndex == 1 {
+			return []string{"ALLOW", "DENY"}
+		}
+	case "delete firewall rule":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+	case "set port-forward add":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+		if argIndex == 2 {
+			return []string{"tcp", "udp"}
+		}
+		if argIndex == 3 {
+			return []string{"<listen_port>"}
+		}
+		if argIndex == 4 {
+			return []string{"<dest_ip[:dest_port]>"}
+		}
+		if argIndex >= 5 {
+			return []string{"sources", "desc", "off"}
+		}
+	case "set port-forward del", "set port-forward enable", "set port-forward disable":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+	case "set proxy forward":
+		if argIndex == 0 {
+			return []string{"on", "off", "true", "false"}
+		}
+		if argIndex == 1 {
+			return []string{"[port]"}
+		}
+	case "set proxy reverse":
+		if argIndex == 0 {
+			return []string{"on", "off", "true", "false"}
+		}
+	case "set nat":
+		if argIndex == 0 {
+			return []string{"on", "off"}
+		}
+		if argIndex >= 1 {
+			return []string{"egress", "sources"}
+		}
+	case "set dataplane":
+		if argIndex == 0 {
+			return []string{"enforcement"}
+		}
+		if argIndex == 1 {
+			return []string{"on", "off", "true", "false"}
+		}
+		if argIndex == 2 {
+			return []string{"[table]"}
+		}
+	case "set route add", "set route del":
+		if argIndex == 0 {
+			return []string{"default"}
+		}
+		if argIndex >= 1 {
+			return []string{"via", "dev", "iface", "table", "metric", "gw", "gateway"}
+		}
+	case "set ip rule add":
+		if argIndex >= 1 {
+			return []string{"src", "dst", "priority"}
+		}
+	case "set ip rule del":
+		if argIndex >= 1 {
+			return []string{"src", "dst", "priority", "all"}
+		}
+	}
+	return nil
 }
 
 func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
@@ -1694,6 +2817,237 @@ func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFun
 		}
 		auditLog(c, audit.Record{Action: "dataplane.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.DataPlane)
+	}
+}
+
+func getPCAPConfigHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, cfg.PCAP)
+	}
+}
+
+func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req config.PCAPConfig
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP = req
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine != nil {
+			if _, err := engine.SetPcapConfig(c.Request.Context(), cfg.PCAP); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		auditLog(c, audit.Record{Action: "pcap.set", Target: "running"})
+		c.JSON(http.StatusOK, cfg.PCAP)
+	}
+}
+
+func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP.Enabled = true
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "pcap start queued"})
+			return
+		}
+		status, err := engine.StartPcap(c.Request.Context(), cfg.PCAP)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.start", Target: "running"})
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func stopPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			httpError(c, err)
+			return
+		}
+		cfg.PCAP.Enabled = false
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			httpError(c, err)
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "pcap stop queued"})
+			return
+		}
+		status, err := engine.StopPcap(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.stop", Target: "running"})
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func getPCAPStatusHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusOK, pcap.Status{Running: false})
+			return
+		}
+		status, err := engine.PcapStatus(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+func getPCAPListHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusOK, []pcap.Item{})
+			return
+		}
+		items, err := engine.ListPcaps(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, items)
+	}
+}
+
+func uploadPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		if err := c.Request.ParseMultipartForm(64 << 20); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+			return
+		}
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+			return
+		}
+		defer file.Close()
+		item, err := engine.UploadPcap(c.Request.Context(), header.Filename, file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.upload", Target: item.Name})
+		c.JSON(http.StatusOK, item)
+	}
+}
+
+func downloadPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		resp, err := engine.DownloadPcap(c.Request.Context(), name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		c.Header("Content-Type", resp.Header.Get("Content-Type"))
+		c.Header("Content-Length", resp.Header.Get("Content-Length"))
+		c.Header("Content-Disposition", resp.Header.Get("Content-Disposition"))
+		_, _ = io.Copy(c.Writer, resp.Body)
+	}
+}
+
+func deletePCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+			return
+		}
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		if err := engine.DeletePcap(c.Request.Context(), name); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.delete", Target: name})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func tagPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req pcap.TagRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.TagPcap(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.tag", Target: req.Name})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func replayPCAPHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req pcap.ReplayRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := engine.ReplayPcap(c.Request.Context(), req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.replay", Target: req.Name})
+		c.Status(http.StatusAccepted)
 	}
 }
 

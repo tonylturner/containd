@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/containd/containd/pkg/cp/config"
 	dpengine "github.com/containd/containd/pkg/dp/engine"
+	"github.com/containd/containd/pkg/dp/pcap"
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
@@ -143,6 +145,50 @@ func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error 
 
 func (m *mockEngine) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
 	return m.ruleset, nil
+}
+
+func (m *mockEngine) PcapConfig(ctx context.Context) (config.PCAPConfig, error) {
+	return config.PCAPConfig{}, nil
+}
+
+func (m *mockEngine) SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error) {
+	return cfg, nil
+}
+
+func (m *mockEngine) StartPcap(ctx context.Context, cfg config.PCAPConfig) (pcap.Status, error) {
+	return pcap.Status{}, nil
+}
+
+func (m *mockEngine) StopPcap(ctx context.Context) (pcap.Status, error) {
+	return pcap.Status{}, nil
+}
+
+func (m *mockEngine) PcapStatus(ctx context.Context) (pcap.Status, error) {
+	return pcap.Status{}, nil
+}
+
+func (m *mockEngine) ListPcaps(ctx context.Context) ([]pcap.Item, error) {
+	return []pcap.Item{}, nil
+}
+
+func (m *mockEngine) UploadPcap(ctx context.Context, filename string, r io.Reader) (pcap.Item, error) {
+	return pcap.Item{Name: filename}, nil
+}
+
+func (m *mockEngine) DeletePcap(ctx context.Context, name string) error {
+	return nil
+}
+
+func (m *mockEngine) TagPcap(ctx context.Context, req pcap.TagRequest) error {
+	return nil
+}
+
+func (m *mockEngine) ReplayPcap(ctx context.Context, req pcap.ReplayRequest) error {
+	return nil
+}
+
+func (m *mockEngine) DownloadPcap(ctx context.Context, name string) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
 }
 
 func TestGetConfigNotFound(t *testing.T) {

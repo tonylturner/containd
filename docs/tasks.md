@@ -25,10 +25,10 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [~] Add objects endpoints.
   - [x] Add services endpoints (syslog/NTP/DNS/proxies) and status endpoint.
   - [x] Add services endpoints for DHCP (config-only) and VPN (WireGuard config + OpenVPN placeholder).
-  - [~] Implement DNS resolver runtime (Unbound supervision) for lab/SMB appliance mode.
+  - [x] Implement DNS resolver runtime (Unbound supervision) for lab/SMB appliance mode.
     - [x] Render `unbound.conf` from `services.dns` config.
     - [x] Embed `unbound` + `unbound-checkconf` in the mgmt image and supervise the process when enabled.
-    - [~] Add DNS events into unified event stream (start/stop/reload now; query/error summaries later).
+    - [x] Add DNS events into unified event stream (start/stop/reload now; query/error summaries later).
   - [~] Implement VPN runtime (WireGuard first; OpenVPN later).
     - [x] WireGuard: apply kernel interface + peers via engine (generic netlink; v4-only endpoints/AllowedIPs initially).
     - [x] WireGuard: remove interface on disable + emit runtime events into unified event stream.
@@ -36,24 +36,24 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [~] Implement OpenVPN runtime (client/server) after WireGuard.
       - [x] Embed `openvpn` binary into mgmt image (distroless runtime copy + deps).
       - [x] Add mgmt supervisor/status/events for OpenVPN (foreground config; restarts on config path changes).
-      - [~] Add OpenVPN UI config card + runtime status (client/server phased; managed client first).
+      - [x] Add OpenVPN UI config card + runtime status (client/server phased; managed client first).
         - [x] Add admin upload endpoint for `.ovpn` profiles (stored under `/data/openvpn/profiles/`, rejects `daemon`).
         - [x] Add UI upload control that sets `openvpn.configPath` automatically.
         - [x] Add managed OpenVPN client config (remote/port/proto + PEM upload) rendered to `/data/openvpn/managed/` by mgmt and supervised as the active config.
         - [x] Add VPN UI setup helpers (required-field checklist + inline guidance for common fields).
-        - [~] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
-          - [ ] Clarify "client network / address pool" semantics in docs + UI (WireGuard uses static peer AllowedIPs; OpenVPN server allocates from `tunnelCIDR`).
+        - [x] Add managed OpenVPN server mode (listen port/proto + tunnel CIDR), local PKI generation, and downloadable per-client `.ovpn` profiles.
+          - [x] Clarify "client network / address pool" semantics in docs + UI (WireGuard uses static peer AllowedIPs; OpenVPN server allocates from `tunnelCIDR`).
   - [~] Implement DHCP server runtime for LAN (leases + status/events).
-    - [~] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 -> UDP/1067 for nonroot).
+    - [x] Minimal DHCPv4 server in engine (IPv4 only; nft redirect UDP/67 -> UDP/1067 for nonroot).
       - [x] Serve per-interface scopes (one listener per interface + pool mapping; restarts when config/scope changes).
       - [x] Persist leases across restarts (engine writes to `/data/dhcp-leases.json`; atomic writes).
       - [x] Add richer status/errors/events (listener crash/restart + lease load/persist errors).
     - [x] Expose current DHCP leases via mgmt API and UI lease table.
     - [x] Emit DHCP runtime + lease events into unified event stream (`/api/v1/events`).
     - [x] Add DHCP lease churn into audit log (`service.dhcp.lease.*`).
-    - [ ] Add DHCP reservations (MAC -> fixed IP, per-interface) and surface in UI/CLI.
-      - [ ] Enforce reservations in allocator (reserved IP wins over dynamic).
-      - [ ] Emit reservation events (`service.dhcp.reservation.hit|miss`) into unified event stream + audit.
+    - [x] Add DHCP reservations (MAC -> fixed IP, per-interface) and surface in UI/CLI.
+      - [x] Enforce reservations in allocator (reserved IP wins over dynamic).
+      - [x] Emit reservation events (`service.dhcp.reservation.hit|miss`) into unified event stream + audit.
     - [ ] Add richer DHCP logging fields (hostname, vendor class, requested IP) and lease history export.
       - [ ] Persist requested IP / vendor class metadata alongside leases (best-effort).
       - [ ] Add simple lease history export (bounded local file/endpoint).
@@ -68,6 +68,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Implement `pkg/dp/capture` scaffolding (interface binding placeholders, mock packet loop).
   - [x] Create `pkg/dp/engine` harness to load/swap rule snapshots.
   - [x] Implement DHCP client for `addressMode: dhcp` when no IPv4 is present (best-effort; Docker already preconfigures IPs).
+  - [x] Add pcap forwarding: capture traffic on an interface and stream to an external sensor (e.g., Zeek) via TCP/UDP.
 - [ ] Rule engine skeleton
   - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.
@@ -97,7 +98,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [x] Make `diag ping` work without raw ICMP (TCP fallback).
     - [x] Improve Linux traceroute accuracy (UDP + error queue).
     - [x] Add interface/path reachability probe (`diag reach <src_iface> <dst> <tcp|udp|icmp> [port]`) to validate routing + basic TCP/UDP reachability and best-effort ICMP.
-  - [~] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
+  - [x] Add DP operational commands once hooks land (`show routes`, `show neighbors`, `show sessions/conntrack`).
     - [x] Add `show sessions`/`show conntrack` (API-backed via engine `/internal/conntrack`; kernel table, best-effort).
   - [ ] Add SSH hardening (rate limiting, banners, host key persistence review).
 - [ ] UI integration
@@ -108,18 +109,20 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Add config diff/commit/rollback/commit-confirmed UI and audit log view.
   - [x] Add dataplane settings UI.
   - [x] Add topology view placeholder with React Flow dependency.
-  - [~] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
+  - [x] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
   - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
   - [x] Add VPN config page (WireGuard first; OpenVPN placeholder).
   - [x] Add DHCP config page (LAN DHCP server; runtime phased).
   - [x] Add Sessions/Conntrack page with admin “Kill” (best-effort delete via engine netlink).
-  - [~] Add in-app console/CLI (dashboard console replacing roadmap; uses mgmt `/api/v1/cli/execute`).
+  - [x] Add in-app console/CLI (dashboard console replacing roadmap; uses mgmt `/api/v1/cli/execute`).
   - [x] Add Operations > Diagnostics page (graphical wrappers for `diag ping`, `diag traceroute`, `diag tcptraceroute`, plus interface connectivity probe).
     - [x] Add Interface Connectivity self-test mode (temporary listener) for TCP/UDP interface↔interface validation when no services are listening.
   - [x] Add in-app documentation (MkDocs Material) behind Help icon.
   - [ ] Enforce `linear-dashboard-cursor-rule.md` for all UI work (strict palette, Linear-style dashboard) and continue UX polish (loading states, AV badges/links).
   - [ ] Add dashboard KPI cards/sparklines using prescribed palette; apply skeletons/toasts across services pages (DNS/NTP/DHCP/VPN/Proxies), standardize buttons/badges to palette, and remove remaining hardcoded colors.
+  - [ ] Icon audit + usage pass: apply `ui/public/icons/*` to services, proxies, VPN, and system cards; remove off-palette icon fills.
+  - [ ] UX consolidation pass: reduce redundant screens (services status vs monitoring), add clearer entry points, and standardize empty/error states.
 - [ ] Deployment
   - [x] Place Dockerfiles at repo root for builds.
   - [x] Move compose to root as single-container `docker-compose.yml`.
@@ -132,19 +135,21 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] Align CI/build jobs to single image (smoke harness against combined image) and retire legacy engine-only build path.
   - [ ] Add lab harness compose example(s) (sample hosts + enforced default routes via firewall) and document recommended topology patterns (internal networks, stable gateway IPs).
 - [ ] Observability/logging
-  - [x] Add structured logging helper in `pkg/common`.
-  - [x] Use helper in both binaries.
+  - [x] Add structured logging helper in `pkg/common` (zap + stdout, optional rotation).
+  - [x] Migrate services/binaries to zap-based logging with per-service file targets and JSON/console toggle.
   - [x] Plan syslog forwarding API surface in control plane (config model + endpoints + stub manager).
-  - [~] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events (basic pipeline + format toggle done; error surfacing/richer events pending).
+  - [~] Implement syslog forwarding pipeline (UDP/TCP) and hook to unified events (RFC5424/JSON toggle, retry/backoff, counters, batch limit surfacing done; remaining: deeper backpressure metrics/queue sizing).
+  - [x] Standardize log retention/rotation defaults and document facility mapping for embedded daemons + services (zap defaults: 20MB/5 backups/7 days; per-service files under `/data/logs/`; env overrides: `CONTAIND_LOG_LEVEL`, `CONTAIND_LOG_LEVEL_<SERVICE>`, disable files via `CONTAIND_LOG_FILE=0`; forward logger output to remote syslog via `CONTAIND_LOG_SYSLOG_ADDR` + `CONTAIND_LOG_SYSLOG_PROTO`).
   - [ ] Add Prometheus metrics endpoint and telemetry sampling controls.
   - [ ] Add unified event schema + retention, including embedded daemon logs.
 - [ ] Security/auth foundations
   - [x] Draft admin user/auth config model hooks (identity placeholders in `pkg/cp/identity`).
-  - [~] Add auth/RBAC (JWT cookie sessions, admin + view-only; enforce admin-only APIs).
-    - [~] Ensure logout invalidates session server-side (session store + denylist) and UI always redirects on expiry.
-  - [~] HTTPS defaults with self-signed cert and custom cert install/rotate (self-signed + TLS config endpoints wired; CA trust management WIP).
+  - [x] Add auth/RBAC (JWT cookie sessions, admin + view-only; enforce admin-only APIs).
+    - [x] Ensure logout invalidates session server-side (session store + denylist) and UI always redirects on expiry.
+  - [x] HTTPS defaults with self-signed cert and custom cert install/rotate (self-signed + TLS config endpoints wired; CA trust management WIP).
   - [x] Add SSH server integration points (admin-only console).
   - [ ] Secrets handling: encrypt at rest; redact exports unless explicitly included.
+  - [ ] User management upgrades: edit user profile fields, role management beyond admin/view, delete/deactivate users, and UI improvements.
 - [ ] ICS/OT features
   - [x] Asset model (ICS assets, criticality, tags) and policy references.
   - [~] ICS policy primitives (Modbus fields in policy; enforcement/matching pending).
@@ -160,12 +165,12 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [ ] AV UX hardening: custom defs upload/list/delete, dashboard counters, Services overview block TTL, “update now” feedback, and flow/event badges (partially done; delete/upload UI in place).
 
 - [ ] IT DPI + Proxies (per integrated spec)
-  - [~] Service manager inside `containd` to supervise embedded daemons.
+  - [x] Service manager inside `containd` to supervise embedded daemons.
   - [x] Render Envoy/Nginx proxy configs on commit (no daemon reload yet).
-  - [~] Add optional daemon supervision (start/stop if binaries present).
+  - [x] Add optional daemon supervision (start/stop if binaries present).
   - [x] Finish proxy config generation (allowDomains, access logging, TLS placeholders).
-  - [~] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
-  - [~] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
+  - [x] Forward proxy (Envoy explicit forward proxy) config model, generator, lifecycle, and UI/CLI.
+  - [x] Reverse proxy (Nginx) config model, generator, lifecycle, and UI/CLI.
   - [ ] IT DPI minimums: DNS/TLS/HTTP metadata, SSH/RDP/SMB/SNMP/NTP detection.
   - [x] Extend native IT DPI beyond minimums (TLS versions/ciphers/JA3, HTTP2, proxy enrichment).
   - [~] Unified event normalization across firewall/DPI/IDS/proxies/audit.
@@ -180,7 +185,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Update `docs/mkdocs/dataplane.md` with policy compilation → engine flow.
   - [x] Flesh out `docs/mkdocs/ics-dpi.md` with decoder plan, interfaces, and integration notes.
   - [x] Document compose networking model (shared netns, engine URL requirements) in `docs/mkdocs/docker-compose.md`.
-  - [~] Integrate MkDocs + Material (build pipeline + nav + search).
+  - [x] Integrate MkDocs + Material (build pipeline + nav + search).
     - [x] Add `mkdocs.yml` using `docs/mkdocs/` as source.
     - [x] Add `docs/mkdocs/index.md` as docs landing page.
     - [x] Add `docs/mkdocs/assets/` for images and diagrams.
@@ -220,7 +225,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [x] Replace-mode reconcile removes containd-managed routes/rules (best-effort).
     - [ ] Harden reconcile safety/coverage (more tables, v6, edge cases) as deployments expand.
   - [~] Linux neighbor visibility + tooling (`show neighbors`, ARP/ND tables). (ARP only done)
-  - [~] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.
+  - [x] Linux session/conntrack visibility (`show sessions/conntrack`) and targeted kill support.
     - [x] Add read-only conntrack visibility (best-effort) via `/proc/net/nf_conntrack` (engine) exposed through mgmt API.
     - [x] Add conntrack kill (targeted, best-effort; IPv4 only for now).
   - [ ] NAT performance + conntrack tuning defaults (sysctls, table sizing) with persisted config knobs.

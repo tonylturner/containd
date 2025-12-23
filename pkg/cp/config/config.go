@@ -18,6 +18,7 @@ type Config struct {
 	Assets        []Asset         `json:"assets,omitempty"`
 	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
+	PCAP          PCAPConfig      `json:"pcap,omitempty"`
 	Firewall      FirewallConfig  `json:"firewall"`
 	IDS           IDSConfig       `json:"ids,omitempty"`
 	Services      ServicesConfig  `json:"services"`
@@ -121,6 +122,8 @@ type ServicesConfig struct {
 type SyslogConfig struct {
 	Forwarders []SyslogForwarder `json:"forwarders"`
 	Format     string            `json:"format,omitempty"` // rfc5424|json
+	BatchSize  int               `json:"batchSize,omitempty"`
+	FlushEvery int               `json:"flushEvery,omitempty"` // seconds
 }
 
 type SyslogForwarder struct {
@@ -181,21 +184,29 @@ type ReverseProxySite struct {
 // DHCPConfig defines an embedded DHCPv4 server (LAN-side) managed by containd.
 // Runtime integration is phased; this is the persisted configuration model.
 type DHCPConfig struct {
-	Enabled        bool       `json:"enabled"`
-	ListenIfaces   []string   `json:"listenIfaces,omitempty"`   // logical interface names (e.g. "lan2")
-	Pools          []DHCPPool `json:"pools,omitempty"`          // address pools per interface (optional)
-	LeaseSeconds   int        `json:"leaseSeconds,omitempty"`   // default lease time
-	Router         string     `json:"router,omitempty"`         // default gateway handed to clients
-	DNSServers     []string   `json:"dnsServers,omitempty"`     // DNS servers handed to clients
-	Domain         string     `json:"domain,omitempty"`         // optional domain
-	Authoritative  bool       `json:"authoritative,omitempty"`  // authoritative mode (lab default)
-	EnableConflict bool       `json:"enableConflict,omitempty"` // conflict detection (phased)
+	Enabled        bool              `json:"enabled"`
+	ListenIfaces   []string          `json:"listenIfaces,omitempty"`   // logical interface names (e.g. "lan2")
+	Pools          []DHCPPool        `json:"pools,omitempty"`          // address pools per interface (optional)
+	Reservations   []DHCPReservation `json:"reservations,omitempty"`   // MAC -> fixed IP per interface
+	LeaseSeconds   int               `json:"leaseSeconds,omitempty"`   // default lease time
+	Router         string            `json:"router,omitempty"`         // default gateway handed to clients
+	DNSServers     []string          `json:"dnsServers,omitempty"`     // DNS servers handed to clients
+	Domain         string            `json:"domain,omitempty"`         // optional domain
+	Authoritative  bool              `json:"authoritative,omitempty"`  // authoritative mode (lab default)
+	EnableConflict bool              `json:"enableConflict,omitempty"` // conflict detection (phased)
 }
 
 type DHCPPool struct {
 	Iface string `json:"iface"` // logical interface name
 	Start string `json:"start"` // start IPv4
 	End   string `json:"end"`   // end IPv4
+}
+
+// DHCPReservation pins a MAC to a specific IP on an interface.
+type DHCPReservation struct {
+	Iface string `json:"iface"` // logical interface name
+	MAC   string `json:"mac"`   // MAC address (normalized to lower-case)
+	IP    string `json:"ip"`    // IPv4 address
 }
 
 // VPNConfig defines VPN services managed by containd.
@@ -279,6 +290,8 @@ type OpenVPNManagedServerConfig struct {
 
 type Interface struct {
 	Name string `json:"name"`
+	// Alias is a user-friendly display name for UI/CLI selection.
+	Alias string `json:"alias,omitempty"`
 	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
 	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
 	Device string `json:"device,omitempty"`
@@ -362,6 +375,15 @@ func DefaultConfig() *Config {
 			DefaultAction: ActionDeny,
 			Rules:         []Rule{allowMgmt},
 		},
+		Services: ServicesConfig{
+			Syslog: SyslogConfig{
+				Forwarders: []SyslogForwarder{},
+				Format:     "rfc5424",
+				BatchSize:  500,
+				FlushEvery: 2,
+			},
+		},
+		PCAP: PCAPConfig{},
 	}
 }
 
@@ -373,8 +395,39 @@ type DataPlaneConfig struct {
 	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only mock DPI loop
 }
 
+// PCAPConfig controls packet capture storage and forwarding.
+type PCAPConfig struct {
+	Enabled        bool                `json:"enabled,omitempty"`
+	Interfaces     []string            `json:"interfaces,omitempty"`
+	Snaplen        int                 `json:"snaplen,omitempty"`
+	MaxSizeMB      int                 `json:"maxSizeMB,omitempty"`
+	MaxFiles       int                 `json:"maxFiles,omitempty"`
+	Mode           string              `json:"mode,omitempty"` // "rolling" or "once"
+	Promisc        bool                `json:"promisc,omitempty"`
+	BufferMB       int                 `json:"bufferMB,omitempty"`
+	RotateSeconds  int                 `json:"rotateSeconds,omitempty"`
+	FilePrefix     string              `json:"filePrefix,omitempty"`
+	Filter         PCAPFilter          `json:"filter,omitempty"`
+	ForwardTargets []PCAPForwardTarget `json:"forwardTargets,omitempty"`
+}
+
+type PCAPFilter struct {
+	Src   string `json:"src,omitempty"`
+	Dst   string `json:"dst,omitempty"`
+	Proto string `json:"proto,omitempty"` // "tcp", "udp", "icmp", "any"
+}
+
+type PCAPForwardTarget struct {
+	Interface string `json:"interface,omitempty"`
+	Enabled   bool   `json:"enabled,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Port      int    `json:"port,omitempty"`
+	Proto     string `json:"proto,omitempty"` // "tcp" or "udp"
+}
+
 type Zone struct {
 	Name        string `json:"name"`
+	Alias       string `json:"alias,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -406,6 +459,7 @@ const (
 type Asset struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
+	Alias       string      `json:"alias,omitempty"`
 	Type        AssetType   `json:"type"`
 	Zone        string      `json:"zone,omitempty"`
 	IPs         []string    `json:"ips,omitempty"`
@@ -458,6 +512,7 @@ type RoutingConfig struct {
 // In early phases this is an IPv4-only convenience for UI/CLI; it is resolved at apply-time.
 type Gateway struct {
 	Name        string `json:"name"`
+	Alias       string `json:"alias,omitempty"`
 	Address     string `json:"address"`         // IPv4
 	Iface       string `json:"iface,omitempty"` // OS device name preferred; may also be a logical name
 	Description string `json:"description,omitempty"`
@@ -542,6 +597,7 @@ type ICSPredicate struct {
 	Addresses    []string `json:"addresses,omitempty"`    // register/address ranges as strings
 	ReadOnly     bool     `json:"readOnly,omitempty"`     // Modbus read-only class
 	WriteOnly    bool     `json:"writeOnly,omitempty"`    // Modbus write-only class
+	Mode         string   `json:"mode,omitempty"`         // "learn" or "enforce"
 }
 
 // Validate performs basic consistency checks on the config.
@@ -577,6 +633,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateDataPlane(c.DataPlane); err != nil {
+		return err
+	}
+	if err := validatePCAP(c.PCAP); err != nil {
 		return err
 	}
 	if err := validateIDS(c.IDS); err != nil {
@@ -636,6 +695,8 @@ func validateSSH(s SSHConfig) error {
 
 func validateZones(zones []Zone) error {
 	seen := map[string]struct{}{}
+	seenLower := map[string]struct{}{}
+	aliasSeen := map[string]struct{}{}
 	for _, z := range zones {
 		if z.Name == "" {
 			return errors.New("zone name cannot be empty")
@@ -644,6 +705,20 @@ func validateZones(zones []Zone) error {
 			return fmt.Errorf("duplicate zone: %s", z.Name)
 		}
 		seen[z.Name] = struct{}{}
+		seenLower[strings.ToLower(z.Name)] = struct{}{}
+		if strings.TrimSpace(z.Alias) != "" {
+			if z.Alias != strings.TrimSpace(z.Alias) {
+				return fmt.Errorf("zone %s alias has leading/trailing whitespace", z.Name)
+			}
+			key := strings.ToLower(z.Alias)
+			if _, ok := aliasSeen[key]; ok {
+				return fmt.Errorf("duplicate zone alias: %s", z.Alias)
+			}
+			if _, ok := seenLower[key]; ok {
+				return fmt.Errorf("zone alias conflicts with zone name: %s", z.Alias)
+			}
+			aliasSeen[key] = struct{}{}
+		}
 	}
 	return nil
 }
@@ -654,6 +729,8 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 		zoneSet[z.Name] = struct{}{}
 	}
 	seen := map[string]struct{}{}
+	seenLower := map[string]struct{}{}
+	aliasSeen := map[string]struct{}{}
 	seenDevices := map[string]struct{}{}
 	// Validate cross-interface references for bridges/VLANs.
 	byName := map[string]Interface{}
@@ -670,6 +747,20 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 			return fmt.Errorf("duplicate interface: %s", iface.Name)
 		}
 		seen[iface.Name] = struct{}{}
+		seenLower[strings.ToLower(iface.Name)] = struct{}{}
+		if strings.TrimSpace(iface.Alias) != "" {
+			if iface.Alias != strings.TrimSpace(iface.Alias) {
+				return fmt.Errorf("interface %s alias has leading/trailing whitespace", iface.Name)
+			}
+			key := strings.ToLower(iface.Alias)
+			if _, ok := aliasSeen[key]; ok {
+				return fmt.Errorf("duplicate interface alias: %s", iface.Alias)
+			}
+			if _, ok := seenLower[key]; ok {
+				return fmt.Errorf("interface alias conflicts with interface name: %s", iface.Alias)
+			}
+			aliasSeen[key] = struct{}{}
+		}
 		if strings.TrimSpace(iface.Device) != "" {
 			if iface.Device != strings.TrimSpace(iface.Device) {
 				return fmt.Errorf("interface %s device has leading/trailing whitespace", iface.Name)
@@ -884,6 +975,9 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Protocol == "" {
 		return nil
 	}
+	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
+		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
+	}
 	// Placeholder validation: enforce mutual exclusivity for read/write classes.
 	if p.ReadOnly && p.WriteOnly {
 		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)
@@ -902,6 +996,9 @@ func validateAssets(assets []Asset, zones []Zone) error {
 	}
 	ids := map[string]struct{}{}
 	names := map[string]struct{}{}
+	idsLower := map[string]struct{}{}
+	namesLower := map[string]struct{}{}
+	aliasSeen := map[string]struct{}{}
 	for _, a := range assets {
 		if a.ID == "" {
 			return errors.New("asset id cannot be empty")
@@ -910,6 +1007,7 @@ func validateAssets(assets []Asset, zones []Zone) error {
 			return fmt.Errorf("duplicate asset id: %s", a.ID)
 		}
 		ids[a.ID] = struct{}{}
+		idsLower[strings.ToLower(a.ID)] = struct{}{}
 		if a.Name == "" {
 			return fmt.Errorf("asset %s name cannot be empty", a.ID)
 		}
@@ -917,6 +1015,23 @@ func validateAssets(assets []Asset, zones []Zone) error {
 			return fmt.Errorf("duplicate asset name: %s", a.Name)
 		}
 		names[a.Name] = struct{}{}
+		namesLower[strings.ToLower(a.Name)] = struct{}{}
+		if strings.TrimSpace(a.Alias) != "" {
+			if a.Alias != strings.TrimSpace(a.Alias) {
+				return fmt.Errorf("asset %s alias has leading/trailing whitespace", a.ID)
+			}
+			key := strings.ToLower(a.Alias)
+			if _, ok := aliasSeen[key]; ok {
+				return fmt.Errorf("duplicate asset alias: %s", a.Alias)
+			}
+			if _, ok := idsLower[key]; ok {
+				return fmt.Errorf("asset alias conflicts with asset id: %s", a.Alias)
+			}
+			if _, ok := namesLower[key]; ok {
+				return fmt.Errorf("asset alias conflicts with asset name: %s", a.Alias)
+			}
+			aliasSeen[key] = struct{}{}
+		}
 		if a.Zone != "" {
 			if _, ok := zoneSet[a.Zone]; !ok {
 				return fmt.Errorf("asset %s references unknown zone %s", a.ID, a.Zone)
@@ -970,6 +1085,8 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 	_ = zoneSet
 
 	gwByName := map[string]Gateway{}
+	gwNamesLower := map[string]struct{}{}
+	gwAliasLower := map[string]struct{}{}
 	for _, gw := range r.Gateways {
 		name := strings.TrimSpace(gw.Name)
 		if name == "" {
@@ -978,6 +1095,7 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 		if _, ok := gwByName[name]; ok {
 			return fmt.Errorf("routing.gateways duplicate name %q", name)
 		}
+		gwNamesLower[strings.ToLower(name)] = struct{}{}
 		addr := strings.TrimSpace(gw.Address)
 		ip := net.ParseIP(addr)
 		if ip == nil || ip.To4() == nil {
@@ -987,6 +1105,19 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 			if _, ok := ifaceSet[ifn]; !ok {
 				return fmt.Errorf("routing.gateways %s iface unknown %q", name, gw.Iface)
 			}
+		}
+		if strings.TrimSpace(gw.Alias) != "" {
+			if gw.Alias != strings.TrimSpace(gw.Alias) {
+				return fmt.Errorf("routing.gateways %s alias has leading/trailing whitespace", name)
+			}
+			aliasKey := strings.ToLower(gw.Alias)
+			if _, ok := gwAliasLower[aliasKey]; ok {
+				return fmt.Errorf("routing.gateways duplicate alias %q", gw.Alias)
+			}
+			if _, ok := gwNamesLower[aliasKey]; ok {
+				return fmt.Errorf("routing.gateways alias conflicts with gateway name %q", gw.Alias)
+			}
+			gwAliasLower[aliasKey] = struct{}{}
 		}
 		gwByName[name] = gw
 	}
@@ -1063,6 +1194,55 @@ func validateDataPlane(dp DataPlaneConfig) error {
 	for _, r := range dp.EnforceTable {
 		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
 			return fmt.Errorf("dataplane.enforceTable has invalid char %q", r)
+		}
+	}
+	return nil
+}
+
+func validatePCAP(p PCAPConfig) error {
+	for _, name := range p.Interfaces {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("pcap.interfaces cannot include empty name")
+		}
+	}
+	if p.Enabled && len(p.Interfaces) == 0 {
+		return errors.New("pcap.enabled requires at least one interface")
+	}
+	if p.Snaplen < 0 {
+		return errors.New("pcap.snaplen must be >= 0")
+	}
+	if p.MaxSizeMB < 0 {
+		return errors.New("pcap.maxSizeMB must be >= 0")
+	}
+	if p.MaxFiles < 0 {
+		return errors.New("pcap.maxFiles must be >= 0")
+	}
+	if p.BufferMB < 0 {
+		return errors.New("pcap.bufferMB must be >= 0")
+	}
+	if p.RotateSeconds < 0 {
+		return errors.New("pcap.rotateSeconds must be >= 0")
+	}
+	if p.Mode != "" && p.Mode != "rolling" && p.Mode != "once" {
+		return fmt.Errorf("pcap.mode invalid %q", p.Mode)
+	}
+	if proto := strings.ToLower(strings.TrimSpace(p.Filter.Proto)); proto != "" && proto != "any" && proto != "tcp" && proto != "udp" && proto != "icmp" {
+		return fmt.Errorf("pcap.filter.proto invalid %q", p.Filter.Proto)
+	}
+	for _, t := range p.ForwardTargets {
+		if strings.TrimSpace(t.Interface) == "" {
+			return errors.New("pcap.forwardTargets.interface cannot be empty")
+		}
+		if t.Enabled {
+			if strings.TrimSpace(t.Host) == "" {
+				return errors.New("pcap.forwardTargets.host is required when enabled")
+			}
+			if t.Port <= 0 || t.Port > 65535 {
+				return fmt.Errorf("pcap.forwardTargets.port out of range: %d", t.Port)
+			}
+		}
+		if t.Proto != "" && t.Proto != "tcp" && t.Proto != "udp" {
+			return fmt.Errorf("pcap.forwardTargets.proto invalid %q", t.Proto)
 		}
 	}
 	return nil
@@ -1190,6 +1370,13 @@ func validateProxy(p ProxyConfig) error {
 }
 
 func validateDHCP(d DHCPConfig) error {
+	ipToUint32 := func(ip net.IP) uint32 {
+		ip4 := ip.To4()
+		if ip4 == nil {
+			return 0
+		}
+		return (uint32(ip4[0]) << 24) | (uint32(ip4[1]) << 16) | (uint32(ip4[2]) << 8) | uint32(ip4[3])
+	}
 	for _, n := range d.ListenIfaces {
 		if strings.TrimSpace(n) == "" {
 			return errors.New("dhcp listenIfaces cannot include empty")
@@ -1204,6 +1391,52 @@ func validateDHCP(d DHCPConfig) error {
 		}
 		if ip := net.ParseIP(strings.TrimSpace(p.End)); ip == nil || ip.To4() == nil {
 			return fmt.Errorf("dhcp pool %s end invalid: %q", p.Iface, p.End)
+		}
+	}
+	seenRes := map[string]struct{}{}
+	poolRanges := map[string][]struct {
+		start net.IP
+		end   net.IP
+	}{}
+	for _, p := range d.Pools {
+		iface := strings.TrimSpace(p.Iface)
+		start := net.ParseIP(strings.TrimSpace(p.Start)).To4()
+		end := net.ParseIP(strings.TrimSpace(p.End)).To4()
+		if iface != "" && start != nil && end != nil {
+			poolRanges[iface] = append(poolRanges[iface], struct {
+				start net.IP
+				end   net.IP
+			}{start: start, end: end})
+		}
+	}
+	for _, r := range d.Reservations {
+		if strings.TrimSpace(r.Iface) == "" {
+			return errors.New("dhcp reservation iface is required")
+		}
+		if _, err := net.ParseMAC(strings.ToLower(strings.TrimSpace(r.MAC))); err != nil {
+			return fmt.Errorf("dhcp reservation %s mac invalid: %v", r.Iface, err)
+		}
+		ip := net.ParseIP(strings.TrimSpace(r.IP))
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("dhcp reservation %s ip invalid: %q", r.Iface, r.IP)
+		}
+		key := strings.ToLower(strings.TrimSpace(r.Iface) + "|" + strings.ToLower(strings.TrimSpace(r.MAC)))
+		if _, ok := seenRes[key]; ok {
+			return fmt.Errorf("dhcp reservation duplicate for iface %s mac %s", r.Iface, r.MAC)
+		}
+		seenRes[key] = struct{}{}
+		if ranges, ok := poolRanges[strings.TrimSpace(r.Iface)]; ok {
+			inPool := false
+			for _, pr := range ranges {
+				ipv := ipToUint32(ip)
+				if ipv >= ipToUint32(pr.start) && ipv <= ipToUint32(pr.end) {
+					inPool = true
+					break
+				}
+			}
+			if !inPool {
+				return fmt.Errorf("dhcp reservation %s ip %s not in any pool for iface", r.Iface, r.IP)
+			}
 		}
 	}
 	if d.LeaseSeconds < 0 {

@@ -14,7 +14,7 @@ export function KPI({ label, value, hint, accent = "primary" }: KPIProps) {
     accent === "success"
       ? "text-[var(--success)]"
       : accent === "warning"
-        ? "text-[#FBBF24]"
+        ? "text-[var(--warning)]"
         : accent === "error"
           ? "text-[var(--error)]"
           : "text-[var(--primary)]";

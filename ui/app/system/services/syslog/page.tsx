@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type ServicesStatus, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
+import { useToast } from "../../../../components/ToastProvider";
+import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function SyslogPage() {
   const canEdit = isAdmin();
-  const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [] });
+  const toast = useToast();
+  const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
   const [status, setStatus] = useState<any>(null);
   const [newFwd, setNewFwd] = useState<SyslogForwarder>({
     address: "",
@@ -18,17 +22,46 @@ export default function SyslogPage() {
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  async function refresh() {
-    const svc = (await api.getServicesStatus()) as ServicesStatus | any;
-    setStatus((svc as any)?.syslog ?? null);
-    const s = await api.getSyslog();
-    setCfg(s ?? { forwarders: [] });
-  }
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const svc = (await api.getServicesStatus()) as ServicesStatus | any;
+      setStatus((svc as any)?.syslog ?? null);
+      const s = await api.getSyslog();
+      setCfg(
+        s ?? {
+          forwarders: [],
+          batchSize: 500,
+          flushEvery: 2,
+        },
+      );
+      toast("Syslog status refreshed", "success");
+      setLastUpdated(new Date());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to refresh syslog.";
+      setError(msg);
+      toast("Failed to refresh syslog", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const fwdCount = useMemo(() => cfg.forwarders?.length ?? 0, [cfg.forwarders]);
 
@@ -62,7 +95,12 @@ export default function SyslogPage() {
     setSaveState("saving");
     const saved = await api.setSyslog(cfg);
     setSaveState(saved ? "saved" : "error");
-    if (!saved) setError("Failed to save syslog settings.");
+    if (!saved) {
+      setError("Failed to save syslog settings.");
+      toast("Failed to save syslog", "error");
+    } else {
+      toast("Syslog saved", "success");
+    }
     setTimeout(() => setSaveState("idle"), 1500);
     if (saved) setCfg(saved);
   }
@@ -73,8 +111,8 @@ export default function SyslogPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            onClick={() => refresh()}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
           >
             Refresh
           </button>
@@ -86,6 +124,15 @@ export default function SyslogPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+              Auto
+          </label>
         </div>
       }
     >
@@ -99,6 +146,24 @@ export default function SyslogPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
+      {status && (
+        <div className="mb-4 grid gap-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-200 md:grid-cols-4">
+          <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
+          <div>Sent: {status?.sent_total ?? 0}</div>
+          <div>Failed: {status?.failed_total ?? 0}</div>
+          <div>Last flush: {status?.last_flush || "—"}</div>
+          <div>Last batch: {status?.last_batch ?? 0}</div>
+          <div>Batch limit: {status?.batch_limit ?? 0}</div>
+          <div>Hit limit: {status?.hit_limit ? "yes" : "no"}</div>
+          <div>Flush interval: {status?.flush_interval_sec ?? cfg.flushEvery ?? 0}s</div>
+          {status?.last_error ? (
+            <div className="md:col-span-4 text-amber-300">Last error: {status.last_error}</div>
+          ) : null}
+        </div>
+      )}
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-lg font-semibold text-white">Forwarders</h2>
@@ -108,22 +173,92 @@ export default function SyslogPage() {
         <p className="mt-2 text-xs text-slate-400">
           Active forwarders: {status?.configured_forwarders ?? 0}
         </p>
-        <div className="mt-2 text-xs text-slate-400">
-          Log format:
-          <select
-            value={cfg.format ?? "rfc5424"}
-            disabled={!canEdit}
-            onChange={(e) =>
-              setCfg((c) => ({
-                ...c,
-                format: e.target.value as SyslogConfig["format"],
-              }))
-            }
-            className="ml-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
-          >
-            <option value="rfc5424">RFC5424</option>
-            <option value="json">JSON</option>
-          </select>
+        <div className="mt-2 grid gap-3 text-xs text-slate-400 md:grid-cols-3">
+          <div>
+            Log format:
+            <select
+              value={cfg.format ?? "rfc5424"}
+              disabled={!canEdit}
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  format: e.target.value as SyslogConfig["format"],
+                }))
+              }
+              className="ml-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+            >
+              <option value="rfc5424">RFC5424</option>
+              <option value="json">JSON</option>
+            </select>
+          </div>
+          <div>
+            Batch size:
+            <input
+              type="number"
+              min={1}
+              max={5000}
+              value={cfg.batchSize ?? 500}
+              disabled={!canEdit}
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  batchSize: Number(e.target.value),
+                }))
+              }
+              className="ml-2 w-24 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+            />
+          </div>
+          <div>
+            Flush every (s):
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={cfg.flushEvery ?? 2}
+              disabled={!canEdit}
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  flushEvery: Number(e.target.value),
+                }))
+              }
+              className="ml-2 w-24 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+            />
+          </div>
+        </div>
+
+        <div className="mt-3">
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : (
+            <Sparkline
+              values={[
+                (status?.configured_forwarders ?? 0) + 2,
+                5,
+                7,
+                (cfg.forwarders?.length ?? 0) + 4,
+                9,
+                6,
+                10,
+              ]}
+              color="var(--primary)"
+              background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
+              title="Recent forwarding volume (simulated)"
+            />
+          )}
+          {!loading && typeof status?.rate_per_min === "number" ? (
+            <p className="mt-2 text-xs text-slate-400">
+              Rate: {status?.rate_per_min.toFixed(1)} / min
+            </p>
+          ) : null}
+          {!loading && typeof status?.errors_rate_per_min === "number" ? (
+            <p className="mt-1 text-xs text-amber-300">
+              Errors: {status?.errors_rate_per_min.toFixed(1)} / min
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-4 grid gap-2 md:grid-cols-4">
@@ -144,14 +279,12 @@ export default function SyslogPage() {
           />
           <select
             value={newFwd.proto ?? "udp"}
-            onChange={(e) =>
-              setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))
-            }
+            onChange={(e) => setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))}
             disabled={!canEdit}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           >
-            <option value="udp">udp</option>
-            <option value="tcp">tcp</option>
+            <option value="udp">UDP</option>
+            <option value="tcp">TCP</option>
           </select>
           {canEdit && (
             <button

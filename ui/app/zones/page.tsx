@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { api, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { TipsBanner, type Tip } from "../../components/TipsBanner";
 
 export default function ZonesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
+  const [alias, setAlias] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,6 +33,7 @@ export default function ZonesPage() {
     setSaving(true);
     const created = await api.createZone({
       name: name.trim(),
+      alias: alias.trim() || undefined,
       description: description.trim() || undefined,
     });
     setSaving(false);
@@ -38,6 +42,7 @@ export default function ZonesPage() {
       return;
     }
     setName("");
+    setAlias("");
     setDescription("");
     refresh();
   }
@@ -62,6 +67,29 @@ export default function ZonesPage() {
     refresh();
   }
 
+  const tips: Tip[] = [
+    {
+      id: "zones:create",
+      title: "Create your first zone",
+      body: "Start with WAN, DMZ, and LAN to segment traffic.",
+      when: () => zones.length === 0,
+    },
+    {
+      id: "zones:assign",
+      title: "Assign zones to interfaces",
+      body: (
+        <>
+          Go to{" "}
+          <Link href="/interfaces/" className="font-semibold text-mint hover:text-mint/80">
+            Interfaces
+          </Link>{" "}
+          to bind zones to ports.
+        </>
+      ),
+      when: () => zones.length > 0,
+    },
+  ];
+
   return (
     <Shell
       title="Zones"
@@ -79,6 +107,7 @@ export default function ZonesPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <TipsBanner tips={tips} className="mb-4" />
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
@@ -90,11 +119,18 @@ export default function ZonesPage() {
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
           <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="alias (optional)"
+            disabled={!isAdmin()}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+          />
+          <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="description"
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-1"
           />
         </div>
         <div className="mt-3 flex items-center justify-between">
@@ -116,6 +152,7 @@ export default function ZonesPage() {
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Alias</th>
               <th className="px-4 py-3">Description</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -123,7 +160,7 @@ export default function ZonesPage() {
           <tbody>
             {zones.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={3}>
+                <td className="px-4 py-4 text-slate-400" colSpan={4}>
                   No zones configured.
                 </td>
               </tr>
@@ -156,11 +193,24 @@ function ZoneRow({
   canEdit: boolean;
 }) {
   const [desc, setDesc] = useState(zone.description ?? "");
+  const [alias, setAlias] = useState(zone.alias ?? "");
   const [editing, setEditing] = useState(false);
 
   return (
     <tr className="border-t border-white/5">
       <td className="px-4 py-3 font-medium text-white">{zone.name}</td>
+      <td className="px-4 py-3">
+        {editing ? (
+          <input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            disabled={!canEdit}
+            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+          />
+        ) : (
+          <span className="text-slate-200">{zone.alias || "—"}</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         {editing ? (
           <input
@@ -178,7 +228,7 @@ function ZoneRow({
           <div className="inline-flex gap-2">
             <button
               onClick={() => {
-                onUpdate(zone.name, { description: desc.trim() || undefined });
+                onUpdate(zone.name, { alias: alias.trim() || undefined, description: desc.trim() || undefined });
                 setEditing(false);
               }}
               className="rounded-md bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
@@ -188,6 +238,7 @@ function ZoneRow({
             <button
               onClick={() => {
                 setDesc(zone.description ?? "");
+                setAlias(zone.alias ?? "");
                 setEditing(false);
               }}
               className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"

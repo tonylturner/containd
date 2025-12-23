@@ -12,7 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	commonlog "github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 // NTPManager renders and optionally supervises OpenNTPD client configuration.
@@ -30,6 +32,20 @@ type NTPManager struct {
 	lastStop   time.Time
 	lastExit   string
 	cmd        *exec.Cmd
+	log        *zap.SugaredLogger
+}
+
+// RecordSync increments NTP telemetry (successful syncs vs failures).
+func (m *NTPManager) RecordSync(success int, failures int) {
+	if m == nil || m.OnEvent == nil {
+		return
+	}
+	if success > 0 {
+		m.emit("service.ntp.sync", map[string]any{"count": success})
+	}
+	if failures > 0 {
+		m.emit("service.ntp.sync_failed", map[string]any{"error_count": failures})
+	}
 }
 
 func NewNTPManager(baseDir string) *NTPManager {
@@ -52,7 +68,20 @@ func NewNTPManager(baseDir string) *NTPManager {
 		BaseDir:      baseDir,
 		Supervise:    supervise,
 		OpenNTPDPath: openntpdPath,
+		log:          newNTPLogger(),
 	}
+}
+
+func newNTPLogger() *zap.SugaredLogger {
+	lg, err := commonlog.NewZap("ntp", "ntp", commonlog.Options{
+		FilePath: "/data/logs/ntp.log",
+		JSON:     true,
+		Level:    "info",
+	})
+	if err != nil {
+		return zap.NewNop().Sugar()
+	}
+	return lg
 }
 
 func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
@@ -163,7 +192,7 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.mu.Unlock()
-		m.emit("service.ntp.validate_failed", map[string]any{"error": err.Error()})
+		m.emit("service.ntp.validate_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		return err
 	}
 	return nil
@@ -178,12 +207,14 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 	if m.OpenNTPDPath == "" {
 		m.lastError = "openntpd binary not found; supervision skipped"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
+		m.log.Warnw("openntpd binary not found; supervision skipped", "path", m.OpenNTPDPath)
 		return
 	}
 	if syscall.Geteuid() != 0 {
 		// OpenNTPD needs privileges to step the clock; avoid failing config applies when not root.
 		m.lastError = "openntpd supervision skipped (requires root/CAP_SYS_TIME)"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
+		m.log.Warnw("openntpd supervision skipped; insufficient privileges")
 		return
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
@@ -195,13 +226,15 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		m.lastError = err.Error()
-		m.emit("service.ntp.start_failed", map[string]any{"error": err.Error()})
+		m.emit("service.ntp.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
+		m.log.Errorw("failed to start openntpd", "error", err)
 		return
 	}
 	m.cmd = cmd
 	m.lastError = ""
 	m.lastStart = time.Now().UTC()
-	m.emit("service.ntp.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath})
+	m.log.Infow("started openntpd", "pid", cmd.Process.Pid, "config", configPath)
+	m.emit("service.ntp.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 	go func() {
 		err := cmd.Wait()
 		exit := "ok"
@@ -212,14 +245,18 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 		m.lastExit = exit
 		m.lastStop = time.Now().UTC()
 		m.mu.Unlock()
-		m.emit("service.ntp.exited", map[string]any{"pid": cmd.Process.Pid, "exit": exit})
+		m.log.Infow("openntpd exited", "pid", cmd.Process.Pid, "exit", exit)
+		m.emit("service.ntp.exited", map[string]any{"pid": cmd.Process.Pid, "exit": exit, "error_count": 1})
 	}()
 }
 
 func (m *NTPManager) stopLocked() {
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Signal(os.Interrupt)
-		m.emit("service.ntp.stopped", map[string]any{"pid": m.cmd.Process.Pid})
+		m.log.Infow("stopped openntpd", "pid", m.cmd.Process.Pid)
+		m.emit("service.ntp.stopped", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
+		m.lastStop = time.Now().UTC()
+		m.lastExit = "stopped"
 	}
 	m.cmd = nil
 }

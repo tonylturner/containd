@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -196,6 +197,15 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show mgmt listeners", RoleView, showMgmtListeners(api))
 		r.RegisterRole("show services", RoleView, showServicesStatus(api))
 		r.RegisterRole("show services status", RoleView, showServicesStatus(api))
+		r.RegisterRole("show syslog", RoleView, showSyslogConfig(api))
+		r.RegisterRole("show syslog config", RoleView, showSyslogConfig(api))
+		r.RegisterRole("show syslog status", RoleView, showSyslogStatus(api))
+		r.RegisterRole("set syslog format", RoleAdmin, setSyslogFormatAPI(api))
+		r.RegisterRole("set syslog forwarder add", RoleAdmin, setSyslogForwarderAddAPI(api))
+		r.RegisterRole("set syslog forwarder del", RoleAdmin, setSyslogForwarderDelAPI(api))
+		r.RegisterRole("show dhcp", RoleView, showDHCPConfig(api))
+		r.RegisterRole("show dhcp config", RoleView, showDHCPConfig(api))
+		r.RegisterRole("show dhcp leases", RoleView, showDHCPLeases(api))
 		r.RegisterRole("show audit", RoleView, showAudit(api))
 		r.RegisterRole("show dataplane", RoleView, showDataPlane(api))
 		r.RegisterRole("show proxy forward", RoleView, showForwardProxy(api))
@@ -412,6 +422,27 @@ func (r *Registry) Commands() []string {
 	for k := range r.commands {
 		out = append(out, k)
 	}
+	return out
+}
+
+// CommandsForRole returns commands available to the given role.
+func (r *Registry) CommandsForRole(role Role) []string {
+	if r == nil || r.commands == nil {
+		return nil
+	}
+	out := make([]string, 0, len(r.commands))
+	for name := range r.commands {
+		required := RoleView
+		if r.roles != nil {
+			if v, ok := r.roles[name]; ok && v != "" {
+				required = v
+			}
+		}
+		if allowed(required, role) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

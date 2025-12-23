@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
 import { api, isAdmin, type TLSInfo } from "../../../lib/api";
+import {
+  clearDismissedTips,
+  getPersistCLIHistory,
+  getShowTips,
+  setPersistCLIHistory,
+  setShowTips,
+} from "../../../lib/prefs";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
@@ -13,6 +20,8 @@ export default function SystemSettingsPage() {
   const [caFile, setCAFile] = useState<File | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showTips, setShowTipsState] = useState(true);
+  const [persistHistory, setPersistHistory] = useState(false);
 
   async function refresh() {
     const info = await api.getTLSInfo();
@@ -21,6 +30,8 @@ export default function SystemSettingsPage() {
 
   useEffect(() => {
     refresh();
+    setShowTipsState(getShowTips());
+    setPersistHistory(getPersistCLIHistory());
   }, []);
 
   const certSummary = useMemo(() => {
@@ -163,6 +174,49 @@ export default function SystemSettingsPage() {
               Upload CA bundle
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
+        <h2 className="text-lg font-semibold text-white">User Preferences</h2>
+        <div className="mt-4 grid gap-4 text-sm text-slate-200 md:grid-cols-2">
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+            <span>Show contextual tips</span>
+            <input
+              type="checkbox"
+              checked={showTips}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setShowTipsState(next);
+                setShowTips(next);
+              }}
+              className="h-4 w-4"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+            <span>Persist CLI history</span>
+            <input
+              type="checkbox"
+              checked={persistHistory}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setPersistHistory(next);
+                setPersistCLIHistory(next);
+              }}
+              className="h-4 w-4"
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <button
+            onClick={() => {
+              clearDismissedTips();
+            }}
+            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200 hover:bg-white/10"
+          >
+            Reset dismissed tips
+          </button>
+          <span>Preferences are stored in your browser.</span>
         </div>
       </div>
 

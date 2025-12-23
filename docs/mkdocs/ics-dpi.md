@@ -4,18 +4,17 @@ This document is rendered from `docs/mkdocs/`.
 
 This document tracks the plan for ICS protocol decoding, DPI events, and how DPI feeds the rule/IDS engines.
 
-## Decoders (phased)
-- Phase 3: Modbus/TCP decoder (unit ID, function code, address, quantity, payload length).
-  - Skeleton decoder now lives in `pkg/dp/ics/modbus` and is ready to be wired into capture.
-- Phase 4+: DNP3, IEC-60870-5-104, S7comm/Profinet, CIP/EtherNet/IP, OPC UA (basic node/service info).
+## Decoders (current/next)
+- Modbus/TCP decoder is implemented in `pkg/dp/ics/modbus` (unit ID, function code, address, quantity, payload length) and ready to be wired into capture.
+- Next targets: DNP3, IEC-60870-5-104, S7comm/Profinet, CIP/EtherNet/IP, OPC UA (basic node/service info).
 
 ## Interfaces
-`pkg/dp/dpi` should expose:
+`pkg/dp/dpi` exposes:
 ```go
 type Decoder interface {
-    Supports(flow *Flow) bool
-    OnPacket(flow *Flow, pkt *ParsedPacket) ([]Event, error)
-    OnFlowEnd(flow *Flow) ([]Event, error)
+    Supports(state *flow.State) bool
+    OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error)
+    OnFlowEnd(state *flow.State) ([]Event, error)
 }
 
 type Event struct {

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { InfoTip } from "../../../../components/InfoTip";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -23,8 +25,10 @@ export default function DNSPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     const svc = (await api.getServicesStatus()) as ServicesStatus | any;
     setStatus((svc as any)?.dns ?? null);
@@ -36,12 +40,21 @@ export default function DNSPage() {
       upstreamServers: s?.upstreamServers ?? [],
       cacheSizeMB: s?.cacheSizeMB ?? 0,
     });
+    setLastUpdated(new Date());
     setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const upstreamText = useMemo(
     () => (cfg.upstreamServers ?? []).join("\n"),
@@ -88,6 +101,15 @@ export default function DNSPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto
+          </label>
         </div>
       }
     >
@@ -101,6 +123,16 @@ export default function DNSPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
+
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+        <span>Related LAN services</span>
+        <Link href="/dhcp/" className="text-mint hover:text-mint/80">
+          DHCP server →
+        </Link>
+      </div>
 
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
@@ -120,6 +152,12 @@ export default function DNSPage() {
               Running:{" "}
               <span className="text-slate-100">{status?.running ? "yes" : "no"}</span>
               {status?.pid ? <span className="text-slate-400"> (pid {status.pid})</span> : null}
+            </div>
+            <div>
+              Rate: <span className="text-slate-100">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
+            <div>
+              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               Config:{" "}
@@ -162,41 +200,13 @@ export default function DNSPage() {
               className="h-4 w-4"
             />
             Enable DNS resolver
+            <InfoTip label="Runs the Unbound resolver on configured interfaces." />
           </label>
 
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">
-              Listen Port
-            </label>
-            <input
-              type="number"
-              value={cfg.listenPort ?? 53}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
-              }
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs uppercase tracking-wide text-slate-400">
-              Cache Size (MB)
-            </label>
-            <input
-              type="number"
-              value={cfg.cacheSizeMB ?? 0}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
-              }
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
-
           <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-slate-400">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
               Upstream Servers (one per line)
+              <InfoTip label="Forward-only DNS servers used by Unbound for resolution." />
             </label>
             <textarea
               rows={5}
@@ -214,10 +224,44 @@ export default function DNSPage() {
               placeholder="1.1.1.1\n8.8.8.8"
               className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
-            <p className="mt-1 text-xs text-slate-400">
-              Recommended: set one or more upstream servers for forward-only mode.
-            </p>
           </div>
+
+          <details className="md:col-span-2 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <summary className="cursor-pointer text-sm text-slate-200">Advanced options</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Listen Port
+                  <InfoTip label="Local port for the DNS resolver (default 53)." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.listenPort ?? 53}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Cache Size (MB)
+                  <InfoTip label="In-memory cache size for DNS responses." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.cacheSizeMB ?? 0}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                />
+              </div>
+            </div>
+          </details>
         </div>
 
         <p className="mt-3 text-xs text-slate-400">

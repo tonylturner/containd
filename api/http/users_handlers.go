@@ -114,3 +114,25 @@ func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
 	}
 }
+
+func deleteUserHandler(store users.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if store == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			return
+		}
+		id := c.Param("id")
+		if err := store.Delete(c.Request.Context(), id); err != nil {
+			code := http.StatusBadRequest
+			switch err {
+			case users.ErrNotFound:
+				code = http.StatusNotFound
+			case users.ErrLastAdmin:
+				code = http.StatusConflict
+			}
+			c.JSON(code, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	}
+}

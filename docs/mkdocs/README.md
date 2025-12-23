@@ -15,7 +15,7 @@ Start here:
 - `config-format.md` – canonical persisted config schema (JSON)
 - `cli.md` – CLI/SSH console conventions and commands
 - `dataplane.md` / `dataplane-enforcement.md` – enforcement model and kernel integration
-- `services.md` – embedded service configuration (DNS/NTP/proxies)
+- `services.md` – embedded service configuration (DNS/NTP/DHCP/VPN/AV/proxies)
 - `ids-rules.md` / `ics-dpi.md` – IDS + ICS DPI notes
 
 Project planning/tracking lives outside this folder:

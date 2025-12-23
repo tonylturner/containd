@@ -8,8 +8,8 @@ type Snapshot struct {
 	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
 	// This is used for management plane, VPN listeners, etc.
 	LocalInput []LocalServiceRule
-	NAT      NATConfig
-	IDS      IDSConfig
+	NAT        NATConfig
+	IDS        IDSConfig
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
 	Default    Action
@@ -78,4 +78,5 @@ type ICSPredicate struct {
 	Addresses    []string // address/register ranges as strings
 	ReadOnly     bool     // Modbus read-only class
 	WriteOnly    bool     // Modbus write-only class
+	Mode         string   // "learn" or "enforce"
 }

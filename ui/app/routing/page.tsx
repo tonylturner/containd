@@ -15,6 +15,7 @@ import {
   type StaticRoute,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { InfoTip } from "../../components/InfoTip";
 
 function normCIDR(s: string) {
   return s.trim();
@@ -87,6 +88,7 @@ export default function RoutingPage() {
   const [detecting, setDetecting] = useState(false);
 
   const [gwName, setGwName] = useState("");
+  const [gwAlias, setGwAlias] = useState("");
   const [gwAddr, setGwAddr] = useState("");
   const [gwIface, setGwIface] = useState("");
   const [gwDesc, setGwDesc] = useState("");
@@ -101,6 +103,13 @@ export default function RoutingPage() {
   const [ruleDst, setRuleDst] = useState("");
   const [ruleTable, setRuleTable] = useState("");
   const [rulePrio, setRulePrio] = useState("");
+
+  const gatewayLabel = (value?: string): string => {
+    if (!value) return "—";
+    const match = (cfg.gateways ?? []).find((g) => g.name === value);
+    if (!match) return value;
+    return match.alias ? `${match.alias} (${match.name})` : match.name;
+  };
 
   async function refresh() {
     const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
@@ -142,6 +151,7 @@ export default function RoutingPage() {
     }
     const nextGateway: Gateway = {
       name: gwName.trim(),
+      alias: gwAlias.trim() || undefined,
       address: gwAddr.trim(),
       iface: gwIface.trim() || undefined,
       description: gwDesc.trim() || undefined,
@@ -153,6 +163,7 @@ export default function RoutingPage() {
     };
     await save(next);
     setGwName("");
+    setGwAlias("");
     setGwAddr("");
     setGwIface("");
     setGwDesc("");
@@ -547,40 +558,70 @@ export default function RoutingPage() {
           </div>
 
           {isAdmin() && (
-            <div className="mt-3 grid gap-2 md:grid-cols-4">
-              <input
-                value={gwName}
-                onChange={(e) => setGwName(e.target.value)}
-                placeholder="name (e.g. isp1)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <input
-                value={gwAddr}
-                onChange={(e) => setGwAddr(e.target.value)}
-                placeholder="address (IPv4, e.g. 192.168.240.1)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <input
-                value={gwIface}
-                onChange={(e) => setGwIface(e.target.value)}
-                placeholder="iface (optional)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <div className="flex gap-2">
-                <input
-                  value={gwDesc}
-                  onChange={(e) => setGwDesc(e.target.value)}
-                  placeholder="description (optional)"
-                  className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                />
-                <button
-                  onClick={addGateway}
-                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
-                >
-                  Add
-                </button>
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+              <summary className="cursor-pointer text-sm text-slate-200">
+                Add gateway (advanced)
+              </summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-5">
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Name
+                  <InfoTip label="Human-friendly name used by routes (e.g. isp1)." />
+                  <input
+                    value={gwName}
+                    onChange={(e) => setGwName(e.target.value)}
+                    placeholder="isp1"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Alias
+                  <InfoTip label="Optional display name shown in selectors." />
+                  <input
+                    value={gwAlias}
+                    onChange={(e) => setGwAlias(e.target.value)}
+                    placeholder="primary ISP"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Address
+                  <InfoTip label="IPv4 address of the next-hop gateway." />
+                  <input
+                    value={gwAddr}
+                    onChange={(e) => setGwAddr(e.target.value)}
+                    placeholder="192.168.240.1"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Interface
+                  <InfoTip label="Optional interface to bind this gateway to." />
+                  <input
+                    value={gwIface}
+                    onChange={(e) => setGwIface(e.target.value)}
+                    placeholder="wan"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <div className="flex gap-2 md:col-span-1">
+                  <label className="flex-1 text-xs uppercase tracking-wide text-slate-400">
+                    Description
+                    <input
+                      value={gwDesc}
+                      onChange={(e) => setGwDesc(e.target.value)}
+                      placeholder="primary ISP"
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    />
+                  </label>
+                  <button
+                    onClick={addGateway}
+                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
-            </div>
+            </details>
           )}
 
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
@@ -588,6 +629,7 @@ export default function RoutingPage() {
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
                   <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Alias</th>
                   <th className="px-4 py-3">Address</th>
                   <th className="px-4 py-3">Iface</th>
                   <th className="px-4 py-3">Description</th>
@@ -597,7 +639,7 @@ export default function RoutingPage() {
               <tbody>
                 {(cfg.gateways ?? []).length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={5}>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
                       No gateways configured.
                     </td>
                   </tr>
@@ -605,6 +647,7 @@ export default function RoutingPage() {
                 {(cfg.gateways ?? []).map((g, idx) => (
                   <tr key={`${g.name}-${idx}`} className="border-t border-white/5">
                     <td className="px-4 py-3 font-medium text-white">{g.name}</td>
+                    <td className="px-4 py-3 text-slate-200">{g.alias || "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{g.address}</td>
                     <td className="px-4 py-3 text-slate-200">{g.iface || "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{g.description || "—"}</td>
@@ -634,67 +677,92 @@ export default function RoutingPage() {
           </div>
 
           {isAdmin() && (
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              <input
-                value={routeDst}
-                onChange={(e) => setRouteDst(e.target.value)}
-                placeholder="dst (CIDR or default)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <div className="space-y-2">
-                <input
-                  value={routeGw}
-                  onChange={(e) => setRouteGw(e.target.value)}
-                  placeholder="gateway (IP or gateway name, optional)"
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                />
-                {(cfg.gateways ?? []).length > 0 && (
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v) setRouteGw(v);
-                    }}
-                    className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+              <summary className="cursor-pointer text-sm text-slate-200">
+                Add static route (advanced)
+              </summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Destination
+                  <InfoTip label="CIDR or default. Example: 0.0.0.0/0 or 10.0.0.0/24." />
+                  <input
+                    value={routeDst}
+                    onChange={(e) => setRouteDst(e.target.value)}
+                    placeholder="dst (CIDR or default)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-slate-400">
+                    Gateway
+                    <InfoTip label="Gateway IP or gateway name. Optional if iface is set." />
+                    <input
+                      value={routeGw}
+                      onChange={(e) => setRouteGw(e.target.value)}
+                      placeholder="gateway (IP or gateway name, optional)"
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    />
+                  </label>
+                  {(cfg.gateways ?? []).length > 0 && (
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) setRouteGw(v);
+                      }}
+                      className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="">Pick gateway…</option>
+                      {(cfg.gateways ?? []).map((g) => (
+                        <option key={g.name} value={g.name}>
+                          {g.alias ? `${g.alias} (${g.name})` : g.name} ({g.address})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Interface
+                  <InfoTip label="Logical or OS device (optional)." />
+                  <input
+                    value={routeIface}
+                    onChange={(e) => setRouteIface(e.target.value)}
+                    placeholder="iface (logical or OS dev, optional)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs uppercase tracking-wide text-slate-400">
+                    Table
+                    <InfoTip label="Routing table (0 = main)." />
+                    <input
+                      value={routeTable}
+                      onChange={(e) => setRouteTable(e.target.value)}
+                      placeholder="table (0=main)"
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    />
+                  </label>
+                  <label className="text-xs uppercase tracking-wide text-slate-400">
+                    Metric
+                    <InfoTip label="Optional route priority (lower wins)." />
+                    <input
+                      value={routeMetric}
+                      onChange={(e) => setRouteMetric(e.target.value)}
+                      placeholder="metric (optional)"
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    />
+                  </label>
+                </div>
+                <div className="md:col-span-2 flex justify-end">
+                  <button
+                    onClick={addRoute}
+                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
                   >
-                    <option value="">Pick gateway…</option>
-                    {(cfg.gateways ?? []).map((g) => (
-                      <option key={g.name} value={g.name}>
-                        {g.name} ({g.address})
-                      </option>
-                    ))}
-                  </select>
-                )}
+                    Add route
+                  </button>
+                </div>
               </div>
-              <input
-                value={routeIface}
-                onChange={(e) => setRouteIface(e.target.value)}
-                placeholder="iface (logical or OS dev, optional)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  value={routeTable}
-                  onChange={(e) => setRouteTable(e.target.value)}
-                  placeholder="table (0=main)"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                />
-                <input
-                  value={routeMetric}
-                  onChange={(e) => setRouteMetric(e.target.value)}
-                  placeholder="metric (optional)"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-                />
-              </div>
-              <div className="md:col-span-2 flex justify-end">
-                <button
-                  onClick={addRoute}
-                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
-                >
-                  Add route
-                </button>
-              </div>
-            </div>
+            </details>
           )}
 
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
@@ -720,7 +788,7 @@ export default function RoutingPage() {
                 {(cfg.routes ?? []).map((r, idx) => (
                   <tr key={`${r.dst}-${idx}`} className="border-t border-white/5">
                     <td className="px-4 py-3 font-medium text-white">{r.dst}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.gateway ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{gatewayLabel(r.gateway)}</td>
                     <td className="px-4 py-3 text-slate-200">{r.iface ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-200">{r.table ?? 0}</td>
                     <td className="px-4 py-3 text-slate-200">{r.metric ?? "—"}</td>
@@ -750,40 +818,61 @@ export default function RoutingPage() {
           </div>
 
           {isAdmin() && (
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              <input
-                value={ruleSrc}
-                onChange={(e) => setRuleSrc(e.target.value)}
-                placeholder="src CIDR (optional)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <input
-                value={ruleDst}
-                onChange={(e) => setRuleDst(e.target.value)}
-                placeholder="dst CIDR (optional)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <input
-                value={ruleTable}
-                onChange={(e) => setRuleTable(e.target.value)}
-                placeholder="table (required)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <input
-                value={rulePrio}
-                onChange={(e) => setRulePrio(e.target.value)}
-                placeholder="priority (optional)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-              <div className="md:col-span-2 flex justify-end">
-                <button
-                  onClick={addRule}
-                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
-                >
-                  Add rule
-                </button>
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+              <summary className="cursor-pointer text-sm text-slate-200">
+                Add policy rule (advanced)
+              </summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Source CIDR
+                  <InfoTip label="Optional source match." />
+                  <input
+                    value={ruleSrc}
+                    onChange={(e) => setRuleSrc(e.target.value)}
+                    placeholder="src CIDR (optional)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Destination CIDR
+                  <InfoTip label="Optional destination match." />
+                  <input
+                    value={ruleDst}
+                    onChange={(e) => setRuleDst(e.target.value)}
+                    placeholder="dst CIDR (optional)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Table
+                  <InfoTip label="Routing table to use when rule matches (required)." />
+                  <input
+                    value={ruleTable}
+                    onChange={(e) => setRuleTable(e.target.value)}
+                    placeholder="table (required)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <label className="text-xs uppercase tracking-wide text-slate-400">
+                  Priority
+                  <InfoTip label="Optional priority; lower wins." />
+                  <input
+                    value={rulePrio}
+                    onChange={(e) => setRulePrio(e.target.value)}
+                    placeholder="priority (optional)"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </label>
+                <div className="md:col-span-2 flex justify-end">
+                  <button
+                    onClick={addRule}
+                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
+                  >
+                    Add rule
+                  </button>
+                </div>
               </div>
-            </div>
+            </details>
           )}
 
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10">

@@ -41,6 +41,7 @@ type listener struct {
 	pool   pool
 	start  time.Time
 	retry  int
+	reservations map[string]string // mac(lower) -> ip
 }
 
 // Manager runs a minimal DHCPv4 server on configured interfaces.
@@ -113,6 +114,7 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 
 	// Build pool map keyed by resolved device.
 	pools := map[string]pool{}
+	reservations := map[string]map[string]string{} // dev -> mac -> ip
 	for _, p := range cfg.Pools {
 		dev := resolveDev(p.Iface)
 		if dev == "" {
@@ -124,6 +126,21 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 			return fmt.Errorf("dhcp: invalid pool %q: %s-%s", p.Iface, p.Start, p.End)
 		}
 		pools[dev] = pool{Start: start, End: end}
+	}
+	for _, r := range cfg.Reservations {
+		dev := resolveDev(r.Iface)
+		if dev == "" {
+			continue
+		}
+		mac := strings.ToLower(strings.TrimSpace(r.MAC))
+		ip := net.ParseIP(strings.TrimSpace(r.IP)).To4()
+		if mac == "" || ip == nil {
+			continue
+		}
+		if _, ok := reservations[dev]; !ok {
+			reservations[dev] = map[string]string{}
+		}
+		reservations[dev][mac] = ip.String()
 	}
 
 	// Determine the set of devices to serve on.
@@ -197,7 +214,7 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		if !ok {
 			return fmt.Errorf("dhcp: no pool configured for %s", dev)
 		}
-		m.startListenerLocked(dev, cfg, pl)
+		m.startListenerLocked(dev, cfg, pl, reservations[dev])
 	}
 
 	// Best-effort load persisted leases on first enable.
@@ -232,7 +249,31 @@ func dhcpListenerNeedsRestart(l listener, cfg config.DHCPConfig, pl pool) bool {
 	if !sameStringSet(l.cfg.DNSServers, cfg.DNSServers) {
 		return true
 	}
+	if !sameReservationSet(l.reservations, cfg.Reservations) {
+		return true
+	}
 	return false
+}
+
+func sameReservationSet(curr map[string]string, cfgRes []config.DHCPReservation) bool {
+	target := map[string]string{}
+	for _, r := range cfgRes {
+		mac := strings.ToLower(strings.TrimSpace(r.MAC))
+		ip := strings.TrimSpace(r.IP)
+		if mac == "" || ip == "" {
+			continue
+		}
+		target[mac] = ip
+	}
+	if len(curr) != len(target) {
+		return false
+	}
+	for mac, ip := range curr {
+		if target[mac] != ip {
+			return false
+		}
+	}
+	return true
 }
 
 func sameStringSet(a, b []string) bool {
@@ -330,6 +371,7 @@ func (m *Manager) upsertLease(dev, mac, ip, hostname string, leaseSeconds int) {
 		"ip":         ip,
 		"hostname":   hostname,
 		"expires_at": exp,
+		"count":      1,
 	})
 }
 
@@ -432,12 +474,12 @@ func (m *Manager) persistLeasesLocked() {
 	}
 }
 
-func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool) {
+func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool, res map[string]string) {
 	lctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
-	go func(dev string, pl pool) {
-		errCh <- serveDHCPv4(lctx, dev, cfg, pl, m)
-	}(dev, pl)
+	go func(dev string, pl pool, res map[string]string) {
+		errCh <- serveDHCPv4(lctx, dev, cfg, pl, res, m)
+	}(dev, pl, res)
 	m.listeners[dev] = listener{
 		cancel: cancel,
 		errCh:  errCh,
@@ -445,6 +487,7 @@ func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool
 		pool:   pl,
 		start:  time.Now().UTC(),
 		retry:  0,
+		reservations: res,
 	}
 	go m.emit("service.dhcp.listener_started", map[string]any{"dev": dev})
 
@@ -494,7 +537,7 @@ func (m *Manager) handleListenerExit(dev string, err error) {
 		m.mu.Unlock()
 		return
 	}
-	m.startListenerLocked(dev, cfg, pl)
+	m.startListenerLocked(dev, cfg, pl, l.reservations)
 	// Carry retry count forward (so repeated failures back off).
 	nl := m.listeners[dev]
 	nl.retry = l.retry

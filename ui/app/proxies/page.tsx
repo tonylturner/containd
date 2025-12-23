@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 
 import {
   api,
@@ -13,6 +14,7 @@ import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
+import { InfoTip } from "../../components/InfoTip";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -43,6 +45,8 @@ export default function ProxiesPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -70,6 +74,7 @@ export default function ProxiesPage() {
         });
       }
       toast("Proxy status refreshed", "success");
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to refresh proxies.");
       toast("Failed to refresh proxies", "error");
@@ -82,6 +87,14 @@ export default function ProxiesPage() {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
+
   const listenZonesCSV = useMemo(
     () => (forward.listenZones ?? []).join(", "),
     [forward.listenZones],
@@ -90,14 +103,24 @@ export default function ProxiesPage() {
     () => (forward.allowedDomains ?? []).join(", "),
     [forward.allowedDomains],
   );
-  const forwardSpark = useMemo(
-    () => [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20],
-    [forward.enabled],
-  );
-  const reverseSpark = useMemo(
-    () => [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15],
-    [reverse.sites?.length],
-  );
+  const forwardSpark = useMemo(() => {
+    if (Array.isArray(status?.envoy?.sparkline) && status.envoy.sparkline.length) {
+      return status.envoy.sparkline as number[];
+    }
+    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
+      return status.sparkline as number[];
+    }
+    return [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20];
+  }, [status, forward.enabled]);
+  const reverseSpark = useMemo(() => {
+    if (Array.isArray(status?.nginx?.sparkline) && status.nginx.sparkline.length) {
+      return status.nginx.sparkline as number[];
+    }
+    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
+      return status.sparkline as number[];
+    }
+    return [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15];
+  }, [status, reverse.sites?.length]);
 
   async function onSaveForward() {
     if (!canEdit) return;
@@ -169,12 +192,23 @@ export default function ProxiesPage() {
     <Shell
       title="Proxies"
       actions={
-        <button
-          onClick={() => refresh()}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => refresh()}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+          >
+            Refresh
+          </button>
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto-refresh
+          </label>
+        </div>
       }
     >
       {!canEdit && (
@@ -184,7 +218,11 @@ export default function ProxiesPage() {
       )}
       <div className="mb-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-          <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
+          <div className="flex items-center gap-3">
+            <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
+            <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
+          </div>
           {loading ? (
             <div className="mt-3 space-y-2">
               <Skeleton className="h-16 w-full" />
@@ -195,6 +233,15 @@ export default function ProxiesPage() {
               <p className="mt-2 text-xs text-slate-400">
                 Running: {status?.envoy_running ? "yes" : "no"}{" "}
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
+              </p>
+              <p className="text-xs text-slate-400">
+                Rate: {typeof status?.envoy?.rate_per_min === "number" ? status?.envoy?.rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-amber-300">
+                Errors: {typeof status?.envoy?.errors_rate_per_min === "number" ? status?.envoy?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-slate-500">
+                Telemetry: access logs when enabled.
               </p>
               {status?.envoy_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
@@ -209,14 +256,18 @@ export default function ProxiesPage() {
                   values={forwardSpark}
                   color="var(--primary)"
                   background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                  title="Recent forward proxy hits"
+                  title="Recent forward proxy requests"
                 />
               </div>
             </>
           )}
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-          <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
+          <div className="flex items-center gap-3">
+            <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
+            <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
+          </div>
           {loading ? (
             <div className="mt-3 space-y-2">
               <Skeleton className="h-16 w-full" />
@@ -227,6 +278,15 @@ export default function ProxiesPage() {
               <p className="mt-2 text-xs text-slate-400">
                 Running: {status?.nginx_running ? "yes" : "no"}{" "}
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
+              </p>
+              <p className="text-xs text-slate-400">
+                Rate: {typeof status?.nginx?.rate_per_min === "number" ? status?.nginx?.rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-amber-300">
+                Errors: {typeof status?.nginx?.errors_rate_per_min === "number" ? status?.nginx?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+              </p>
+              <p className="text-xs text-slate-500">
+                Telemetry: access logs from published apps.
               </p>
               {status?.nginx_last_error ? (
                 <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
@@ -241,7 +301,7 @@ export default function ProxiesPage() {
                   values={reverseSpark}
                   color="var(--purple)"
                   background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
-                  title="Published app traffic trend"
+                  title="Recent reverse proxy requests"
                 />
               </div>
             </>
@@ -253,14 +313,15 @@ export default function ProxiesPage() {
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
 
       <div className="grid gap-6 md:grid-cols-2">
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <h2 className="text-lg font-semibold text-white">Forward proxy</h2>
           <p className="mt-1 text-sm text-slate-300">
-            Explicit forward proxy powered by Envoy. Configure clients and
-            domains in future phases; JSON import/export already supports full
-            fields.
+            Quick controls for enablement and listening port.
           </p>
 
           <div className="mt-5 space-y-4">
@@ -295,55 +356,78 @@ export default function ProxiesPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-200">
-                Listen zones
-              </label>
-              <p className="mt-1 text-xs text-slate-400">
-                Comma-separated zones where proxy listens.
-              </p>
-              <input
-                type="text"
-                value={listenZonesCSV}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  setForward((f) => ({
-                    ...f,
-                    listenZones: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="mgmt, lan"
-                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-            </div>
+            <details className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+              <summary className="cursor-pointer text-sm text-slate-200">
+                Advanced options
+              </summary>
+              <div className="mt-3 space-y-4">
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    Listen zones
+                    <InfoTip label="Comma-separated zones where the proxy listens. Leave blank to bind on all." />
+                  </label>
+                  <input
+                    type="text"
+                    value={listenZonesCSV}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setForward((f) => ({
+                        ...f,
+                        listenZones: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      }))
+                    }
+                    placeholder="mgmt, lan"
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-200">
-                Allowed domains
-              </label>
-              <p className="mt-1 text-xs text-slate-400">
-                Comma-separated FQDN patterns (e.g. *.vendor.com).
-              </p>
-              <input
-                type="text"
-                value={allowedDomainsCSV}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  setForward((f) => ({
-                    ...f,
-                    allowedDomains: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="*.example.com"
-                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-              />
-            </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    Allowed domains
+                    <InfoTip label="Comma-separated FQDN patterns (e.g. *.vendor.com). Use * to allow all." />
+                  </label>
+                  <input
+                    type="text"
+                    value={allowedDomainsCSV}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setForward((f) => ({
+                        ...f,
+                        allowedDomains: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      }))
+                    }
+                    placeholder="*.example.com"
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    Upstream proxy
+                    <InfoTip label="Optional upstream proxy URL for chaining (phased). Leave empty for direct egress." />
+                  </label>
+                  <input
+                    type="text"
+                    value={forward.upstream ?? ""}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setForward((f) => ({
+                        ...f,
+                        upstream: e.target.value,
+                      }))
+                    }
+                    placeholder="http://upstream:3128"
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </div>
+              </div>
+            </details>
 
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -356,6 +440,7 @@ export default function ProxiesPage() {
                 className="h-4 w-4 rounded border-white/20 bg-black/30"
               />
               Log requests
+              <InfoTip label="Writes access logs so the UI can show request rate and errors." />
             </label>
 
             <div className="flex items-center justify-end gap-3">
@@ -381,8 +466,7 @@ export default function ProxiesPage() {
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <h2 className="text-lg font-semibold text-white">Reverse proxy</h2>
           <p className="mt-1 text-sm text-slate-300">
-            Published services powered by Nginx. Add sites to expose internal
-            apps.
+            Add sites to expose internal apps.
           </p>
 
           <div className="mt-5 space-y-4">

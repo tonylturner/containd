@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type AVConfig } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
+import { Sparkline } from "../../../../components/Sparkline";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -31,20 +32,44 @@ export default function AVPage() {
   const [uploading, setUploading] = useState(false);
   const [defsPath, setDefsPath] = useState<string>("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
-  async function refresh() {
-    const svc = await api.getServicesStatus();
-    setStatus((svc as any)?.av ?? null);
-    const s = await api.getAV();
-    if (s) setCfg(s);
-    const defsResp = await api.listAVDefs();
-    setDefs(defsResp?.files ?? []);
-    setDefsPath(defsResp?.path ?? "");
-  }
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setRefreshError(null);
+    try {
+      const svc = await api.getServicesStatus();
+      setStatus((svc as any)?.av ?? null);
+      const s = await api.getAV();
+      if (s) setCfg(s);
+      const defsResp = await api.listAVDefs();
+      setDefs(defsResp?.files ?? []);
+      setDefsPath(defsResp?.path ?? "");
+      toast("AV status refreshed", "success");
+      setLastUpdated(new Date());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to refresh AV.";
+      setRefreshError(msg);
+      toast("Failed to refresh AV", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = window.setInterval(() => {
+      void refresh();
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [autoRefresh, refresh]);
 
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
 
@@ -103,8 +128,8 @@ export default function AVPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            onClick={() => refresh()}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
           >
             Refresh
           </button>
@@ -125,6 +150,15 @@ export default function AVPage() {
               Save
             </button>
           )}
+          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-black/30"
+            />
+            Auto
+          </label>
         </div>
       }
     >
@@ -133,11 +167,19 @@ export default function AVPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {refreshError && (
+        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          {refreshError}
+        </div>
+      )}
       {error && (
         <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           {error}
         </div>
       )}
+      <p className="mb-4 text-xs text-slate-400">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      </p>
       {(updateMsg || notice) && (
         <div className="mb-4 space-y-2">
           {updateMsg && (
@@ -155,15 +197,22 @@ export default function AVPage() {
 
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
-        {!status ? (
-          <div className="mt-3">
+        {loading || !status ? (
+          <div className="mt-3 space-y-2">
             <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-10 w-1/2" />
           </div>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
             <div>Enabled: <span className="text-slate-100">{status?.enabled ? "yes" : "no"}</span></div>
             <div>Mode: <span className="text-slate-100">{status?.mode ?? cfg.mode ?? "icap"}</span></div>
             <div>Fail policy: <span className="text-slate-100">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
+            <div>
+              Rate: <span className="text-slate-100">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
+            <div>
+              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+            </div>
             <div>ICS fail-open: <span className="text-slate-100">{status?.failOpenICS ?? cfg.failOpenIcs ? "yes" : "no"}</span></div>
             <div>ICAP servers: <span className="text-slate-100">{status?.icap_servers ?? 0}</span></div>
             <div>Cache: <span className="text-slate-100">{status?.cache_size ?? 0}</span></div>
@@ -176,6 +225,22 @@ export default function AVPage() {
             <div>Freshclam interval: <span className="text-slate-100">{status?.freshclam_interval || "6h"}</span></div>
             <div>Block TTL: <span className="text-slate-100">{status?.block_ttl ?? cfg.blockTtlSeconds ?? 600}s</span></div>
             <div>Custom defs path: <span className="text-slate-100">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
+            <div className="md:col-span-3">
+              <Sparkline
+                values={[
+                  (status?.clamav_custom_defs ?? 0) + 2,
+                  5,
+                  (status?.block_ttl ?? 6) / 60,
+                  8,
+                  (defs?.length ?? 1) + 4,
+                  7,
+                  9,
+                ]}
+                color="var(--purple)"
+                background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
+                title="AV detections/updates trend (simulated)"
+              />
+            </div>
             <div className="md:col-span-3 text-xs text-amber-300">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs text-amber-300">{status?.freshclam_error}</div>
           </div>
@@ -299,7 +364,7 @@ export default function AVPage() {
                 {canEdit && (
                   <button
                     onClick={() => deleteICAPServer(idx)}
-                    className="rounded-lg border border-white/10 bg-red/10 px-3 py-2 text-xs text-red hover:bg-red/20"
+                    className="rounded-lg border border-white/10 bg-[color:var(--error)]/10 px-3 py-2 text-xs text-[color:var(--error)] hover:bg-[color:var(--error)]/20"
                   >
                     Delete
                   </button>
@@ -407,7 +472,7 @@ export default function AVPage() {
                       <span>{d}</span>
                       {canEdit && (
                         <button
-                          className="text-xs text-red hover:text-red/80"
+                          className="text-xs text-[color:var(--error)] hover:text-[color:var(--error)]/80"
                           onClick={async () => {
                             if (!window.confirm(`Delete ${d}?`)) return;
                             const ok = await api.deleteAVDef(d);
