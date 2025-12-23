@@ -50,7 +50,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
         { href: "/dhcp/", label: "DHCP" },
         { href: "/proxies/", label: "Proxies" },
         { href: "/vpn/", label: "VPN" },
-        { href: "/config/", label: "Config Lifecycle" },
+        { href: "/config/", label: "Configuration" },
       ],
       defaultCollapsed: true,
     },

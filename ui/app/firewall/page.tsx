@@ -876,6 +876,15 @@ function EditRuleModal({
               </option>
             ))}
           </select>
+          {zones.length === 0 && (
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
+              No zones yet.{" "}
+              <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+                Create a zone
+              </Link>{" "}
+              to target policies.
+            </div>
+          )}
           <select
             value={dstZone}
             onChange={(e) => setDstZone(e.target.value)}
@@ -1362,23 +1371,32 @@ function CreateRuleForm({
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select
-          value={srcZone}
-          onChange={(e) => setSrcZone(e.target.value)}
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-        >
-          <option value="">Source zone (any)</option>
-          {zones.map((z) => (
-            <option key={z.name} value={z.name}>
-              {zoneLabel(z)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={dstZone}
-          onChange={(e) => setDstZone(e.target.value)}
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-        >
+          <select
+            value={srcZone}
+            onChange={(e) => setSrcZone(e.target.value)}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          >
+            <option value="">Source zone (any)</option>
+            {zones.map((z) => (
+              <option key={z.name} value={z.name}>
+                {zoneLabel(z)}
+              </option>
+            ))}
+          </select>
+          {zones.length === 0 && (
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
+              No zones yet.{" "}
+              <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+                Create a zone
+              </Link>{" "}
+              to target policies.
+            </div>
+          )}
+          <select
+            value={dstZone}
+            onChange={(e) => setDstZone(e.target.value)}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          >
           <option value="">Dest zone (any)</option>
           {zones.map((z) => (
             <option key={z.name} value={z.name}>

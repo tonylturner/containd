@@ -350,6 +350,15 @@ export default function InterfacesPage() {
               </option>
             ))}
           </select>
+          {zones.length === 0 && (
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
+              No zones yet.{" "}
+              <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+                Create a zone
+              </Link>{" "}
+              to assign it here.
+            </div>
+          )}
           {ifaceType === "bridge" ? (
             <input
               value={members}

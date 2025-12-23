@@ -17,7 +17,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 
 | Component | Purpose | SPDX License | Notes |
 |---|---|---|---|
-| Go (stdlib) | Control/data/mgmt plane binaries | BSD-3-Clause | Go runtime/stdlib is compiled into `ngfw-mgmt` and `ngfw-engine` (we do not ship the Go toolchain in the image). |
+| Go (stdlib) | Control/data/mgmt plane binaries | BSD-3-Clause | Go runtime/stdlib is compiled into `containd` (we do not ship the Go toolchain in the image). |
 | Gin | REST API framework | MIT | Used in `api/http`. |
 | `github.com/golang-jwt/jwt/v5` | JWT auth | MIT | Used for UI/API auth sessions. |
 | `modernc.org/sqlite` | Embedded SQLite (Go) | BSD-3-Clause | Used for config/audit/users DBs. |
@@ -26,9 +26,11 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Tailwind CSS | UI styling | MIT | Built into UI assets. |
 | Envoy Proxy | Optional explicit forward proxy | Apache-2.0 | Copied into the mgmt appliance image from `envoyproxy/envoy`. |
 | Nginx | Optional reverse proxy | BSD-2-Clause | Copied into the mgmt appliance image from `nginxinc/nginx-unprivileged`. |
-| Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image (forwarder-first config; supervised by `ngfw-mgmt`). |
+| Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image (forwarder-first config; supervised by `containd mgmt`). |
+| OpenNTPD | NTP client | ISC | Embedded in the mgmt image; supervised by `containd mgmt` when enabled. |
 | WireGuard (Linux kernel) | Remote access VPN dataplane | GPL-2.0-only | WireGuard runs via Linux kernel interfaces + generic netlink control; we do not bundle the `wg` CLI in the appliance image. |
-| OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `ngfw-mgmt` when enabled with a foreground config (no `daemon`). |
+| OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `containd mgmt` when enabled with a foreground config (no `daemon`). |
+| xterm.js | In-app terminal emulator | MIT | Used by the in-app console UI (`ui/components/Console.tsx`). |
 | nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Userspace `nft` binary is copied into the engine image from Debian packages. |
 | Distroless base (`base-debian12`) | Minimal runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
@@ -52,7 +54,5 @@ These are used to build UI/docs (CI/Docker build stages), but are not included i
 
 | Component | Purpose | SPDX License | Notes |
 |---|---|---|---|
-| OpenNTPD | NTP client | ISC | Planned; not embedded yet. |
-| xterm.js | Web UI console | MIT | Planned for a richer in-UI terminal experience. |
 | React Flow | Topology UI | MIT | Planned for topology/graph screens. |
 | Recharts | Charts | MIT | Candidate for dashboards. |

@@ -7,6 +7,7 @@ site_dir: site
 
 theme:
   name: material
+  custom_dir: docs/mkdocs/overrides
   features:
     - navigation.instant
     - navigation.sections
@@ -15,7 +16,7 @@ theme:
     - content.code.copy
   palette:
     - scheme: slate
-      primary: teal
+      primary: blue
       accent: teal
 
 plugins:
@@ -38,6 +39,9 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
+
+extra_css:
+  - assets/styles/mkdocs-theme.css
 
 nav:
   - Home: index.md

@@ -172,8 +172,10 @@ Notes:
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
 - `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).
-- `services.dhcp` configures the built-in DHCP server (phased; config-first).
-- `services.vpn.wireguard` configures WireGuard (phased; config-first). `services.vpn.openvpn` is a placeholder.
+- `services.dhcp` configures the built-in DHCP server.
+- `services.vpn.wireguard` configures WireGuard. `services.vpn.openvpn` supports managed client/server modes.
+- `services.vpn.openvpn.server.tunnelCIDR` is the client address pool allocated by the OpenVPN server. WireGuard uses static peer `AllowedIPs` and `addressCIDR` for policy targeting.
+- Config backups are stored under `data/config-backups/` and can be created redacted or full (admin-only for unredacted).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
 - `routing` configures kernel routing when applying running config:
@@ -185,8 +187,8 @@ Notes:
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
 Limitations (current):
-- Routing/PBR is applied as “additive” changes; full reconcile/replace semantics are still in progress.
-- NAT is currently postrouting masquerade only (no DNAT/port-forward yet).
+- Routing/PBR supports additive updates plus an explicit replace/reconcile mode; coverage for all tables and IPv6 is still expanding.
+- NAT is currently postrouting masquerade plus basic DNAT/port-forwarding (validation improvements pending).
 
 ## API endpoints (initial)
 - `GET /api/v1/config` – fetch current config (404 if none).
@@ -197,7 +199,12 @@ Limitations (current):
 - `GET/POST /api/v1/config/candidate` – fetch/save candidate config.
 - `GET /api/v1/config/diff` – view running vs candidate.
 - `POST /api/v1/config/commit` – promote candidate to running.
+- `POST /api/v1/config/commit_confirmed` – promote candidate to running with auto-rollback unless confirmed.
+- `POST /api/v1/config/confirm` – confirm the last commit-confirmed operation.
 - `POST /api/v1/config/rollback` – restore previous running config.
+- `GET/POST /api/v1/config/backups` – list/create config backups.
+- `GET /api/v1/config/backups/:id` – download a config backup.
+- `DELETE /api/v1/config/backups/:id` – delete a config backup.
 - `GET/POST/PATCH/DELETE /api/v1/zones` – list/add/update/delete zones.
 - `GET/POST/PATCH/DELETE /api/v1/interfaces` – list/add/update/delete interfaces.
 - `GET/POST/PATCH/DELETE /api/v1/firewall/rules` – list/add/update/delete firewall rules.
@@ -206,8 +213,14 @@ Limitations (current):
 - `GET/POST /api/v1/services/dns` – get/set DNS (Unbound) settings.
 - `GET/POST /api/v1/services/ntp` – get/set NTP (OpenNTPD) settings.
 - `GET/POST /api/v1/services/dhcp` – get/set DHCP (LAN) settings.
-- `GET/POST /api/v1/services/vpn` – get/set VPN settings (WireGuard + OpenVPN placeholder).
+- `GET/POST /api/v1/services/vpn` – get/set VPN settings (WireGuard + OpenVPN managed client/server).
+- `POST /api/v1/services/vpn/openvpn/profile` – upload a foreground `.ovpn` profile.
+- `GET/POST /api/v1/services/vpn/openvpn/clients` – list/create OpenVPN server clients.
+- `GET /api/v1/services/vpn/openvpn/clients/:name` – download a generated client profile.
 - `GET/POST /api/v1/services/proxy/forward` – get/set forward proxy (Envoy).
 - `GET/POST /api/v1/services/proxy/reverse` – get/set reverse proxy (Nginx).
+- `GET/POST /api/v1/services/av` – get/set AV settings.
+- `POST /api/v1/services/av/update` – trigger AV definition refresh.
+- `GET/POST/DELETE /api/v1/services/av/defs` – manage AV definitions.
 - `GET /api/v1/services/status` – summary of embedded service status.
 - `GET /api/v1/audit` – list audit records (write events pending).

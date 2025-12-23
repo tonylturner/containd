@@ -4,9 +4,9 @@ This document is rendered from `docs/mkdocs/`.
 
 The CLI mirrors appliance-style workflows. Commands will call control-plane APIs/config store for configuration and show operations.
 
-## Current skeleton
+## Current CLI
 
-- Command registry in `pkg/cli` with stub commands:
+- Command registry in `pkg/cli` with appliance-style commands:
   - `show version`
   - `help` / `show help` / `set help`
   - `show zones`
@@ -71,7 +71,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `export config`
   - `export config redacted` / `export config --redacted`
   - `import config <path>`
-- Backed by the config store (uses `pkg/cp/config`); ready to wire into SSH/HTTP transports later.
+- Backed by the management API and config store; exposed via SSH and the in-app console.
 
 ## Auth (current)
 
@@ -88,7 +88,7 @@ Roles (current):
 
 ## SSH console (appliance-style)
 
-`ngfw-mgmt` exposes an SSH console that runs the same CLI registry (admin-only).
+`containd mgmt` exposes an SSH console that runs the same CLI registry (admin-only).
 
 Interactive commands:
 - `menu` - setup + diagnostics menu (OPNsense-style)
@@ -102,9 +102,6 @@ Notes:
 
 ## Future
 
-- Add `show running-config`, `set`/`delete` commands for interfaces/zones/rules.
-- Integrate with embedded SSH server for appliance-style access.
-- Add an interactive `wizard` command over SSH for initial provisioning.
-- Hook command execution to HTTP client layer (or direct store) depending on deployment topology.
-- Add service commands (syslog/NTP/DNS) as system services land.
-- Add `show ip rule`, `set route`, and `set pbr` commands as routing/PBR support is surfaced via UI/CLI/API.
+- SSH hardening (rate limiting, banners, host key persistence review).
+- Expand DP operational commands (`show routes` netlink, richer neighbor views).
+- Add deeper service controls as runtime supervision matures.

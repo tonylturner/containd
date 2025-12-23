@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,6 +168,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/config/candidate", getCandidateConfigHandler(store))
 		protected.POST("/config/candidate", requireAdmin(), saveCandidateConfigHandler(store))
 		protected.GET("/config/diff", diffConfigHandler(store))
+		protected.GET("/config/backups", listConfigBackupsHandler(store))
+		protected.POST("/config/backups", requireAdmin(), createConfigBackupHandler(store))
+		protected.GET("/config/backups/:id", downloadConfigBackupHandler(store))
+		protected.DELETE("/config/backups/:id", requireAdmin(), deleteConfigBackupHandler())
 		protected.POST("/config/commit", requireAdmin(), commitConfigHandler(store, engine, services))
 		protected.POST("/config/commit_confirmed", requireAdmin(), commitConfirmedHandler(store, engine, services))
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
@@ -459,6 +465,275 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 		}
 		auditLog(c, audit.Record{Action: "config.import", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "imported"})
+	}
+}
+
+type configBackupMeta struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Redacted  bool      `json:"redacted"`
+}
+
+type configBackupInfo struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Redacted  bool      `json:"redacted"`
+	Size      int64     `json:"size"`
+}
+
+type configBackupRequest struct {
+	Name     string `json:"name"`
+	Redacted bool   `json:"redacted"`
+}
+
+func configBackupDir() string {
+	if v := strings.TrimSpace(os.Getenv("NGFW_CONFIG_BACKUP_DIR")); v != "" {
+		return v
+	}
+	if dbPath := strings.TrimSpace(os.Getenv("NGFW_CONFIG_DB")); dbPath != "" {
+		return filepath.Join(filepath.Dir(dbPath), "config-backups")
+	}
+	return filepath.Join("data", "config-backups")
+}
+
+func configBackupPaths(id string) (string, string) {
+	dir := configBackupDir()
+	return filepath.Join(dir, id+".json"), filepath.Join(dir, id+".meta.json")
+}
+
+func newConfigBackupID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
+}
+
+func sanitizeBackupFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "containd-config-backup"
+	}
+	var out strings.Builder
+	out.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune(r)
+		case r >= '0' && r <= '9':
+			out.WriteRune(r)
+		case r == '-' || r == '_' || r == ' ':
+			out.WriteRune(r)
+		default:
+			out.WriteRune('_')
+		}
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func listConfigBackupsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dir := configBackupDir()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusOK, []configBackupInfo{})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		isAdmin := c.GetString(ctxRoleKey) == string(roleAdmin)
+		backups := make([]configBackupInfo, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".meta.json") {
+				continue
+			}
+			metaPath := filepath.Join(dir, entry.Name())
+			metaBytes, err := os.ReadFile(metaPath)
+			if err != nil {
+				continue
+			}
+			var meta configBackupMeta
+			if err := json.Unmarshal(metaBytes, &meta); err != nil {
+				continue
+			}
+			if !isAdmin && !meta.Redacted {
+				continue
+			}
+			jsonPath, _ := configBackupPaths(meta.ID)
+			info, err := os.Stat(jsonPath)
+			if err != nil {
+				continue
+			}
+			backups = append(backups, configBackupInfo{
+				ID:        meta.ID,
+				Name:      meta.Name,
+				CreatedAt: meta.CreatedAt,
+				Redacted:  meta.Redacted,
+				Size:      info.Size(),
+			})
+		}
+		sort.Slice(backups, func(i, j int) bool {
+			return backups[i].CreatedAt.After(backups[j].CreatedAt)
+		})
+		c.JSON(http.StatusOK, backups)
+	}
+}
+
+func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req configBackupRequest
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		cfg, err := store.Load(c.Request.Context())
+		if err != nil {
+			if errors.Is(err, config.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Redacted {
+			cfg = cfg.RedactedCopy()
+		}
+		if err := os.MkdirAll(configBackupDir(), 0o750); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		id, err := newConfigBackupID()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate backup id"})
+			return
+		}
+		now := time.Now().UTC()
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			name = fmt.Sprintf("Backup %s", now.Format("2006-01-02 15:04 UTC"))
+		}
+		meta := configBackupMeta{
+			ID:        id,
+			Name:      name,
+			CreatedAt: now,
+			Redacted:  req.Redacted,
+		}
+		jsonPath, metaPath := configBackupPaths(id)
+		tmpJSON := jsonPath + ".tmp"
+		tmpMeta := metaPath + ".tmp"
+		payload, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to serialize config"})
+			return
+		}
+		if err := os.WriteFile(tmpJSON, payload, 0o600); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup"})
+			return
+		}
+		metaBytes, err := json.Marshal(meta)
+		if err != nil {
+			_ = os.Remove(tmpJSON)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup metadata"})
+			return
+		}
+		if err := os.WriteFile(tmpMeta, metaBytes, 0o600); err != nil {
+			_ = os.Remove(tmpJSON)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write backup metadata"})
+			return
+		}
+		if err := os.Rename(tmpJSON, jsonPath); err != nil {
+			_ = os.Remove(tmpJSON)
+			_ = os.Remove(tmpMeta)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist backup"})
+			return
+		}
+		if err := os.Rename(tmpMeta, metaPath); err != nil {
+			_ = os.Remove(jsonPath)
+			_ = os.Remove(tmpMeta)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist backup metadata"})
+			return
+		}
+		info, _ := os.Stat(jsonPath)
+		auditLog(c, audit.Record{Action: "config.backup.create", Target: "running"})
+		c.JSON(http.StatusOK, configBackupInfo{
+			ID:        meta.ID,
+			Name:      meta.Name,
+			CreatedAt: meta.CreatedAt,
+			Redacted:  meta.Redacted,
+			Size:      info.Size(),
+		})
+	}
+}
+
+func downloadConfigBackupHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := strings.TrimSpace(c.Param("id"))
+		if id == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "backup id required"})
+			return
+		}
+		_, metaPath := configBackupPaths(id)
+		metaBytes, err := os.ReadFile(metaPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var meta configBackupMeta
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "backup metadata corrupted"})
+			return
+		}
+		if !meta.Redacted && c.GetString(ctxRoleKey) != string(roleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin role required for unredacted backup"})
+			return
+		}
+		jsonPath, _ := configBackupPaths(id)
+		f, err := os.Open(jsonPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer f.Close()
+		filename := sanitizeBackupFilename(meta.Name) + ".json"
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, f)
+	}
+}
+
+func deleteConfigBackupHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := strings.TrimSpace(c.Param("id"))
+		if id == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "backup id required"})
+			return
+		}
+		jsonPath, metaPath := configBackupPaths(id)
+		if err := os.Remove(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := os.Remove(jsonPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "config.backup.delete", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }
 
