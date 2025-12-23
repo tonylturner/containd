@@ -720,3 +720,38 @@ func TestAssetCRUD(t *testing.T) {
 		t.Fatalf("asset delete expected 204, got %d", rec.Code)
 	}
 }
+
+func TestObjectCRUD(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/objects", bytes.NewBufferString(`{"id":"obj1","name":"plc-host","type":"HOST","addresses":["10.0.0.5"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("object create expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodGet, "/api/v1/objects", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"obj1"`)) {
+		t.Fatalf("object list missing object: %s", rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodPatch, "/api/v1/objects/obj1", bytes.NewBufferString(`{"description":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("object update expected 200, got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodDelete, "/api/v1/objects/obj1", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("object delete expected 204, got %d", rec.Code)
+	}
+}

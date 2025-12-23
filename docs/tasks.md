@@ -22,7 +22,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Implement CRUD handlers/DTOs for interfaces, zones, firewall rules (basic add/list/delete using persisted config).
   - [x] Add request validation and basic unit tests.
   - [x] Add config export/import endpoints.
-  - [~] Add objects endpoints.
+  - [x] Add objects endpoints.
   - [x] Add services endpoints (syslog/NTP/DNS/proxies) and status endpoint.
   - [x] Add services endpoints for DHCP (config-only) and VPN (WireGuard config + OpenVPN placeholder).
   - [x] Implement DNS resolver runtime (Unbound supervision) for lab/SMB appliance mode.
@@ -72,13 +72,13 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
 - [ ] Rule engine skeleton
   - [x] Define immutable rule bundle structs in `pkg/dp/rules`.
   - [x] Add swap mechanism and basic allow/deny evaluation stub.
-  - [~] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
+  - [x] Add ICS/identity predicates to evaluator (ICS predicates plumbed; matching pending).
   - [x] Add verdict types (allow/deny/reset/alert/block/rate-limit/tag) and integration plan.
   - [~] Add nftables compile/apply path for rules and verdict updates (baseline + dynamic block sets done; zone bindings done).
     - [x] Add NAT masquerade via nftables postrouting (config + compile + CLI/UI surface).
     - [~] Add local input rules for appliance services (mgmt/ssh/vpn) and auto-open VPN server ports on WAN.
       - [x] Auto-open management plane ports and VPN server ports in nftables input chain when enabled.
-      - [ ] Add configurable bind zone/interface for VPN server listeners and corresponding auto rules.
+      - [x] Add configurable bind zone/interface for VPN server listeners and corresponding auto rules.
       - [x] Add VPN tunnel network objects for policy targeting (rule CIDR tokens: `vpn:any`, `vpn:wireguard`, `vpn:openvpn`).
 - [x] Flow tracking scaffold
   - [x] Build flow key/state structs and timeout handling in `pkg/dp/flow`.

@@ -68,6 +68,8 @@ type EngineClient interface {
 	TagPcap(ctx context.Context, req pcap.TagRequest) error
 	ReplayPcap(ctx context.Context, req pcap.ReplayRequest) error
 	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
+	BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error
+	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
 }
 
 type TelemetryClient interface {
@@ -211,6 +213,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
+		protected.POST("/dataplane/blocks/host", requireAdmin(), blockHostHandler(engine))
+		protected.POST("/dataplane/blocks/flow", requireAdmin(), blockFlowHandler(engine))
 		protected.GET("/pcap/config", getPCAPConfigHandler(store))
 		protected.POST("/pcap/config", requireAdmin(), setPCAPConfigHandler(store, engine))
 		protected.POST("/pcap/start", requireAdmin(), startPCAPHandler(store, engine))
@@ -226,6 +230,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
 		protected.DELETE("/assets/:id", requireAdmin(), deleteAssetHandler(store))
+		protected.GET("/objects", listObjectsHandler(store))
+		protected.POST("/objects", requireAdmin(), createObjectHandler(store))
+		protected.PATCH("/objects/:id", requireAdmin(), updateObjectHandler(store))
+		protected.DELETE("/objects/:id", requireAdmin(), deleteObjectHandler(store))
 		protected.GET("/zones", listZonesHandler(store))
 		protected.POST("/zones", requireAdmin(), createZoneHandler(store))
 		protected.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
@@ -1878,6 +1886,84 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 	}
 }
 
+type blockHostRequest struct {
+	IP         string `json:"ip"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+type blockFlowRequest struct {
+	SrcIP      string `json:"srcIp"`
+	DstIP      string `json:"dstIp"`
+	Proto      string `json:"proto"`
+	DstPort    string `json:"dstPort"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+func blockHostHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req blockHostRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		ip := net.ParseIP(strings.TrimSpace(req.IP))
+		if ip == nil || ip.To4() == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ip"})
+			return
+		}
+		if req.TTLSeconds < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ttlSeconds must be >= 0"})
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := engine.BlockHostTemp(c.Request.Context(), ip, ttl); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "dataplane.block_host", Target: ip.String()})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	}
+}
+
+func blockFlowHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if engine == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engine unavailable"})
+			return
+		}
+		var req blockFlowRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON", "detail": err.Error()})
+			return
+		}
+		srcIP := net.ParseIP(strings.TrimSpace(req.SrcIP))
+		dstIP := net.ParseIP(strings.TrimSpace(req.DstIP))
+		if srcIP == nil || srcIP.To4() == nil || dstIP == nil || dstIP.To4() == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid flow ip"})
+			return
+		}
+		if strings.TrimSpace(req.Proto) == "" || strings.TrimSpace(req.DstPort) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "proto and dstPort required"})
+			return
+		}
+		if req.TTLSeconds < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ttlSeconds must be >= 0"})
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := engine.BlockFlowTemp(c.Request.Context(), srcIP, dstIP, strings.ToLower(strings.TrimSpace(req.Proto)), strings.TrimSpace(req.DstPort), ttl); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "dataplane.block_flow", Target: fmt.Sprintf("%s->%s", srcIP, dstIP)})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	}
+}
+
 func getIDSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -3159,6 +3245,118 @@ func deleteAssetHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		auditLog(c, audit.Record{Action: "assets.delete", Target: id})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func listObjectsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cfg.Objects)
+	}
+}
+
+func createObjectHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var obj config.Object
+		if err := c.ShouldBindJSON(&obj); err != nil || obj.ID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid object payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, existing := range cfg.Objects {
+			if existing.ID == obj.ID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "object already exists"})
+				return
+			}
+			if existing.Name != "" && existing.Name == obj.Name {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "object name already exists"})
+				return
+			}
+		}
+		cfg.Objects = append(cfg.Objects, obj)
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "objects.create", Target: obj.ID})
+		c.JSON(http.StatusOK, obj)
+	}
+}
+
+func updateObjectHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var obj config.Object
+		if err := c.ShouldBindJSON(&obj); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid object payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Objects {
+			if existing.ID == id {
+				if obj.ID == "" {
+					obj.ID = existing.ID
+				}
+				if obj.Name == "" {
+					obj.Name = existing.Name
+				}
+				cfg.Objects[i] = obj
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "objects.update", Target: id})
+		c.JSON(http.StatusOK, obj)
+	}
+}
+
+func deleteObjectHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		original := len(cfg.Objects)
+		filtered := make([]config.Object, 0, len(cfg.Objects))
+		for _, obj := range cfg.Objects {
+			if obj.ID != id {
+				filtered = append(filtered, obj)
+			}
+		}
+		if len(filtered) == original {
+			c.JSON(http.StatusNotFound, gin.H{"error": "object not found"})
+			return
+		}
+		cfg.Objects = filtered
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "objects.delete", Target: id})
 		c.Status(http.StatusNoContent)
 	}
 }

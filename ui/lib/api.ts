@@ -524,6 +524,8 @@ export type WireGuardConfig = {
   enabled?: boolean;
   interface?: string;
   listenPort?: number;
+  listenZone?: string;
+  listenInterfaces?: string[];
   addressCIDR?: string;
   privateKey?: string;
   peers?: WGPeer[];
@@ -551,6 +553,8 @@ export type OpenVPNManagedClientConfig = {
 export type OpenVPNManagedServerConfig = {
   listenPort?: number;
   proto?: string;
+  listenZone?: string;
+  listenInterfaces?: string[];
   tunnelCIDR?: string;
   publicEndpoint?: string;
   pushDNS?: string[];

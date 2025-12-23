@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ type Config struct {
 	Interfaces    []Interface     `json:"interfaces"`
 	Zones         []Zone          `json:"zones"`
 	Assets        []Asset         `json:"assets,omitempty"`
+	Objects       []Object        `json:"objects,omitempty"`
 	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
 	PCAP          PCAPConfig      `json:"pcap,omitempty"`
@@ -36,6 +38,9 @@ func (c *Config) RedactedCopy() *Config {
 	// Shallow-copy slices/maps that might later contain secrets.
 	if c.Assets != nil {
 		cp.Assets = append([]Asset(nil), c.Assets...)
+	}
+	if c.Objects != nil {
+		cp.Objects = append([]Object(nil), c.Objects...)
 	}
 	if c.Zones != nil {
 		cp.Zones = append([]Zone(nil), c.Zones...)
@@ -218,12 +223,14 @@ type VPNConfig struct {
 // WireGuardConfig defines a WireGuard server configuration.
 // Keys are secrets and should be redacted in exports by default.
 type WireGuardConfig struct {
-	Enabled     bool     `json:"enabled"`
-	Interface   string   `json:"interface,omitempty"` // e.g. "wg0"
-	ListenPort  int      `json:"listenPort,omitempty"`
-	AddressCIDR string   `json:"addressCIDR,omitempty"` // e.g. "10.8.0.1/24"
-	PrivateKey  string   `json:"privateKey,omitempty"`  // base64, stored encrypted later
-	Peers       []WGPeer `json:"peers,omitempty"`
+	Enabled          bool     `json:"enabled"`
+	Interface        string   `json:"interface,omitempty"` // e.g. "wg0"
+	ListenPort       int      `json:"listenPort,omitempty"`
+	ListenZone       string   `json:"listenZone,omitempty"`       // zone name for inbound listener
+	ListenInterfaces []string `json:"listenInterfaces,omitempty"` // interface names/devices
+	AddressCIDR      string   `json:"addressCIDR,omitempty"`      // e.g. "10.8.0.1/24"
+	PrivateKey       string   `json:"privateKey,omitempty"`       // base64, stored encrypted later
+	Peers            []WGPeer `json:"peers,omitempty"`
 }
 
 type WGPeer struct {
@@ -270,6 +277,10 @@ type OpenVPNManagedClientConfig struct {
 type OpenVPNManagedServerConfig struct {
 	ListenPort int    `json:"listenPort,omitempty"` // default 1194
 	Proto      string `json:"proto,omitempty"`      // udp|tcp (default udp)
+	// ListenZone controls which zone auto-opens the OpenVPN listener (default wan).
+	ListenZone string `json:"listenZone,omitempty"`
+	// ListenInterfaces restricts auto-open rules to specific interfaces/devices.
+	ListenInterfaces []string `json:"listenInterfaces,omitempty"`
 
 	// TunnelCIDR is the VPN client address pool.
 	// Example: "10.9.0.0/24"
@@ -429,6 +440,27 @@ type Zone struct {
 	Name        string `json:"name"`
 	Alias       string `json:"alias,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+type ObjectType string
+
+const (
+	ObjectHost    ObjectType = "HOST"
+	ObjectSubnet  ObjectType = "SUBNET"
+	ObjectGroup   ObjectType = "GROUP"
+	ObjectService ObjectType = "SERVICE"
+)
+
+// Object defines reusable hosts/subnets/groups/services for policy references.
+type Object struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Type        ObjectType `json:"type"`
+	Addresses   []string   `json:"addresses,omitempty"` // hosts/subnets
+	Members     []string   `json:"members,omitempty"`   // groups (object IDs)
+	Protocols   []Protocol `json:"protocols,omitempty"` // services
+	Tags        []string   `json:"tags,omitempty"`
+	Description string     `json:"description,omitempty"`
 }
 
 // AssetType enumerates common OT/ICS asset categories.
@@ -629,6 +661,9 @@ func (c *Config) Validate() error {
 	if err := validateAssets(c.Assets, c.Zones); err != nil {
 		return err
 	}
+	if err := validateObjects(c.Objects); err != nil {
+		return err
+	}
 	if err := validateRouting(c.Routing, c.Interfaces, c.Zones); err != nil {
 		return err
 	}
@@ -641,7 +676,7 @@ func (c *Config) Validate() error {
 	if err := validateIDS(c.IDS); err != nil {
 		return err
 	}
-	if err := validateServices(c.Services); err != nil {
+	if err := validateServices(c.Services, c.Interfaces, c.Zones); err != nil {
 		return err
 	}
 	return nil
@@ -1065,6 +1100,138 @@ func validateAssets(assets []Asset, zones []Zone) error {
 	return nil
 }
 
+func validateObjects(objects []Object) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	ids := map[string]struct{}{}
+	names := map[string]struct{}{}
+	idsLower := map[string]struct{}{}
+	namesLower := map[string]struct{}{}
+	for _, obj := range objects {
+		if obj.ID == "" {
+			return errors.New("object id cannot be empty")
+		}
+		if _, ok := ids[obj.ID]; ok {
+			return fmt.Errorf("duplicate object id: %s", obj.ID)
+		}
+		ids[obj.ID] = struct{}{}
+		idsLower[strings.ToLower(obj.ID)] = struct{}{}
+		if obj.Name == "" {
+			return fmt.Errorf("object %s name cannot be empty", obj.ID)
+		}
+		if _, ok := names[obj.Name]; ok {
+			return fmt.Errorf("duplicate object name: %s", obj.Name)
+		}
+		names[obj.Name] = struct{}{}
+		namesLower[strings.ToLower(obj.Name)] = struct{}{}
+		switch obj.Type {
+		case ObjectHost:
+			for _, addr := range obj.Addresses {
+				if err := validateObjectHostAddress(addr); err != nil {
+					return fmt.Errorf("object %s has invalid host address %q: %v", obj.ID, addr, err)
+				}
+			}
+		case ObjectSubnet:
+			for _, addr := range obj.Addresses {
+				if err := validateObjectSubnetAddress(addr); err != nil {
+					return fmt.Errorf("object %s has invalid subnet %q: %v", obj.ID, addr, err)
+				}
+			}
+		case ObjectGroup:
+			// Members validated after IDs are collected.
+		case ObjectService:
+			if len(obj.Protocols) == 0 {
+				return fmt.Errorf("object %s service must include at least one protocol", obj.ID)
+			}
+			for _, p := range obj.Protocols {
+				if strings.TrimSpace(p.Name) == "" {
+					return fmt.Errorf("object %s service protocol name cannot be empty", obj.ID)
+				}
+				if err := validatePortString(p.Port); err != nil {
+					return fmt.Errorf("object %s service protocol port %q invalid: %v", obj.ID, p.Port, err)
+				}
+			}
+		default:
+			return fmt.Errorf("object %s has invalid type %q", obj.ID, obj.Type)
+		}
+	}
+	for _, obj := range objects {
+		if obj.Type != ObjectGroup {
+			continue
+		}
+		for _, member := range obj.Members {
+			if member == "" {
+				return fmt.Errorf("object %s group member cannot be empty", obj.ID)
+			}
+			if member == obj.ID {
+				return fmt.Errorf("object %s group cannot include itself", obj.ID)
+			}
+			if _, ok := ids[member]; !ok {
+				return fmt.Errorf("object %s references unknown member %s", obj.ID, member)
+			}
+		}
+	}
+	if len(idsLower) != len(ids) || len(namesLower) != len(names) {
+		return errors.New("object ids and names must be unique case-insensitively")
+	}
+	return nil
+}
+
+func validateObjectHostAddress(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return errors.New("address cannot be empty")
+	}
+	if strings.Contains(addr, "/") {
+		return errors.New("host addresses must not be CIDR")
+	}
+	if net.ParseIP(addr) != nil {
+		return nil
+	}
+	if strings.ContainsAny(addr, " \t\n") {
+		return errors.New("hostname contains whitespace")
+	}
+	if err := validateHostname(addr); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateObjectSubnetAddress(addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return errors.New("subnet cannot be empty")
+	}
+	if _, _, err := net.ParseCIDR(addr); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePortString(port string) error {
+	port = strings.TrimSpace(port)
+	if port == "" {
+		return nil
+	}
+	parts := strings.Split(port, "-")
+	if len(parts) > 2 {
+		return errors.New("invalid port range")
+	}
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || start < 1 || start > 65535 {
+		return fmt.Errorf("invalid port %q", port)
+	}
+	if len(parts) == 1 {
+		return nil
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || end < 1 || end > 65535 || end < start {
+		return fmt.Errorf("invalid port range %q", port)
+	}
+	return nil
+}
+
 func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 	if len(r.Gateways) == 0 && len(r.Routes) == 0 && len(r.Rules) == 0 {
 		return nil
@@ -1248,7 +1415,7 @@ func validatePCAP(p PCAPConfig) error {
 	return nil
 }
 
-func validateServices(s ServicesConfig) error {
+func validateServices(s ServicesConfig, ifaces []Interface, zones []Zone) error {
 	for _, fwd := range s.Syslog.Forwarders {
 		if fwd.Address == "" {
 			return errors.New("syslog forwarder address is required")
@@ -1290,7 +1457,7 @@ func validateServices(s ServicesConfig) error {
 	if err := validateDHCP(s.DHCP); err != nil {
 		return err
 	}
-	if err := validateVPN(s.VPN); err != nil {
+	if err := validateVPN(s.VPN, ifaces, zones); err != nil {
 		return err
 	}
 	if err := validateAV(s.AV); err != nil {
@@ -1455,10 +1622,26 @@ func validateDHCP(d DHCPConfig) error {
 	return nil
 }
 
-func validateVPN(v VPNConfig) error {
+func validateVPN(v VPNConfig, ifaces []Interface, zones []Zone) error {
+	zoneSet := map[string]struct{}{}
+	for _, z := range zones {
+		zoneSet[z.Name] = struct{}{}
+	}
+	ifaceSet := map[string]struct{}{}
+	for _, iface := range ifaces {
+		if strings.TrimSpace(iface.Name) != "" {
+			ifaceSet[iface.Name] = struct{}{}
+		}
+		if strings.TrimSpace(iface.Device) != "" {
+			ifaceSet[iface.Device] = struct{}{}
+		}
+	}
 	wg := v.WireGuard
 	if wg.ListenPort != 0 && (wg.ListenPort < 1 || wg.ListenPort > 65535) {
 		return fmt.Errorf("vpn.wireguard listenPort invalid: %d", wg.ListenPort)
+	}
+	if err := validateVPNListenTargets("vpn.wireguard", wg.ListenZone, wg.ListenInterfaces, zoneSet, ifaceSet); err != nil {
+		return err
 	}
 	if wg.AddressCIDR != "" {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(wg.AddressCIDR)); err != nil {
@@ -1561,6 +1744,9 @@ func validateVPN(v VPNConfig) error {
 			if _, _, err := net.ParseCIDR(strings.TrimSpace(s.TunnelCIDR)); err != nil {
 				return fmt.Errorf("vpn.openvpn.server tunnelCIDR invalid: %q", s.TunnelCIDR)
 			}
+			if err := validateVPNListenTargets("vpn.openvpn.server", s.ListenZone, s.ListenInterfaces, zoneSet, ifaceSet); err != nil {
+				return err
+			}
 			for _, ipStr := range s.PushDNS {
 				if ip := net.ParseIP(strings.TrimSpace(ipStr)); ip == nil || ip.To4() == nil {
 					return fmt.Errorf("vpn.openvpn.server pushDNS invalid: %q", ipStr)
@@ -1574,6 +1760,24 @@ func validateVPN(v VPNConfig) error {
 					return fmt.Errorf("vpn.openvpn.server pushRoutes invalid: %q", cidr)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func validateVPNListenTargets(prefix, zone string, ifaces []string, zoneSet, ifaceSet map[string]struct{}) error {
+	if strings.TrimSpace(zone) != "" {
+		if _, ok := zoneSet[zone]; !ok {
+			return fmt.Errorf("%s listenZone invalid: %s", prefix, zone)
+		}
+	}
+	for _, name := range ifaces {
+		n := strings.TrimSpace(name)
+		if n == "" {
+			return fmt.Errorf("%s listenInterfaces cannot include empty", prefix)
+		}
+		if _, ok := ifaceSet[n]; !ok {
+			return fmt.Errorf("%s listenInterfaces unknown: %s", prefix, n)
 		}
 	}
 	return nil

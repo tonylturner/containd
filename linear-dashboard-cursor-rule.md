@@ -82,13 +82,14 @@
 
 When writing CSS/Tailwind or theming:
 
-- **Use CSS variables** for all colors (e.g. `--color-primary`, `--color-bg`, etc.).
-- **Use HSL values** in the CSS variables wherever possible (easier to adjust lightness/saturation).
+- **Prefer CSS variables** for all colors (e.g. `--color-primary`, `--color-bg`, etc.).
+- **Allowed dashboard utility palette**: when matching the existing dashboard, use the same Tailwind utilities already in use (e.g. `bg-white/5`, `border-white/10`, `bg-black/30`, `bg-black/40`, `text-slate-300`, `text-slate-100`, `text-slate-400`, `text-white`). Do not introduce new hardcoded hex values or new color families.
+- **Use HSL values** in the CSS variables wherever possible (easier to adjust lightness/saturation) when adding new tokens.
 - Support **both dark and light modes**:
   - Dark mode default for “pro” / dashboard feel.
   - Light mode must still be polished and consistent.
 - Maintain at least **4.5:1 contrast ratio** for text vs background.
-- Do **not** hardcode hex colors directly inside components; reference CSS vars or Tailwind theme tokens.
+- Do **not** hardcode hex colors directly inside components; reference CSS vars or the allowed dashboard utility palette.
 
 ---
 
@@ -122,6 +123,16 @@ When building new screens, **treat everything as part of a modern analytics dash
 - **Dashboard Layout**
   - Above-the-fold: concise KPIs and primary charts.
   - Use **cards** for grouping content: consistent padding, rounded corners, subtle shadows.
+- **Current Dashboard Reference (authoritative)**
+  - **Card shell**: `rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur`
+  - **Card title**: `text-xs uppercase tracking-[0.2em] text-slate-300`
+  - **Key/value rows**: label `text-slate-300`, value `text-slate-100`
+  - **Quick stats tiles**: `rounded-lg border border-white/10 bg-black/30 p-3 hover:bg-black/40`
+  - **Status chips**:
+    - Success: `bg-mint/15 text-mint`
+    - Warning/off: `bg-amber/15 text-amber`
+  - **Section meta text**: `text-xs text-slate-400`
+  - **Skeletons**: use `Skeleton` component for cards and charts to avoid layout shifts
 - **Common Component Types**
   - **KPI Cards**  
     - Small cards with title, main value, trend (up/down), period.

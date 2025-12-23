@@ -247,6 +247,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set port-forward enable", RoleAdmin, setPortForwardEnableAPI(api, true))
 		r.RegisterRole("set port-forward disable", RoleAdmin, setPortForwardEnableAPI(api, false))
 		r.RegisterRole("set dataplane", RoleAdmin, setDataPlaneAPI(api))
+		r.RegisterRole("set dataplane block host", RoleAdmin, setDataPlaneBlockHostAPI(api))
+		r.RegisterRole("set dataplane block flow", RoleAdmin, setDataPlaneBlockFlowAPI(api))
 		r.RegisterRole("set system hostname", RoleAdmin, setSystemHostnameAPI(api))
 		r.RegisterRole("set system mgmt listen", RoleAdmin, setSystemMgmtListenAPI(api))
 		r.RegisterRole("set system mgmt http listen", RoleAdmin, setSystemMgmtHTTPListenAPI(api))
@@ -1130,6 +1132,49 @@ func setDataPlaneAPI(api *API) Command {
 			dp.CaptureInterfaces = args[3:]
 		}
 		return api.postJSON(ctx, "/api/v1/dataplane", dp, out)
+	}
+}
+
+func setDataPlaneBlockHostAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		// usage: set dataplane block host <ip> [ttlSeconds]
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set dataplane block host <ip> [ttlSeconds]")
+		}
+		payload := map[string]any{
+			"ip": args[0],
+		}
+		if len(args) > 1 {
+			ttl, err := strconv.Atoi(args[1])
+			if err != nil || ttl < 0 {
+				return fmt.Errorf("invalid ttlSeconds: %s", args[1])
+			}
+			payload["ttlSeconds"] = ttl
+		}
+		return api.postJSON(ctx, "/api/v1/dataplane/blocks/host", payload, out)
+	}
+}
+
+func setDataPlaneBlockFlowAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		// usage: set dataplane block flow <srcIp> <dstIp> <proto> <dstPort> [ttlSeconds]
+		if len(args) < 4 {
+			return fmt.Errorf("usage: set dataplane block flow <srcIp> <dstIp> <proto> <dstPort> [ttlSeconds]")
+		}
+		payload := map[string]any{
+			"srcIp":   args[0],
+			"dstIp":   args[1],
+			"proto":   args[2],
+			"dstPort": args[3],
+		}
+		if len(args) > 4 {
+			ttl, err := strconv.Atoi(args[4])
+			if err != nil || ttl < 0 {
+				return fmt.Errorf("invalid ttlSeconds: %s", args[4])
+			}
+			payload["ttlSeconds"] = ttl
+		}
+		return api.postJSON(ctx, "/api/v1/dataplane/blocks/flow", payload, out)
 	}
 }
 

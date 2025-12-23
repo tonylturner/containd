@@ -1,8 +1,8 @@
 package rules
 
 import (
-	"net"
 	"fmt"
+	"net"
 	"strconv"
 )
 
@@ -14,6 +14,20 @@ type EvalContext struct {
 	DstIP   net.IP
 	Proto   string // tcp, udp, icmp
 	Port    string // dest port as string (e.g., "80")
+	// Identities represent user/group or identity tags associated with the flow.
+	Identities []string
+	// ICS provides decoded ICS metadata for predicate matching.
+	ICS *ICSContext
+}
+
+// ICSContext represents decoded ICS metadata for rule evaluation.
+type ICSContext struct {
+	Protocol     string
+	FunctionCode uint8
+	UnitID       *uint8
+	Address      string
+	ReadOnly     bool
+	WriteOnly    bool
 }
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
@@ -30,7 +44,7 @@ func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 		return ActionDeny
 	}
 	for _, entry := range e.snapshot.Firewall {
-		if matchZones(entry, ctx) && matchCIDRs(entry, ctx) && matchProto(entry, ctx) {
+		if matchZones(entry, ctx) && matchCIDRs(entry, ctx) && matchProto(entry, ctx) && matchIdentities(entry, ctx) && matchICS(entry, ctx) {
 			return entry.Action
 		}
 	}
@@ -78,6 +92,74 @@ func matchProto(entry Entry, ctx EvalContext) bool {
 	return false
 }
 
+func matchIdentities(entry Entry, ctx EvalContext) bool {
+	if len(entry.Identities) == 0 {
+		return true
+	}
+	if len(ctx.Identities) == 0 {
+		return false
+	}
+	for _, id := range entry.Identities {
+		if id == "" {
+			continue
+		}
+		for _, got := range ctx.Identities {
+			if id == got {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchICS(entry Entry, ctx EvalContext) bool {
+	if icsPredicateEmpty(entry.ICS) {
+		return true
+	}
+	if ctx.ICS == nil {
+		return false
+	}
+	if entry.ICS.Protocol != "" && entry.ICS.Protocol != ctx.ICS.Protocol {
+		return false
+	}
+	if len(entry.ICS.FunctionCode) > 0 {
+		match := false
+		for _, fc := range entry.ICS.FunctionCode {
+			if fc == ctx.ICS.FunctionCode {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	if entry.ICS.UnitID != nil {
+		if ctx.ICS.UnitID == nil || *entry.ICS.UnitID != *ctx.ICS.UnitID {
+			return false
+		}
+	}
+	if len(entry.ICS.Addresses) > 0 {
+		addrMatch := false
+		for _, addr := range entry.ICS.Addresses {
+			if addr == ctx.ICS.Address {
+				addrMatch = true
+				break
+			}
+		}
+		if !addrMatch {
+			return false
+		}
+	}
+	if entry.ICS.ReadOnly && !ctx.ICS.ReadOnly {
+		return false
+	}
+	if entry.ICS.WriteOnly && !ctx.ICS.WriteOnly {
+		return false
+	}
+	return true
+}
+
 func contains(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {
@@ -85,6 +167,15 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func icsPredicateEmpty(p ICSPredicate) bool {
+	return p.Protocol == "" &&
+		len(p.FunctionCode) == 0 &&
+		p.UnitID == nil &&
+		len(p.Addresses) == 0 &&
+		!p.ReadOnly &&
+		!p.WriteOnly
 }
 
 // portMatches supports single ports and ranges like "1000-2000".

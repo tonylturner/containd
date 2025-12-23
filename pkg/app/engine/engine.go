@@ -133,6 +133,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())
+	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
+	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
 	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
@@ -178,6 +180,92 @@ func wireguardStatusHandler() http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(st)
+	}
+}
+
+type blockHostRequest struct {
+	IP         string `json:"ip"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+type blockFlowRequest struct {
+	SrcIP      string `json:"srcIp"`
+	DstIP      string `json:"dstIp"`
+	Proto      string `json:"proto"`
+	DstPort    string `json:"dstPort"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+func blockHostHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil || dp.Updater() == nil {
+			http.Error(w, "updater unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var req blockHostRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(strings.TrimSpace(req.IP))
+		if ip == nil || ip.To4() == nil {
+			http.Error(w, "invalid ip", http.StatusBadRequest)
+			return
+		}
+		if req.TTLSeconds < 0 {
+			http.Error(w, "ttlSeconds must be >= 0", http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := dp.Updater().BlockHostTemp(r.Context(), ip, ttl); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil || dp.Updater() == nil {
+			http.Error(w, "updater unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var req blockFlowRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		srcIP := net.ParseIP(strings.TrimSpace(req.SrcIP))
+		dstIP := net.ParseIP(strings.TrimSpace(req.DstIP))
+		if srcIP == nil || srcIP.To4() == nil || dstIP == nil || dstIP.To4() == nil {
+			http.Error(w, "invalid flow ip", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Proto) == "" || strings.TrimSpace(req.DstPort) == "" {
+			http.Error(w, "proto and dstPort required", http.StatusBadRequest)
+			return
+		}
+		if req.TTLSeconds < 0 {
+			http.Error(w, "ttlSeconds must be >= 0", http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := dp.Updater().BlockFlowTemp(r.Context(), srcIP, dstIP, strings.ToLower(strings.TrimSpace(req.Proto)), strings.TrimSpace(req.DstPort), ttl); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
 }
 

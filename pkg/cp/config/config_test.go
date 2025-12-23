@@ -112,6 +112,51 @@ func TestValidateAssets(t *testing.T) {
 	}
 }
 
+func TestValidateObjects(t *testing.T) {
+	cfg := Config{
+		Objects: []Object{
+			{ID: "host1", Name: "plc-host", Type: ObjectHost, Addresses: []string{"10.0.0.5"}},
+			{ID: "net1", Name: "ot-net", Type: ObjectSubnet, Addresses: []string{"10.0.0.0/24"}},
+			{ID: "svc1", Name: "modbus", Type: ObjectService, Protocols: []Protocol{{Name: "tcp", Port: "502"}}},
+			{ID: "grp1", Name: "ot-assets", Type: ObjectGroup, Members: []string{"host1", "net1"}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid objects, got %v", err)
+	}
+	cfg.Objects = append(cfg.Objects, Object{ID: "host1", Name: "dup", Type: ObjectHost, Addresses: []string{"10.0.0.6"}})
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected duplicate object id error")
+	}
+}
+
+func TestValidateVPNListenTargets(t *testing.T) {
+	cfg := Config{
+		Zones: []Zone{{Name: "wan"}},
+		Interfaces: []Interface{
+			{Name: "wan0", Device: "eth0", Zone: "wan"},
+		},
+		Services: ServicesConfig{
+			VPN: VPNConfig{
+				WireGuard: WireGuardConfig{
+					Enabled:          true,
+					ListenPort:       51820,
+					ListenZone:       "bad-zone",
+					ListenInterfaces: []string{"eth0"},
+				},
+			},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid listenZone error")
+	}
+	cfg.Services.VPN.WireGuard.ListenZone = "wan"
+	cfg.Services.VPN.WireGuard.ListenInterfaces = []string{"missing"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected invalid listenInterfaces error")
+	}
+}
+
 func TestValidateDataPlaneConfig(t *testing.T) {
 	cfg := Config{
 		DataPlane: DataPlaneConfig{
