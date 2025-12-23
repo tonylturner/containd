@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -421,6 +422,27 @@ func (r *Registry) Commands() []string {
 	for k := range r.commands {
 		out = append(out, k)
 	}
+	return out
+}
+
+// CommandsForRole returns commands available to the given role.
+func (r *Registry) CommandsForRole(role Role) []string {
+	if r == nil || r.commands == nil {
+		return nil
+	}
+	out := make([]string, 0, len(r.commands))
+	for name := range r.commands {
+		required := RoleView
+		if r.roles != nil {
+			if v, ok := r.roles[name]; ok && v != "" {
+				required = v
+			}
+		}
+		if allowed(required, role) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kballard/go-shellquote"
 
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/cp/audit"
@@ -244,6 +245,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
+		protected.GET("/cli/commands", cliCommandsHandler(store))
+		protected.GET("/cli/complete", cliCompleteHandler(store))
 		protected.GET("/cli/ws", cliWSHandler(store))
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
@@ -1681,6 +1684,53 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+func cliCommandsHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		_, reg := cliRegistryForRequest(c, store)
+		role := cli.RoleView
+		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
+			role = cli.RoleAdmin
+		}
+		c.JSON(http.StatusOK, reg.CommandsForRole(role))
+	}
+}
+
+func cliCompleteHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		line := c.Query("line")
+		if strings.TrimSpace(line) == "" {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		tokens, err := shellquote.Split(line)
+		if err != nil {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		if strings.HasSuffix(line, " ") {
+			tokens = append(tokens, "")
+		}
+		_, reg := cliRegistryForRequest(c, store)
+		role := cli.RoleView
+		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
+			role = cli.RoleAdmin
+		}
+		cmds := reg.CommandsForRole(role)
+		cmdName, args := matchCommandTokens(tokens, cmds)
+		if cmdName == "" {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		suggestions := completeCLIArgs(cmdName, args, cfg, cmds)
+		c.JSON(http.StatusOK, suggestions)
+	}
+}
+
 func cliWSHandler(store config.Store) gin.HandlerFunc {
 	type req struct {
 		Line string `json:"line"`
@@ -1804,14 +1854,633 @@ func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context,
 	}
 	// Pass through the caller's bearer token so in-app console commands
 	// can access the same protected endpoints as the UI session.
-	if h := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
-		apiClient.Token = strings.TrimSpace(h[len("bearer "):])
-	} else if ck, err := c.Cookie("containd_token"); err == nil && strings.TrimSpace(ck) != "" {
-		apiClient.Token = strings.TrimSpace(ck)
+	if tok := strings.TrimSpace(bearerOrCookie(c)); tok != "" {
+		apiClient.Token = tok
 	}
 	ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
 	reg := cli.NewRegistry(store, apiClient)
 	return ctx, reg
+}
+
+func matchCommandTokens(tokens []string, available []string) (string, []string) {
+	if len(tokens) == 0 {
+		return "", nil
+	}
+	tokensForMatch := tokens
+	if len(tokensForMatch) > 0 && tokensForMatch[len(tokensForMatch)-1] == "" {
+		tokensForMatch = tokensForMatch[:len(tokensForMatch)-1]
+	}
+	availSet := map[string]struct{}{}
+	for _, a := range available {
+		availSet[a] = struct{}{}
+	}
+	for i := len(tokensForMatch); i > 0; i-- {
+		candidate := strings.ToLower(strings.Join(tokensForMatch[:i], " "))
+		if _, ok := availSet[candidate]; ok {
+			args := tokensForMatch[i:]
+			if len(tokens) > 0 && tokens[len(tokens)-1] == "" {
+				args = append(args, "")
+			}
+			return candidate, args
+		}
+	}
+	return "", nil
+}
+
+func completeCLIArgs(cmd string, args []string, cfg *config.Config, allCommands []string) []string {
+	prefix := ""
+	if len(args) > 0 {
+		prefix = args[len(args)-1]
+	}
+	argIndex := len(args) - 1
+	prev := ""
+	if len(args) >= 2 {
+		prev = strings.ToLower(strings.TrimSpace(args[len(args)-2]))
+	}
+	ifaces := interfaceNames(cfg)
+	zones := zoneNames(cfg)
+	rules := firewallRuleIDs(cfg)
+	portForwards := portForwardIDs(cfg)
+	gateways := gatewayAddresses(cfg)
+	switch cmd {
+	case "help":
+		if argIndex == 0 {
+			return filterPrefix(allCommands, prefix)
+		}
+	case "show help":
+		if argIndex == 0 {
+			return filterPrefix(filterCommandPrefix(allCommands, "show "), prefix)
+		}
+	case "set help":
+		if argIndex == 0 {
+			return filterPrefix(filterCommandPrefix(allCommands, "set "), prefix)
+		}
+	case "set zone":
+		if argIndex == 0 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set interface":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex >= 2 {
+			return filterPrefix([]string{"<cidr...>", "none"}, prefix)
+		}
+	case "set interface ip":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"static", "dhcp", "none"}, prefix)
+		}
+		if argIndex >= 2 && len(args) >= 2 && strings.EqualFold(strings.TrimSpace(args[1]), "static") {
+			return filterPrefix([]string{"<cidr>", "[gateway]"}, prefix)
+		}
+	case "set interface zone":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set interface bind":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set interface bridge":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			if len(ifaces) > 0 {
+				return filterPrefix(ifaces, prefix)
+			}
+			return filterPrefix([]string{"<members_csv>"}, prefix)
+		}
+		if argIndex >= 3 {
+			return filterPrefix([]string{"<cidr...>"}, prefix)
+		}
+	case "set interface vlan":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 3 {
+			return filterPrefix([]string{"<vlan_id>"}, prefix)
+		}
+		if argIndex >= 4 {
+			return filterPrefix([]string{"<cidr...>"}, prefix)
+		}
+	case "assign interfaces":
+		if argIndex >= 0 {
+			suggestions := append([]string{"auto"}, ifaceAssignHints(ifaces)...)
+			return filterPrefix(suggestions, prefix)
+		}
+	case "set firewall rule":
+		if argIndex == 0 {
+			return filterPrefix(rules, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"ALLOW", "DENY", "allow", "deny"}, prefix)
+		}
+		if argIndex == 2 || argIndex == 3 {
+			return filterPrefix(zones, prefix)
+		}
+	case "delete firewall rule":
+		if argIndex == 0 {
+			return filterPrefix(rules, prefix)
+		}
+	case "set port-forward del", "set port-forward enable", "set port-forward disable":
+		if argIndex == 0 {
+			return filterPrefix(portForwards, prefix)
+		}
+	case "set port-forward add":
+		if argIndex == 1 {
+			return filterPrefix(zones, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"tcp", "udp"}, prefix)
+		}
+		if prev == "sources" {
+			return filterPrefix([]string{"<cidr1,cidr2>"}, prefix)
+		}
+		if prev == "desc" {
+			return filterPrefix([]string{"<text>"}, prefix)
+		}
+	case "set dataplane":
+		if argIndex == 0 {
+			return filterPrefix([]string{"enforcement"}, prefix)
+		}
+		if argIndex == 1 && strings.EqualFold(strings.TrimSpace(args[0]), "enforcement") {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+		if argIndex >= 3 && strings.EqualFold(strings.TrimSpace(args[0]), "enforcement") {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set proxy forward":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+		if argIndex >= 2 {
+			return filterPrefix(zones, prefix)
+		}
+	case "set proxy reverse":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off", "true", "false"}, prefix)
+		}
+	case "set nat":
+		if argIndex == 0 {
+			return filterPrefix([]string{"on", "off"}, prefix)
+		}
+		if prev == "egress" {
+			if len(zones) > 0 {
+				return filterPrefix(append([]string{"default"}, zones...), prefix)
+			}
+			return filterPrefix([]string{"default", "<zone>"}, prefix)
+		}
+		if prev == "sources" {
+			if len(zones) > 0 {
+				return filterPrefix(append([]string{"default"}, zones...), prefix)
+			}
+			return filterPrefix([]string{"default", "<zone1,zone2>"}, prefix)
+		}
+		return filterPrefix(append([]string{"egress", "sources"}, zones...), prefix)
+	case "diag reach":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"tcp", "udp", "icmp"}, prefix)
+		}
+	case "diag capture":
+		if argIndex == 0 {
+			return filterPrefix(ifaces, prefix)
+		}
+	case "set route add", "set route del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"default", "<dst>"}, prefix)
+		}
+		if prev == "via" || prev == "gw" || prev == "gateway" {
+			if len(gateways) > 0 {
+				return filterPrefix(gateways, prefix)
+			}
+			return filterPrefix([]string{"<gw>"}, prefix)
+		}
+		if prev == "dev" || prev == "iface" {
+			return filterPrefix(ifaces, prefix)
+		}
+		return filterPrefix([]string{"via", "dev", "iface", "table", "metric", "gw", "gateway"}, prefix)
+	case "set ip rule add":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<table>"}, prefix)
+		}
+		if prev == "src" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "dst" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "priority" {
+			return filterPrefix([]string{"<n>"}, prefix)
+		}
+		return filterPrefix([]string{"src", "dst", "priority"}, prefix)
+	case "set ip rule del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<table>"}, prefix)
+		}
+		if prev == "src" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "dst" {
+			return filterPrefix([]string{"<cidr>"}, prefix)
+		}
+		if prev == "priority" {
+			return filterPrefix([]string{"<n>"}, prefix)
+		}
+		return filterPrefix([]string{"src", "dst", "priority", "all"}, prefix)
+	case "set syslog format":
+		if argIndex == 0 {
+			return filterPrefix([]string{"rfc5424", "json"}, prefix)
+		}
+	case "set syslog forwarder add":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<address>"}, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"<port>"}, prefix)
+		}
+		if argIndex == 2 {
+			return filterPrefix([]string{"udp", "tcp"}, prefix)
+		}
+	case "set syslog forwarder del":
+		if argIndex == 0 {
+			return filterPrefix([]string{"<address>"}, prefix)
+		}
+		if argIndex == 1 {
+			return filterPrefix([]string{"<port>"}, prefix)
+		}
+	}
+	if hints := usageHints(cmd, argIndex, args); len(hints) > 0 {
+		return filterPrefix(hints, prefix)
+	}
+	return nil
+}
+
+func filterPrefix(candidates []string, prefix string) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	needle := strings.ToLower(strings.TrimSpace(prefix))
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(candidates))
+	for _, cand := range candidates {
+		c := strings.TrimSpace(cand)
+		if c == "" {
+			continue
+		}
+		if needle != "" && !strings.HasPrefix(strings.ToLower(c), needle) {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func interfaceNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Interfaces))
+	for _, iface := range cfg.Interfaces {
+		if strings.TrimSpace(iface.Name) != "" {
+			out = append(out, iface.Name)
+		}
+	}
+	return out
+}
+
+func zoneNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Zones))
+	for _, z := range cfg.Zones {
+		if strings.TrimSpace(z.Name) != "" {
+			out = append(out, z.Name)
+		}
+	}
+	return out
+}
+
+func firewallRuleIDs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Firewall.Rules))
+	for _, r := range cfg.Firewall.Rules {
+		if strings.TrimSpace(r.ID) != "" {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+func portForwardIDs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Firewall.NAT.PortForwards))
+	for _, pf := range cfg.Firewall.NAT.PortForwards {
+		if strings.TrimSpace(pf.ID) != "" {
+			out = append(out, pf.ID)
+		}
+	}
+	return out
+}
+
+func gatewayAddresses(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Routing.Gateways))
+	for _, gw := range cfg.Routing.Gateways {
+		if strings.TrimSpace(gw.Address) != "" {
+			out = append(out, gw.Address)
+		}
+	}
+	return out
+}
+
+func ifaceAssignHints(ifaces []string) []string {
+	out := make([]string, 0, len(ifaces))
+	for _, name := range ifaces {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		out = append(out, name+"=")
+	}
+	return out
+}
+
+func filterCommandPrefix(commands []string, prefix string) []string {
+	out := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, prefix) {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+func usageHints(cmd string, argIndex int, args []string) []string {
+	switch cmd {
+	case "convert sigma":
+		if argIndex == 0 {
+			return []string{"<sigma.yml>"}
+		}
+	case "factory reset":
+		if argIndex == 0 {
+			return []string{"NUCLEAR"}
+		}
+	case "commit confirmed":
+		if argIndex == 0 {
+			return []string{"<ttl_seconds>"}
+		}
+	case "import config":
+		if argIndex == 0 {
+			return []string{"<path>"}
+		}
+	case "export config":
+		if argIndex == 0 {
+			return []string{"<path>"}
+		}
+	case "diag ping":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"[count]"}
+		}
+	case "diag traceroute":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"[max_hops]"}
+		}
+	case "diag tcptraceroute":
+		if argIndex == 0 {
+			return []string{"<host>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+		if argIndex == 2 {
+			return []string{"[max_hops]"}
+		}
+	case "diag reach":
+		if argIndex == 0 {
+			return []string{"<src_iface>"}
+		}
+		if argIndex == 1 {
+			return []string{"<dst_host|dst_ip|dst_iface>"}
+		}
+		if argIndex == 2 {
+			return []string{"tcp", "udp", "icmp", "[tcp_port]"}
+		}
+		if argIndex == 3 {
+			return []string{"[port]"}
+		}
+	case "diag capture":
+		if argIndex == 0 {
+			return []string{"<iface>"}
+		}
+		if argIndex == 1 {
+			return []string{"[seconds]"}
+		}
+		if argIndex == 2 {
+			return []string{"[file]"}
+		}
+	case "diag routing reconcile", "diag interfaces reconcile":
+		if argIndex == 0 {
+			return []string{"REPLACE"}
+		}
+	case "set syslog format":
+		if argIndex == 0 {
+			return []string{"rfc5424", "json"}
+		}
+	case "set syslog forwarder add":
+		if argIndex == 0 {
+			return []string{"<address>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+		if argIndex == 2 {
+			return []string{"udp", "tcp"}
+		}
+	case "set syslog forwarder del":
+		if argIndex == 0 {
+			return []string{"<address>"}
+		}
+		if argIndex == 1 {
+			return []string{"<port>"}
+		}
+	case "set system hostname":
+		if argIndex == 0 {
+			return []string{"<name>"}
+		}
+	case "set system mgmt listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt http listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt https listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system mgmt http enable":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt https enable":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt redirect-http-to-https":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system mgmt hsts":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+		if argIndex == 1 {
+			return []string{"[max_age_seconds]"}
+		}
+	case "set system ssh listen":
+		if argIndex == 0 {
+			return []string{"<addr>"}
+		}
+	case "set system ssh allow-password":
+		if argIndex == 0 {
+			return []string{"true", "false"}
+		}
+	case "set system ssh authorized-keys-dir":
+		if argIndex == 0 {
+			return []string{"<dir>"}
+		}
+	case "set interface ip":
+		if argIndex == 2 && len(args) >= 2 && strings.EqualFold(strings.TrimSpace(args[1]), "static") {
+			return []string{"<cidr>", "[gateway]"}
+		}
+	case "set interface bind":
+		if argIndex == 1 {
+			return []string{"<os_iface>"}
+		}
+	case "set interface bridge":
+		if argIndex == 2 {
+			return []string{"<members_csv>"}
+		}
+	case "set interface vlan":
+		if argIndex == 3 {
+			return []string{"<vlan_id>"}
+		}
+	case "set firewall rule":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+		if argIndex == 1 {
+			return []string{"ALLOW", "DENY"}
+		}
+	case "delete firewall rule":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+	case "set port-forward add":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+		if argIndex == 2 {
+			return []string{"tcp", "udp"}
+		}
+		if argIndex == 3 {
+			return []string{"<listen_port>"}
+		}
+		if argIndex == 4 {
+			return []string{"<dest_ip[:dest_port]>"}
+		}
+		if argIndex >= 5 {
+			return []string{"sources", "desc", "off"}
+		}
+	case "set port-forward del", "set port-forward enable", "set port-forward disable":
+		if argIndex == 0 {
+			return []string{"<id>"}
+		}
+	case "set proxy forward":
+		if argIndex == 0 {
+			return []string{"on", "off", "true", "false"}
+		}
+		if argIndex == 1 {
+			return []string{"[port]"}
+		}
+	case "set proxy reverse":
+		if argIndex == 0 {
+			return []string{"on", "off", "true", "false"}
+		}
+	case "set nat":
+		if argIndex == 0 {
+			return []string{"on", "off"}
+		}
+		if argIndex >= 1 {
+			return []string{"egress", "sources"}
+		}
+	case "set dataplane":
+		if argIndex == 0 {
+			return []string{"enforcement"}
+		}
+		if argIndex == 1 {
+			return []string{"on", "off", "true", "false"}
+		}
+		if argIndex == 2 {
+			return []string{"[table]"}
+		}
+	case "set route add", "set route del":
+		if argIndex == 0 {
+			return []string{"default"}
+		}
+		if argIndex >= 1 {
+			return []string{"via", "dev", "iface", "table", "metric", "gw", "gateway"}
+		}
+	case "set ip rule add":
+		if argIndex >= 1 {
+			return []string{"src", "dst", "priority"}
+		}
+	case "set ip rule del":
+		if argIndex >= 1 {
+			return []string{"src", "dst", "priority", "all"}
+		}
+	}
+	return nil
 }
 
 func getFirewallNATHandler(store config.Store) gin.HandlerFunc {

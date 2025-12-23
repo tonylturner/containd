@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import {
   api,
@@ -21,6 +22,7 @@ import {
   type PortForward,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { InfoTip } from "../../components/InfoTip";
 
 function zoneLabel(zone: Zone): string {
@@ -95,6 +97,40 @@ export default function FirewallPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
+  const tips: Tip[] = [
+    {
+      id: "firewall:zones",
+      title: "Create zones first",
+      body: (
+        <>
+          Define zones in{" "}
+          <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+            Zones
+          </Link>{" "}
+          so you can target them in rules.
+        </>
+      ),
+      when: () => zones.length === 0,
+    },
+    {
+      id: "firewall:first-rule",
+      title: "Add your first rule",
+      body: "Start with a simple allow rule between LAN and WAN, then tighten later.",
+      when: () => zones.length > 0 && rules.length === 0,
+    },
+    {
+      id: "firewall:nat",
+      title: "Enable NAT for outbound access",
+      body: "Turn on SNAT to allow LAN hosts to reach the Internet.",
+      when: () => zones.length > 0 && rules.length > 0 && !nat.enabled,
+    },
+    {
+      id: "firewall:ics",
+      title: "Advance to ICS policies",
+      body: "Add ICS rules to safely control protocol-specific behavior.",
+      when: () => rules.length > 0,
+    },
+  ];
 
   async function refresh() {
     const [r, z, n, rt, dp] = await Promise.all([
@@ -322,6 +358,7 @@ export default function FirewallPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <TipsBanner tips={tips} className="mb-4" />
       <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-white">Outbound readiness</div>

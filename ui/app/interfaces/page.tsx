@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { TipsBanner, type Tip } from "../../components/TipsBanner";
 
 function firstIPv4CIDR(addrs: string[] | null | undefined): string | null {
   for (const a of addrs ?? []) {
@@ -52,6 +55,34 @@ export default function InterfacesPage() {
   const [reconciling, setReconciling] = useState(false);
 
   const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
+  const tips: Tip[] = [
+    {
+      id: "interfaces:zones",
+      title: "Create zones first",
+      body: (
+        <>
+          Add zones in{" "}
+          <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+            Zones
+          </Link>{" "}
+          so you can assign them to interfaces.
+        </>
+      ),
+      when: () => zones.length === 0,
+    },
+    {
+      id: "interfaces:binding",
+      title: "Bind interfaces to OS devices",
+      body: "Use Auto-assign or pick a Device so the engine can apply addresses and rules.",
+      when: () => unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0,
+    },
+    {
+      id: "interfaces:ips",
+      title: "Add IP addresses",
+      body: "Set static addresses or DHCP per interface to make routing work.",
+      when: () => ifaces.length > 0,
+    },
+  ];
 
   async function refresh() {
     const [i, z, s] = await Promise.all([
@@ -247,6 +278,7 @@ export default function InterfacesPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <TipsBanner tips={tips} className="mb-4" />
       {notice && (
         <div className="mb-4 rounded-xl border border-mint/20 bg-mint/10 px-4 py-3 text-sm text-mint">
           {notice}
@@ -769,7 +801,7 @@ function InterfaceRow({
           const hasNetwork = network !== "—";
           return (
             <span className="relative inline-flex items-center justify-center rounded-md border border-white/10 bg-white/5 p-1 text-slate-200 group">
-              <img src="/icons/docker.svg" alt="Docker" className="h-4 w-4" />
+              <Image src="/icons/docker.svg" alt="Docker" width={16} height={16} className="h-4 w-4" />
               <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-white/10 bg-black/90 px-3 py-2 text-xs text-slate-200 opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
                 <div className="font-semibold text-white">Network</div>
                 <div className="mt-1 text-slate-200">

@@ -1015,8 +1015,11 @@ export const api = {
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
 
+  listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
     postJSON<CLIExecuteResponse>("/api/v1/cli/execute", { line }),
+  completeCLI: (line: string) =>
+    getJSON<string[]>(`/api/v1/cli/complete?line=${encodeURIComponent(line)}`),
 
   // Config lifecycle
   getRunningConfig: () => getJSON<ConfigBundle>("/api/v1/config"),

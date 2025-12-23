@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 
 import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
@@ -223,7 +224,7 @@ export default function MonitoringOverviewPage() {
           <div className="space-y-3 text-xs text-slate-300">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-slate-400">
-                <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
+                <Image src="/icons/nginx.svg" alt="" width={16} height={16} className="h-4 w-4" />
                 Proxies
               </span>
               <span>
@@ -243,7 +244,7 @@ export default function MonitoringOverviewPage() {
                   className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2"
                 >
                   <span className="flex items-center gap-2 text-slate-300">
-                    <img src={svc.icon} alt="" className="h-4 w-4" />
+                    <Image src={svc.icon} alt="" width={16} height={16} className="h-4 w-4" />
                     {svc.label}
                   </span>
                   <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] text-slate-200">

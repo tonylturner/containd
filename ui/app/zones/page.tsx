@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { api, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { TipsBanner, type Tip } from "../../components/TipsBanner";
 
 export default function ZonesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
@@ -65,6 +67,29 @@ export default function ZonesPage() {
     refresh();
   }
 
+  const tips: Tip[] = [
+    {
+      id: "zones:create",
+      title: "Create your first zone",
+      body: "Start with WAN, DMZ, and LAN to segment traffic.",
+      when: () => zones.length === 0,
+    },
+    {
+      id: "zones:assign",
+      title: "Assign zones to interfaces",
+      body: (
+        <>
+          Go to{" "}
+          <Link href="/interfaces/" className="font-semibold text-mint hover:text-mint/80">
+            Interfaces
+          </Link>{" "}
+          to bind zones to ports.
+        </>
+      ),
+      when: () => zones.length > 0,
+    },
+  ];
+
   return (
     <Shell
       title="Zones"
@@ -82,6 +107,7 @@ export default function ZonesPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <TipsBanner tips={tips} className="mb-4" />
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">

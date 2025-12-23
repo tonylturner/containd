@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -194,8 +195,8 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("proxy")}
         >
           <div className="flex items-center gap-2 text-xs text-slate-300">
-            <img src="/icons/envoyproxy.svg" alt="" className="h-4 w-4" />
-            <img src="/icons/nginx.svg" alt="" className="h-4 w-4" />
+            <Image src="/icons/envoyproxy.svg" alt="" width={16} height={16} className="h-4 w-4" />
+            <Image src="/icons/nginx.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <span>Envoy + Nginx</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-200">
@@ -345,8 +346,8 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("vpn")}
         >
           <div className="flex items-center gap-2 text-xs text-slate-300">
-            <img src="/icons/wireguard.svg" alt="" className="h-4 w-4" />
-            <img src="/icons/openvpn.svg" alt="" className="h-4 w-4" />
+            <Image src="/icons/wireguard.svg" alt="" width={16} height={16} className="h-4 w-4" />
+            <Image src="/icons/openvpn.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <span>WireGuard + OpenVPN</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-200">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 
 import {
   api,
@@ -218,7 +219,7 @@ export default function ProxiesPage() {
       <div className="mb-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <div className="flex items-center gap-3">
-            <img src="/icons/envoyproxy.svg" alt="" className="h-5 w-5" />
+            <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
             <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
           </div>
@@ -263,7 +264,7 @@ export default function ProxiesPage() {
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
           <div className="flex items-center gap-3">
-            <img src="/icons/nginx.svg" alt="" className="h-5 w-5" />
+            <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
             <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
           </div>
