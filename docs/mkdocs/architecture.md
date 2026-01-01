@@ -6,7 +6,7 @@ This document tracks the high-level architecture for containd as it evolves.
 
 ## Planes
 - **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), capture, flow tracking, rule evaluator, DPI/IDS (selective).
-- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/DNS/NTP/DHCP/VPN/AV/proxies), policy compilation → rule snapshots/nftables sets, audit, identity (placeholder), embedded-daemon config generation.
+- **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/DNS/NTP/DHCP/VPN/AV/proxies), policy compilation → rule snapshots/nftables sets, audit, identity (phased), embedded-daemon config generation.
 - **Management plane (`containd mgmt` + UI + CLI)**: REST API (`api/http`), UI serving, CLI/SSH, config lifecycle (candidate/commit/commit-confirmed/rollback/export/import/backups), audit, dashboards.
 
 ## Integrated daemons (per `agents.md`)
@@ -22,12 +22,12 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 - `pkg/cp/services`: syslog/DNS/NTP/proxy/VPN/AV managers render configs; optional supervision of embedded daemons (Envoy/Nginx/Unbound/OpenNTPD/ClamAV) with validation + service events.
 - `pkg/common/logging`: zap-based structured logger helper (stdout + optional rotation) plus legacy prefixed UTC helpers.
 - `pkg/cli`: command registry with API-backed show/set/delete for config, commit/rollback, audit, services, and diagnostics.
-- `pkg/dp/capture`: capture manager placeholder (NFQUEUE/AF_PACKET planned).
-- `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity placeholders).
+- `pkg/dp/capture`: AF_PACKET capture worker (Linux) with interface validation; NFQUEUE steering planned.
+- `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity predicates matched when present).
 - `pkg/dp/engine`: harness to start capture, swap/apply rule snapshots, evaluate contexts, and apply verdict-driven updates.
 - `pkg/dp/enforce`: nftables compile/apply skeleton with dynamic block sets.
 - `pkg/dp/dpi`: selective DPI framework and decoder manager; HTTP previews feed AV queue; ICS marker tags OT protocols for AV fail-open.
-- `pkg/dp/ics`: ICS protocol decoders (Modbus/TCP skeleton added).
+- `pkg/dp/ics`: ICS protocol decoders (Modbus/TCP).
 - `pkg/dp/verdict`: verdict types/actions used by enforcement paths.
 - IDS evaluation lives in `pkg/dp/ids`; eBPF remains optional and unimplemented.
 

@@ -61,8 +61,7 @@ func (c *ICAPClient) Probe(ctx context.Context, srv config.ICAPServer) error {
 	return nil
 }
 
-// Scan is a placeholder that currently probes connectivity and returns "clean".
-// This version streams a small payload via RESPmod-like request and treats 2xx as clean, 4xx/5xx as errors, and X-Verdict headers as detections.
+// Scan performs a minimal RESPmod-like request and treats 2xx as clean, 4xx/5xx as errors, and X-Verdict headers as detections.
 func (c *ICAPClient) Scan(ctx context.Context, srv config.ICAPServer, payload []byte) (string, error) {
 	if c == nil {
 		return "", fmt.Errorf("icap client nil")

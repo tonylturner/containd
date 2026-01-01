@@ -21,11 +21,9 @@ import (
 	"github.com/containd/containd/pkg/dp/capture"
 	"github.com/containd/containd/pkg/dp/conntrack"
 	"github.com/containd/containd/pkg/dp/dhcpd"
-	"github.com/containd/containd/pkg/dp/dpi"
 	"github.com/containd/containd/pkg/dp/enforce"
 	"github.com/containd/containd/pkg/dp/engine"
 	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/flow"
 	"github.com/containd/containd/pkg/dp/netcfg"
 	"github.com/containd/containd/pkg/dp/pcap"
 	"github.com/containd/containd/pkg/dp/rules"
@@ -64,13 +62,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	dpEngine, err := engine.New(engine.Config{
-		Capture: capture.Config{Interfaces: ifaces},
-		Enforce: engine.EnforceConfig{
-			Enabled:   enforceEnabled,
-			TableName: enforceTable,
-			Applier:   enforce.NewNftApplier(),
-			Updater:   enforce.NewNftUpdater(enforceTable),
-		},
+		Capture:    capture.Config{Interfaces: ifaces},
+		Enforce:    engine.EnforceConfig{Enabled: enforceEnabled, TableName: enforceTable, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(enforceTable)},
+		InspectAll: os.Getenv("NGFW_DPI_MOCK") == "1",
 	})
 	if err != nil {
 		return fmt.Errorf("failed to init dp engine: %w", err)
@@ -87,10 +81,6 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Printf("capture start failed: %v", err)
 		}
 	}()
-
-	if os.Getenv("NGFW_DPI_MOCK") == "1" {
-		go mockDPI(logger, dpEngine)
-	}
 
 	ownership.start(ctx)
 	dhcpMgr := dhcpd.NewManager()
@@ -653,13 +643,9 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 			// Reconfigure by rebuilding the engine instance.
 			current = dp
 			newEngine, err := engine.New(engine.Config{
-				Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
-				Enforce: engine.EnforceConfig{
-					Enabled:   dp.Enforcement,
-					TableName: firstNonEmpty(dp.EnforceTable, "containd"),
-					Applier:   enforce.NewNftApplier(),
-					Updater:   enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd")),
-				},
+				Capture:    capture.Config{Interfaces: dp.CaptureInterfaces},
+				Enforce:    engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
+				InspectAll: dp.DPIMock,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -672,9 +658,6 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 					logger.Printf("capture start failed: %v", err)
 				}
 			}()
-			if dp.DPIMock {
-				go mockDPI(logger, dpEngine)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "configured"})
 			return
@@ -1065,48 +1048,6 @@ func parseListEnv(key string) []string {
 	return out
 }
 
-func mockDPI(logger *log.Logger, dpEngine *engine.Engine) {
-	raw := []byte{
-		0x00, 0x01,
-		0x00, 0x00,
-		0x00, 0x06,
-		0x01,
-		0x03,
-		0x00, 0x00,
-		0x00, 0x02,
-	}
-	key := flow.Key{
-		SrcIP:   net.ParseIP("10.0.0.1"),
-		DstIP:   net.ParseIP("10.0.0.2"),
-		SrcPort: 12345,
-		DstPort: 502,
-		Proto:   6,
-		Dir:     flow.DirForward,
-	}
-	state := flow.NewState(key, time.Now())
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for range t.C {
-		pkt := &dpi.ParsedPacket{
-			Payload: raw,
-			Proto:   "tcp",
-			SrcPort: 12345,
-			DstPort: 502,
-		}
-		if !dpEngine.ShouldInspect(state, pkt) {
-			continue
-		}
-		events, err := dpEngine.DPI().OnPacket(state, pkt)
-		if err != nil {
-			logger.Printf("mock dpi error: %v", err)
-			continue
-		}
-		dpEngine.RecordDPIEvents(state, pkt, events)
-		for _, ev := range events {
-			logger.Printf("dpi event proto=%s kind=%s attrs=%v", ev.Proto, ev.Kind, ev.Attributes)
-		}
-	}
-}
 
 func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -135,7 +135,7 @@ export default function ICSPolicyPage() {
               onChange={(e) => setDpiConfig((c) => ({ ...c, dpiMock: e.target.checked }))}
               className="h-4 w-4 rounded border-white/20 bg-black/30"
             />
-            Safe learning lab mode (mock DPI)
+            Safe learning lab mode (DPI inspect-all)
             <InfoTip label="Lab-only: emit synthetic Modbus events for learning and UI visibility." />
           </label>
         </div>

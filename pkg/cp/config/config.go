@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -241,7 +242,7 @@ type WGPeer struct {
 	PersistentKeepalive int      `json:"persistentKeepalive,omitempty"` // seconds
 }
 
-// OpenVPNConfig is a placeholder for OpenVPN support.
+// OpenVPNConfig defines OpenVPN server/client configuration.
 type OpenVPNConfig struct {
 	Enabled    bool   `json:"enabled"`
 	Mode       string `json:"mode,omitempty"`       // server|client (phased)
@@ -317,7 +318,7 @@ type Interface struct {
 	Members []string `json:"members,omitempty"`
 	Zone    string   `json:"zone"`
 	// AddressMode controls how addresses are acquired on this interface.
-	// Supported: "", "static", "dhcp" (dhcp is currently a placeholder and not applied).
+	// Supported: "", "static", "dhcp" (dhcp is best-effort via engine when no IPv4 is present).
 	AddressMode string   `json:"addressMode,omitempty"`
 	Addresses   []string `json:"addresses,omitempty"` // CIDR strings
 	// Gateway is an optional next-hop IP for a default route (primarily for "wan").
@@ -403,7 +404,7 @@ type DataPlaneConfig struct {
 	CaptureInterfaces []string `json:"captureInterfaces,omitempty"` // interface names for capture
 	Enforcement       bool     `json:"enforcement,omitempty"`       // enable nftables apply
 	EnforceTable      string   `json:"enforceTable,omitempty"`      // nftables table name
-	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only mock DPI loop
+	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
 }
 
 // PCAPConfig controls packet capture storage and forwarding.
@@ -620,8 +621,8 @@ type Protocol struct {
 	Port string `json:"port,omitempty"` // single or range "80", "443", "1000-2000"
 }
 
-// ICSPredicate captures ICS-specific primitives for rules (placeholder).
-// For Phase 2, Modbus fields are supported.
+// ICSPredicate captures ICS-specific primitives for rules.
+// Modbus fields are supported; additional protocols are phased.
 type ICSPredicate struct {
 	Protocol     string   `json:"protocol,omitempty"`     // modbus, dnp3, iec104, etc.
 	FunctionCode []uint8  `json:"functionCode,omitempty"` // e.g., Modbus function codes
@@ -655,7 +656,7 @@ func (c *Config) Validate() error {
 	if err := validateInterfaces(c.Interfaces, c.Zones); err != nil {
 		return err
 	}
-	if err := validateFirewall(c.Firewall, c.Zones); err != nil {
+	if err := validateFirewall(c.Firewall, c.Zones, c.Interfaces); err != nil {
 		return err
 	}
 	if err := validateAssets(c.Assets, c.Zones); err != nil {
@@ -858,12 +859,43 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 	return nil
 }
 
-func validateFirewall(f FirewallConfig, zones []Zone) error {
+func zoneIfaceMap(ifaces []Interface) map[string][]string {
+	out := map[string][]string{}
+	seen := map[string]map[string]struct{}{}
+	for _, iface := range ifaces {
+		z := strings.TrimSpace(iface.Zone)
+		if z == "" {
+			continue
+		}
+		name := strings.TrimSpace(iface.Name)
+		if strings.TrimSpace(iface.Device) != "" {
+			name = strings.TrimSpace(iface.Device)
+		}
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[z]; !ok {
+			seen[z] = map[string]struct{}{}
+		}
+		if _, ok := seen[z][name]; ok {
+			continue
+		}
+		seen[z][name] = struct{}{}
+		out[z] = append(out[z], name)
+	}
+	for z := range out {
+		sort.Strings(out[z])
+	}
+	return out
+}
+
+func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error {
 	zoneSet := map[string]struct{}{}
 	for _, z := range zones {
 		zoneSet[z.Name] = struct{}{}
 	}
-	if err := validateNAT(f.NAT, zoneSet); err != nil {
+	zoneIfaces := zoneIfaceMap(ifaces)
+	if err := validateNAT(f.NAT, zoneSet, zoneIfaces); err != nil {
 		return err
 	}
 	ruleIDs := map[string]struct{}{}
@@ -920,7 +952,7 @@ func isSpecialCIDRToken(s string) bool {
 	}
 }
 
-func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {
+func validateNAT(n NATConfig, zoneSet map[string]struct{}, zoneIfaces map[string][]string) error {
 	// Validate SNAT fields only when enabled.
 	if n.Enabled {
 		egress := strings.TrimSpace(n.EgressZone)
@@ -932,7 +964,7 @@ func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {
 		}
 		srcZones := n.SourceZones
 		if len(srcZones) == 0 {
-			srcZones = []string{"lan", "dmz"}
+			srcZones = defaultNATSourceZones(zoneSet, egress)
 		}
 		for _, z := range srcZones {
 			z = strings.TrimSpace(z)
@@ -945,18 +977,25 @@ func validateNAT(n NATConfig, zoneSet map[string]struct{}) error {
 		}
 	}
 	// Validate DNAT port forwards regardless of SNAT enabled state.
-	if err := validatePortForwards(n.PortForwards, zoneSet); err != nil {
+	if err := validatePortForwards(n.PortForwards, zoneSet, zoneIfaces); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}) error {
+type portForwardBinding struct {
+	id    string
+	any   bool
+	cidrs []*net.IPNet
+}
+
+func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}, zoneIfaces map[string][]string) error {
 	if len(pfs) == 0 {
 		return nil
 	}
 	ids := map[string]struct{}{}
-	bindings := map[string]struct{}{} // ingress|proto|listenPort
+	bindings := map[string][]portForwardBinding{}     // ingress|proto|listenPort
+	ifaceBindings := map[string][]portForwardBinding{} // iface|proto|listenPort
 	for _, pf := range pfs {
 		if strings.TrimSpace(pf.ID) == "" {
 			return fmt.Errorf("nat.portForwards[].id cannot be empty")
@@ -991,19 +1030,112 @@ func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}) error 
 		if pf.DestPort != 0 && (pf.DestPort < 1 || pf.DestPort > 65535) {
 			return fmt.Errorf("port-forward %s destPort out of range: %d", pf.ID, pf.DestPort)
 		}
-		for _, cidr := range pf.AllowedSources {
-			if _, _, err := net.ParseCIDR(cidr); err != nil {
-				return fmt.Errorf("port-forward %s has invalid allowedSources CIDR %q: %v", pf.ID, cidr, err)
-			}
+		allowed, err := parseIPv4CIDRs(pf.AllowedSources)
+		if err != nil {
+			return fmt.Errorf("port-forward %s has invalid allowedSources: %v", pf.ID, err)
 		}
 
-		key := fmt.Sprintf("%s|%s|%d", ingress, proto, pf.ListenPort)
-		if _, ok := bindings[key]; ok {
-			return fmt.Errorf("duplicate port-forward binding (ingressZone/proto/listenPort): %s %s %d", ingress, proto, pf.ListenPort)
+		binding := portForwardBinding{
+			id:    pf.ID,
+			any:   len(allowed) == 0,
+			cidrs: allowed,
 		}
-		bindings[key] = struct{}{}
+
+		zoneKey := fmt.Sprintf("%s|%s|%d", ingress, proto, pf.ListenPort)
+		if err := ensureNoOverlap(bindings, zoneKey, binding, fmt.Sprintf("ingress %s %s/%d", ingress, proto, pf.ListenPort)); err != nil {
+			return err
+		}
+		bindings[zoneKey] = append(bindings[zoneKey], binding)
+
+		ifaces := zoneIfaces[ingress]
+		for _, iface := range ifaces {
+			ifaceKey := fmt.Sprintf("%s|%s|%d", iface, proto, pf.ListenPort)
+			if err := ensureNoOverlap(ifaceBindings, ifaceKey, binding, fmt.Sprintf("interface %s %s/%d", iface, proto, pf.ListenPort)); err != nil {
+				return err
+			}
+			ifaceBindings[ifaceKey] = append(ifaceBindings[ifaceKey], binding)
+		}
 	}
 	return nil
+}
+
+func ensureNoOverlap(bindings map[string][]portForwardBinding, key string, next portForwardBinding, context string) error {
+	for _, existing := range bindings[key] {
+		if !bindingsOverlap(existing, next) {
+			continue
+		}
+		return fmt.Errorf("port-forward %s overlaps with %s on %s", next.id, existing.id, context)
+	}
+	return nil
+}
+
+func bindingsOverlap(a, b portForwardBinding) bool {
+	if a.any || b.any {
+		return true
+	}
+	for _, ac := range a.cidrs {
+		for _, bc := range b.cidrs {
+			if cidrOverlap(ac, bc) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func parseIPv4CIDRs(in []string) ([]*net.IPNet, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]*net.IPNet, 0, len(in))
+	for _, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		ip, cidr, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q", raw)
+		}
+		if ip == nil || ip.To4() == nil {
+			return nil, fmt.Errorf("non-IPv4 CIDR %q", raw)
+		}
+		out = append(out, cidr)
+	}
+	return out, nil
+}
+
+func cidrOverlap(a, b *net.IPNet) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Contains(b.IP) || b.Contains(a.IP)
+}
+
+func defaultNATSourceZones(zoneSet map[string]struct{}, egress string) []string {
+	if len(zoneSet) == 0 {
+		return nil
+	}
+	egress = strings.TrimSpace(egress)
+	out := make([]string, 0, len(zoneSet))
+	zoneLower := map[string]struct{}{}
+	for z := range zoneSet {
+		if z == "" || strings.EqualFold(z, egress) {
+			continue
+		}
+		zoneLower[strings.ToLower(z)] = struct{}{}
+		out = append(out, z)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		for _, name := range []string{"lan", "dmz"} {
+			if _, ok := zoneLower[name]; ok && !strings.EqualFold(name, egress) {
+				out = append(out, name)
+			}
+		}
+		sort.Strings(out)
+	}
+	return out
 }
 
 func validateICSPredicate(p ICSPredicate, ruleID string) error {

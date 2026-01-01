@@ -70,7 +70,7 @@ type Protocol struct {
 	Port string // single or range
 }
 
-// ICSPredicate captures ICS-specific fields (placeholder).
+// ICSPredicate captures ICS-specific fields; Modbus is supported today.
 type ICSPredicate struct {
 	Protocol     string   // modbus, dnp3, etc.
 	FunctionCode []uint8  // e.g., modbus function codes

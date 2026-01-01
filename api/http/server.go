@@ -2894,7 +2894,7 @@ func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFun
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Apply runtime dataplane changes immediately (including DPI mock).
+		// Apply runtime dataplane changes immediately (including DPI inspect-all).
 		if engine != nil {
 			if err := engine.Configure(c.Request.Context(), cfg.DataPlane); err != nil {
 				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})

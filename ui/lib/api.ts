@@ -1013,6 +1013,19 @@ export const api = {
     deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
   setNAT: (cfg: NATConfig) => postJSON<NATConfig>("/api/v1/firewall/nat", cfg),
+  blockHostTemp: (ip: string, ttlSeconds?: number) =>
+    postJSON<{ status: string }>("/api/v1/dataplane/blocks/host", {
+      ip,
+      ttlSeconds,
+    }),
+  blockFlowTemp: (req: {
+    srcIp: string;
+    dstIp: string;
+    proto: string;
+    dstPort: string;
+    ttlSeconds?: number;
+  }) =>
+    postJSON<{ status: string }>("/api/v1/dataplane/blocks/flow", req),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),

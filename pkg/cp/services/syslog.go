@@ -101,9 +101,15 @@ func (m *SyslogManager) Current() config.SyslogConfig {
 	return m.config
 }
 
-// Run is a placeholder for the future forwarding loop.
+// Run keeps the forwarder loop alive for long-running service supervision.
 func (m *SyslogManager) Run(ctx context.Context) error {
+	if m == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	m.restartForwarder(ctx)
 	<-ctx.Done()
+	m.Stop()
 	return ctx.Err()
 }
 

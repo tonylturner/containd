@@ -24,7 +24,6 @@ import (
 
 	engineapi "github.com/containd/containd/api/engine"
 	httpapi "github.com/containd/containd/api/http"
-	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/config"
@@ -54,7 +53,6 @@ func Run(ctx context.Context, _ Options) error {
 	store := mustInitStore()
 	defer store.Close()
 	ensureDefaultConfig(logger, store)
-	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
 	auditStore := mustInitAuditStore()
 	defer auditStore.Close()
 	userStore := mustInitUsersStore()

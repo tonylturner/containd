@@ -108,7 +108,7 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
   - [x] Make Interfaces edits apply instantly (no-store API fetch + post-save refresh/notice).
   - [x] Add config diff/commit/rollback/commit-confirmed UI and audit log view.
   - [x] Add dataplane settings UI.
-  - [x] Add topology view placeholder with React Flow dependency.
+  - [x] Add topology view (React Flow initial graph with zones/interfaces/assets).
   - [x] Add monitoring dashboards (flows/events/alerts, DPI/IDS, proxy stats).
   - [x] Add services pages (syslog/NTP/DNS/proxies) and policy views (FW/IDS/ICS).
     - [x] Add ICS policy view page.
@@ -214,7 +214,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [~] DNAT/port-forwarding (UI/CLI/API + validation).
       - [x] Add port-forward config model and nftables prerouting DNAT compile.
       - [x] Expose port forwards via UI/CLI using the existing NAT endpoint.
-      - [ ] Add richer validation (overlap checks across zones + preview of generated nft rules).
+      - [~] Add richer validation (overlap checks across zones + preview of generated nft rules).
+        - [x] Validate overlapping port forwards on ingress zone/interface bindings.
+        - [ ] Add preview of generated nft rules.
 
 - [ ] Appliance-grade networking & performance
   - [~] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).

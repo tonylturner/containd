@@ -66,6 +66,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
       label: "Operations Center",
       items: [
         { href: "/monitoring/", label: "Overview" },
+        { href: "/topology/", label: "Topology" },
         { href: "/system/services/", label: "Services" },
         { href: "/alerts/", label: "IDS Alerts" },
         { href: "/flows/", label: "Flows" },

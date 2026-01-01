@@ -112,6 +112,47 @@ func TestValidateAssets(t *testing.T) {
 	}
 }
 
+func TestValidatePortForwardOverlap(t *testing.T) {
+	cfg := Config{
+		Zones: []Zone{{Name: "wan"}},
+		Interfaces: []Interface{
+			{Name: "eth0", Zone: "wan"},
+		},
+		Firewall: FirewallConfig{
+			DefaultAction: ActionDeny,
+			NAT: NATConfig{
+				PortForwards: []PortForward{
+					{
+						ID:             "pf-1",
+						Enabled:        true,
+						IngressZone:    "wan",
+						Proto:          "tcp",
+						ListenPort:     443,
+						DestIP:         "10.0.0.10",
+						AllowedSources: []string{"203.0.113.0/24"},
+					},
+					{
+						ID:             "pf-2",
+						Enabled:        true,
+						IngressZone:    "wan",
+						Proto:          "tcp",
+						ListenPort:     443,
+						DestIP:         "10.0.0.11",
+						AllowedSources: []string{"203.0.113.128/25"},
+					},
+				},
+			},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected overlapping port-forward validation error")
+	}
+	cfg.Firewall.NAT.PortForwards[1].AllowedSources = []string{"198.51.100.0/24"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected disjoint port-forwards to be valid, got %v", err)
+	}
+}
+
 func TestValidateObjects(t *testing.T) {
 	cfg := Config{
 		Objects: []Object{

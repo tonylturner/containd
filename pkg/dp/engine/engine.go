@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +33,10 @@ type Engine struct {
 	eventStore    *events.Store
 	rulesetStatus atomic.Pointer[RulesetStatus]
 	avSink        AVSink
+	inspectAll    bool
+	flowMu        sync.Mutex
+	flows         map[string]*flow.State
+	lastSweep     time.Time
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -49,8 +54,9 @@ type EnforceConfig struct {
 }
 
 type Config struct {
-	Capture capture.Config
-	Enforce EnforceConfig
+	Capture    capture.Config
+	Enforce    EnforceConfig
+	InspectAll bool
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -58,7 +64,11 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{capture: capManager}
+	e := &Engine{
+		capture:    capManager,
+		inspectAll: cfg.InspectAll,
+		flows:      make(map[string]*flow.State),
+	}
 	e.eventStore = events.NewStore(4096)
 	e.dpiMgr = dpi.NewManager(
 		modbus.NewDecoder(),
@@ -92,7 +102,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.started.Swap(true) {
 		return nil
 	}
-	if err := e.capture.Start(ctx); err != nil {
+	if err := e.capture.Start(ctx, e.handlePacket); err != nil {
 		return err
 	}
 	return nil
@@ -150,6 +160,9 @@ func (e *Engine) ShouldInspect(state *flow.State, pkt *dpi.ParsedPacket) bool {
 	if e == nil || pkt == nil {
 		return false
 	}
+	if e.inspectAll {
+		return true
+	}
 	snap := e.ruleSnap.Load()
 	if snap == nil {
 		return false
@@ -183,6 +196,69 @@ func (e *Engine) ShouldInspect(state *flow.State, pkt *dpi.ParsedPacket) bool {
 		}
 	}
 	return false
+}
+
+func (e *Engine) handlePacket(pkt capture.Packet) {
+	if e == nil {
+		return
+	}
+	now := pkt.Timestamp
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	state := e.trackFlow(pkt, now)
+	if state == nil {
+		return
+	}
+	parsed := dpi.ParsedPacket{
+		Payload: pkt.Payload,
+		Proto:   pkt.Transport,
+		SrcPort: pkt.SrcPort,
+		DstPort: pkt.DstPort,
+	}
+	if !e.ShouldInspect(state, &parsed) {
+		return
+	}
+	events, err := e.dpiMgr.OnPacket(state, &parsed)
+	if err != nil {
+		return
+	}
+	e.RecordDPIEvents(state, &parsed, events)
+}
+
+func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
+	key := flow.Key{
+		SrcIP:   pkt.SrcIP,
+		DstIP:   pkt.DstIP,
+		SrcPort: pkt.SrcPort,
+		DstPort: pkt.DstPort,
+		Proto:   pkt.Proto,
+		Dir:     flow.DirForward,
+	}
+	hash := key.Hash()
+	e.flowMu.Lock()
+	defer e.flowMu.Unlock()
+	state, ok := e.flows[hash]
+	if !ok {
+		state = flow.NewState(key, now)
+		state.IdleTimeout = 5 * time.Minute
+		e.flows[hash] = state
+	}
+	state.Touch(uint64(len(pkt.Payload)), now)
+	e.sweepFlows(now)
+	return state
+}
+
+func (e *Engine) sweepFlows(now time.Time) {
+	if now.Sub(e.lastSweep) < 30*time.Second {
+		return
+	}
+	e.lastSweep = now
+	for k, st := range e.flows {
+		if st == nil || st.Expired(now) {
+			delete(e.flows, k)
+		}
+	}
 }
 
 func protocolPortMatches(entry rules.Entry, p rules.Protocol, state *flow.State, pkt *dpi.ParsedPacket) bool {

@@ -15,7 +15,7 @@ import (
 )
 
 // AVManager handles antivirus configuration and async scan orchestration.
-// Initial implementation is a stub with status + validation; scanning pipeline will follow.
+// It supports ICAP probing, async scan queueing, and optional ClamAV supervision.
 type AVManager struct {
 	mu         sync.Mutex
 	lastCfg    config.AVConfig
@@ -298,10 +298,10 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 		m.recordVerdict(key, verdict)
 		if verdict == "malware" {
 			m.emit("service.av.detected", map[string]any{
-				"hash":   task.Hash,
-				"proto":  task.Proto,
-				"source": task.Source,
-				"dest":   task.Dest,
+				"hash":        task.Hash,
+				"proto":       task.Proto,
+				"source":      task.Source,
+				"dest":        task.Dest,
 				"error_count": 1,
 			})
 		}
@@ -319,10 +319,10 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 			m.recordVerdict(key, verdict)
 			if verdict == "malware" {
 				m.emit("service.av.detected", map[string]any{
-					"hash":   task.Hash,
-					"proto":  task.Proto,
-					"source": task.Source,
-					"dest":   task.Dest,
+					"hash":        task.Hash,
+					"proto":       task.Proto,
+					"source":      task.Source,
+					"dest":        task.Dest,
 					"error_count": 1,
 				})
 			}

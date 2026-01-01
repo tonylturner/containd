@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-// udpForwarder is a placeholder UDP syslog forwarder.
+// udpForwarder is a small UDP forwarder helper used for syslog delivery.
 type udpForwarder struct {
 	addr *net.UDPAddr
 	conn *net.UDPConn

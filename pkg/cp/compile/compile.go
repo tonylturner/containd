@@ -43,7 +43,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			snap.NAT.EgressZone = "wan"
 		}
 		if len(snap.NAT.SourceZones) == 0 {
-			snap.NAT.SourceZones = []string{"lan", "dmz"}
+			snap.NAT.SourceZones = defaultNATSourceZones(cfg, snap.NAT.EgressZone)
 		}
 	}
 	for _, pf := range cfg.Firewall.NAT.PortForwards {
@@ -182,6 +182,34 @@ func vpnCIDRs(cfg *config.Config) []string {
 		}
 	}
 	return compactAndSortCIDRs(out)
+}
+
+func defaultNATSourceZones(cfg *config.Config, egress string) []string {
+	if cfg == nil {
+		return nil
+	}
+	egress = strings.TrimSpace(egress)
+	out := make([]string, 0, len(cfg.Zones))
+	zoneSet := map[string]struct{}{}
+	for _, z := range cfg.Zones {
+		name := strings.TrimSpace(z.Name)
+		if name == "" {
+			continue
+		}
+		zoneSet[strings.ToLower(name)] = struct{}{}
+		if strings.EqualFold(name, egress) {
+			continue
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		for _, name := range []string{"lan", "dmz"} {
+			if _, ok := zoneSet[name]; ok && !strings.EqualFold(name, egress) {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
 }
 
 func compactAndSortCIDRs(in []string) []string {
