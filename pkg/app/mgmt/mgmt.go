@@ -136,6 +136,15 @@ func Run(ctx context.Context, _ Options) error {
 	}
 
 	handler = hstsHandler(enableHSTS, hstsMaxAge, handler)
+
+	// Add CORS and frame-embedding support for external applications (e.g., RangerDanger)
+	allowedOrigins := getAllowedOrigins()
+	if len(allowedOrigins) > 0 {
+		logger.Printf("CORS/frame-embedding enabled for origins: %v", allowedOrigins)
+		handler = corsHandler(handler, allowedOrigins)
+		handler = frameOptionsHandler(handler, allowedOrigins)
+	}
+
 	// Note: redirect is applied only for the plain HTTP listeners.
 
 	tlsCert, tlsKey := resolveTLSFiles(cfg)
@@ -693,6 +702,85 @@ func hstsHandler(enabled bool, maxAgeSeconds int, next http.Handler) http.Handle
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// corsHandler adds CORS headers to allow cross-origin requests from specified origins.
+// This enables embedding the containd UI in iframes from other applications (e.g., RangerDanger).
+func corsHandler(next http.Handler, allowedOrigins []string) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		for _, o := range allowedOrigins {
+			o = strings.TrimSpace(o)
+			if o != "" && o == origin {
+				allowed = true
+				break
+			}
+		}
+
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS, PUT")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-CSRF-Token")
+			w.Header().Set("Access-Control-Max-Age", "3600")
+		}
+
+		// Handle preflight OPTIONS requests
+		if r.Method == http.MethodOptions {
+			if allowed {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// frameOptionsHandler sets Content-Security-Policy frame-ancestors to allow embedding in iframes
+// from the specified origins.
+func frameOptionsHandler(next http.Handler, allowedOrigins []string) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	// Build CSP frame-ancestors directive
+	cspValue := "'self'"
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			cspValue += " " + o
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors "+cspValue)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// getAllowedOrigins returns the list of allowed origins for CORS and frame embedding.
+// Reads from CONTAIND_ALLOWED_ORIGINS environment variable (comma-separated).
+func getAllowedOrigins() []string {
+	val := os.Getenv("CONTAIND_ALLOWED_ORIGINS")
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	var origins []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			origins = append(origins, p)
+		}
+	}
+	return origins
 }
 
 func redirectToHTTPSHandler(httpsAddr string, next http.Handler) http.Handler {
