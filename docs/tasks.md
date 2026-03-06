@@ -214,9 +214,9 @@ Status legend: `[ ]` pending, `[~]` in-progress, `[x]` done.
     - [~] DNAT/port-forwarding (UI/CLI/API + validation).
       - [x] Add port-forward config model and nftables prerouting DNAT compile.
       - [x] Expose port forwards via UI/CLI using the existing NAT endpoint.
-      - [~] Add richer validation (overlap checks across zones + preview of generated nft rules).
+      - [x] Add richer validation (overlap checks across zones + preview of generated nft rules).
         - [x] Validate overlapping port forwards on ingress zone/interface bindings.
-        - [ ] Add preview of generated nft rules.
+        - [x] Add preview of generated nft rules.
 
 - [ ] Appliance-grade networking & performance
   - [~] Interface ownership model (containd “owns” kernel interfaces; reconcile desired vs actual).

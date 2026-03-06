@@ -687,6 +687,13 @@ export type IDSConfig = {
   rules?: IDSRule[];
 };
 
+export type RulesetPreview = {
+  ruleset: string;
+  snapshot?: unknown;
+  engineStatus?: unknown;
+  engineStatusError?: string;
+};
+
 export type CLIExecuteResponse = {
   output: string;
   error?: string;
@@ -776,6 +783,10 @@ export async function stopPcap(): Promise<PcapStatus | null> {
 
 export async function getPcapStatus(): Promise<PcapStatus | null> {
   return await getJSON<PcapStatus>("/api/v1/pcap/status");
+}
+
+export async function getRulesetPreview(): Promise<RulesetPreview | null> {
+  return await getJSON<RulesetPreview>("/api/v1/dataplane/ruleset");
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {

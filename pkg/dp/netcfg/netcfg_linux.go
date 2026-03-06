@@ -405,6 +405,10 @@ func setLinkUp(name string) error {
 	if err != nil {
 		return err
 	}
+	// Skip if interface is already up (common in Docker where interfaces are externally managed)
+	if nic.Flags&net.FlagUp != 0 {
+		return nil
+	}
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return err

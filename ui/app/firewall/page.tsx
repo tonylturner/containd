@@ -8,6 +8,7 @@ import {
   isAdmin,
   fetchDataPlane,
   setDataPlane,
+  getRulesetPreview,
   type DataPlaneConfig,
   type FirewallRule,
   type Gateway,
@@ -20,6 +21,7 @@ import {
   type ICSPredicate,
   type NATConfig,
   type PortForward,
+  type RulesetPreview,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
@@ -95,6 +97,8 @@ export default function FirewallPage() {
   const [dpiSaveState, setDpiSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
+  const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const tips: Tip[] = [
@@ -155,6 +159,18 @@ export default function FirewallPage() {
   useEffect(() => {
     refresh();
   }, []);
+
+  async function loadRulesetPreview() {
+    if (!isAdmin()) return;
+    setRulesetState("loading");
+    const preview = await getRulesetPreview();
+    if (!preview) {
+      setRulesetState("error");
+      return;
+    }
+    setRulesetPreview(preview);
+    setRulesetState("idle");
+  }
 
   async function onDelete(id: string) {
     setError(null);
@@ -455,6 +471,45 @@ export default function FirewallPage() {
           refresh();
         }}
       />
+
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white">nftables ruleset preview</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Preview the compiled ruleset before it is applied to the dataplane.
+            </p>
+          </div>
+          {isAdmin() && (
+            <button
+              onClick={loadRulesetPreview}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            >
+              {rulesetState === "loading" ? "Loading..." : "Preview"}
+            </button>
+          )}
+        </div>
+        {!isAdmin() && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+            View-only mode: ruleset preview requires admin access.
+          </div>
+        )}
+        {rulesetState === "error" && (
+          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+            Failed to load ruleset preview.
+          </div>
+        )}
+        {rulesetPreview?.engineStatusError && (
+          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+            Engine status unavailable: {rulesetPreview.engineStatusError}
+          </div>
+        )}
+        {rulesetPreview?.ruleset && (
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xl border border-white/10 bg-black/60 p-4 text-xs text-slate-200">
+            {rulesetPreview.ruleset}
+          </pre>
+        )}
+      </div>
 
       <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <div className="flex items-center justify-between">
