@@ -216,7 +216,7 @@ func Run(ctx context.Context, _ Options) error {
 			_ = s.Close()
 		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("ngfw-mgmt server exited: %w", err)
+			return fmt.Errorf("containd mgmt server exited: %w", err)
 		}
 		return nil
 	}
@@ -345,8 +345,8 @@ func firstNonEmpty(values ...string) string {
 func health(c *gin.Context) {
 	c.JSON(http.StatusOK, mgmtHealthResponse{
 		Status:    "ok",
-		Component: "ngfw-mgmt",
-		Build:     "dev",
+		Component: "mgmt",
+		Build:     config.BuildVersion,
 		Time:      time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }

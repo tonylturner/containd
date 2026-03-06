@@ -129,7 +129,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 
-	logger.Printf("ngfw-engine starting on %s", addr)
+	logger.Printf("containd engine starting on %s", addr)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: mux,
@@ -556,8 +556,8 @@ func conntrackHandler() http.HandlerFunc {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	resp := healthResponse{
 		Status:    "ok",
-		Component: "ngfw-engine",
-		Build:     "dev",
+		Component: "engine",
+		Build:     config.BuildVersion,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

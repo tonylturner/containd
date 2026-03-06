@@ -34,8 +34,10 @@ gocache/
 .gomodcache/
 .gopath/
 bin/
-ngfw-engine
-ngfw-mgmt
+/containd
+/ngfw-engine
+/ngfw-mgmt
+/smoketest
 
 # MkDocs
 site/
@@ -56,6 +58,12 @@ pnpm-debug.log*
 
 # Runtime data (docker-compose volumes)
 data/
+
+# Internal development files (kept locally, not published)
+agents.md
+linear-dashboard-cursor-rule.md
+docs/tasks.md
+docs/spec-archive/
 
 # Editor/IDE
 .idea/

@@ -8,7 +8,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 - Update this file whenever a new external component is added, removed, or swapped.
 - Prefer SPDX identifiers from https://spdx.org/licenses/.
 - If a component has multiple valid licenses, list the one we are using and note the alternative.
-- Keep this list aligned with `agents.md` and actual build/runtime packaging.
+- Keep this list aligned with actual build/runtime packaging.
 - This list is intentionally **not exhaustive** for every transitive Go/npm dependency; use `go.mod` and `ui/package.json` for the complete dependency graphs.
 
 ---

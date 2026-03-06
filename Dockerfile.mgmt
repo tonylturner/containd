@@ -94,6 +94,9 @@ RUN apk add --no-cache curl && \
     chmod +x /tini
 
 FROM golang:1.25.5-alpine AS builder
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
 
 WORKDIR /src
 COPY go.mod ./
@@ -101,11 +104,19 @@ COPY go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/containd ./cmd/containd
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags "-s -w -X github.com/containd/containd/pkg/cp/config.BuildVersion=${VERSION} -X github.com/containd/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
+    -o /out/containd ./cmd/containd
 
 # Final appliance image: distroless glibc base (public, minimal, nonroot).
 # Envoy (Apache-2.0) and Nginx (BSD-2-Clause) binaries are copied in from public images.
 FROM gcr.io/distroless/base-debian12:nonroot
+
+LABEL org.opencontainers.image.title="containd" \
+      org.opencontainers.image.description="ICS/OT next-generation firewall" \
+      org.opencontainers.image.url="https://github.com/containd/containd" \
+      org.opencontainers.image.source="https://github.com/containd/containd" \
+      org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=builder /out/containd /usr/bin/containd
 COPY --from=tini /tini /sbin/tini
 COPY --from=envoy /usr/local/bin/envoy /usr/bin/envoy
@@ -122,5 +133,7 @@ COPY --from=openntpd /out/ /
 COPY --from=clamav /out/ /
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/bin/containd", "healthcheck"]
 ENTRYPOINT ["/sbin/tini", "--", "/usr/bin/containd"]
 CMD ["all"]

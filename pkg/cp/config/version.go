@@ -10,6 +10,12 @@ const (
 	SchemaVersionCurrent = "0.1.0"
 )
 
+// Build metadata injected at compile time via -ldflags.
+var (
+	BuildVersion = "dev"
+	BuildCommit  = "unknown"
+)
+
 type semver struct {
 	major int
 	minor int

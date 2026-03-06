@@ -71,7 +71,7 @@ export default function Home() {
         <DashboardCard title="System information">
           {health ? (
             <div className="space-y-1 text-sm">
-              <KeyValue label="Hostname" value="containd" />
+              <KeyValue label="Hostname" value={health?.hostname ?? "containd"} />
               <KeyValue label="Build" value={health?.build ?? "dev"} />
               <KeyValue label="Component" value={health?.component ?? "mgmt"} />
               <KeyValue
@@ -248,7 +248,7 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-400">
-        Green = configured/active, red = off/unconfigured.
+        Green = configured/active, amber = off/unconfigured.
       </p>
       {(envoyRate !== null || nginxRate !== null) && (
         <p className="mt-2 text-xs text-slate-400">

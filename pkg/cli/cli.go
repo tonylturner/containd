@@ -487,7 +487,7 @@ func matchCommand(tokens []string, available []string) (string, []string) {
 }
 
 func showVersion(ctx context.Context, out io.Writer, args []string) error {
-	_, err := fmt.Fprintf(out, "containd ngfw-mgmt (dev)\n")
+	_, err := fmt.Fprintf(out, "containd %s (%s)\n", config.BuildVersion, config.BuildCommit)
 	return err
 }
 

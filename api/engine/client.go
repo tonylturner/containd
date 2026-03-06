@@ -23,7 +23,7 @@ import (
 	"github.com/containd/containd/pkg/dp/rules"
 )
 
-// HTTPClient applies runtime config and snapshots to a remote ngfw-engine via internal HTTP.
+// HTTPClient applies runtime config and snapshots to the engine via internal HTTP.
 type HTTPClient struct {
 	BaseURL string
 	Client  *http.Client
