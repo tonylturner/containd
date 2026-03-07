@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"encoding/json"
+	"mime/multipart"
 
 	"bytes"
 
@@ -98,6 +99,52 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 	}
 	if out != nil {
 		_, _ = out.Write([]byte("ok\n"))
+	}
+	return nil
+}
+
+func (a *API) postMultipartFile(ctx context.Context, path string, filename string, file io.Reader, out any) error {
+	if a.Client == nil {
+		a.Client = defaultHTTPClient
+	}
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	go func() {
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, file); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.BaseURL+path, pr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if a.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+	}
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	a.updateTokenFromResponse(resp)
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
 }
@@ -215,6 +262,9 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show proxy reverse", RoleView, showReverseProxy(api))
 		r.RegisterRole("show flows", RoleView, showFlows(api))
 		r.RegisterRole("show events", RoleView, showEvents(api))
+		r.RegisterRole("show stats protocols", RoleView, showStatsProtocols(api))
+		r.RegisterRole("show stats top-talkers", RoleView, showStatsTopTalkers(api))
+		r.RegisterRole("show anomalies", RoleView, showAnomalies(api))
 		r.RegisterRole("show zones", RoleView, showZonesAPI(api))
 		r.RegisterRole("show interfaces", RoleView, showInterfacesAPI(api))
 		r.RegisterRole("show interfaces state", RoleView, showInterfacesStateAPI(api))
@@ -224,11 +274,21 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show portforwards", RoleView, showPortForwardsAPI(api))
 		r.RegisterRole("show conntrack", RoleView, showConntrackAPI(api))
 		r.RegisterRole("show sessions", RoleView, showConntrackAPI(api))
+		r.RegisterRole("analyze pcap", RoleView, analyzePcapAPI(api))
 		r.RegisterRole("assign interfaces", RoleAdmin, assignInterfacesAPI(api))
 		r.RegisterRole("diag routing reconcile", RoleAdmin, routingReconcileAPI(api))
+		r.RegisterRole("show templates", RoleView, showTemplatesAPI(api))
+		r.RegisterRole("apply template", RoleAdmin, applyTemplateAPI(api))
 		r.RegisterRole("show assets", RoleView, showAssetsAPI(api))
+		r.RegisterRole("show inventory", RoleView, showInventoryAPI(api))
 		r.RegisterRole("show firewall rules", RoleView, showFirewallRulesAPI(api))
 		r.RegisterRole("show ids rules", RoleView, showIDSRulesAPI(api))
+		r.RegisterRole("show signatures", RoleView, showSignaturesAPI(api))
+		r.RegisterRole("show signature matches", RoleView, showSignatureMatchesAPI(api))
+		r.RegisterRole("show learn profiles", RoleView, showLearnProfiles(api))
+		r.RegisterRole("show learn rules", RoleView, showLearnRules(api))
+		r.RegisterRole("apply learn rules", RoleAdmin, applyLearnRules(api))
+		r.RegisterRole("clear learn data", RoleAdmin, clearLearnData(api))
 		r.RegisterRole("set zone", RoleAdmin, setZoneAPI(api))
 		r.RegisterRole("set interface", RoleAdmin, setInterfaceAPI(api))
 		r.RegisterRole("set interface bridge", RoleAdmin, setInterfaceBridgeAPI(api))
@@ -242,6 +302,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set ip rule del", RoleAdmin, setIPRuleDelAPI(api))
 		r.RegisterRole("diag interfaces reconcile", RoleAdmin, interfacesReconcileAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
+		r.RegisterRole("set firewall ics-rule", RoleAdmin, setFirewallICSRuleAPI(api))
+		r.RegisterRole("show firewall ics-rules", RoleView, showFirewallICSRulesAPI(api))
 		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
 		r.RegisterRole("set nat", RoleAdmin, setNATAPI(api))
 		r.RegisterRole("set outbound quickstart", RoleAdmin, setOutboundQuickstartLANWAN(api))
@@ -263,6 +325,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set system ssh listen", RoleAdmin, setSystemSSHListenAPI(api))
 		r.RegisterRole("set system ssh allow-password", RoleAdmin, setSystemSSHAllowPasswordAPI(api))
 		r.RegisterRole("set system ssh authorized-keys-dir", RoleAdmin, setSystemSSHAuthorizedKeysDirAPI(api))
+		r.RegisterRole("set system ssh banner", RoleAdmin, setSystemSSHBannerAPI(api))
+		r.RegisterRole("set system ssh host-key-rotation", RoleAdmin, setSystemSSHHostKeyRotationAPI(api))
 		r.RegisterRole("set proxy forward", RoleAdmin, setForwardProxyAPI(api))
 		r.RegisterRole("set proxy reverse", RoleAdmin, setReverseProxyAPI(api))
 		r.RegisterRole("factory reset", RoleAdmin, factoryResetAPI(api))

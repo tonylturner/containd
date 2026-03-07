@@ -24,6 +24,7 @@ type Config struct {
 	Objects       []Object        `json:"objects,omitempty"`
 	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
+	Export        ExportConfig    `json:"export,omitempty"`
 	PCAP          PCAPConfig      `json:"pcap,omitempty"`
 	Firewall      FirewallConfig  `json:"firewall"`
 	IDS           IDSConfig       `json:"ids,omitempty"`
@@ -116,6 +117,10 @@ type SSHConfig struct {
 	AuthorizedKeysDir string `json:"authorizedKeysDir,omitempty"`
 	// AllowPassword enables SSH password authentication. Should only be enabled in lab mode.
 	AllowPassword bool `json:"allowPassword,omitempty"`
+	// Banner is the SSH login banner displayed before authentication.
+	Banner string `json:"banner,omitempty"`
+	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).
+	HostKeyRotationDays int `json:"hostKeyRotationDays,omitempty"`
 }
 
 type ServicesConfig struct {
@@ -410,6 +415,14 @@ type DataPlaneConfig struct {
 	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
 }
 
+// ExportConfig controls DPI event export to SIEM systems.
+type ExportConfig struct {
+	Enabled bool   `json:"enabled,omitempty"`             // enable DPI event export
+	Format  string `json:"format,omitempty"`              // cef, json, syslog
+	Target  string `json:"target,omitempty"`              // file:///path, udp://host:514, tcp://host:514
+	Filter  string `json:"filter,omitempty"`              // all, ics-only, alerts-only
+}
+
 // PCAPConfig controls packet capture storage and forwarding.
 type PCAPConfig struct {
 	Enabled        bool                `json:"enabled,omitempty"`
@@ -607,16 +620,26 @@ const (
 	ActionDeny  Action = "DENY"
 )
 
+// ScheduleConfig restricts a firewall rule to a recurring time window.
+type ScheduleConfig struct {
+	DaysOfWeek []string `json:"daysOfWeek,omitempty"` // e.g. ["Monday","Tuesday"]
+	StartTime  string   `json:"startTime,omitempty"`  // HH:MM
+	EndTime    string   `json:"endTime,omitempty"`     // HH:MM
+	Timezone   string   `json:"timezone,omitempty"`    // IANA timezone, e.g. "America/New_York"
+}
+
 type Rule struct {
-	ID           string       `json:"id"`
-	Description  string       `json:"description,omitempty"`
-	SourceZones  []string     `json:"sourceZones,omitempty"`
-	DestZones    []string     `json:"destZones,omitempty"`
-	Sources      []string     `json:"sources,omitempty"`      // CIDR strings
-	Destinations []string     `json:"destinations,omitempty"` // CIDR strings
-	Protocols    []Protocol   `json:"protocols,omitempty"`
-	ICS          ICSPredicate `json:"ics,omitempty"`
-	Action       Action       `json:"action"`
+	ID           string          `json:"id"`
+	Description  string          `json:"description,omitempty"`
+	SourceZones  []string        `json:"sourceZones,omitempty"`
+	DestZones    []string        `json:"destZones,omitempty"`
+	Sources      []string        `json:"sources,omitempty"`      // CIDR strings
+	Destinations []string        `json:"destinations,omitempty"` // CIDR strings
+	Protocols    []Protocol      `json:"protocols,omitempty"`
+	Identities   []string        `json:"identities,omitempty"`
+	ICS          ICSPredicate    `json:"ics,omitempty"`
+	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
+	Action       Action          `json:"action"`
 }
 
 type Protocol struct {
@@ -934,9 +957,64 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				return fmt.Errorf("rule %s has protocol with empty name", r.ID)
 			}
 		}
+		for _, id := range r.Identities {
+			if strings.TrimSpace(id) == "" {
+				return fmt.Errorf("rule %s has empty identity", r.ID)
+			}
+		}
 		if err := validateICSPredicate(r.ICS, r.ID); err != nil {
 			return err
 		}
+		if err := validateSchedule(r.Schedule, r.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var validDays = map[string]struct{}{
+	"Sunday": {}, "Monday": {}, "Tuesday": {}, "Wednesday": {},
+	"Thursday": {}, "Friday": {}, "Saturday": {},
+}
+
+func validateSchedule(s *ScheduleConfig, ruleID string) error {
+	if s == nil {
+		return nil
+	}
+	for _, d := range s.DaysOfWeek {
+		if _, ok := validDays[d]; !ok {
+			return fmt.Errorf("rule %s schedule has invalid day %q", ruleID, d)
+		}
+	}
+	if s.StartTime != "" {
+		if err := validateHHMM(s.StartTime); err != nil {
+			return fmt.Errorf("rule %s schedule startTime: %w", ruleID, err)
+		}
+	}
+	if s.EndTime != "" {
+		if err := validateHHMM(s.EndTime); err != nil {
+			return fmt.Errorf("rule %s schedule endTime: %w", ruleID, err)
+		}
+	}
+	if s.Timezone != "" {
+		if _, err := time.LoadLocation(s.Timezone); err != nil {
+			return fmt.Errorf("rule %s schedule timezone %q: %w", ruleID, s.Timezone, err)
+		}
+	}
+	return nil
+}
+
+func validateHHMM(s string) error {
+	if len(s) != 5 || s[2] != ':' {
+		return fmt.Errorf("invalid time format %q, expected HH:MM", s)
+	}
+	h, err := strconv.Atoi(s[:2])
+	if err != nil || h < 0 || h > 23 {
+		return fmt.Errorf("invalid hour in %q", s)
+	}
+	m, err := strconv.Atoi(s[3:])
+	if err != nil || m < 0 || m > 59 {
+		return fmt.Errorf("invalid minute in %q", s)
 	}
 	return nil
 }
@@ -1152,9 +1230,9 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.ReadOnly && p.WriteOnly {
 		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)
 	}
-	// If function codes are set, ensure protocol is modbus for now.
-	if len(p.FunctionCode) > 0 && p.Protocol != "modbus" {
-		return fmt.Errorf("rule %s ics functionCode only supported for modbus currently", ruleID)
+	// If function codes are set, ensure protocol supports them.
+	if len(p.FunctionCode) > 0 && p.Protocol != "modbus" && p.Protocol != "dnp3" && p.Protocol != "cip" && p.Protocol != "s7comm" && p.Protocol != "bacnet" && p.Protocol != "opcua" && p.Protocol != "mms" {
+		return fmt.Errorf("rule %s ics functionCode only supported for modbus, dnp3, cip, s7comm, bacnet, opcua, and mms currently", ruleID)
 	}
 	return nil
 }

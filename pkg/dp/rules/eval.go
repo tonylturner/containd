@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // EvalContext represents a simplified flow context for rule evaluation.
@@ -21,6 +23,9 @@ type EvalContext struct {
 	Identities []string
 	// ICS provides decoded ICS metadata for predicate matching.
 	ICS *ICSContext
+	// Now overrides the current time for schedule evaluation (used in tests).
+	// If zero, time.Now() is used.
+	Now time.Time
 }
 
 // ICSContext represents decoded ICS metadata for rule evaluation.
@@ -47,7 +52,7 @@ func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 		return ActionDeny
 	}
 	for _, entry := range e.snapshot.Firewall {
-		if matchZones(entry, ctx) && matchCIDRs(entry, ctx) && matchProto(entry, ctx) && matchIdentities(entry, ctx) && matchICS(entry, ctx) {
+		if matchZones(entry, ctx) && matchCIDRs(entry, ctx) && matchProto(entry, ctx) && matchIdentities(entry, ctx) && matchICS(entry, ctx) && matchSchedule(entry, ctx) {
 			return entry.Action
 		}
 	}
@@ -143,14 +148,7 @@ func matchICS(entry Entry, ctx EvalContext) bool {
 		}
 	}
 	if len(entry.ICS.Addresses) > 0 {
-		addrMatch := false
-		for _, addr := range entry.ICS.Addresses {
-			if addr == ctx.ICS.Address {
-				addrMatch = true
-				break
-			}
-		}
-		if !addrMatch {
+		if !matchAddress(entry.ICS.Addresses, ctx.ICS.Address) {
 			return false
 		}
 	}
@@ -181,6 +179,55 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		!p.WriteOnly
 }
 
+// parseAddr parses a numeric address string supporting both decimal and hex (0x prefix).
+func parseAddr(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		v, err := strconv.ParseInt(s[2:], 16, 64)
+		return v, err == nil
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	return v, err == nil
+}
+
+// matchAddress checks whether contextAddr falls within any of the entry address
+// specifications. Each entry may be a single value ("0x0100", "256") or a
+// dash-separated range ("0x0100-0x01FF", "100-511"). Both hex (0x prefix) and
+// decimal formats are supported, and they may be mixed.
+func matchAddress(entryAddrs []string, contextAddr string) bool {
+	ctxVal, ok := parseAddr(contextAddr)
+	if !ok {
+		return false
+	}
+	for _, spec := range entryAddrs {
+		if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
+			// Disambiguate: if the first part starts with "0x"/"0X" and the
+			// second part also starts with "0x"/"0X", treat as range. Also
+			// handle the case where neither part has a prefix (pure decimal
+			// range). For a hex prefix on part1 but not part2, it could be
+			// ambiguous (e.g. "0x10-20"); we handle it by checking if
+			// part2 parses as a standalone value.
+			low, okLow := parseAddr(parts[0])
+			high, okHigh := parseAddr(parts[1])
+			if okLow && okHigh {
+				if ctxVal >= low && ctxVal <= high {
+					return true
+				}
+				continue
+			}
+		}
+		// Single value.
+		val, ok := parseAddr(spec)
+		if ok && val == ctxVal {
+			return true
+		}
+	}
+	return false
+}
+
 // portMatches supports single ports and ranges like "1000-2000".
 func portMatches(pattern, port string) bool {
 	if pattern == "" {
@@ -207,4 +254,66 @@ func ipInCIDRs(ip net.IP, cidrs []string) bool {
 		}
 	}
 	return false
+}
+
+func schedulePredicateEmpty(s SchedulePredicate) bool {
+	return len(s.DaysOfWeek) == 0 && s.StartTime == "" && s.EndTime == ""
+}
+
+func matchSchedule(entry Entry, ctx EvalContext) bool {
+	if schedulePredicateEmpty(entry.Schedule) {
+		return true
+	}
+	now := ctx.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	// Convert to the rule's timezone if specified.
+	if entry.Schedule.Timezone != "" {
+		loc, err := time.LoadLocation(entry.Schedule.Timezone)
+		if err != nil {
+			return false
+		}
+		now = now.In(loc)
+	}
+	// Check day of week.
+	if len(entry.Schedule.DaysOfWeek) > 0 {
+		day := now.Weekday().String()
+		found := false
+		for _, d := range entry.Schedule.DaysOfWeek {
+			if d == day {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	// Check time window.
+	if entry.Schedule.StartTime != "" && entry.Schedule.EndTime != "" {
+		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
+		if entry.Schedule.StartTime <= entry.Schedule.EndTime {
+			// Normal range, e.g. 09:00–17:00.
+			if hhmm < entry.Schedule.StartTime || hhmm > entry.Schedule.EndTime {
+				return false
+			}
+		} else {
+			// Overnight range, e.g. 22:00–06:00.
+			if hhmm < entry.Schedule.StartTime && hhmm > entry.Schedule.EndTime {
+				return false
+			}
+		}
+	} else if entry.Schedule.StartTime != "" {
+		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
+		if hhmm < entry.Schedule.StartTime {
+			return false
+		}
+	} else if entry.Schedule.EndTime != "" {
+		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
+		if hhmm > entry.Schedule.EndTime {
+			return false
+		}
+	}
+	return true
 }

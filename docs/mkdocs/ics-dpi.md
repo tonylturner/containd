@@ -1,7 +1,5 @@
 # ICS DPI Plan
 
-This document is rendered from `docs/mkdocs/`.
-
 This document tracks the plan for ICS protocol decoding, DPI events, and how DPI feeds the rule/IDS engines.
 
 ## Decoders (current/next)

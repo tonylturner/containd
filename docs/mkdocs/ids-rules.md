@@ -1,7 +1,5 @@
 # IDS Rules (Sigma-like)
 
-This document is rendered from `docs/mkdocs/`.
-
 containd supports a small, Sigma-inspired IDS rule format that matches on normalized DPI events.
 
 ## Storage

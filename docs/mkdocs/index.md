@@ -1,5 +1,3 @@
-This document is rendered from `docs/mkdocs/`.
-
 # containd documentation
 
 Welcome. This documentation is meant to be rendered in-app (Help icon) and as a standalone static site.

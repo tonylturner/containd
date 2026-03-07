@@ -26,23 +26,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kballard/go-shellquote"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/identity"
 	cpids "github.com/tonylturner/containd/pkg/cp/ids"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
+	"github.com/tonylturner/containd/pkg/cp/templates"
 	"github.com/tonylturner/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/signatures"
+	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
 // NewServer builds a Gin engine with versioned routes for management APIs.
@@ -97,6 +105,40 @@ type WireGuardStatusClient interface {
 	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
 }
 
+// InventoryClient is an optional interface for querying the ICS asset inventory.
+type InventoryClient interface {
+	ListInventory(ctx context.Context) ([]inventory.DiscoveredAsset, error)
+	GetInventoryAsset(ctx context.Context, ip string) (*inventory.DiscoveredAsset, error)
+	ClearInventory(ctx context.Context) error
+}
+
+// AnomalyClient is an optional interface for protocol anomaly detection.
+type AnomalyClient interface {
+	ListAnomalies(ctx context.Context, limit int) ([]anomaly.Anomaly, error)
+	ClearAnomalies(ctx context.Context) error
+}
+
+// LearnClient is an optional interface for ICS learn mode.
+type LearnClient interface {
+	ListLearnProfiles(ctx context.Context) ([]learn.LearnedProfile, error)
+	GenerateLearnRules(ctx context.Context) ([]config.Rule, error)
+	ClearLearnData(ctx context.Context) error
+}
+
+// SignaturesClient is an optional interface for ICS signature-based detection.
+type SignaturesClient interface {
+	ListSignatures(ctx context.Context) ([]signatures.Signature, error)
+	AddSignature(ctx context.Context, sig signatures.Signature) error
+	RemoveSignature(ctx context.Context, id string) (bool, error)
+	ListSignatureMatches(ctx context.Context, limit int) ([]signatures.Match, error)
+}
+
+// StatsClient is an optional interface for querying protocol and flow statistics.
+type StatsClient interface {
+	ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error)
+	ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error)
+}
+
 type ServicesValidator interface {
 	Validate(ctx context.Context, cfg config.ServicesConfig) error
 }
@@ -121,7 +163,8 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 }
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
-func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store) *gin.Engine {
+// opts may contain an *identity.Resolver as the first element; if absent identity endpoints are not registered.
+func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
@@ -154,6 +197,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api := r.Group("/api/v1")
 	// Health is always unauthenticated for liveness.
 	api.GET("/health", healthHandler)
+	// Prometheus metrics endpoint (unauthenticated for scraping).
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
 	api.POST("/auth/login", loginHandler(userStore))
 	// Logout is intentionally unauthenticated so clients can always clear cookies
@@ -217,6 +262,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/stats/protocols", protoStatsHandler(engine))
+		protected.GET("/stats/top-talkers", topTalkersHandler(engine))
+		protected.GET("/anomalies", listAnomaliesHandler(engine))
+		protected.DELETE("/anomalies", requireAdmin(), clearAnomaliesHandler(engine))
 		protected.GET("/conntrack", listConntrackHandler(engine))
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
@@ -236,6 +285,13 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/pcap/:name", requireAdmin(), deletePCAPHandler(engine))
 		protected.POST("/pcap/tag", requireAdmin(), tagPCAPHandler(engine))
 		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
+		protected.GET("/inventory", listInventoryHandler(engine))
+		protected.GET("/inventory/:ip", getInventoryAssetHandler(engine))
+		protected.DELETE("/inventory", requireAdmin(), clearInventoryHandler(engine))
+		protected.GET("/signatures", listSignaturesHandler(engine))
+		protected.POST("/signatures", requireAdmin(), addSignatureHandler(engine))
+		protected.DELETE("/signatures/:id", requireAdmin(), deleteSignatureHandler(engine))
+		protected.GET("/signatures/matches", listSignatureMatchesHandler(engine))
 		protected.GET("/assets", listAssetsHandler(store))
 		protected.POST("/assets", requireAdmin(), createAssetHandler(store))
 		protected.PATCH("/assets/:id", requireAdmin(), updateAssetHandler(store))
@@ -265,6 +321,14 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
 		protected.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
+		protected.GET("/firewall/ics-rules", listICSRulesHandler(store))
+		protected.POST("/firewall/ics-rules", requireAdmin(), createICSRuleHandler(store))
+		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), updateICSRuleHandler(store))
+		// ICS learn mode.
+		protected.GET("/learn/profiles", learnProfilesHandler(engine))
+		protected.POST("/learn/generate", requireAdmin(), learnGenerateHandler(engine))
+		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))
+		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
@@ -281,9 +345,72 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)
 		}
+		// Policy templates.
+		protected.GET("/templates", listTemplatesHandler())
+		protected.POST("/templates/apply", requireAdmin(), applyTemplateHandler(store))
+		// Identity resolver routes (optional).
+		for _, o := range opts {
+			if resolver, ok := o.(*identity.Resolver); ok && resolver != nil {
+				protected.GET("/identities", listIdentitiesHandler(resolver))
+				protected.POST("/identities", requireAdmin(), setIdentityHandler(resolver))
+				protected.DELETE("/identities/:ip", requireAdmin(), deleteIdentityHandler(resolver))
+			}
+		}
 	}
 
 	return r
+}
+
+func listInventoryHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ic, ok := engine.(InventoryClient)
+		if !ok || ic == nil {
+			c.JSON(http.StatusOK, []inventory.DiscoveredAsset{})
+			return
+		}
+		assets, err := ic.ListInventory(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, assets)
+	}
+}
+
+func getInventoryAssetHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ic, ok := engine.(InventoryClient)
+		if !ok || ic == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "inventory not available"})
+			return
+		}
+		ip := c.Param("ip")
+		asset, err := ic.GetInventoryAsset(c.Request.Context(), ip)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		if asset == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "asset not found"})
+			return
+		}
+		c.JSON(http.StatusOK, asset)
+	}
+}
+
+func clearInventoryHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ic, ok := engine.(InventoryClient)
+		if !ok || ic == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "inventory not available"})
+			return
+		}
+		if err := ic.ClearInventory(c.Request.Context()); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "cleared"})
+	}
 }
 
 func dhcpLeasesHandler(engine any) gin.HandlerFunc {
@@ -1816,6 +1943,81 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, flows)
+	}
+}
+
+func protoStatsHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(StatsClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, []stats.ProtoStats{})
+			return
+		}
+		result, err := sc.ListProtoStats(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(StatsClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, []stats.FlowStats{})
+			return
+		}
+		n := 10
+		if q := c.Query("n"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 1000 {
+				n = v
+			}
+		}
+		result, err := sc.ListTopTalkers(c.Request.Context(), n)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ac, ok := engine.(AnomalyClient)
+		if !ok || ac == nil {
+			c.JSON(http.StatusOK, []anomaly.Anomaly{})
+			return
+		}
+		limit := 200
+		if q := c.Query("limit"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
+				limit = v
+			}
+		}
+		anomalies, err := ac.ListAnomalies(c.Request.Context(), limit)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, anomalies)
+	}
+}
+
+func clearAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ac, ok := engine.(AnomalyClient)
+		if !ok || ac == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			return
+		}
+		if err := ac.ClearAnomalies(c.Request.Context()); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	}
 }
 
@@ -4216,6 +4418,110 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// hasICSPredicate returns true if the rule has a non-empty ICS predicate.
+func hasICSPredicate(r config.Rule) bool {
+	return strings.TrimSpace(r.ICS.Protocol) != "" ||
+		len(r.ICS.FunctionCode) > 0 ||
+		r.ICS.UnitID != nil ||
+		len(r.ICS.Addresses) > 0 ||
+		r.ICS.ReadOnly ||
+		r.ICS.WriteOnly
+}
+
+func listICSRulesHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		var icsRules []config.Rule
+		for _, r := range cfg.Firewall.Rules {
+			if hasICSPredicate(r) {
+				icsRules = append(icsRules, r)
+			}
+		}
+		if icsRules == nil {
+			icsRules = []config.Rule{}
+		}
+		c.JSON(http.StatusOK, icsRules)
+	}
+}
+
+func createICSRuleHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var r config.Rule
+		if err := c.ShouldBindJSON(&r); err != nil || r.ID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule payload"})
+			return
+		}
+		if !hasICSPredicate(r) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "rule must include an ICS predicate"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		for _, existing := range cfg.Firewall.Rules {
+			if existing.ID == r.ID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "rule already exists"})
+				return
+			}
+		}
+		if cfg.Firewall.DefaultAction == "" {
+			cfg.Firewall.DefaultAction = config.ActionDeny
+		}
+		cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, r)
+	}
+}
+
+func updateICSRuleHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var rule config.Rule
+		if err := c.ShouldBindJSON(&rule); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule payload"})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		updated := false
+		for i, existing := range cfg.Firewall.Rules {
+			if existing.ID == id {
+				if !hasICSPredicate(existing) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "rule is not an ICS rule"})
+					return
+				}
+				if rule.ID == "" {
+					rule.ID = existing.ID
+				}
+				cfg.Firewall.Rules[i] = rule
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+			return
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, rule)
+	}
+}
+
 func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, error) {
 	cfg, err := store.Load(ctx)
 	if err != nil {
@@ -4374,4 +4680,272 @@ func auditLog(c *gin.Context, rec audit.Record) {
 		rec.Result = "success"
 	}
 	_ = store.Add(c.Request.Context(), rec)
+}
+
+// --- Identity mapping handlers ---
+
+func listIdentitiesHandler(resolver *identity.Resolver) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"mappings": resolver.All()})
+	}
+}
+
+func setIdentityHandler(resolver *identity.Resolver) gin.HandlerFunc {
+	type req struct {
+		IP         string   `json:"ip"`
+		Identities []string `json:"identities"`
+	}
+	return func(c *gin.Context) {
+		var body req
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		ip := net.ParseIP(strings.TrimSpace(body.IP))
+		if ip == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid IP address"})
+			return
+		}
+		if len(body.Identities) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "identities must not be empty"})
+			return
+		}
+		for _, id := range body.Identities {
+			if strings.TrimSpace(id) == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "identity must not be empty"})
+				return
+			}
+		}
+		resolver.Register(ip, body.Identities)
+		c.JSON(http.StatusOK, gin.H{"ip": ip.String(), "identities": body.Identities})
+	}
+}
+
+func listTemplatesHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, templates.List())
+	}
+}
+
+func applyTemplateHandler(store config.Store) gin.HandlerFunc {
+	type req struct {
+		Name string `json:"name"`
+	}
+	return func(c *gin.Context) {
+		var r req
+		if err := c.ShouldBindJSON(&r); err != nil || r.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		ctx := c.Request.Context()
+		cfg, err := loadOrInitConfig(ctx, store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if err := templates.Apply(r.Name, cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.Save(ctx, cfg); err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules)})
+	}
+}
+
+func deleteIdentityHandler(resolver *identity.Resolver) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := c.Param("ip")
+		ip := net.ParseIP(strings.TrimSpace(raw))
+		if ip == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid IP address"})
+			return
+		}
+		resolver.Remove(ip)
+		c.JSON(http.StatusOK, gin.H{"deleted": ip.String()})
+	}
+}
+
+// --- ICS Learn Mode handlers ---
+
+func learnProfilesHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lc, ok := engine.(LearnClient)
+		if !ok || lc == nil {
+			c.JSON(http.StatusOK, []learn.LearnedProfile{})
+			return
+		}
+		profiles, err := lc.ListLearnProfiles(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, profiles)
+	}
+}
+
+func learnGenerateHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lc, ok := engine.(LearnClient)
+		if !ok || lc == nil {
+			c.JSON(http.StatusOK, []config.Rule{})
+			return
+		}
+		genRules, err := lc.GenerateLearnRules(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, genRules)
+	}
+}
+
+func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lc, ok := engine.(LearnClient)
+		if !ok || lc == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "learn mode not available"})
+			return
+		}
+		generated, err := lc.GenerateLearnRules(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if len(generated) == 0 {
+			c.JSON(http.StatusOK, gin.H{"status": "no rules to apply", "count": 0})
+			return
+		}
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		existing := map[string]bool{}
+		for _, r := range cfg.Firewall.Rules {
+			existing[r.ID] = true
+		}
+		added := 0
+		for _, r := range generated {
+			if existing[r.ID] {
+				continue
+			}
+			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+			added++
+		}
+		if cfg.Firewall.DefaultAction == "" {
+			cfg.Firewall.DefaultAction = config.ActionDeny
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "applied", "count": added, "rules": generated})
+	}
+}
+
+func learnClearHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lc, ok := engine.(LearnClient)
+		if !ok || lc == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "cleared"})
+			return
+		}
+		if err := lc.ClearLearnData(c.Request.Context()); err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "cleared"})
+	}
+}
+
+func listSignaturesHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SignaturesClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, []signatures.Signature{})
+			return
+		}
+		sigs, err := sc.ListSignatures(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, sigs)
+	}
+}
+
+func addSignatureHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SignaturesClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "signatures not available"})
+			return
+		}
+		var sig signatures.Signature
+		if err := c.ShouldBindJSON(&sig); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if sig.ID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "signature ID is required"})
+			return
+		}
+		if len(sig.Conditions) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "at least one condition is required"})
+			return
+		}
+		if err := sc.AddSignature(c.Request.Context(), sig); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		auditLog(c, audit.Record{Action: "signatures.add", Target: sig.ID})
+		c.JSON(http.StatusOK, sig)
+	}
+}
+
+func deleteSignatureHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SignaturesClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "signatures not available"})
+			return
+		}
+		id := c.Param("id")
+		removed, err := sc.RemoveSignature(c.Request.Context(), id)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if !removed {
+			c.JSON(http.StatusNotFound, gin.H{"error": "signature not found"})
+			return
+		}
+		auditLog(c, audit.Record{Action: "signatures.delete", Target: id})
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func listSignatureMatchesHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SignaturesClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, []signatures.Match{})
+			return
+		}
+		limit := 100
+		if v := c.Query("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		matches, err := sc.ListSignatureMatches(c.Request.Context(), limit)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, matches)
+	}
 }

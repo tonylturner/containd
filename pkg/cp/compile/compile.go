@@ -81,6 +81,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Destinations: dsts,
 			Protocols:    make([]dprules.Protocol, 0, len(r.Protocols)),
 			Action:       dprules.Action(r.Action),
+			Identities:   append([]string(nil), r.Identities...),
 			ICS: dprules.ICSPredicate{
 				Protocol:     r.ICS.Protocol,
 				FunctionCode: append([]uint8(nil), r.ICS.FunctionCode...),
@@ -90,6 +91,14 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 				WriteOnly:    r.ICS.WriteOnly,
 				Mode:         r.ICS.Mode,
 			},
+		}
+		if r.Schedule != nil {
+			entry.Schedule = dprules.SchedulePredicate{
+				DaysOfWeek: append([]string(nil), r.Schedule.DaysOfWeek...),
+				StartTime:  r.Schedule.StartTime,
+				EndTime:    r.Schedule.EndTime,
+				Timezone:   r.Schedule.Timezone,
+			}
 		}
 		for _, p := range r.Protocols {
 			entry.Protocols = append(entry.Protocols, dprules.Protocol{Name: p.Name, Port: p.Port})

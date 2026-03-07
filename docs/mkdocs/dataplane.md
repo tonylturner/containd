@@ -1,11 +1,7 @@
 # Data Plane Overview
 
-This document is rendered from `docs/mkdocs/`.
-
-This document tracks the data-plane design and current scaffolding.
-
-## Current scaffolding
-- Capture manager (`pkg/dp/capture`): AF_PACKET capture worker (Linux) with interface validation; NFQUEUE steering planned.
+## Components
+- Capture manager (`pkg/dp/capture`): AF_PACKET capture worker (Linux) with interface validation.
 - Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, and exposes `ShouldInspect` for selective DPI steering.
 - Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS/identity predicates are matched when present.
 - Flow tracking (`pkg/dp/flow`): flow key/state scaffolding with timeouts and hashing tests.
@@ -15,7 +11,7 @@ This document tracks the data-plane design and current scaffolding.
   - nftables rules compiled/applied for zone firewall, NAT masquerade, and basic DNAT/port-forwards.
   - Ownership loop in `containd engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
 
-## Pipeline (current/target)
+## Pipeline
 1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.
 2) Selective capture (NFQUEUE/AF_PACKET) for DPI/IDS flows.
 3) Flow tracker (5-tuple + direction, timestamps, state) for enrichment and IDS.
@@ -25,13 +21,12 @@ This document tracks the data-plane design and current scaffolding.
    - Protocol-specific parsers emitting `dpi.Event`.
 6) IDS/IPS engine consuming DPI events and flow context for signatures/behavioral rules.
 
-## Rule model (initial)
+## Rule model
 - Source/dest zones, CIDRs, protocol+port (ranges). Default action fallback.
 - Snapshot swapping is atomic (pointer swap in engine).
-- Future extensions: schedules, richer identity attributes, and verdict fast paths for nftables/eBPF.
 
-## Next steps
-- Implement capture workers and DPI steering (NFQUEUE/AF_PACKET).
-- Expand nftables compilation (richer input policy, per-zone defaults, stricter DNAT validation).
-- Extend DPI decoders into flow processing and rule context enrichment.
-- Surface metrics/telemetry for throughput and drop counters; optional eBPF probes.
+## Roadmap
+- NFQUEUE-based selective DPI steering.
+- Schedule and identity predicates in rule evaluation.
+- Prometheus metrics for throughput and drop counters.
+- Optional eBPF (XDP/TC) acceleration.

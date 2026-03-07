@@ -22,6 +22,10 @@ import (
 // This is a minimal Phase 1 skeleton.
 type Compiler struct {
 	TableName string
+	// QueueID, when non-zero, causes DPI-eligible rules (those with an
+	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
+	// steering matched traffic through NFQUEUE for selective DPI.
+	QueueID int
 }
 
 func NewCompiler() *Compiler {
@@ -154,7 +158,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		line, err := compileEntry(e, snap.ZoneIfaces)
+		line, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
 		if err != nil {
 			return "", err
 		}
@@ -254,7 +258,7 @@ func defaultPolicy(a rules.Action) string {
 	return "drop"
 }
 
-func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error) {
+func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) (string, error) {
 	parts := []string{}
 
 	if len(e.SourceZones) > 0 {
@@ -294,6 +298,14 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 		parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
 	}
 
+	// If QueueID is set and the entry has DPI/ICS inspection enabled,
+	// emit a queue verdict instead of accept/drop so the traffic is
+	// steered through NFQUEUE for selective DPI inspection.
+	if queueID > 0 && isDPIEligible(e) {
+		parts = append(parts, fmt.Sprintf("queue num %d", queueID))
+		return strings.Join(parts, " "), nil
+	}
+
 	switch e.Action {
 	case rules.ActionAllow:
 		parts = append(parts, "accept")
@@ -303,6 +315,12 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// isDPIEligible returns true if an entry requires DPI/ICS inspection and
+// should therefore be steered through NFQUEUE when a queue ID is configured.
+func isDPIEligible(e rules.Entry) bool {
+	return e.ICS.Protocol != ""
 }
 
 func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {

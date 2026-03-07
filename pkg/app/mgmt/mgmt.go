@@ -32,6 +32,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/identity"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
@@ -97,7 +98,8 @@ func Run(ctx context.Context, _ Options) error {
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
-	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
+	identityResolver := identity.NewResolver()
+	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore, identityResolver)
 	// Best-effort initial service render on startup.
 	if cfg, err := store.Load(context.Background()); err == nil {
 		_ = serviceManager.Apply(context.Background(), cfg.Services)
@@ -1075,8 +1077,10 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 		BaseURL:           baseURL,
 		HostKeyPath:       hostKeyPath,
 		AuthorizedKeysDir: authKeysDir,
-		AllowPassword:     allowPassword,
-		LabMode:           lab,
+		AllowPassword:       allowPassword,
+		Banner:              func() string { if cfg != nil { return cfg.System.SSH.Banner }; return "" }(),
+		HostKeyRotationDays: func() int { if cfg != nil { return cfg.System.SSH.HostKeyRotationDays }; return 0 }(),
+		LabMode:             lab,
 		JWTSecret:         []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
 		UserStore:         userStore,
 		AuditStore:        auditStore,

@@ -1,7 +1,5 @@
 # Config Format
 
-This document is rendered from `docs/mkdocs/`.
-
 Canonical JSON configuration for export/import and persistent state.
 
 ## Schema (initial)
@@ -188,7 +186,7 @@ Notes:
 
 Limitations (current):
 - Routing/PBR supports additive updates plus an explicit replace/reconcile mode; coverage for all tables and IPv6 is still expanding.
-- NAT is currently postrouting masquerade plus basic DNAT/port-forwarding (validation improvements pending).
+- NAT supports postrouting masquerade and DNAT/port-forwarding.
 
 ## API endpoints (initial)
 - `GET /api/v1/config` – fetch current config (404 if none).
@@ -223,4 +221,4 @@ Limitations (current):
 - `POST /api/v1/services/av/update` – trigger AV definition refresh.
 - `GET/POST/DELETE /api/v1/services/av/defs` – manage AV definitions.
 - `GET /api/v1/services/status` – summary of embedded service status.
-- `GET /api/v1/audit` – list audit records (write events pending).
+- `GET /api/v1/audit` – list audit records.
