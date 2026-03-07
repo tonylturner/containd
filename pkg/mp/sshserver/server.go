@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package sshserver
 
 import (
@@ -11,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,11 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containd/containd/pkg/cli"
-	"github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/common/ratelimit"
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/users"
+	"go.uber.org/zap"
+
+	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/ratelimit"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
@@ -47,7 +51,7 @@ type Options struct {
 
 type Server struct {
 	opts   Options
-	logger *log.Logger
+	logger *zap.SugaredLogger
 
 	ln net.Listener
 	wg sync.WaitGroup
@@ -76,7 +80,7 @@ func New(opts Options) (*Server, error) {
 	}
 	return &Server{
 		opts:      opts,
-		logger:    logging.New("[ssh]"),
+		logger:    logging.NewService("ssh"),
 		pwLimiter: ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
 	}, nil
 }
@@ -90,6 +94,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	cfg := &ssh.ServerConfig{
 		PasswordCallback:  s.passwordCallback(),
 		PublicKeyCallback: s.publicKeyCallback(),
+		BannerCallback: func(conn ssh.ConnMetadata) string {
+			return "containd ICS/OT firewall\r\n"
+		},
 	}
 	cfg.AddHostKey(signer)
 
@@ -98,7 +105,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return err
 	}
 	s.ln = ln
-	s.logger.Printf("ssh listening on %s", s.opts.ListenAddr)
+	s.logger.Infof("ssh listening on %s", s.opts.ListenAddr)
 
 	go func() {
 		<-ctx.Done()
@@ -111,7 +118,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			if errors.Is(err, net.ErrClosed) {
 				break
 			}
-			s.logger.Printf("accept error: %v", err)
+			s.logger.Errorf("accept error: %v", err)
 			continue
 		}
 		s.wg.Add(1)
@@ -901,30 +908,6 @@ func shellEscape(s string) string {
 		return "'" + s + "'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-func readLine(r *bufio.Reader) (string, bool) {
-	var buf []byte
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return "", false
-		}
-		// Ctrl-D (EOT) -> treat as EOF (exit session) if no input collected.
-		if b == 0x04 && len(buf) == 0 {
-			return "", false
-		}
-		// Ctrl-C (ETX) -> interrupt.
-		if b == 0x03 {
-			return "\x03", true
-		}
-		// Accept both \n and \r as line terminators (most SSH clients send \r).
-		if b == '\n' || b == '\r' {
-			break
-		}
-		buf = append(buf, b)
-	}
-	return string(buf), true
 }
 
 func readLineInteractive(r *bufio.Reader, echo io.Writer) (string, bool) {

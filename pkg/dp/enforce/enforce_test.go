@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package enforce
 
 import (
@@ -6,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func TestCompileFirewallBasic(t *testing.T) {

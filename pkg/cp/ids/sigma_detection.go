@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package ids
 
 import (
@@ -6,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func buildDetectionConditions(det map[string]any) (config.IDSCondition, error) {

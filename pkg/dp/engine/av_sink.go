@@ -1,12 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package engine
 
 import (
 	"context"
-	"net"
 	"strconv"
-	"strings"
 
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // AVSink receives HTTP request/response previews for asynchronous scanning.
@@ -50,11 +51,3 @@ func srcDestStrings(state *flow.State) (string, string) {
 	return src, dst
 }
 
-// splitHostPort parses host:port strings and returns srcIP, dstIP, dport, proto.
-func splitHostPort(src, dst string) (net.IP, net.IP, string, string) {
-	srcHost, _, _ := strings.Cut(src, ":")
-	dstHost, dstPort, _ := strings.Cut(dst, ":")
-	sip := net.ParseIP(strings.TrimSpace(srcHost))
-	dip := net.ParseIP(strings.TrimSpace(dstHost))
-	return sip, dip, strings.TrimSpace(dstPort), "tcp"
-}

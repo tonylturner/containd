@@ -1,11 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package itdpi
 
 import (
 	"bytes"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // PortDetector emits coarse IT protocol detections based on ports/signatures.

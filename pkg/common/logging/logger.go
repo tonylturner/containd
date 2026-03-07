@@ -1,23 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package logging
 
-import (
-	"log"
-	"os"
-)
+import "go.uber.org/zap"
 
-// New returns a standard library logger with sane defaults.
-func New(prefix string) *log.Logger {
-	return log.New(os.Stdout, prefix+" ", log.LstdFlags|log.LUTC|log.Lmsgprefix)
-}
-
-// SetVerbose toggles log flags for verbose output.
-func SetVerbose(logger *log.Logger, verbose bool) {
-	if logger == nil {
-		return
+// NewService returns a zap SugaredLogger for the named service with stdout output.
+// It respects CONTAIND_LOG_LEVEL and CONTAIND_LOG_LEVEL_<SERVICE> environment variables.
+// It panics only if logger creation fails, which requires syslog misconfiguration.
+func NewService(name string) *zap.SugaredLogger {
+	l, err := NewZap(name, "daemon", Options{})
+	if err != nil {
+		// Syslog dial failed; retry without syslog.
+		l, _ = NewZap(name, "daemon", Options{SyslogAddr: ""})
+		if l == nil {
+			return zap.NewNop().Sugar()
+		}
 	}
-	if verbose {
-		logger.SetFlags(log.LstdFlags | log.LUTC | log.Lmsgprefix | log.Lshortfile)
-	} else {
-		logger.SetFlags(log.LstdFlags | log.LUTC | log.Lmsgprefix)
-	}
+	return l
 }

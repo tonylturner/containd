@@ -1,7 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025 containd Authors
+
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -11,9 +15,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-      - name: Go test
-        run: go test ./...
+          go-version-file: go.mod
+      - name: Verify go.mod is tidy
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  lint-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11
 
   docs:
     runs-on: ubuntu-latest
@@ -23,12 +43,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+          cache-dependency-path: docs/requirements-mkdocs.txt
       - name: Install MkDocs deps
         run: pip install -r docs/requirements-mkdocs.txt
       - name: Build docs
         run: mkdocs build -f mkdocs.yml -d /tmp/containd-docs
 
-  ui-lint:
+  ui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,24 +59,40 @@ jobs:
           cache: 'npm'
           cache-dependency-path: ui/package-lock.json
       - name: Install deps
-        run: |
-          cd ui
-          npm ci
-      - name: Lint UI
-        run: |
-          cd ui
-          npm run lint
-      - name: Build static UI
-        run: |
-          cd ui
-          npm run build
+        run: npm ci
+        working-directory: ui
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high || true
+        working-directory: ui
+      - name: Lint
+        run: npm run lint
+        working-directory: ui
+      - name: Build
+        run: npm run build
+        working-directory: ui
 
-  docker-build:
+  docker:
     runs-on: ubuntu-latest
-    needs: [go, docs, ui-lint]
+    needs: [go, lint-go, docs, ui]
     steps:
       - uses: actions/checkout@v4
-      - name: Build mgmt image
-        run: docker build -f Dockerfile.mgmt -t containd/containd:ci .
-      - name: Build engine image
-        run: docker build -f Dockerfile.engine -t containd/containd-engine:ci .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mgmt
+          push: false
+          load: true
+          tags: containd/containd:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy vulnerability scan
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/aquasecurity/trivy:latest \
+            image --exit-code 1 --severity CRITICAL --format table \
+            containd/containd:ci

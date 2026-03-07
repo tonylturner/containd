@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package engineapi
 
 import (
@@ -7,25 +10,39 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/dp/conntrack"
-	"github.com/containd/containd/pkg/dp/dhcpd"
-	dpengine "github.com/containd/containd/pkg/dp/engine"
-	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/netcfg"
-	"github.com/containd/containd/pkg/dp/pcap"
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
+	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// HTTPClient applies runtime config and snapshots to a remote ngfw-engine via internal HTTP.
+// HTTPClient applies runtime config and snapshots to the engine via internal HTTP.
 type HTTPClient struct {
 	BaseURL string
 	Client  *http.Client
+}
+
+type blockHostRequest struct {
+	IP         string `json:"ip"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+type blockFlowRequest struct {
+	SrcIP      string `json:"srcIp"`
+	DstIP      string `json:"dstIp"`
+	Proto      string `json:"proto"`
+	DstPort    string `json:"dstPort"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
 }
 
 func NewHTTPClient(baseURL string) *HTTPClient {
@@ -482,6 +499,73 @@ func (c *HTTPClient) DownloadPcap(ctx context.Context, name string) (*http.Respo
 		return nil, fmt.Errorf("engine pcap download status %d", resp.StatusCode)
 	}
 	return resp, nil
+}
+
+func (c *HTTPClient) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	if ip == nil {
+		return fmt.Errorf("ip is nil")
+	}
+	reqBody := blockHostRequest{IP: ip.String()}
+	if ttl > 0 {
+		reqBody.TTLSeconds = int(ttl.Seconds())
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/blocks/host", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine block host status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *HTTPClient) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("engine BaseURL is empty")
+	}
+	if srcIP == nil || dstIP == nil {
+		return fmt.Errorf("src/dst ip required")
+	}
+	reqBody := blockFlowRequest{
+		SrcIP:   srcIP.String(),
+		DstIP:   dstIP.String(),
+		Proto:   proto,
+		DstPort: dport,
+	}
+	if ttl > 0 {
+		reqBody.TTLSeconds = int(ttl.Seconds())
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/blocks/flow", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("engine block flow status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *HTTPClient) GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error) {

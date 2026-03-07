@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package users
 
 import (
@@ -23,14 +26,15 @@ var (
 )
 
 type User struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	FirstName string    `json:"firstName,omitempty"`
-	LastName  string    `json:"lastName,omitempty"`
-	Email     string    `json:"email,omitempty"`
-	Role      string    `json:"role"` // admin|view
-	CreatedAt time.Time `json:"createdAt,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	FirstName          string    `json:"firstName,omitempty"`
+	LastName           string    `json:"lastName,omitempty"`
+	Email              string    `json:"email,omitempty"`
+	Role               string    `json:"role"` // admin|view
+	MustChangePassword bool      `json:"mustChangePassword,omitempty"`
+	CreatedAt          time.Time `json:"createdAt,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt,omitempty"`
 }
 
 type StoredUser struct {
@@ -120,6 +124,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT,
   role TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -135,6 +140,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create users schema: %w", err)
 	}
+	// Migrate existing databases: add must_change_password column if missing.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -163,29 +170,30 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 			return nil
 		}
 		// Otherwise create it (explicit operator intent).
-		_, err := s.Create(ctx, User{
+		_, err := s.createUser(ctx, User{
 			Username:  username,
 			FirstName: "Default",
 			LastName:  "Admin",
 			Role:      "admin",
 			Email:     "",
-		}, password)
+		}, password, true)
 		return err
 	}
 
-	// Fresh DB: always seed the default admin.
-	_, err := s.Create(ctx, User{
-		Username:  username,
-		FirstName: "Default",
-		LastName:  "Admin",
-		Role:      "admin",
-		Email:     "",
-	}, password)
+	// Fresh DB: always seed the default admin with password change required.
+	_, err := s.createUser(ctx, User{
+		Username:           username,
+		FirstName:          "Default",
+		LastName:           "Admin",
+		Role:               "admin",
+		Email:              "",
+		MustChangePassword: password == "containd",
+	}, password, true)
 	return err
 }
 
 func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, created_at, updated_at FROM users ORDER BY username ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, must_change_password, created_at, updated_at FROM users ORDER BY username ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -194,7 +202,7 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		var cAt, uAt int64
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &cAt, &uAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.MustChangePassword, &cAt, &uAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt = time.Unix(cAt, 0).UTC()
@@ -209,10 +217,10 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 
 func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*StoredUser, error) {
 	username = strings.TrimSpace(username)
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, created_at, updated_at FROM users WHERE username = ?`, username)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at FROM users WHERE username = ?`, username)
 	var u StoredUser
 	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -224,10 +232,10 @@ func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*Stor
 }
 
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at FROM users WHERE id = ?`, id)
 	var u StoredUser
 	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -238,15 +246,47 @@ func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, erro
 	return &u, nil
 }
 
+func validatePassword(pw string) error {
+	if pw == "" {
+		return errors.New("password required")
+	}
+	if len(pw) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, r := range pw {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return errors.New("password must contain uppercase, lowercase, and a digit")
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Create(ctx context.Context, u User, password string) (*User, error) {
+	return s.createUser(ctx, u, password, false)
+}
+
+func (s *SQLiteStore) createUser(ctx context.Context, u User, password string, bootstrap bool) (*User, error) {
 	if strings.TrimSpace(u.Username) == "" {
 		return nil, errors.New("username required")
 	}
 	if u.Role != "admin" && u.Role != "view" {
 		return nil, fmt.Errorf("invalid role %q", u.Role)
 	}
-	if password == "" {
-		return nil, errors.New("password required")
+	if bootstrap {
+		if password == "" {
+			return nil, errors.New("password required")
+		}
+	} else if err := validatePassword(password); err != nil {
+		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -256,9 +296,13 @@ func (s *SQLiteStore) Create(ctx context.Context, u User, password string) (*Use
 	u.ID = newID()
 	u.CreatedAt = now
 	u.UpdatedAt = now
+	mustChange := 0
+	if u.MustChangePassword {
+		mustChange = 1
+	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), now.Unix(), now.Unix())
+		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), mustChange, now.Unix(), now.Unix())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrUsernameTaken
@@ -339,15 +383,15 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {
-	if password == "" {
-		return errors.New("password required")
+	if err := validatePassword(password); err != nil {
+		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}

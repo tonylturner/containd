@@ -4,65 +4,36 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
-import { fetchHealth, type AuditRecord, type HealthResponse, type User, api } from "../lib/api";
+import { type AuditRecord, type DashboardData, type HealthResponse, type User, api } from "../lib/api";
 import { Shell } from "../components/Shell";
 import { Console } from "../components/Console";
 import { Skeleton } from "../components/Skeleton";
 
 export default function Home() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [me, setMe] = useState<User | null>(null);
-  const [lastAdminChange, setLastAdminChange] = useState<AuditRecord | null>(null);
-  const [assetCount, setAssetCount] = useState<number | null>(null);
-  const [zoneCount, setZoneCount] = useState<number | null>(null);
-  const [ifaceCount, setIfaceCount] = useState<number | null>(null);
-  const [ruleCount, setRuleCount] = useState<number | null>(null);
-  const [eventStats, setEventStats] = useState<{
-    idsAlerts: number;
-    modbusWrites: number;
-    avDetections: number;
-    avBlocks: number;
-    totalEvents: number;
-  } | null>(null);
-  const [servicesStatus, setServicesStatus] = useState<Record<string, unknown> | null>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
+
+  const health = data?.health ?? null;
+  const me = data?.user ?? null;
+  const lastAdminChange = data?.lastActivity ?? null;
+  const assetCount = data?.counts?.assets ?? null;
+  const zoneCount = data?.counts?.zones ?? null;
+  const ifaceCount = data?.counts?.interfaces ?? null;
+  const ruleCount = data?.counts?.rules ?? null;
+  const eventStats = data ? {
+    idsAlerts: data.eventStats.idsAlerts,
+    modbusWrites: data.eventStats.modbusWrites,
+    avDetections: data.eventStats.avDetections,
+    avBlocks: data.eventStats.avBlocks,
+    totalEvents: data.eventStats.total,
+  } : null;
+  const servicesStatus = data?.services ?? null;
 
   useEffect(() => {
     let alive = true;
-    fetchHealth().then((res) => alive && setHealth(res));
-    Promise.all([
-      api.listAssets(),
-      api.listZones(),
-      api.listInterfaces(),
-      api.listFirewallRules(),
-      api.listEvents(500),
-      api.getServicesStatus(),
-      api.me(),
-      api.listAudit(),
-    ]).then(([assets, zones, ifaces, rules, events, services, meUser, audit]) => {
-      if (!alive) return;
-      setAssetCount(assets?.length ?? 0);
-      setZoneCount(zones?.length ?? 0);
-      setIfaceCount(ifaces?.length ?? 0);
-      setRuleCount(rules?.length ?? 0);
-      setMe(meUser ?? null);
-      const evs = events ?? [];
-      const idsAlerts = evs.filter((e) => e.proto === "ids" && e.kind === "alert").length;
-      const avDetections = evs.filter((e) => e.kind === "service.av.detected").length;
-      const avBlocks = evs.filter((e) => e.kind === "service.av.block_flow").length;
-      const modbusWrites = evs.filter(
-        (e) =>
-          e.proto === "modbus" &&
-          e.kind === "request" &&
-          (e.attributes as any)?.is_write === true,
-      ).length;
-      setEventStats({ idsAlerts, modbusWrites, avDetections, avBlocks, totalEvents: evs.length });
-      setServicesStatus(services);
-      const lastChange = (audit ?? []).find((rec) => rec.actor && rec.actor !== "system") ?? null;
-      setLastAdminChange(lastChange);
+    api.getDashboard().then((res) => {
+      if (alive && res) setData(res);
     });
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   return (
@@ -71,7 +42,7 @@ export default function Home() {
         <DashboardCard title="System information">
           {health ? (
             <div className="space-y-1 text-sm">
-              <KeyValue label="Hostname" value="containd" />
+              <KeyValue label="Hostname" value={health?.hostname ?? "containd"} />
               <KeyValue label="Build" value={health?.build ?? "dev"} />
               <KeyValue label="Component" value={health?.component ?? "mgmt"} />
               <KeyValue
@@ -248,7 +219,7 @@ function ServicesWidget({ status }: { status: Record<string, unknown> | null }) 
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-400">
-        Green = configured/active, red = off/unconfigured.
+        Green = configured/active, amber = off/unconfigured.
       </p>
       {(envoyRate !== null || nginxRate !== null) && (
         <p className="mt-2 text-xs text-slate-400">

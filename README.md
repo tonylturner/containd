@@ -1,62 +1,145 @@
 # containd
 
-`containd` is an open-source next-generation firewall purpose-built for ICS/OT environments. This repository follows the agent specification in `agents.md` and evolves through staged phases. Product/operator docs live under `docs/mkdocs/` and the roadmap is tracked in `docs/tasks.md`.
+An open-source next-generation firewall purpose-built for ICS/OT environments.
 
-## Current status
+containd is a single-image appliance that combines zone-based firewalling, ICS protocol inspection, embedded network services, and a full management UI into one deployable container. It is designed for industrial control system operators who need OT-aware security without cobbling together dozens of point tools.
 
-- Phase 0 scaffolding with Go entrypoints for `ngfw-engine` and `ngfw-mgmt`.
-- Next.js UI in `ui/` (static export embedded into the appliance image).
-- Docker Compose workflow for local appliance bring-up (HTTP+HTTPS UI/API and SSH console).
+## Key Features
 
-## Running the skeleton
+- **Zone-based firewall** with nftables enforcement, NAT (SNAT + DNAT), and default-deny posture
+- **ICS/OT protocol inspection** — Modbus/TCP deep packet inspection with function code and register-level visibility
+- **IT protocol DPI** — DNS, TLS (SNI/JA3), HTTP/2, SSH, RDP, SMB, SNMP, NTP
+- **Native IDS** with Sigma-compatible rule evaluation across DPI events
+- **Embedded services** — DNS resolver (Unbound), NTP (OpenNTPD), DHCP server, forward proxy (Envoy), reverse proxy (Nginx)
+- **VPN** — WireGuard and OpenVPN with managed config, PKI, and client profiles
+- **Antivirus** — ICAP pipeline with optional embedded ClamAV
+- **Config lifecycle** — candidate/running configs, diff, commit, commit-confirmed with auto-rollback, deterministic JSON export/import
+- **Management UI** — dashboard, topology, firewall rules, routing, NAT, services, monitoring, diagnostics, audit log, and in-browser CLI console
+- **SSH console** — full CLI shell with `show`, `set`, `diag` commands, setup wizard, and diagnostics
+- **Syslog forwarding** — UDP/TCP, RFC 5424 or JSON, with retry and backoff
 
-```bash
-# Combined appliance (default)
-go run ./cmd/containd all
+## Quick Start
 
-# Management plane only
-go run ./cmd/containd mgmt
-
-# Data plane only
-go run ./cmd/containd engine
-```
-
-Health endpoints:
-
-- `http://localhost:8080/api/v1/health` (management)
-- `http://localhost:8081/health` (engine)
-
-UI serving:
-- `ngfw-mgmt` serves a built UI from `NGFW_UI_DIR` if set, otherwise prefers `ui/out`, then `ui/public`, then `/var/lib/ngfw/ui`.
-- During development, run `npm run dev` in `ui/` and access the Next.js dev server directly.
-
-Containers:
-- Build appliance image (single container, default): `docker build -f Dockerfile.mgmt -t containd/containd:dev .`
-- Compose (combined containd) + prints connection info: `bash scripts/containd up --build`
-- Override mode if needed: `CONTAIND_MODE=engine docker compose up` (engine-only) or `CONTAIND_MODE=mgmt` (mgmt-only).
-- Publish (example): `docker tag containd/containd:dev ghcr.io/you/containd:dev && docker push ghcr.io/you/containd:dev`
-
-Consume published image:
-- `docker run --rm -p 8080:8080 ghcr.io/you/containd:dev`
-
-## Docker Compose quickstart
+### Deploy (recommended)
 
 ```bash
-cp .env.example .env
-# Edit .env and set a real CONTAIND_JWT_SECRET
-docker compose up -d --build
-
-# Print connection info (UI/HTTPS/SSH + container IPs)
-bash scripts/containd-connect
+curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
+docker compose up -d
 ```
 
-Defaults:
-- UI/API: `http://localhost:${CONTAIND_PUBLISH_HTTP_PORT:-8080}` and `https://localhost:${CONTAIND_PUBLISH_HTTPS_PORT:-8443}`
-- SSH: `ssh -p ${CONTAIND_PUBLISH_SSH_PORT:-2222} containd@localhost` (password `containd` until you enroll a key)
+Once running:
 
-Next steps: flesh out control plane models, data plane capture/flow tracking, and the full UI/CLI experience per `agents.md`.
+| Service | URL |
+|---------|-----|
+| Web UI / API | `http://localhost:8080` |
+| HTTPS | `https://localhost:8443` |
+| SSH console | `ssh -p 2222 containd@localhost` |
 
-## Docs
+Default admin credentials: `containd` / `containd` — change these on first login.
 
-- `docs/mkdocs/` – operator/product documentation
-- `docs/tasks.md` – roadmap/task tracker
+For production, set a unique JWT secret:
+
+```bash
+CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
+```
+
+### Standalone Container
+
+```bash
+docker run -d \
+  --name containd \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  -p 8080:8080 -p 8443:8443 -p 2222:2222 \
+  -v containd-data:/data \
+  -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
+  ghcr.io/tonylturner/containd:latest
+```
+
+### From Source (development)
+
+```bash
+# Build the Go binary
+go build -o containd ./cmd/containd
+
+# Build the UI (static export)
+cd ui && npm ci && npm run build && cd ..
+
+# Run the combined appliance
+CONTAIND_UI_DIR=ui/out ./containd all
+```
+
+## Architecture
+
+containd runs as a single Go binary with three logical planes:
+
+- **Data plane** — nftables/conntrack enforcement, packet capture, flow tracking, DPI/IDS, verdict engine
+- **Control plane** — SQLite persistence, config lifecycle, policy compilation, service management (DNS/NTP/DHCP/VPN/AV/proxies), audit
+- **Management plane** — REST API, web UI, SSH console, authentication/RBAC
+
+The binary supports three modes: `containd all` (default, combined appliance), `containd mgmt` (management only), and `containd engine` (data plane only).
+
+## Docker Compose Lab Topology
+
+The included `docker-compose.yml` (at the repo root) creates a lab environment with 8 isolated networks representing firewall ports:
+
+| Network | Subnet | Interface |
+|---------|--------|-----------|
+| WAN | 192.168.240.0/24 | eth0 |
+| DMZ | 192.168.241.0/24 | eth1 |
+| LAN1 | 192.168.242.0/24 | eth2 |
+| LAN2–LAN6 | 192.168.243–247.0/24 | eth3–eth7 |
+
+Default zones: `wan`, `dmz`, `mgmt` (lan1), `lan` (lan2–lan6).
+
+## Configuration
+
+All runtime configuration is managed through the UI, CLI, or REST API and persisted in SQLite. No direct file editing required.
+
+```bash
+# CLI examples (via SSH or in-app console)
+show interfaces
+show zones
+show firewall rules
+set zone lan interface lan2
+set firewall rule allow --src-zone lan --dst-zone wan --action allow
+commit
+```
+
+Config can be exported and imported as deterministic JSON:
+
+```bash
+export config > backup.json
+import config < backup.json
+```
+
+## Documentation
+
+Full product documentation is embedded in the appliance (accessible via the Help icon in the UI) and built from `docs/mkdocs/`:
+
+- [Architecture](docs/mkdocs/architecture.md)
+- [Docker Compose Deployment](docs/mkdocs/docker-compose.md)
+- [CLI Reference](docs/mkdocs/cli.md)
+- [Configuration Format](docs/mkdocs/config-format.md)
+- [Services](docs/mkdocs/services.md)
+- [Dataplane & Enforcement](docs/mkdocs/dataplane.md)
+- [ICS/DPI](docs/mkdocs/ics-dpi.md)
+- [IDS Rules](docs/mkdocs/ids-rules.md)
+- [Third-Party Licenses](docs/mkdocs/SPDX.md)
+
+## Security
+
+- Default-deny firewall posture out of the box.
+- Distroless container image running as nonroot.
+- JWT-based auth with session invalidation; admin and view-only roles.
+- HTTPS with auto-generated self-signed certificate; custom cert install supported.
+- SSH key auth supported; password auth for lab use.
+
+For production hardening guidance and vulnerability reporting, see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package netcfg
@@ -15,7 +18,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -405,6 +408,10 @@ func setLinkUp(name string) error {
 	if err != nil {
 		return err
 	}
+	// Skip if interface is already up (common in Docker where interfaces are externally managed)
+	if nic.Flags&net.FlagUp != 0 {
+		return nil
+	}
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return err
@@ -596,11 +603,11 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 	if ipnet == nil {
 		return nil
 	}
-	family := unix.AF_INET
 	ip := ipnet.IP
 	if ip == nil {
 		return nil
 	}
+	var family int
 	if ip4 := ip.To4(); ip4 != nil {
 		ip = ip4
 		family = unix.AF_INET
@@ -696,11 +703,11 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 	if ipnet == nil {
 		return nil
 	}
-	family := unix.AF_INET
 	ip := ipnet.IP
 	if ip == nil {
 		return nil
 	}
+	var family int
 	if ip4 := ip.To4(); ip4 != nil {
 		ip = ip4
 		family = unix.AF_INET

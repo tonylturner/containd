@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package pcap
@@ -8,12 +11,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type worker struct {
@@ -237,7 +241,7 @@ func buildForwarders(iface string, cfg config.PCAPConfig) []*forwardSink {
 		if t.Host == "" || t.Port == 0 {
 			continue
 		}
-		target := fmt.Sprintf("%s:%d", t.Host, t.Port)
+		target := net.JoinHostPort(t.Host, strconv.Itoa(int(t.Port)))
 		network := "udp"
 		if strings.ToLower(t.Proto) == "tcp" {
 			network = "tcp"

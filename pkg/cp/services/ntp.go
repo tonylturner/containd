@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -12,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
@@ -187,7 +190,7 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			err = fmt.Errorf("%v: %s", err, msg)
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
 		m.mu.Lock()
 		m.lastError = err.Error()

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package capture
 
 import (
@@ -30,7 +33,7 @@ func TestManagerStartValidatesInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
-	if err := m.Start(context.Background()); err == nil {
+	if err := m.Start(context.Background(), func(Packet) {}); err == nil {
 		t.Fatalf("expected error for missing interface")
 	}
 }

@@ -1,6 +1,6 @@
-module github.com/containd/containd
+module github.com/tonylturner/containd
 
-go 1.25.5
+go 1.25.7
 
 require github.com/gin-gonic/gin v1.9.1
 

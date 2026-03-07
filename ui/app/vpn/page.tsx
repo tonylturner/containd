@@ -12,6 +12,8 @@ import {
   type OpenVPNConfig,
   type OpenVPNManagedClientConfig,
   type OpenVPNManagedServerConfig,
+  type Zone,
+  type Interface,
   type InterfaceState,
   type WireGuardStatus,
   type ServicesStatus,
@@ -33,6 +35,8 @@ function normalize(cfg: VPNConfig | null): { wireguard: WireGuardConfig; openvpn
       enabled: cfg?.wireguard?.enabled ?? false,
       interface: cfg?.wireguard?.interface ?? "wg0",
       listenPort: cfg?.wireguard?.listenPort ?? 51820,
+      listenZone: cfg?.wireguard?.listenZone ?? "",
+      listenInterfaces: cfg?.wireguard?.listenInterfaces ?? [],
       addressCIDR: cfg?.wireguard?.addressCIDR ?? "10.8.0.1/24",
       privateKey: cfg?.wireguard?.privateKey ?? "",
       peers: cfg?.wireguard?.peers ?? [],
@@ -122,6 +126,8 @@ const defaultOpenVPNManaged: OpenVPNManagedClientConfig = {
 const defaultOpenVPNServer: OpenVPNManagedServerConfig = {
   listenPort: 1194,
   proto: "udp",
+  listenZone: "",
+  listenInterfaces: [],
   tunnelCIDR: "10.9.0.0/24",
   publicEndpoint: "",
   pushDNS: [],
@@ -139,6 +145,8 @@ export default function VPNPage() {
   const [runtime, setRuntime] = useState<InterfaceState | null>(null);
   const [wgStatus, setWgStatus] = useState<WireGuardStatus | null>(null);
   const [svcStatus, setSvcStatus] = useState<VPNServiceStatus | null>(null);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
   const [newClientName, setNewClientName] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -153,6 +161,13 @@ export default function VPNPage() {
     if (!hasNonEmptyString(cfg.wireguard.addressCIDR)) out.push({ field: "wireguard.addressCIDR", severity: "required", message: "Tunnel address CIDR is required (e.g. 10.8.0.1/24)." });
     if (!hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
     if (!cfg.wireguard.peers?.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
+    if ((cfg.wireguard.listenInterfaces ?? []).length > 0 && hasNonEmptyString(cfg.wireguard.listenZone)) {
+      out.push({
+        field: "wireguard.listenTargets",
+        severity: "recommended",
+        message: "Listen interfaces override listen zone; clear one to avoid confusion.",
+      });
+    }
     return out;
   }, [cfg.wireguard]);
 
@@ -179,6 +194,13 @@ export default function VPNPage() {
       if (!hasNonEmptyString(s?.proto)) out.push({ field: "openvpn.server.proto", severity: "required", message: "Protocol must be set (udp/tcp)." });
       if (!hasNonEmptyString(s?.tunnelCIDR)) out.push({ field: "openvpn.server.tunnelCIDR", severity: "required", message: "Tunnel CIDR is required (client address pool)." });
       if (!hasNonEmptyString(s?.publicEndpoint)) out.push({ field: "openvpn.server.publicEndpoint", severity: "recommended", message: "Set Public Endpoint so generated client profiles know where to connect." });
+      if ((s?.listenInterfaces ?? []).length > 0 && hasNonEmptyString(s?.listenZone)) {
+        out.push({
+          field: "openvpn.server.listenTargets",
+          severity: "recommended",
+          message: "Listen interfaces override listen zone; clear one to avoid confusion.",
+        });
+      }
     }
     return out;
   }, [cfg.openvpn]);
@@ -190,7 +212,13 @@ export default function VPNPage() {
       try {
         const current = await api.getVPN();
         setCfg(normalize(current));
-        const states = await api.listInterfaceState();
+        const [states, zonesResp, ifacesResp] = await Promise.all([
+          api.listInterfaceState(),
+          api.listZones(),
+          api.listInterfaces(),
+        ]);
+        setZones(zonesResp ?? []);
+        setInterfaces(ifacesResp ?? []);
         const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
         setRuntime((states ?? []).find((s) => s.name === ifName) ?? null);
         try {
@@ -265,6 +293,17 @@ export default function VPNPage() {
     ],
     [wgStatus?.peers?.length, svcStatus?.openvpn_running],
   );
+  const interfaceOptions = useMemo(() => {
+    return (interfaces ?? [])
+      .map((iface) => {
+        const value = (iface.device ?? iface.name ?? "").trim();
+        if (!value) return null;
+        const label = iface.alias ? `${iface.alias} (${value})` : value;
+        const zone = iface.zone ? ` · ${iface.zone}` : "";
+        return { value, label: `${label}${zone}` };
+      })
+      .filter((item): item is { value: string; label: string } => Boolean(item));
+  }, [interfaces]);
 
   async function onSave() {
     if (!canEdit) return;
@@ -517,8 +556,8 @@ export default function VPNPage() {
 
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
             <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
-              When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the <span className="font-mono">wan</span> zone
-              (nftables input) so clients can connect.
+              When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
+              (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -549,6 +588,67 @@ export default function VPNPage() {
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                 />
               </div>
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                  Listen Zone
+                  <InfoTip label="Zone used for auto-open input rules (default wan)." />
+                </label>
+                <select
+                  value={cfg.wireguard.listenZone ?? ""}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setCfg((c) => ({
+                      ...c,
+                      wireguard: { ...c.wireguard, listenZone: e.target.value },
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                >
+                  <option value="">default (wan)</option>
+                  {zones.map((z) => (
+                    <option key={z.name} value={z.name}>
+                      {z.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                Listen Interfaces (optional)
+                <InfoTip label="Overrides listen zone when set. Select one or more interfaces/devices." />
+              </label>
+              {interfaceOptions.length ? (
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {interfaceOptions.map((opt) => {
+                    const active = (cfg.wireguard.listenInterfaces ?? []).includes(opt.value);
+                    return (
+                      <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          disabled={!canEdit}
+                          onChange={(e) => {
+                            const next = new Set(cfg.wireguard.listenInterfaces ?? []);
+                            if (e.target.checked) {
+                              next.add(opt.value);
+                            } else {
+                              next.delete(opt.value);
+                            }
+                            setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, listenInterfaces: Array.from(next) } }));
+                          }}
+                          className="h-4 w-4"
+                        />
+                        {opt.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-slate-400">No interfaces discovered yet.</p>
+              )}
+              <p className="mt-2 text-xs text-slate-400">If any interfaces are selected, the listen zone is ignored.</p>
             </div>
 
             <div>
@@ -984,7 +1084,8 @@ export default function VPNPage() {
                 <div className="text-xs uppercase tracking-wide text-slate-400">Server Configuration</div>
                 <div className="mt-3 grid gap-3">
                   <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-300">
-                    Enabling OpenVPN server automatically opens the listen port on the WAN zone (nftables input) so clients can connect.
+                    Enabling OpenVPN server automatically opens the listen port on the configured listen zone or interfaces
+                    (default WAN) via nftables input so clients can connect.
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
                     <div>
@@ -1041,6 +1142,78 @@ export default function VPNPage() {
                         }
                         className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
                       />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Listen Zone
+                        <InfoTip label="Zone used for auto-open input rules (default wan)." />
+                      </label>
+                      <select
+                        value={cfg.openvpn.server?.listenZone ?? ""}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          setCfg((c) => ({
+                            ...c,
+                            openvpn: {
+                              ...c.openvpn,
+                              server: { ...(c.openvpn.server ?? defaultOpenVPNServer), listenZone: e.target.value },
+                            },
+                          }))
+                        }
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">default (wan)</option>
+                        {zones.map((z) => (
+                          <option key={z.name} value={z.name}>
+                            {z.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                        Listen Interfaces (optional)
+                        <InfoTip label="Overrides listen zone when set. Select one or more interfaces/devices." />
+                      </label>
+                      {interfaceOptions.length ? (
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          {interfaceOptions.map((opt) => {
+                            const active = (cfg.openvpn.server?.listenInterfaces ?? []).includes(opt.value);
+                            return (
+                              <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={active}
+                                  disabled={!canEdit}
+                                  onChange={(e) => {
+                                    const next = new Set(cfg.openvpn.server?.listenInterfaces ?? []);
+                                    if (e.target.checked) {
+                                      next.add(opt.value);
+                                    } else {
+                                      next.delete(opt.value);
+                                    }
+                                    setCfg((c) => ({
+                                      ...c,
+                                      openvpn: {
+                                        ...c.openvpn,
+                                        server: { ...(c.openvpn.server ?? defaultOpenVPNServer), listenInterfaces: Array.from(next) },
+                                      },
+                                    }));
+                                  }}
+                                  className="h-4 w-4"
+                                />
+                                {opt.label}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-400">No interfaces discovered yet.</p>
+                      )}
+                      <p className="mt-2 text-xs text-slate-400">If any interfaces are selected, the listen zone is ignored.</p>
                     </div>
                   </div>
 

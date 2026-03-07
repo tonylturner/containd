@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
@@ -7,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -221,18 +224,24 @@ func setAuthCookie(c *gin.Context, token string, exp time.Time) {
 		maxAge = 0
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
-	// Default is non-Secure so local HTTPS with self-signed certs works reliably in browsers.
-	// Production deployments should set CONTAIND_COOKIE_SECURE=1 (or terminate TLS in front).
-	secure := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true")
+	secure := cookieSecure(c)
 	c.SetCookie("containd_token", token, maxAge, "/", "", secure, true)
 }
 
 func clearAuthCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	secure := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")) == "1" ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE")), "true")
+	secure := cookieSecure(c)
 	c.SetCookie("containd_token", "", -1, "/", "", secure, true)
+}
+
+// cookieSecure returns true if the Secure flag should be set on auth cookies.
+// Auto-detects TLS from the request, and can be overridden via CONTAIND_COOKIE_SECURE.
+func cookieSecure(c *gin.Context) bool {
+	env := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE"))
+	if env != "" {
+		return env == "1" || strings.EqualFold(env, "true")
+	}
+	return c.Request.TLS != nil
 }
 
 func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {

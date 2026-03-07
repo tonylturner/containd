@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package audit
 
 import (
@@ -12,7 +15,7 @@ import (
 // Store persists audit records.
 type Store interface {
 	Add(ctx context.Context, r Record) error
-	List(ctx context.Context, limit int) ([]Record, error)
+	List(ctx context.Context, limit int, offset ...int) ([]Record, error)
 	Close() error
 }
 
@@ -95,11 +98,15 @@ func (s *SQLiteStore) Add(ctx context.Context, r Record) error {
 	return nil
 }
 
-func (s *SQLiteStore) List(ctx context.Context, limit int) ([]Record, error) {
+func (s *SQLiteStore) List(ctx context.Context, limit int, offset ...int) ([]Record, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, source, action, target, result, detail FROM audit_records ORDER BY id DESC LIMIT ?`, limit)
+	off := 0
+	if len(offset) > 0 && offset[0] > 0 {
+		off = offset[0]
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, source, action, target, result, detail FROM audit_records ORDER BY id DESC LIMIT ? OFFSET ?`, limit, off)
 	if err != nil {
 		return nil, fmt.Errorf("query audit records: %w", err)
 	}

@@ -376,6 +376,15 @@ export type Asset = {
   description?: string;
 };
 
+export type DashboardData = {
+  health: HealthResponse & { commit?: string; hostname?: string };
+  counts: { assets: number; zones: number; interfaces: number; rules: number };
+  eventStats: { total: number; idsAlerts: number; modbusWrites: number; avDetections: number; avBlocks: number };
+  services: Record<string, unknown> | null;
+  user: User | null;
+  lastActivity: AuditRecord | null;
+};
+
 export type AuditRecord = {
   id: number;
   timestamp: string;
@@ -431,6 +440,8 @@ export type User = {
   lastName?: string;
   email?: string;
   role: UserRole;
+  mustChangePassword?: boolean;
+  labMode?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -524,6 +535,8 @@ export type WireGuardConfig = {
   enabled?: boolean;
   interface?: string;
   listenPort?: number;
+  listenZone?: string;
+  listenInterfaces?: string[];
   addressCIDR?: string;
   privateKey?: string;
   peers?: WGPeer[];
@@ -551,6 +564,8 @@ export type OpenVPNManagedClientConfig = {
 export type OpenVPNManagedServerConfig = {
   listenPort?: number;
   proto?: string;
+  listenZone?: string;
+  listenInterfaces?: string[];
   tunnelCIDR?: string;
   publicEndpoint?: string;
   pushDNS?: string[];
@@ -683,6 +698,13 @@ export type IDSConfig = {
   rules?: IDSRule[];
 };
 
+export type RulesetPreview = {
+  ruleset: string;
+  snapshot?: unknown;
+  engineStatus?: unknown;
+  engineStatusError?: string;
+};
+
 export type CLIExecuteResponse = {
   output: string;
   error?: string;
@@ -772,6 +794,10 @@ export async function stopPcap(): Promise<PcapStatus | null> {
 
 export async function getPcapStatus(): Promise<PcapStatus | null> {
   return await getJSON<PcapStatus>("/api/v1/pcap/status");
+}
+
+export async function getRulesetPreview(): Promise<RulesetPreview | null> {
+  return await getJSON<RulesetPreview>("/api/v1/dataplane/ruleset");
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {
@@ -1009,6 +1035,19 @@ export const api = {
     deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
   setNAT: (cfg: NATConfig) => postJSON<NATConfig>("/api/v1/firewall/nat", cfg),
+  blockHostTemp: (ip: string, ttlSeconds?: number) =>
+    postJSON<{ status: string }>("/api/v1/dataplane/blocks/host", {
+      ip,
+      ttlSeconds,
+    }),
+  blockFlowTemp: (req: {
+    srcIp: string;
+    dstIp: string;
+    proto: string;
+    dstPort: string;
+    ttlSeconds?: number;
+  }) =>
+    postJSON<{ status: string }>("/api/v1/dataplane/blocks/flow", req),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),
@@ -1067,6 +1106,9 @@ export const api = {
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
+
+  // Dashboard (aggregated)
+  getDashboard: () => getJSON<DashboardData>("/api/v1/dashboard"),
 
   // System TLS
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),

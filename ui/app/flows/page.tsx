@@ -91,7 +91,7 @@ function FlowsInner() {
                   colSpan={6}
                   className="px-4 py-6 text-center text-slate-400"
                 >
-                  No flows yet. Enable DPI mock or capture to generate events.
+                  No flows yet. Enable DPI capture or learning mode to generate events.
                 </td>
               </tr>
             )}

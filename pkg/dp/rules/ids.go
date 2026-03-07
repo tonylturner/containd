@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package rules
 
 // IDSConfig holds native IDS rules that match on normalized DPI events.

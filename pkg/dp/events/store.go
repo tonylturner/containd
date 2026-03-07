@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package events
 
 import (
@@ -6,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // Event is a normalized DPI/IDS/Firewall event for telemetry.

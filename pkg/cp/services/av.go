@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -9,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
 // AVManager handles antivirus configuration and async scan orchestration.
-// Initial implementation is a stub with status + validation; scanning pipeline will follow.
+// It supports ICAP probing, async scan queueing, and optional ClamAV supervision.
 type AVManager struct {
 	mu         sync.Mutex
 	lastCfg    config.AVConfig
@@ -298,10 +301,10 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 		m.recordVerdict(key, verdict)
 		if verdict == "malware" {
 			m.emit("service.av.detected", map[string]any{
-				"hash":   task.Hash,
-				"proto":  task.Proto,
-				"source": task.Source,
-				"dest":   task.Dest,
+				"hash":        task.Hash,
+				"proto":       task.Proto,
+				"source":      task.Source,
+				"dest":        task.Dest,
 				"error_count": 1,
 			})
 		}
@@ -319,10 +322,10 @@ func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 			m.recordVerdict(key, verdict)
 			if verdict == "malware" {
 				m.emit("service.av.detected", map[string]any{
-					"hash":   task.Hash,
-					"proto":  task.Proto,
-					"source": task.Source,
-					"dest":   task.Dest,
+					"hash":        task.Hash,
+					"proto":       task.Proto,
+					"source":      task.Source,
+					"dest":        task.Dest,
 					"error_count": 1,
 				})
 			}
@@ -590,10 +593,6 @@ func (m *AVManager) startClamd(ctx context.Context, cfg config.ClamAVConfig) {
 	if m.clamdCmd != nil && m.clamdCmd.Process != nil {
 		// already running
 		return
-	}
-	sock := strings.TrimSpace(cfg.SocketPath)
-	if sock == "" {
-		sock = m.clamdSocket
 	}
 	cmd := exec.CommandContext(ctx, m.clamdPath, "--foreground=yes", fmt.Sprintf("--config-file=%s", "/etc/clamav/clamd.conf"))
 	cmd.Stdout = os.Stdout

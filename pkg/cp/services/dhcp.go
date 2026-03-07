@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -8,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
-// DHCPManager persists DHCP service configuration and (later) will supervise a DHCP daemon/server.
-// Today it only writes a rendered config artifact for inspection.
+// DHCPManager persists DHCP service configuration and renders config artifacts.
+// Runtime DHCP is handled by the engine; this manager focuses on config/state.
 type DHCPManager struct {
 	BaseDir string
 
@@ -111,7 +114,7 @@ func (m *DHCPManager) Status() map[string]any {
 		"reservations":  len(m.lastCfg.Reservations),
 		"last_render":   m.lastRender.Format(time.RFC3339Nano),
 		"last_error":    m.lastError,
-		"note":          "DHCP server runtime integration is phased (config-only today).",
+		"note":          "DHCP runtime is handled by the engine; this status reflects config render state.",
 	}
 }
 

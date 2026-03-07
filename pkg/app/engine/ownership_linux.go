@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package engineapp
@@ -5,15 +8,16 @@ package engineapp
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/dp/netcfg"
+	"go.uber.org/zap"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"golang.org/x/sys/unix"
 )
 
@@ -23,7 +27,7 @@ type ownershipState struct {
 }
 
 type ownershipManager struct {
-	logger *log.Logger
+	logger *zap.SugaredLogger
 
 	state atomic.Value // ownershipState
 	// reconcile requests are coalesced.
@@ -34,7 +38,7 @@ type ownershipManager struct {
 	lastApplyErr string
 }
 
-func newOwnershipManager(logger *log.Logger) *ownershipManager {
+func newOwnershipManager(logger *zap.SugaredLogger) *ownershipManager {
 	m := &ownershipManager{
 		logger:      logger,
 		reconcileCh: make(chan struct{}, 1),
@@ -117,7 +121,7 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 		if len(st.ifaces) > 0 {
 			if err := netcfg.ApplyInterfaces(applyCtx, st.ifaces); err != nil {
 				m.setLastError(err)
-				m.logger.Printf("ownership reconcile (%s) apply interfaces failed: %v", reason, err)
+				m.logger.Errorf("ownership reconcile (%s) apply interfaces failed: %v", reason, err)
 				return
 			}
 		}
@@ -128,7 +132,7 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 			resolved := resolveRoutingIfaces(st.routing, st.ifaces)
 			if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
 				m.setLastError(err)
-				m.logger.Printf("ownership reconcile (%s) apply routing failed: %v", reason, err)
+				m.logger.Errorf("ownership reconcile (%s) apply routing failed: %v", reason, err)
 				return
 			}
 		}
@@ -170,7 +174,7 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
-		m.logger.Printf("ownership netlink watch disabled: %v", err)
+		m.logger.Warnf("ownership netlink watch disabled: %v", err)
 		return
 	}
 	defer unix.Close(fd)
@@ -186,7 +190,7 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 	groups |= unix.RTNLGRP_IPV6_ROUTE
 
 	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: groups}); err != nil {
-		m.logger.Printf("ownership netlink watch disabled: %v", err)
+		m.logger.Warnf("ownership netlink watch disabled: %v", err)
 		return
 	}
 
@@ -201,7 +205,7 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 		n, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
 			// If the socket becomes invalid (container constraints), stop watching.
-			m.logger.Printf("ownership netlink watch stopped: %v", err)
+			m.logger.Warnf("ownership netlink watch stopped: %v", err)
 			return
 		}
 		if n <= 0 {

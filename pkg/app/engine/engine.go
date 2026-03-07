@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package engineapp
 
 import (
@@ -6,29 +9,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/cp/services"
-	"github.com/containd/containd/pkg/dp/capture"
-	"github.com/containd/containd/pkg/dp/conntrack"
-	"github.com/containd/containd/pkg/dp/dhcpd"
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/enforce"
-	"github.com/containd/containd/pkg/dp/engine"
-	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/flow"
-	"github.com/containd/containd/pkg/dp/netcfg"
-	"github.com/containd/containd/pkg/dp/pcap"
-	"github.com/containd/containd/pkg/dp/rules"
+	"go.uber.org/zap"
+
+	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/services"
+	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/engine"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
+	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 type Options struct {
@@ -45,12 +48,19 @@ type healthResponse struct {
 	CommitHash string `json:"commitHash,omitempty"`
 }
 
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("json encode error", "error", err)
+	}
+}
+
 func Run(ctx context.Context, opts Options) error {
 	addr := opts.Addr
 	if addr == "" {
-		addr = addrFromEnv("NGFW_ENGINE_ADDR", ":8081")
+		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
 	}
-	logger := logging.New("[engine]")
+	logger := logging.NewService("engine")
 	ownership := newOwnershipManager(logger)
 
 	ifaces := opts.CaptureInterfaces
@@ -64,13 +74,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	dpEngine, err := engine.New(engine.Config{
-		Capture: capture.Config{Interfaces: ifaces},
-		Enforce: engine.EnforceConfig{
-			Enabled:   enforceEnabled,
-			TableName: enforceTable,
-			Applier:   enforce.NewNftApplier(),
-			Updater:   enforce.NewNftUpdater(enforceTable),
-		},
+		Capture:    capture.Config{Interfaces: ifaces},
+		Enforce:    engine.EnforceConfig{Enabled: enforceEnabled, TableName: enforceTable, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(enforceTable)},
+		InspectAll: common.Env("CONTAIND_DPI_MOCK", "") == "1",
 	})
 	if err != nil {
 		return fmt.Errorf("failed to init dp engine: %w", err)
@@ -84,13 +90,9 @@ func Run(ctx context.Context, opts Options) error {
 	// Start capture (no-op if no interfaces).
 	go func() {
 		if err := dpEngine.Start(ctx); err != nil {
-			logger.Printf("capture start failed: %v", err)
+			logger.Errorf("capture start failed: %v", err)
 		}
 	}()
-
-	if os.Getenv("NGFW_DPI_MOCK") == "1" {
-		go mockDPI(logger, dpEngine)
-	}
 
 	ownership.start(ctx)
 	dhcpMgr := dhcpd.NewManager()
@@ -110,7 +112,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	mux := http.NewServeMux()
-	pcapMgr := pcap.NewManager("/data/pcaps")
+	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
@@ -133,11 +135,13 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())
+	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
+	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
 	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 
-	logger.Printf("ngfw-engine starting on %s", addr)
+	logger.Infof("containd engine starting on %s", addr)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: mux,
@@ -176,8 +180,91 @@ func wireguardStatusHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(st)
+		writeJSON(w, st)
+	}
+}
+
+type blockHostRequest struct {
+	IP         string `json:"ip"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+type blockFlowRequest struct {
+	SrcIP      string `json:"srcIp"`
+	DstIP      string `json:"dstIp"`
+	Proto      string `json:"proto"`
+	DstPort    string `json:"dstPort"`
+	TTLSeconds int    `json:"ttlSeconds,omitempty"`
+}
+
+func blockHostHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil || dp.Updater() == nil {
+			http.Error(w, "updater unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var req blockHostRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(strings.TrimSpace(req.IP))
+		if ip == nil || ip.To4() == nil {
+			http.Error(w, "invalid ip", http.StatusBadRequest)
+			return
+		}
+		if req.TTLSeconds < 0 {
+			http.Error(w, "ttlSeconds must be >= 0", http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := dp.Updater().BlockHostTemp(r.Context(), ip, ttl); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	}
+}
+
+func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil || dp.Updater() == nil {
+			http.Error(w, "updater unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var req blockFlowRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		srcIP := net.ParseIP(strings.TrimSpace(req.SrcIP))
+		dstIP := net.ParseIP(strings.TrimSpace(req.DstIP))
+		if srcIP == nil || srcIP.To4() == nil || dstIP == nil || dstIP.To4() == nil {
+			http.Error(w, "invalid flow ip", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Proto) == "" || strings.TrimSpace(req.DstPort) == "" {
+			http.Error(w, "proto and dstPort required", http.StatusBadRequest)
+			return
+		}
+		if req.TTLSeconds < 0 {
+			http.Error(w, "ttlSeconds must be >= 0", http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if err := dp.Updater().BlockFlowTemp(r.Context(), srcIP, dstIP, strings.ToLower(strings.TrimSpace(req.Proto)), strings.TrimSpace(req.DstPort), ttl); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
 	}
 }
 
@@ -313,13 +400,12 @@ func parseHostPort(src, dst string) (net.IP, net.IP, string, string) {
 	return net.ParseIP(strings.TrimSpace(srcHost)), net.ParseIP(strings.TrimSpace(dstHost)), strings.TrimSpace(dstPort), "tcp"
 }
 
-func servicesHandler(logger *log.Logger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
+func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
 	var current config.ServicesConfig
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(current)
+			writeJSON(w, current)
 			return
 		case http.MethodPost:
 			body, err := io.ReadAll(r.Body)
@@ -344,7 +430,7 @@ func servicesHandler(logger *log.Logger, dpEngine *engine.Engine, ownership *own
 			defer cancel()
 			// WireGuard runs in the engine (privileged) because it requires NET_ADMIN.
 			if err := netcfg.ApplyWireGuard(ctx, svc.VPN.WireGuard); err != nil {
-				logger.Printf("apply wireguard failed: %v", err)
+				logger.Errorf("apply wireguard failed: %v", err)
 				if dpEngine != nil && dpEngine.Events() != nil {
 					dpEngine.Events().Append(dpevents.Event{
 						Proto:     "vpn",
@@ -390,14 +476,13 @@ func servicesHandler(logger *log.Logger, dpEngine *engine.Engine, ownership *own
 					ifaces = ownership.currentInterfaces()
 				}
 				if err := dhcpMgr.Apply(ctx, svc.DHCP, ifaces); err != nil {
-					logger.Printf("apply dhcp failed: %v", err)
+					logger.Errorf("apply dhcp failed: %v", err)
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
 			}
 			current = svc
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+			writeJSON(w, map[string]any{"status": "applied"})
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -416,20 +501,12 @@ func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		if mgr == nil {
-			_ = json.NewEncoder(w).Encode(resp{Leases: nil, Status: map[string]any{"enabled": false}})
+			writeJSON(w, resp{Leases: nil, Status: map[string]any{"enabled": false}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(resp{Leases: mgr.Leases(), Status: mgr.Status()})
+		writeJSON(w, resp{Leases: mgr.Leases(), Status: mgr.Status()})
 	}
-}
-
-func addrFromEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func conntrackHandler() http.HandlerFunc {
@@ -450,8 +527,7 @@ func conntrackHandler() http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp{Entries: entries})
+			writeJSON(w, resp{Entries: entries})
 			return
 		case http.MethodPost:
 			var req conntrack.DeleteRequest
@@ -465,8 +541,7 @@ func conntrackHandler() http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "deleted"})
+			writeJSON(w, map[string]any{"status": "deleted"})
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -478,14 +553,11 @@ func conntrackHandler() http.HandlerFunc {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	resp := healthResponse{
 		Status:    "ok",
-		Component: "ngfw-engine",
-		Build:     "dev",
+		Component: "engine",
+		Build:     config.BuildVersion,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSON(w, resp)
 }
 
 func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
@@ -510,8 +582,7 @@ func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+		writeJSON(w, map[string]any{"status": "applied"})
 	}
 }
 
@@ -526,8 +597,7 @@ func getRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			http.Error(w, "no rules loaded", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(snap)
+		writeJSON(w, snap)
 	}
 }
 
@@ -538,18 +608,16 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			return
 		}
 		status := dpEngine.RulesetStatus()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(status)
+		writeJSON(w, status)
 	}
 }
 
-func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc {
+func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.HandlerFunc {
 	var current config.DataPlaneConfig
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(current)
+			writeJSON(w, current)
 			return
 		case http.MethodPost:
 			body, err := io.ReadAll(r.Body)
@@ -565,30 +633,21 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 			// Reconfigure by rebuilding the engine instance.
 			current = dp
 			newEngine, err := engine.New(engine.Config{
-				Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
-				Enforce: engine.EnforceConfig{
-					Enabled:   dp.Enforcement,
-					TableName: firstNonEmpty(dp.EnforceTable, "containd"),
-					Applier:   enforce.NewNftApplier(),
-					Updater:   enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd")),
-				},
+				Capture:    capture.Config{Interfaces: dp.CaptureInterfaces},
+				Enforce:    engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
+				InspectAll: dp.DPIMock,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			// Swap pointer by copying fields.
-			*dpEngine = *newEngine
+			dpEngine.Reconfigure(newEngine)
 			go func() {
 				if err := dpEngine.Start(context.Background()); err != nil {
-					logger.Printf("capture start failed: %v", err)
+					logger.Errorf("capture start failed: %v", err)
 				}
 			}()
-			if dp.DPIMock {
-				go mockDPI(logger, dpEngine)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "configured"})
+			writeJSON(w, map[string]any{"status": "configured"})
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -601,8 +660,7 @@ func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(mgr.Config())
+			writeJSON(w, mgr.Config())
 			return
 		case http.MethodPost:
 			body, err := io.ReadAll(r.Body)
@@ -629,8 +687,7 @@ func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
 					}
 				}
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(mgr.Config())
+			writeJSON(w, mgr.Config())
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -661,8 +718,7 @@ func pcapStartHandler(mgr *pcap.Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(mgr.Status())
+		writeJSON(w, mgr.Status())
 	}
 }
 
@@ -673,8 +729,7 @@ func pcapStopHandler(mgr *pcap.Manager) http.HandlerFunc {
 			return
 		}
 		_ = mgr.Stop()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(mgr.Status())
+		writeJSON(w, mgr.Status())
 	}
 }
 
@@ -684,8 +739,7 @@ func pcapStatusHandler(mgr *pcap.Manager) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(mgr.Status())
+		writeJSON(w, mgr.Status())
 	}
 }
 
@@ -700,8 +754,7 @@ func pcapListHandler(mgr *pcap.Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(items)
+		writeJSON(w, items)
 	}
 }
 
@@ -721,13 +774,30 @@ func pcapUploadHandler(mgr *pcap.Manager) http.HandlerFunc {
 			return
 		}
 		defer file.Close()
+		// Validate PCAP/PCAPng magic bytes.
+		var magic [4]byte
+		if _, err := io.ReadFull(file, magic[:]); err != nil {
+			http.Error(w, "file too small or unreadable", http.StatusBadRequest)
+			return
+		}
+		switch {
+		case magic == [4]byte{0xd4, 0xc3, 0xb2, 0xa1}: // pcap LE
+		case magic == [4]byte{0xa1, 0xb2, 0xc3, 0xd4}: // pcap BE
+		case magic == [4]byte{0x0a, 0x0d, 0x0d, 0x0a}: // pcapng
+		default:
+			http.Error(w, "not a valid pcap/pcapng file", http.StatusBadRequest)
+			return
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			http.Error(w, "failed to rewind file", http.StatusInternalServerError)
+			return
+		}
 		item, err := mgr.Upload(header.Filename, file)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(item)
+		writeJSON(w, item)
 	}
 }
 
@@ -813,13 +883,17 @@ func pcapReplayHandler(mgr *pcap.Manager) http.HandlerFunc {
 			return
 		}
 		go func() {
-			_ = mgr.Replay(context.Background(), req)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if err := mgr.Replay(ctx, req); err != nil {
+				slog.Error("pcap replay failed", "name", req.Name, "error", err)
+			}
 		}()
 		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
-func interfacesHandler(logger *log.Logger, ownership *ownershipManager) http.HandlerFunc {
+func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -841,13 +915,13 @@ func interfacesHandler(logger *log.Logger, ownership *ownershipManager) http.Han
 		defer cancel()
 		if replace {
 			if err := netcfg.ApplyInterfacesReplace(ctx, ifaces); err != nil {
-				logger.Printf("apply interfaces(replace) failed: %v", err)
+				logger.Errorf("apply interfaces(replace) failed: %v", err)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		} else {
 			if err := netcfg.ApplyInterfaces(ctx, ifaces); err != nil {
-				logger.Printf("apply interfaces failed: %v", err)
+				logger.Errorf("apply interfaces failed: %v", err)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -856,8 +930,7 @@ func interfacesHandler(logger *log.Logger, ownership *ownershipManager) http.Han
 		if ownership != nil {
 			ownership.setInterfaces(ifaces)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+		writeJSON(w, map[string]any{"status": "applied"})
 	}
 }
 
@@ -891,12 +964,11 @@ func interfacesStateHandler() http.HandlerFunc {
 				Addrs: ss,
 			})
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
+		writeJSON(w, out)
 	}
 }
 
-func routingHandler(logger *log.Logger, ownership *ownershipManager) http.HandlerFunc {
+func routingHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -930,15 +1002,14 @@ func routingHandler(logger *log.Logger, ownership *ownershipManager) http.Handle
 		}
 		if applyErr != nil {
 			err := applyErr
-			logger.Printf("apply routing failed: %v", err)
+			logger.Errorf("apply routing failed: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if ownership != nil {
 			ownership.setRouting(routing)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "applied"})
+		writeJSON(w, map[string]any{"status": "applied"})
 	}
 }
 
@@ -961,71 +1032,12 @@ func firstNonEmpty(v, fallback string) string {
 	return v
 }
 
-func parseListEnv(key string) []string {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func mockDPI(logger *log.Logger, dpEngine *engine.Engine) {
-	raw := []byte{
-		0x00, 0x01,
-		0x00, 0x00,
-		0x00, 0x06,
-		0x01,
-		0x03,
-		0x00, 0x00,
-		0x00, 0x02,
-	}
-	key := flow.Key{
-		SrcIP:   net.ParseIP("10.0.0.1"),
-		DstIP:   net.ParseIP("10.0.0.2"),
-		SrcPort: 12345,
-		DstPort: 502,
-		Proto:   6,
-		Dir:     flow.DirForward,
-	}
-	state := flow.NewState(key, time.Now())
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for range t.C {
-		pkt := &dpi.ParsedPacket{
-			Payload: raw,
-			Proto:   "tcp",
-			SrcPort: 12345,
-			DstPort: 502,
-		}
-		if !dpEngine.ShouldInspect(state, pkt) {
-			continue
-		}
-		events, err := dpEngine.DPI().OnPacket(state, pkt)
-		if err != nil {
-			logger.Printf("mock dpi error: %v", err)
-			continue
-		}
-		dpEngine.RecordDPIEvents(state, pkt, events)
-		for _, ev := range events {
-			logger.Printf("dpi event proto=%s kind=%s attrs=%v", ev.Proto, ev.Kind, ev.Attributes)
-		}
-	}
-}
 
 func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := parseLimit(r, 500)
 		list := dpEngine.Events().List(limit)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(list)
+		writeJSON(w, list)
 	}
 }
 
@@ -1033,8 +1045,7 @@ func flowsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := parseLimit(r, 200)
 		list := dpEngine.Events().Flows(limit)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(list)
+		writeJSON(w, list)
 	}
 }
 

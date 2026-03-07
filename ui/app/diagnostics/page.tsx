@@ -108,7 +108,20 @@ function firstIPv4(addrs: string[] | undefined | null): string | null {
   return null;
 }
 
+function isIPv4(input: string): boolean {
+  const s = input.trim();
+  if (!s) return false;
+  const parts = s.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((p) => {
+    if (!p.match(/^[0-9]+$/)) return false;
+    const n = Number(p);
+    return Number.isInteger(n) && n >= 0 && n <= 255;
+  });
+}
+
 export default function DiagnosticsPage() {
+  const canEdit = isAdmin();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [state, setState] = useState<InterfaceState[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -133,6 +146,16 @@ export default function DiagnosticsPage() {
   const [reachDstIface, setReachDstIface] = useState("wan");
   const [reachPort, setReachPort] = useState<string>("");
   const [reachRes, setReachRes] = useState<CmdResult | null>(null);
+
+  const [blockHostIP, setBlockHostIP] = useState("");
+  const [blockHostTTL, setBlockHostTTL] = useState("300");
+  const [blockFlowSrc, setBlockFlowSrc] = useState("");
+  const [blockFlowDst, setBlockFlowDst] = useState("");
+  const [blockFlowProto, setBlockFlowProto] = useState<"tcp" | "udp">("tcp");
+  const [blockFlowPort, setBlockFlowPort] = useState("502");
+  const [blockFlowTTL, setBlockFlowTTL] = useState("300");
+  const [blockMsg, setBlockMsg] = useState<string | null>(null);
+  const [blockErr, setBlockErr] = useState<string | null>(null);
 
   const dstInterfaceChoices = useMemo(() => {
     const byName = new Map(state.map((s) => [s.name, s] as const));
@@ -166,6 +189,7 @@ export default function DiagnosticsPage() {
     () => (tcpTraceRes ? parseTraceroute(tcpTraceRes.output) : []),
     [tcpTraceRes],
   );
+  const blockDisabled = !canEdit || busy !== null;
 
   return (
     <Shell title="Diagnostics">
@@ -559,6 +583,164 @@ export default function DiagnosticsPage() {
               {!isAdmin() && (
                 <div className="mt-2 text-[11px] text-slate-400">
                   Some diagnostics (like packet capture) require admin.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <h2 className="text-sm font-semibold text-white">Temporary Blocks</h2>
+          <div className="mt-1 text-xs text-slate-400">
+            Push short-lived blocks into nftables. These are best-effort and expire automatically.
+          </div>
+          {!canEdit && (
+            <div className="mt-3 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+              Admin access required to apply blocks.
+            </div>
+          )}
+          <div className="mt-4 grid gap-4">
+            <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-400">Block Host</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <input
+                  value={blockHostIP}
+                  onChange={(e) => setBlockHostIP(e.target.value)}
+                  placeholder="source or destination IP"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
+                />
+                <input
+                  value={blockHostTTL}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || v.match(/^[0-9]+$/)) setBlockHostTTL(v);
+                  }}
+                  placeholder="ttl (seconds)"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-400">Blocks any flow matching this IP.</div>
+                <button
+                  type="button"
+                  disabled={blockDisabled}
+                  onClick={async () => {
+                    if (!blockHostIP.trim()) return;
+                    if (!isIPv4(blockHostIP)) {
+                      setBlockErr("Enter a valid IPv4 address for host block.");
+                      setBlockMsg(null);
+                      return;
+                    }
+                    setBlockErr(null);
+                    setBlockMsg(null);
+                    setBusy("block-host");
+                    const ttl = blockHostTTL.trim() ? Number(blockHostTTL.trim()) : 0;
+                    const res = await api.blockHostTemp(blockHostIP.trim(), Number.isFinite(ttl) ? ttl : undefined);
+                    if (!res) setBlockErr("Failed to apply host block.");
+                    else setBlockMsg(`Blocked host ${blockHostIP.trim()}.`);
+                    setBusy(null);
+                  }}
+                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                >
+                  {busy === "block-host" ? "Applying..." : "Block host"}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-400">Block Flow</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <input
+                  value={blockFlowSrc}
+                  onChange={(e) => setBlockFlowSrc(e.target.value)}
+                  placeholder="source IP"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                />
+                <input
+                  value={blockFlowDst}
+                  onChange={(e) => setBlockFlowDst(e.target.value)}
+                  placeholder="destination IP"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                />
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <select
+                  value={blockFlowProto}
+                  onChange={(e) => setBlockFlowProto(e.target.value as "tcp" | "udp")}
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                >
+                  <option value="tcp">tcp</option>
+                  <option value="udp">udp</option>
+                </select>
+                <input
+                  value={blockFlowPort}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || v.match(/^[0-9]+$/)) setBlockFlowPort(v);
+                  }}
+                  placeholder="dst port"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                />
+                <input
+                  value={blockFlowTTL}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || v.match(/^[0-9]+$/)) setBlockFlowTTL(v);
+                  }}
+                  placeholder="ttl (seconds)"
+                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-400">Blocks a specific 5-tuple (src/dst/port/proto).</div>
+                <button
+                  type="button"
+                  disabled={blockDisabled}
+                  onClick={async () => {
+                    if (!blockFlowSrc.trim() || !blockFlowDst.trim() || !blockFlowPort.trim()) return;
+                    if (!isIPv4(blockFlowSrc) || !isIPv4(blockFlowDst)) {
+                      setBlockErr("Enter valid IPv4 addresses for flow block.");
+                      setBlockMsg(null);
+                      return;
+                    }
+                    const portNum = Number(blockFlowPort.trim());
+                    if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+                      setBlockErr("Enter a valid destination port (1-65535).");
+                      setBlockMsg(null);
+                      return;
+                    }
+                    setBlockErr(null);
+                    setBlockMsg(null);
+                    setBusy("block-flow");
+                    const ttl = blockFlowTTL.trim() ? Number(blockFlowTTL.trim()) : 0;
+                    const res = await api.blockFlowTemp({
+                      srcIp: blockFlowSrc.trim(),
+                      dstIp: blockFlowDst.trim(),
+                      proto: blockFlowProto,
+                      dstPort: blockFlowPort.trim(),
+                      ttlSeconds: Number.isFinite(ttl) ? ttl : undefined,
+                    });
+                    if (!res) setBlockErr("Failed to apply flow block.");
+                    else setBlockMsg(`Blocked flow ${blockFlowSrc.trim()} -> ${blockFlowDst.trim()}:${blockFlowPort.trim()}.`);
+                    setBusy(null);
+                  }}
+                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                >
+                  {busy === "block-flow" ? "Applying..." : "Block flow"}
+                </button>
+              </div>
+            </div>
+          </div>
+          {(blockMsg || blockErr) && (
+            <div className="mt-4 space-y-2">
+              {blockErr && (
+                <div className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+                  {blockErr}
+                </div>
+              )}
+              {blockMsg && (
+                <div className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-2 text-xs text-mint">
+                  {blockMsg}
                 </div>
               )}
             </div>

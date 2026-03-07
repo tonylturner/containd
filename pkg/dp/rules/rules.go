@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package rules
 
 // Snapshot is an immutable rule set used by the data-plane fast path.
@@ -70,7 +73,7 @@ type Protocol struct {
 	Port string // single or range
 }
 
-// ICSPredicate captures ICS-specific fields (placeholder).
+// ICSPredicate captures ICS-specific fields; Modbus is supported today.
 type ICSPredicate struct {
 	Protocol     string   // modbus, dnp3, etc.
 	FunctionCode []uint8  // e.g., modbus function codes

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -16,8 +19,8 @@ import (
 	"text/template"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
@@ -26,8 +29,6 @@ import (
 const defaultServicesDir = "/data/services"
 
 const defaultCertsDir = "/data/certs"
-const envoyAccessLogPath = "/data/logs/envoy-access.log"
-const nginxAccessLogPath = "/data/logs/nginx-access.log"
 
 type ProxyOptions struct {
 	BaseDir   string
@@ -149,7 +150,8 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/data/logs", 0o755); err != nil {
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
 	if err := m.renderForward(cfg.Forward); err != nil {
@@ -199,7 +201,7 @@ func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
 		"ListenPort":     port,
 		"Domains":        string(domainsJSON),
 		"LogRequests":    cfg.LogRequests,
-		"AccessLogPath":  envoyAccessLogPath,
+		"AccessLogPath":  filepath.Join(filepath.Dir(m.BaseDir), "logs", "envoy-access.log"),
 		"Upstream":       cfg.Upstream,
 		"HasUpstream":    cfg.Upstream != "",
 		"ListenZones":    cfg.ListenZones,
@@ -234,13 +236,16 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		config.ReverseProxyConfig
 		CertsDir      string
 		AccessLogPath string
+		PidPath       string
 	}
 
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, tmplData{
 		ReverseProxyConfig: cfg,
 		CertsDir:           m.CertsDir,
-		AccessLogPath:      nginxAccessLogPath,
+		AccessLogPath:      filepath.Join(logDir, "nginx-access.log"),
+		PidPath:            filepath.Join(m.BaseDir, "nginx.pid"),
 	}); err != nil {
 		return err
 	}
@@ -265,7 +270,7 @@ func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardPr
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			err = fmt.Errorf("%v: %s", err, msg)
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
 		m.mu.Lock()
 		m.lastEnvoyError = err.Error()
@@ -291,7 +296,7 @@ func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReversePr
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			err = fmt.Errorf("%v: %s", err, msg)
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
 		m.mu.Lock()
 		m.lastNginxError = err.Error()
@@ -488,13 +493,14 @@ func (m *ProxyManager) syncAccessTailers(cfg config.ProxyConfig) {
 		m.stopNginxAccessTailer()
 		return
 	}
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
 	if cfg.Forward.Enabled && cfg.Forward.LogRequests {
-		m.startEnvoyAccessTailer(envoyAccessLogPath)
+		m.startEnvoyAccessTailer(filepath.Join(logDir, "envoy-access.log"))
 	} else {
 		m.stopEnvoyAccessTailer()
 	}
 	if cfg.Reverse.Enabled && len(cfg.Reverse.Sites) > 0 {
-		m.startNginxAccessTailer(nginxAccessLogPath)
+		m.startNginxAccessTailer(filepath.Join(logDir, "nginx-access.log"))
 	} else {
 		m.stopNginxAccessTailer()
 	}
@@ -702,6 +708,7 @@ admin:
 `
 
 const nginxReverseTemplate = `
+pid {{ .PidPath }};
 events {}
 
 http {

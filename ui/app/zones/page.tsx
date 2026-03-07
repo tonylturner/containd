@@ -161,7 +161,7 @@ export default function ZonesPage() {
             {zones.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={4}>
-                  No zones configured.
+                  No zones configured. Create zones (e.g. WAN, DMZ, OT) to segment network traffic.
                 </td>
               </tr>
             )}

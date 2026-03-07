@@ -13,8 +13,10 @@
 .gopath
 
 # Local binaries produced in repo root
+containd
 ngfw-mgmt
 ngfw-engine
+smoketest
 
 # UI artifacts
 **/node_modules
@@ -36,3 +38,11 @@ data
 docs
 !docs/mkdocs
 !docs/requirements-mkdocs.txt
+
+# Internal development files
+agents.md
+linear-dashboard-cursor-rule.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+CHANGELOG.md

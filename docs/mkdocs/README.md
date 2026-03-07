@@ -18,6 +18,4 @@ Start here:
 - `services.md` – embedded service configuration (DNS/NTP/DHCP/VPN/AV/proxies)
 - `ids-rules.md` / `ics-dpi.md` – IDS + ICS DPI notes
 
-Project planning/tracking lives outside this folder:
-- `docs/tasks.md` – roadmap/task tracker
-- `docs/spec-archive/` – archived specs and design drafts
+Historical design references live in `docs/spec-archive/`.

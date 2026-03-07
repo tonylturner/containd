@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package mgmtapp
 
 import (
@@ -11,7 +14,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,39 +24,39 @@ import (
 	"sync"
 	"time"
 
-	engineapi "github.com/containd/containd/api/engine"
-	httpapi "github.com/containd/containd/api/http"
-	"github.com/containd/containd/pkg/cli"
-	"github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/cp/services"
-	"github.com/containd/containd/pkg/cp/users"
-	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/mp/sshserver"
+	"go.uber.org/zap"
+
+	engineapi "github.com/tonylturner/containd/api/engine"
+	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/services"
+	"github.com/tonylturner/containd/pkg/cp/users"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/mp/sshserver"
 	"github.com/gin-gonic/gin"
 )
-
-type mgmtHealthResponse struct {
-	Status     string `json:"status"`
-	Component  string `json:"component"`
-	Build      string `json:"build"`
-	CommitHash string `json:"commitHash,omitempty"`
-	Time       string `json:"time"`
-}
 
 type Options struct{}
 
 func Run(ctx context.Context, _ Options) error {
-	logger := logging.New("[mgmt]")
-	if strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")) == "containd-dev-secret-change-me" {
-		logger.Println("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
-		logger.Println("         Change it in `.env` before any real deployment.")
+	logger := logging.NewService("mgmt")
+	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
+	switch {
+	case jwtSecret == "containd-dev-secret-change-me":
+		logger.Warn("WARNING: ============================================================")
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
+		logger.Warn("WARNING: This is insecure. Set a unique value in .env for any")
+		logger.Warn("WARNING: deployment beyond local development.")
+		logger.Warn("WARNING: ============================================================")
+	case jwtSecret == "":
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is empty; auth tokens will not be signed.")
 	}
 	store := mustInitStore()
 	defer store.Close()
 	ensureDefaultConfig(logger, store)
-	_ = cli.NewRegistry(store, nil) // placeholder until wired into SSH/HTTP transports
 	auditStore := mustInitAuditStore()
 	defer auditStore.Close()
 	userStore := mustInitUsersStore()
@@ -64,7 +66,7 @@ func Run(ctx context.Context, _ Options) error {
 
 	cfg, _ := store.Load(context.Background())
 
-	httpAddr := addrFromEnv("NGFW_MGMT_ADDR", "")
+	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
 	if httpAddr == "" && cfg != nil {
 		httpAddr = firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
 	}
@@ -72,7 +74,7 @@ func Run(ctx context.Context, _ Options) error {
 		httpAddr = ":8080"
 	}
 	httpsAddr := ""
-	if v := strings.TrimSpace(os.Getenv("NGFW_MGMT_HTTPS_ADDR")); v != "" {
+	if v := common.EnvTrimmed("CONTAIND_MGMT_HTTPS_ADDR", ""); v != "" {
 		httpsAddr = v
 	}
 	if cfg != nil {
@@ -86,16 +88,14 @@ func Run(ctx context.Context, _ Options) error {
 	enableHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true)
 
 	var engineClient httpapi.EngineClient
-	if engineURL := strings.TrimSpace(os.Getenv("NGFW_ENGINE_URL")); engineURL != "" {
-		// Be forgiving: allow "127.0.0.1:8081" in env files and treat it as http://127.0.0.1:8081.
-		// This prevents the UI from losing interface runtime state due to a missing URL scheme.
+	if engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", ""); engineURL != "" {
 		if !strings.Contains(engineURL, "://") {
 			engineURL = "http://" + engineURL
-			logger.Printf("WARNING: NGFW_ENGINE_URL missing scheme; using %q", engineURL)
+			logger.Warnf("CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
 		}
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
-	startDHCPLeaseAuditIngestor(logger, engineClient, auditStore)
+	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
 	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
 	// Best-effort initial service render on startup.
@@ -138,6 +138,15 @@ func Run(ctx context.Context, _ Options) error {
 	}
 
 	handler = hstsHandler(enableHSTS, hstsMaxAge, handler)
+
+	// Add CORS and frame-embedding support for external applications (e.g., RangerDanger)
+	allowedOrigins := getAllowedOrigins()
+	if len(allowedOrigins) > 0 {
+		logger.Infof("CORS/frame-embedding enabled for origins: %v", allowedOrigins)
+		handler = corsHandler(handler, allowedOrigins)
+		handler = frameOptionsHandler(handler, allowedOrigins)
+	}
+
 	// Note: redirect is applied only for the plain HTTP listeners.
 
 	tlsCert, tlsKey := resolveTLSFiles(cfg)
@@ -145,7 +154,7 @@ func Run(ctx context.Context, _ Options) error {
 		var err error
 		tlsCert, tlsKey, err = ensureSelfSignedTLSFiles(tlsCert, tlsKey, detectIPs())
 		if err != nil {
-			logger.Printf("https disabled: failed to ensure TLS cert: %v", err)
+			logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
 			enableHTTPS = false
 		}
 	}
@@ -209,13 +218,13 @@ func Run(ctx context.Context, _ Options) error {
 			_ = s.Close()
 		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("ngfw-mgmt server exited: %w", err)
+			return fmt.Errorf("containd mgmt server exited: %w", err)
 		}
 		return nil
 	}
 }
 
-func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStore audit.Store) {
+func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger, engineClient any, auditStore audit.Store) {
 	if logger == nil || auditStore == nil || engineClient == nil {
 		return
 	}
@@ -232,7 +241,13 @@ func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStor
 		defer ticker.Stop()
 
 		var lastID uint64
-		for range ticker.C {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			evs, err := ec.ListEvents(ctx, 1000)
 			cancel()
@@ -293,14 +308,7 @@ func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStor
 	}()
 }
 
-func addrFromEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func ensureDevCompatUsers(logger *log.Logger, userStore users.Store) {
+func ensureDevCompatUsers(logger *zap.SugaredLogger, userStore users.Store) {
 	// Dev convenience only: if the operator is using the example JWT secret, we provision
 	// an additional admin user "containerd"/"containerd" so early demos don't get stuck
 	// on mismatched credentials. This is intentionally NOT enabled once the secret is changed.
@@ -322,7 +330,7 @@ func ensureDevCompatUsers(logger *log.Logger, userStore users.Store) {
 		LastName:  "Admin",
 		Role:      "admin",
 	}, "containerd"); err == nil {
-		logger.Println("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
+		logger.Info("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
 	}
 }
 
@@ -333,15 +341,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func health(c *gin.Context) {
-	c.JSON(http.StatusOK, mgmtHealthResponse{
-		Status:    "ok",
-		Component: "ngfw-mgmt",
-		Build:     "dev",
-		Time:      time.Now().UTC().Format(time.RFC3339Nano),
-	})
 }
 
 func serveStaticUI(router *gin.Engine) {
@@ -396,7 +395,7 @@ func serveStaticUI(router *gin.Engine) {
 
 func pickUIDir() string {
 	// Allow override for packaged builds.
-	if override := os.Getenv("NGFW_UI_DIR"); override != "" {
+	if override := common.Env("CONTAIND_UI_DIR", ""); override != "" {
 		if dirExists(override) {
 			return override
 		}
@@ -422,7 +421,7 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func ensureDefaultConfig(logger *log.Logger, store config.Store) {
+func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
 	if store == nil {
 		return
 	}
@@ -463,13 +462,13 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 		}
 		if changed {
 			if err := store.Save(context.Background(), cfg); err != nil {
-				logger.Printf("failed to backfill default config values: %v", err)
+				logger.Errorf("failed to backfill default config values: %v", err)
 			}
 		}
 		return
 	}
 	if !errors.Is(err, config.ErrNotFound) {
-		logger.Printf("failed to load config (continuing): %v", err)
+		logger.Warnf("failed to load config (continuing): %v", err)
 		return
 	}
 	def := config.DefaultConfig()
@@ -482,10 +481,10 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
 	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 	if err := store.Save(context.Background(), def); err != nil {
-		logger.Printf("failed to initialize default config: %v", err)
+		logger.Errorf("failed to initialize default config: %v", err)
 		return
 	}
-	logger.Printf("initialized default config")
+	logger.Info("initialized default config")
 }
 
 func ensureLoopbackHTTPAddr(addr string) string {
@@ -695,6 +694,85 @@ func hstsHandler(enabled bool, maxAgeSeconds int, next http.Handler) http.Handle
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// corsHandler adds CORS headers to allow cross-origin requests from specified origins.
+// This enables embedding the containd UI in iframes from other applications (e.g., RangerDanger).
+func corsHandler(next http.Handler, allowedOrigins []string) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		for _, o := range allowedOrigins {
+			o = strings.TrimSpace(o)
+			if o != "" && o == origin {
+				allowed = true
+				break
+			}
+		}
+
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS, PUT")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-CSRF-Token")
+			w.Header().Set("Access-Control-Max-Age", "3600")
+		}
+
+		// Handle preflight OPTIONS requests
+		if r.Method == http.MethodOptions {
+			if allowed {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// frameOptionsHandler sets Content-Security-Policy frame-ancestors to allow embedding in iframes
+// from the specified origins.
+func frameOptionsHandler(next http.Handler, allowedOrigins []string) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	// Build CSP frame-ancestors directive
+	cspValue := "'self'"
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			cspValue += " " + o
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors "+cspValue)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// getAllowedOrigins returns the list of allowed origins for CORS and frame embedding.
+// Reads from CONTAIND_ALLOWED_ORIGINS environment variable (comma-separated).
+func getAllowedOrigins() []string {
+	val := os.Getenv("CONTAIND_ALLOWED_ORIGINS")
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	var origins []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			origins = append(origins, p)
+		}
+	}
+	return origins
 }
 
 func redirectToHTTPSHandler(httpsAddr string, next http.Handler) http.Handler {
@@ -936,14 +1014,14 @@ func SSHAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
 	return sshAllowedOnInterface(cfg, ifaceName)
 }
 
-func startSSH(logger *log.Logger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
+func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
 	ctx := context.Background()
-	sshAddr := addrFromEnv("NGFW_SSH_ADDR", "")
-	authKeysDir := os.Getenv("NGFW_SSH_AUTH_KEYS_DIR")
-	hostKeyPath := os.Getenv("NGFW_SSH_HOST_KEY")
-	bootstrapKey := strings.TrimSpace(os.Getenv("NGFW_SSH_BOOTSTRAP_ADMIN_KEY"))
-	bootstrapUser := strings.TrimSpace(os.Getenv("NGFW_SSH_BOOTSTRAP_ADMIN_USER"))
-	allowPasswordEnv := strings.TrimSpace(os.Getenv("NGFW_SSH_ALLOW_PASSWORD"))
+	sshAddr := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
+	authKeysDir := common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", "")
+	hostKeyPath := common.Env("CONTAIND_SSH_HOST_KEY", "")
+	bootstrapKey := common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY", "")
+	bootstrapUser := common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_USER", "")
+	allowPasswordEnv := common.EnvTrimmed("CONTAIND_SSH_ALLOW_PASSWORD", "")
 
 	cfg, _ := store.Load(ctx)
 	if sshAddr == "" && cfg != nil && cfg.System.SSH.ListenAddr != "" {
@@ -1016,7 +1094,7 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 	}
 	srv, err := sshserver.New(opts)
 	if err != nil {
-		logger.Printf("ssh disabled: %v", err)
+		logger.Warnf("ssh disabled: %v", err)
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
@@ -1028,59 +1106,59 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 			bootstrapUser = "containd"
 		}
 		if err := srv.SeedAuthorizedKey(bootstrapUser, bootstrapKey); err != nil {
-			logger.Printf("ssh bootstrap key seed failed: %v", err)
+			logger.Errorf("ssh bootstrap key seed failed: %v", err)
 		}
 	}
 
 	go func() {
 		if err := srv.ListenAndServe(context.Background()); err != nil {
-			logger.Printf("ssh server exited: %v", err)
+			logger.Errorf("ssh server exited: %v", err)
 		}
 	}()
-	logger.Printf("ssh enabled on %s (admin only)", sshAddr)
+	logger.Infof("ssh enabled on %s (admin only)", sshAddr)
 	return sshAddr, true
 }
 
-func printStartupHints(logger *log.Logger, httpAddr string, httpLoopbackAddr string, httpsAddr string, httpsLoopbackAddr string, enableHTTP bool, enableHTTPS bool, sshAddr string, sshEnabled bool) {
+func printStartupHints(logger *zap.SugaredLogger, httpAddr string, httpLoopbackAddr string, httpsAddr string, httpsLoopbackAddr string, enableHTTP bool, enableHTTPS bool, sshAddr string, sshEnabled bool) {
 	httpPort := portOf(httpAddr)
 	httpsPort := portOf(httpsAddr)
 	sshPort := portOf(sshAddr)
 
-	logger.Println("------------------------------------------------------------")
-	logger.Println("containd access")
+	logger.Info("------------------------------------------------------------")
+	logger.Info("containd access")
 
 	if enableHTTP && httpPort != "" {
-		logger.Printf("UI/API (HTTP):  http://localhost:%s", httpPort)
+		logger.Infof("UI/API (HTTP):  http://localhost:%s", httpPort)
 	}
 	if enableHTTPS && httpsPort != "" {
-		logger.Printf("UI/API (HTTPS): https://localhost:%s (self-signed by default)", httpsPort)
+		logger.Infof("UI/API (HTTPS): https://localhost:%s (self-signed by default)", httpsPort)
 	}
 
 	if sshEnabled && sshPort != "" {
-		logger.Printf("SSH CLI: ssh -p %s containd@localhost", sshPort)
-		logger.Println("         then type: wizard or menu")
+		logger.Infof("SSH CLI: ssh -p %s containd@localhost", sshPort)
+		logger.Info("         then type: wizard or menu")
 	}
 
 	ips := detectIPs()
 	if len(ips) > 0 && httpPort != "" {
-		logger.Printf("Container IPs: %s", strings.Join(ips, ", "))
+		logger.Infof("Container IPs: %s", strings.Join(ips, ", "))
 		if enableHTTP && bindsAll(httpAddr) {
 			for _, ip := range ips {
-				logger.Printf("UI/API via IP (HTTP):  http://%s:%s", ip, httpPort)
+				logger.Infof("UI/API via IP (HTTP):  http://%s:%s", ip, httpPort)
 				if sshEnabled && sshPort != "" {
-					logger.Printf("SSH via IP:    ssh -p %s containd@%s", sshPort, ip)
+					logger.Infof("SSH via IP:    ssh -p %s containd@%s", sshPort, ip)
 				}
 			}
 		} else if enableHTTP && hostOnly(httpAddr) {
-			logger.Printf("UI/API bind is restricted to %s; use localhost or reconfigure.", httpAddr)
+			logger.Infof("UI/API bind is restricted to %s; use localhost or reconfigure.", httpAddr)
 		}
 	}
 
-	logger.Println("Initial login: username=containd password=containd (change immediately)")
-	logger.Println("Production note: add SSH key and disable password auth after provisioning.")
-	logger.Println("  - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
-	logger.Println("Tip: docker compose logs -f containd")
-	logger.Println("------------------------------------------------------------")
+	logger.Info("Initial login: username=containd password=containd (change immediately)")
+	logger.Info("Production note: add SSH key and disable password auth after provisioning.")
+	logger.Info("  - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
+	logger.Info("Tip: docker compose logs -f containd")
+	logger.Info("------------------------------------------------------------")
 }
 
 func portOf(addr string) string {
@@ -1183,46 +1261,46 @@ func isRFC1918(ip net.IP) bool {
 }
 
 func mustInitStore() config.Store {
-	dbPath := addrFromEnv("NGFW_CONFIG_DB", filepath.Join("data", "config.db"))
+	dbPath := common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		logging.New("[mgmt]").Fatalf("failed to create config dir: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to create config dir: %v", err)
 	}
 	store, err := config.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open config store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open config store: %v", err)
 	}
 	return store
 }
 
 func mustInitAuditStore() audit.Store {
-	dbPath := addrFromEnv("NGFW_AUDIT_DB", filepath.Join("data", "audit.db"))
+	dbPath := common.Env("CONTAIND_AUDIT_DB", filepath.Join("data", "audit.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		logging.New("[mgmt]").Fatalf("failed to create audit dir: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to create audit dir: %v", err)
 	}
 	store, err := audit.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open audit store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open audit store: %v", err)
 	}
 	return store
 }
 
 func mustInitUsersStore() users.Store {
-	dbPath := addrFromEnv("NGFW_USERS_DB", filepath.Join("data", "users.db"))
+	dbPath := common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		// If the requested path isn't writable (common in distroless/nonroot),
 		// fall back to a local data dir that should be writable in dev images.
 		fallback := filepath.Join("data", "users.db")
 		if fallback != dbPath {
 			_ = os.MkdirAll(filepath.Dir(fallback), 0o755)
-			logging.New("[mgmt]").Printf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
+			logging.NewService("mgmt").Warnf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
 			dbPath = fallback
 		} else {
-			logging.New("[mgmt]").Fatalf("failed to create users dir: %v", err)
+			logging.NewService("mgmt").Fatalf("failed to create users dir: %v", err)
 		}
 	}
 	store, err := users.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open users store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open users store: %v", err)
 	}
 	return store
 }

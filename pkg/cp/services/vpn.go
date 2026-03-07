@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -12,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
@@ -291,7 +294,7 @@ func (m *VPNManager) openVPNConfigPathForEnabled(cfg config.OpenVPNConfig) (stri
 		return "", errorsNew("openvpn enabled but configPath is empty")
 	}
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("openvpn configPath not readable: %s", err.Error())
+		return "", fmt.Errorf("openvpn configPath not readable: %w", err)
 	}
 	if err := ensureOpenVPNConfigForeground(path); err != nil {
 		return "", err

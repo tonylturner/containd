@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package compile
 
 import (
@@ -7,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containd/containd/pkg/cp/config"
-	dprules "github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // CompileSnapshot compiles a control-plane running config into a data-plane snapshot.
@@ -43,7 +46,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			snap.NAT.EgressZone = "wan"
 		}
 		if len(snap.NAT.SourceZones) == 0 {
-			snap.NAT.SourceZones = []string{"lan", "dmz"}
+			snap.NAT.SourceZones = defaultNATSourceZones(cfg, snap.NAT.EgressZone)
 		}
 	}
 	for _, pf := range cfg.Firewall.NAT.PortForwards {
@@ -184,6 +187,34 @@ func vpnCIDRs(cfg *config.Config) []string {
 	return compactAndSortCIDRs(out)
 }
 
+func defaultNATSourceZones(cfg *config.Config, egress string) []string {
+	if cfg == nil {
+		return nil
+	}
+	egress = strings.TrimSpace(egress)
+	out := make([]string, 0, len(cfg.Zones))
+	zoneSet := map[string]struct{}{}
+	for _, z := range cfg.Zones {
+		name := strings.TrimSpace(z.Name)
+		if name == "" {
+			continue
+		}
+		zoneSet[strings.ToLower(name)] = struct{}{}
+		if strings.EqualFold(name, egress) {
+			continue
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		for _, name := range []string{"lan", "dmz"} {
+			if _, ok := zoneSet[name]; ok && !strings.EqualFold(name, egress) {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
 func compactAndSortCIDRs(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -284,14 +315,62 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 		})
 	}
 
+	// DNS resolver (Unbound): allow TCP/UDP on configured zones (or all if unspecified).
+	if cfg.Services.DNS.Enabled {
+		dnsPort := cfg.Services.DNS.ListenPort
+		if dnsPort == 0 {
+			dnsPort = 53
+		}
+		out = append(out, compileZoneBoundService("auto-allow-dns-udp", "udp", dnsPort, cfg.Services.DNS.ListenZones)...)
+		out = append(out, compileZoneBoundService("auto-allow-dns-tcp", "tcp", dnsPort, cfg.Services.DNS.ListenZones)...)
+	}
+
+	// DHCP server: allow UDP/1067 on configured listen interfaces.
+	if cfg.Services.DHCP.Enabled && len(cfg.Services.DHCP.ListenIfaces) > 0 {
+		ifaces := resolveListenIfaces(cfg.Services.DHCP.ListenIfaces, cfg.Interfaces)
+		if len(ifaces) > 0 {
+			out = append(out, dprules.LocalServiceRule{
+				ID:     "auto-allow-dhcp",
+				Ifaces: ifaces,
+				Proto:  "udp",
+				Port:   1067,
+			})
+		}
+	}
+
+	// Forward proxy: allow TCP on configured zones (or all if unspecified).
+	if cfg.Services.Proxy.Forward.Enabled {
+		port := cfg.Services.Proxy.Forward.ListenPort
+		if port == 0 {
+			port = 3128
+		}
+		out = append(out, compileZoneBoundService("auto-allow-forward-proxy", "tcp", port, cfg.Services.Proxy.Forward.ListenZones)...)
+	}
+
+	// Reverse proxy: allow TCP on WAN by default (published apps).
+	if cfg.Services.Proxy.Reverse.Enabled {
+		for _, site := range cfg.Services.Proxy.Reverse.Sites {
+			if site.ListenPort <= 0 || site.ListenPort > 65535 {
+				continue
+			}
+			out = append(out, dprules.LocalServiceRule{
+				ID:    "auto-allow-reverse-proxy-" + sanitizeIdent(site.Name),
+				Zone:  "wan",
+				Proto: "tcp",
+				Port:  site.ListenPort,
+			})
+		}
+	}
+
 	// WireGuard: allow inbound to server listen port on wan zone (default).
 	if cfg.Services.VPN.WireGuard.Enabled && cfg.Services.VPN.WireGuard.ListenPort > 0 {
-		out = append(out, dprules.LocalServiceRule{
+		rule := dprules.LocalServiceRule{
 			ID:    "auto-allow-wireguard",
-			Zone:  "wan",
 			Proto: "udp",
 			Port:  cfg.Services.VPN.WireGuard.ListenPort,
-		})
+		}
+		applyVPNListenTargets(&rule, cfg.Services.VPN.WireGuard.ListenZone, cfg.Services.VPN.WireGuard.ListenInterfaces, cfg.Interfaces, "wan")
+		out = append(out, rule)
 	}
 
 	// OpenVPN server (managed): allow inbound to server listen port on wan zone (default).
@@ -305,16 +384,122 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			proto = "udp"
 		}
 		if port > 0 && port <= 65535 && (proto == "udp" || proto == "tcp") {
-			out = append(out, dprules.LocalServiceRule{
+			rule := dprules.LocalServiceRule{
 				ID:    "auto-allow-openvpn",
-				Zone:  "wan",
 				Proto: proto,
 				Port:  port,
-			})
+			}
+			applyVPNListenTargets(&rule, cfg.Services.VPN.OpenVPN.Server.ListenZone, cfg.Services.VPN.OpenVPN.Server.ListenInterfaces, cfg.Interfaces, "wan")
+			out = append(out, rule)
 		}
 	}
 
 	return out
+}
+
+func compileZoneBoundService(id, proto string, port int, zones []string) []dprules.LocalServiceRule {
+	if port <= 0 || port > 65535 {
+		return nil
+	}
+	if len(zones) == 0 {
+		return []dprules.LocalServiceRule{
+			{
+				ID:    id,
+				Proto: proto,
+				Port:  port,
+			},
+		}
+	}
+	seen := map[string]struct{}{}
+	out := make([]dprules.LocalServiceRule, 0, len(zones))
+	for _, z := range zones {
+		z = strings.TrimSpace(z)
+		if z == "" {
+			continue
+		}
+		if _, ok := seen[z]; ok {
+			continue
+		}
+		seen[z] = struct{}{}
+		out = append(out, dprules.LocalServiceRule{
+			ID:    id + "-" + sanitizeIdent(z),
+			Zone:  z,
+			Proto: proto,
+			Port:  port,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func applyVPNListenTargets(rule *dprules.LocalServiceRule, zone string, ifaces []string, cfgIfaces []config.Interface, defZone string) {
+	resolved := resolveListenIfaces(ifaces, cfgIfaces)
+	if len(resolved) > 0 {
+		rule.Ifaces = resolved
+		return
+	}
+	zone = strings.TrimSpace(zone)
+	if zone == "" {
+		zone = defZone
+	}
+	rule.Zone = zone
+}
+
+func resolveListenIfaces(raw []string, ifaces []config.Interface) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	lookup := map[string]string{}
+	for _, iface := range ifaces {
+		dev := strings.TrimSpace(iface.Device)
+		name := strings.TrimSpace(iface.Name)
+		if dev == "" {
+			dev = name
+		}
+		if name != "" && dev != "" {
+			lookup[name] = dev
+		}
+		if dev != "" {
+			lookup[dev] = dev
+		}
+	}
+	out := make([]string, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, item := range raw {
+		key := strings.TrimSpace(item)
+		if key == "" {
+			continue
+		}
+		dev := lookup[key]
+		if dev == "" {
+			dev = key
+		}
+		if _, ok := seen[dev]; ok {
+			continue
+		}
+		seen[dev] = struct{}{}
+		out = append(out, dev)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sanitizeIdent(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var out strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			out.WriteRune(r)
+			continue
+		}
+		if r == '-' || r == ' ' {
+			out.WriteRune('_')
+		}
+	}
+	if out.Len() == 0 {
+		return "id"
+	}
+	return out.String()
 }
 
 func listenPortOrDefault(addr string, def int) int {

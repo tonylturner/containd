@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package rules
 
 import (
@@ -59,6 +62,61 @@ func TestPortRange(t *testing.T) {
 		t.Fatalf("expected allow, got %s", got)
 	}
 	ctx.Port = "80"
+	if got := ev.Evaluate(ctx); got != ActionDeny {
+		t.Fatalf("expected deny, got %s", got)
+	}
+}
+
+func TestIdentityMatch(t *testing.T) {
+	snap := Snapshot{
+		Default: ActionDeny,
+		Firewall: []Entry{
+			{
+				ID:         "1",
+				Identities: []string{"operator"},
+				Action:     ActionAllow,
+			},
+		},
+	}
+	ev := NewEvaluator(&snap)
+	ctx := EvalContext{Identities: []string{"operator"}}
+	if got := ev.Evaluate(ctx); got != ActionAllow {
+		t.Fatalf("expected allow, got %s", got)
+	}
+	ctx.Identities = []string{"guest"}
+	if got := ev.Evaluate(ctx); got != ActionDeny {
+		t.Fatalf("expected deny, got %s", got)
+	}
+}
+
+func TestICSMatch(t *testing.T) {
+	unit := uint8(1)
+	snap := Snapshot{
+		Default: ActionDeny,
+		Firewall: []Entry{
+			{
+				ID: "1",
+				ICS: ICSPredicate{
+					Protocol:     "modbus",
+					FunctionCode: []uint8{3, 16},
+					UnitID:       &unit,
+				},
+				Action: ActionAllow,
+			},
+		},
+	}
+	ev := NewEvaluator(&snap)
+	ctx := EvalContext{
+		ICS: &ICSContext{
+			Protocol:     "modbus",
+			FunctionCode: 3,
+			UnitID:       &unit,
+		},
+	}
+	if got := ev.Evaluate(ctx); got != ActionAllow {
+		t.Fatalf("expected allow, got %s", got)
+	}
+	ctx.ICS.FunctionCode = 5
 	if got := ev.Evaluate(ctx); got != ActionDeny {
 		t.Fatalf("expected deny, got %s", got)
 	}

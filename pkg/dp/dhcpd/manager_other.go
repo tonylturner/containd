@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build !linux
 
 package dhcpd
@@ -6,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type Lease struct {

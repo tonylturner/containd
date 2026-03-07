@@ -8,6 +8,7 @@ import {
   isAdmin,
   fetchDataPlane,
   setDataPlane,
+  getRulesetPreview,
   type DataPlaneConfig,
   type FirewallRule,
   type Gateway,
@@ -20,10 +21,12 @@ import {
   type ICSPredicate,
   type NATConfig,
   type PortForward,
+  type RulesetPreview,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { InfoTip } from "../../components/InfoTip";
+import { validateIPOrCIDRList } from "../../lib/validate";
 
 function zoneLabel(zone: Zone): string {
   return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
@@ -95,6 +98,8 @@ export default function FirewallPage() {
   const [dpiSaveState, setDpiSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
+  const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const tips: Tip[] = [
@@ -155,6 +160,18 @@ export default function FirewallPage() {
   useEffect(() => {
     refresh();
   }, []);
+
+  async function loadRulesetPreview() {
+    if (!isAdmin()) return;
+    setRulesetState("loading");
+    const preview = await getRulesetPreview();
+    if (!preview) {
+      setRulesetState("error");
+      return;
+    }
+    setRulesetPreview(preview);
+    setRulesetState("idle");
+  }
 
   async function onDelete(id: string) {
     setError(null);
@@ -459,6 +476,45 @@ export default function FirewallPage() {
       <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <div className="flex items-center justify-between">
           <div>
+            <h2 className="text-sm font-semibold text-white">nftables ruleset preview</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Preview the compiled ruleset before it is applied to the dataplane.
+            </p>
+          </div>
+          {isAdmin() && (
+            <button
+              onClick={loadRulesetPreview}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            >
+              {rulesetState === "loading" ? "Loading..." : "Preview"}
+            </button>
+          )}
+        </div>
+        {!isAdmin() && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+            View-only mode: ruleset preview requires admin access.
+          </div>
+        )}
+        {rulesetState === "error" && (
+          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+            Failed to load ruleset preview.
+          </div>
+        )}
+        {rulesetPreview?.engineStatusError && (
+          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+            Engine status unavailable: {rulesetPreview.engineStatusError}
+          </div>
+        )}
+        {rulesetPreview?.ruleset && (
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xl border border-white/10 bg-black/60 p-4 text-xs text-slate-200">
+            {rulesetPreview.ruleset}
+          </pre>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <div>
             <h2 className="text-sm font-semibold text-white">DPI capture (required for ICS filters)</h2>
             <p className="mt-1 text-xs text-slate-400">
               DPI capture is configured here; PCAP storage is managed separately.
@@ -503,7 +559,7 @@ export default function FirewallPage() {
               onChange={(e) => setDpiConfig((c) => ({ ...c, dpiMock: e.target.checked }))}
               className="h-4 w-4 rounded border-white/20 bg-black/30"
             />
-            Safe learning lab mode (mock DPI)
+            Safe learning lab mode (DPI inspect-all)
             <InfoTip label="Lab-only: emit synthetic Modbus events for learning and UI visibility." />
           </label>
         </div>
@@ -531,7 +587,7 @@ export default function FirewallPage() {
             {rules.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                  No firewall rules configured.
+                  No firewall rules configured. Create rules below to control traffic between zones.
                 </td>
               </tr>
             )}
@@ -1223,7 +1279,7 @@ function PortForwardsCard({
               {items.length === 0 && (
                 <tr>
                   <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                    No port forwards configured.
+                    No port forwards configured. Port forwards (DNAT) expose internal services to external zones.
                   </td>
                 </tr>
               )}
@@ -1310,6 +1366,14 @@ function CreateRuleForm({
     if (!id.trim()) {
       setError("Rule ID is required.");
       return;
+    }
+    if (sources.trim()) {
+      const srcErr = validateIPOrCIDRList(sources);
+      if (srcErr) { setError("Source: " + srcErr); return; }
+    }
+    if (destinations.trim()) {
+      const dstErr = validateIPOrCIDRList(destinations);
+      if (dstErr) { setError("Destination: " + dstErr); return; }
     }
     const protocols: Protocol[] = proto
       ? [{ name: proto, port: port.trim() || undefined }]

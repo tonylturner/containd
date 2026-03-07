@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package httpapi
@@ -29,7 +32,7 @@ func getOSRoutingHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		st, err := readProcNetRoute()
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(200, st)

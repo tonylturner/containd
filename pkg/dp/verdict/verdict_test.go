@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package verdict
 
 import (
 	"testing"
 
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func TestFromRulesAction(t *testing.T) {

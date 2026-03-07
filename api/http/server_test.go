@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
@@ -6,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,10 +19,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/containd/containd/pkg/cp/config"
-	dpengine "github.com/containd/containd/pkg/dp/engine"
-	"github.com/containd/containd/pkg/dp/pcap"
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 const testAdminToken = "test-admin-token"
@@ -189,6 +193,14 @@ func (m *mockEngine) ReplayPcap(ctx context.Context, req pcap.ReplayRequest) err
 
 func (m *mockEngine) DownloadPcap(ctx context.Context, name string) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+}
+
+func (m *mockEngine) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error {
+	return nil
+}
+
+func (m *mockEngine) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
+	return nil
 }
 
 func TestGetConfigNotFound(t *testing.T) {
@@ -718,5 +730,40 @@ func TestAssetCRUD(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("asset delete expected 204, got %d", rec.Code)
+	}
+}
+
+func TestObjectCRUD(t *testing.T) {
+	m := &mockStore{}
+	s := NewServer(m, nil)
+
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/objects", bytes.NewBufferString(`{"id":"obj1","name":"plc-host","type":"HOST","addresses":["10.0.0.5"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("object create expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodGet, "/api/v1/objects", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"obj1"`)) {
+		t.Fatalf("object list missing object: %s", rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodPatch, "/api/v1/objects/obj1", bytes.NewBufferString(`{"description":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("object update expected 200, got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodDelete, "/api/v1/objects/obj1", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("object delete expected 204, got %d", rec.Code)
 	}
 }

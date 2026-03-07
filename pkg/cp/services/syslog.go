@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -10,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
-	dpevents "github.com/containd/containd/pkg/dp/events"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"go.uber.org/zap"
 )
 
@@ -101,9 +104,15 @@ func (m *SyslogManager) Current() config.SyslogConfig {
 	return m.config
 }
 
-// Run is a placeholder for the future forwarding loop.
+// Run keeps the forwarder loop alive for long-running service supervision.
 func (m *SyslogManager) Run(ctx context.Context) error {
+	if m == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	m.restartForwarder(ctx)
 	<-ctx.Done()
+	m.Stop()
 	return ctx.Err()
 }
 
