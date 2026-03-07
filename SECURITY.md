@@ -14,7 +14,7 @@ The containd team takes security seriously. If you discover a security vulnerabi
 
 ### How to Report
 
-1. Email **security@containd.io** with a description of the vulnerability.
+1. Email **tony@defendics.com** with a description of the vulnerability.
 2. Include steps to reproduce, affected versions, and any relevant logs or configuration details.
 3. If possible, suggest a fix or mitigation.
 

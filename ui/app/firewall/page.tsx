@@ -26,6 +26,7 @@ import {
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { InfoTip } from "../../components/InfoTip";
+import { validateIPOrCIDRList } from "../../lib/validate";
 
 function zoneLabel(zone: Zone): string {
   return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
@@ -586,7 +587,7 @@ export default function FirewallPage() {
             {rules.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                  No firewall rules configured.
+                  No firewall rules configured. Create rules below to control traffic between zones.
                 </td>
               </tr>
             )}
@@ -1278,7 +1279,7 @@ function PortForwardsCard({
               {items.length === 0 && (
                 <tr>
                   <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                    No port forwards configured.
+                    No port forwards configured. Port forwards (DNAT) expose internal services to external zones.
                   </td>
                 </tr>
               )}
@@ -1365,6 +1366,14 @@ function CreateRuleForm({
     if (!id.trim()) {
       setError("Rule ID is required.");
       return;
+    }
+    if (sources.trim()) {
+      const srcErr = validateIPOrCIDRList(sources);
+      if (srcErr) { setError("Source: " + srcErr); return; }
+    }
+    if (destinations.trim()) {
+      const dstErr = validateIPOrCIDRList(destinations);
+      if (dstErr) { setError("Destination: " + dstErr); return; }
     }
     const protocols: Protocol[] = proto
       ? [{ name: proto, port: port.trim() || undefined }]

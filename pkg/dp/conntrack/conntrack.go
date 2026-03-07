@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package conntrack
 
 // Entry is a minimal, portable conntrack record representation.

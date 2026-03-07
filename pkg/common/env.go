@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package common
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -23,7 +26,7 @@ func Env(name, fallback string) string {
 		legacy := "NGFW_" + strings.TrimPrefix(name, "CONTAIND_")
 		if v := os.Getenv(legacy); v != "" {
 			if _, warned := warnedVars.LoadOrStore(legacy, true); !warned {
-				log.Printf("DEPRECATED: %s is deprecated, use %s instead", legacy, name)
+				slog.Warn("deprecated env var", "var", legacy, "use", name)
 			}
 			return v
 		}

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package engine
 
 import (
@@ -6,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // AVSink receives HTTP request/response previews for asynchronous scanning.

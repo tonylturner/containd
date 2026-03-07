@@ -1,16 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/cp/users"
-	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/users"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
 type dashboardResponse struct {
@@ -29,6 +33,7 @@ type dashboardHealth struct {
 	Commit    string `json:"commit"`
 	Hostname  string `json:"hostname"`
 	Time      string `json:"time"`
+	LabMode   bool   `json:"labMode,omitempty"`
 }
 
 type dashboardCounts struct {
@@ -52,6 +57,7 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 
 		// Health
 		hostname, _ := os.Hostname()
+		lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 		resp.Health = dashboardHealth{
 			Status:    "ok",
 			Component: "mgmt",
@@ -59,6 +65,7 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 			Commit:    config.BuildCommit,
 			Hostname:  hostname,
 			Time:      time.Now().UTC().Format(time.RFC3339Nano),
+			LabMode:   lab,
 		}
 
 		// Config counts

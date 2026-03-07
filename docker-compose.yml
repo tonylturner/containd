@@ -35,7 +35,7 @@ services:
       # - CONTAIND_SSH_ALLOW_PASSWORD=0
 
       # Auth + session cookie behavior
-      - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:-containd-dev-secret-change-me}
+      - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:?Set CONTAIND_JWT_SECRET to a random 32+ character string}
       - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
       - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
       - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
@@ -51,6 +51,7 @@ services:
       - ./data:/data
     devices:
       - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
     # Default: run combined mgmt+engine. Override with ["mgmt"] or ["engine"] if desired.
     command: ["all"]
     networks:

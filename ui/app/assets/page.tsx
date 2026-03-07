@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { validateIPOrCIDRList } from "../../lib/validate";
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -36,6 +37,10 @@ export default function AssetsPage() {
     if (!id.trim() || !name.trim()) {
       setError("Asset id and name are required.");
       return;
+    }
+    if (ips.trim()) {
+      const ipErr = validateIPOrCIDRList(ips);
+      if (ipErr) { setError(ipErr); return; }
     }
     const created = await api.createAsset({
       id: id.trim(),
@@ -185,7 +190,7 @@ export default function AssetsPage() {
             {assets.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={8}>
-                  No assets configured.
+                  No assets configured. Add an asset above to begin tracking OT/ICS devices.
                 </td>
               </tr>
             )}

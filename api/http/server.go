@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
@@ -24,22 +27,22 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kballard/go-shellquote"
 
-	"github.com/containd/containd/pkg/common"
-	"github.com/containd/containd/pkg/cli"
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/compile"
-	"github.com/containd/containd/pkg/cp/config"
-	cpids "github.com/containd/containd/pkg/cp/ids"
-	cpservices "github.com/containd/containd/pkg/cp/services"
-	"github.com/containd/containd/pkg/cp/users"
-	"github.com/containd/containd/pkg/dp/conntrack"
-	"github.com/containd/containd/pkg/dp/dhcpd"
-	"github.com/containd/containd/pkg/dp/enforce"
-	dpengine "github.com/containd/containd/pkg/dp/engine"
-	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/netcfg"
-	"github.com/containd/containd/pkg/dp/pcap"
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/compile"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	cpids "github.com/tonylturner/containd/pkg/cp/ids"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
+	"github.com/tonylturner/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
+	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // NewServer builds a Gin engine with versioned routes for management APIs.
@@ -121,6 +124,11 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Next()
+	})
 	// Avoid trusting all proxies by default; this prevents spoofed ClientIP via X-Forwarded-For.
 	// Override via CONTAIND_TRUSTED_PROXIES="127.0.0.1,::1" (comma-separated CIDRs/IPs).
 	proxiesEnv := strings.TrimSpace(os.Getenv("CONTAIND_TRUSTED_PROXIES"))
@@ -158,17 +166,17 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/auth/me", meHandler(userStore))
 		protected.GET("/auth/session", authSessionHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
-		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
+		protected.POST("/auth/me/password", rateLimitSensitive(), changeMyPasswordHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
-		protected.POST("/system/factory-reset", requireAdmin(), factoryResetHandler(store, userStore))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler())
 		protected.GET("/config/export", exportConfigHandler(store))
-		protected.POST("/config/import", requireAdmin(), importConfigHandler(store))
+		protected.POST("/config/import", requireAdmin(), rateLimitSensitive(), importConfigHandler(store))
 		protected.GET("/config/candidate", getCandidateConfigHandler(store))
 		protected.POST("/config/candidate", requireAdmin(), saveCandidateConfigHandler(store))
 		protected.GET("/config/diff", diffConfigHandler(store))
@@ -266,10 +274,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/cli/ws", cliWSHandler(store))
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
-		protected.POST("/users", requireAdmin(), createUserHandler(userStore))
-		protected.PATCH("/users/:id", requireAdmin(), updateUserHandler(userStore))
-		protected.POST("/users/:id/password", requireAdmin(), setUserPasswordHandler(userStore))
-		protected.DELETE("/users/:id", requireAdmin(), deleteUserHandler(userStore))
+		protected.POST("/users", requireAdmin(), rateLimitSensitive(), createUserHandler(userStore))
+		protected.PATCH("/users/:id", requireAdmin(), rateLimitSensitive(), updateUserHandler(userStore))
+		protected.POST("/users/:id/password", requireAdmin(), rateLimitSensitive(), setUserPasswordHandler(userStore))
+		protected.DELETE("/users/:id", requireAdmin(), rateLimitSensitive(), deleteUserHandler(userStore))
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)
 		}
@@ -315,7 +323,7 @@ func patchSyslogHandler(store config.Store, services ServicesApplier) gin.Handle
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cur := cfg.Services.Syslog
@@ -381,7 +389,7 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg)
@@ -429,7 +437,7 @@ func exportConfigHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Exports are redacted by default; only admins can request unredacted.
@@ -458,9 +466,14 @@ func exportConfigHandler(store config.Store) gin.HandlerFunc {
 
 func importConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
+		const maxImportSize = 10 << 20 // 10 MB
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxImportSize+1))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+			return
+		}
+		if int64(len(body)) > maxImportSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
 			return
 		}
 		var cfg config.Config
@@ -473,7 +486,7 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		if err := store.Save(c.Request.Context(), &cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.import", Target: "running"})
@@ -557,7 +570,7 @@ func listConfigBackupsHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusOK, []configBackupInfo{})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		isAdmin := c.GetString(ctxRoleKey) == string(roleAdmin)
@@ -611,14 +624,14 @@ func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "config not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if req.Redacted {
 			cfg = cfg.RedactedCopy()
 		}
 		if err := os.MkdirAll(configBackupDir(), 0o750); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		id, err := newConfigBackupID()
@@ -698,7 +711,7 @@ func downloadConfigBackupHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		var meta configBackupMeta
@@ -717,7 +730,7 @@ func downloadConfigBackupHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "backup not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		defer f.Close()
@@ -738,11 +751,11 @@ func deleteConfigBackupHandler() gin.HandlerFunc {
 		}
 		jsonPath, metaPath := configBackupPaths(id)
 		if err := os.Remove(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := os.Remove(jsonPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.backup.delete", Target: "running"})
@@ -758,7 +771,7 @@ func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "candidate config not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg)
@@ -788,7 +801,7 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 			return
 		}
 		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
@@ -799,7 +812,7 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 func commitConfirmedHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const defaultTTLSeconds = 60
-		body, _ := io.ReadAll(c.Request.Body)
+		body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 4096))
 		ttlSeconds := int64(defaultTTLSeconds)
 		if len(body) > 0 {
 			var req struct {
@@ -818,7 +831,7 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
@@ -844,7 +857,7 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 			return
 		}
 		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
@@ -905,12 +918,12 @@ func diffConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		running, err := store.Load(c.Request.Context())
 		if err != nil && !errors.Is(err, config.ErrNotFound) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		candidate, err := store.LoadCandidate(c.Request.Context())
 		if err != nil && !errors.Is(err, config.ErrNotFound) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -924,7 +937,7 @@ func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
@@ -940,7 +953,7 @@ func setSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerF
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.Syslog = syslogCfg
@@ -962,7 +975,7 @@ func getDNSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.DNS)
@@ -978,7 +991,7 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
@@ -1009,7 +1022,7 @@ func getNTPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.NTP)
@@ -1025,7 +1038,7 @@ func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.NTP = ntpCfg
@@ -1048,7 +1061,7 @@ func getAVHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.AV)
@@ -1064,7 +1077,7 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
@@ -1110,7 +1123,7 @@ func listAVDefsHandler(store config.Store, services ServicesApplier) gin.Handler
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		path := "/data/clamav/custom"
@@ -1125,7 +1138,7 @@ func listAVDefsHandler(store config.Store, services ServicesApplier) gin.Handler
 				c.JSON(http.StatusOK, gin.H{"files": []string{}})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		var files []string
@@ -1143,7 +1156,7 @@ func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		path := "/data/clamav/custom"
@@ -1153,7 +1166,7 @@ func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 			path = cfg.Services.AV.ClamAV.CustomDefsPath
 		}
 		if err := os.MkdirAll(path, 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		file, err := c.FormFile("file")
@@ -1162,9 +1175,17 @@ func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 			return
 		}
 		name := filepath.Base(file.Filename)
+		if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename"})
+			return
+		}
 		dst := filepath.Join(path, name)
+		if !strings.HasPrefix(filepath.Clean(dst), filepath.Clean(path)) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename"})
+			return
+		}
 		if err := c.SaveUploadedFile(file, dst); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "uploaded", "file": name})
@@ -1175,7 +1196,7 @@ func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		file := strings.TrimSpace(c.Query("file"))
@@ -1191,7 +1212,7 @@ func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 		}
 		target := filepath.Join(path, filepath.Base(file))
 		if err := os.Remove(target); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted", "file": filepath.Base(file)})
@@ -1202,7 +1223,7 @@ func getDHCPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.DHCP)
@@ -1218,7 +1239,7 @@ func setDHCPHandler(store config.Store, services ServicesApplier, engine EngineC
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.DHCP = dhcpCfg
@@ -1247,7 +1268,7 @@ func getVPNHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.VPN)
@@ -1263,7 +1284,7 @@ func setVPNHandler(store config.Store, services ServicesApplier, engine EngineCl
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.VPN = vpnCfg
@@ -1328,24 +1349,24 @@ func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, e
 			base = v
 		}
 		if err := os.MkdirAll(base, 0o700); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		path := filepath.Join(base, name+".ovpn")
 		tmp := path + ".tmp"
 		if err := os.WriteFile(tmp, []byte(ovpn+"\n"), 0o600); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := os.Rename(tmp, path); err != nil {
 			_ = os.Remove(tmp)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.VPN.OpenVPN.ConfigPath = path
@@ -1438,7 +1459,7 @@ func listOpenVPNClientsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
@@ -1453,7 +1474,7 @@ func listOpenVPNClientsHandler(store config.Store) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"clients": []string{}})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		var out []string
@@ -1478,7 +1499,7 @@ func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
@@ -1502,7 +1523,7 @@ func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		pkiDir := openVPNManagedServerPKIDir()
 		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		// Ensure server cert exists too, so the PKI is complete.
@@ -1531,7 +1552,7 @@ func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		ovpn := cfg.Services.VPN.OpenVPN
@@ -1556,7 +1577,7 @@ func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		pkiDir := openVPNManagedServerPKIDir()
 		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
@@ -1567,17 +1588,17 @@ func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
 		}
 		caPEM, err := os.ReadFile(caCertPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		certPEM, err := os.ReadFile(clientCertPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		keyPEM, err := os.ReadFile(clientKeyPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -1639,7 +1660,7 @@ func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
@@ -1655,7 +1676,7 @@ func setForwardProxyHandler(store config.Store, services ServicesApplier) gin.Ha
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.Proxy.Forward = forwardCfg
@@ -1678,7 +1699,7 @@ func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
@@ -1694,7 +1715,7 @@ func setReverseProxyHandler(store config.Store, services ServicesApplier) gin.Ha
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Services.Proxy.Reverse = reverseCfg
@@ -1731,7 +1752,7 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 	return func(c *gin.Context) {
 		limit := 500
 		if q := c.Query("limit"); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
 				limit = v
 			}
 		}
@@ -1785,7 +1806,7 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		limit := 200
 		if q := c.Query("limit"); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
 				limit = v
 			}
 		}
@@ -1845,7 +1866,7 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.DataPlane)
@@ -1856,7 +1877,7 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		snap, err := compile.CompileSnapshot(cfg)
@@ -1973,7 +1994,7 @@ func getIDSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.IDS)
@@ -1989,7 +2010,7 @@ func setIDSHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.IDS = idsCfg
@@ -2111,10 +2132,10 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 		CheckOrigin: func(r *http.Request) bool {
 			origin := strings.TrimSpace(r.Header.Get("Origin"))
 			if origin == "" {
-				return true
+				return false
 			}
 			u, err := url.Parse(origin)
-			if err != nil {
+			if err != nil || u.Host == "" {
 				return false
 			}
 			return strings.EqualFold(u.Host, r.Host)
@@ -2853,7 +2874,7 @@ func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Firewall.NAT)
@@ -2869,7 +2890,7 @@ func setFirewallNATHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Firewall.NAT = nat
@@ -2891,7 +2912,7 @@ func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFun
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.DataPlane = dp
@@ -3048,6 +3069,24 @@ func uploadPCAPHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		defer file.Close()
+		// Validate PCAP/PCAPng magic bytes.
+		var magic [4]byte
+		if _, err := io.ReadFull(file, magic[:]); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file too small or unreadable"})
+			return
+		}
+		switch {
+		case magic == [4]byte{0xd4, 0xc3, 0xb2, 0xa1}: // pcap LE
+		case magic == [4]byte{0xa1, 0xb2, 0xc3, 0xd4}: // pcap BE
+		case magic == [4]byte{0x0a, 0x0d, 0x0d, 0x0a}: // pcapng
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid pcap/pcapng file"})
+			return
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to rewind file"})
+			return
+		}
 		item, err := engine.UploadPcap(c.Request.Context(), header.Filename, file)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -3146,7 +3185,7 @@ func listAssetsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Assets)
@@ -3162,7 +3201,7 @@ func createAssetHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, existing := range cfg.Assets {
@@ -3195,7 +3234,7 @@ func updateAssetHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		updated := false
@@ -3230,7 +3269,7 @@ func deleteAssetHandler(store config.Store) gin.HandlerFunc {
 		id := c.Param("id")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		original := len(cfg.Assets)
@@ -3246,7 +3285,7 @@ func deleteAssetHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg.Assets = filtered
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "assets.delete", Target: id})
@@ -3258,7 +3297,7 @@ func listObjectsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Objects)
@@ -3274,7 +3313,7 @@ func createObjectHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, existing := range cfg.Objects {
@@ -3307,7 +3346,7 @@ func updateObjectHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		updated := false
@@ -3357,7 +3396,7 @@ func deleteObjectHandler(store config.Store) gin.HandlerFunc {
 		id := c.Param("id")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		original := len(cfg.Objects)
@@ -3373,7 +3412,7 @@ func deleteObjectHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg.Objects = filtered
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		auditLog(c, audit.Record{Action: "objects.delete", Target: id})
@@ -3385,7 +3424,7 @@ func listZonesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Zones)
@@ -3401,7 +3440,7 @@ func createZoneHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, existing := range cfg.Zones {
@@ -3424,7 +3463,7 @@ func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 		name := c.Param("name")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, iface := range cfg.Interfaces {
@@ -3454,7 +3493,7 @@ func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg.Zones = filtered
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -3471,7 +3510,7 @@ func updateZoneHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		updated := false
@@ -3501,7 +3540,7 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Interfaces)
@@ -3512,7 +3551,7 @@ func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerF
 	return func(c *gin.Context) {
 		// Ensure config exists (so default interfaces are seeded).
 		if _, err := loadOrInitConfig(c.Request.Context(), store); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if engine == nil {
@@ -3550,7 +3589,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -3868,7 +3907,7 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {
@@ -3889,7 +3928,7 @@ func createInterfaceHandler(store config.Store, engine EngineClient, services Se
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, existing := range cfg.Interfaces {
@@ -3919,7 +3958,7 @@ func deleteInterfaceHandler(store config.Store, engine EngineClient, services Se
 		name := c.Param("name")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		original := len(cfg.Interfaces)
@@ -3935,7 +3974,7 @@ func deleteInterfaceHandler(store config.Store, engine EngineClient, services Se
 		}
 		cfg.Interfaces = filtered
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if engine != nil {
@@ -3959,7 +3998,7 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		isAccessUnset := func(a config.InterfaceAccess) bool {
@@ -4014,7 +4053,7 @@ func getRoutingHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Routing)
@@ -4030,7 +4069,7 @@ func setRoutingHandler(store config.Store, engine EngineClient, services Service
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		cfg.Routing = routingCfg
@@ -4062,7 +4101,7 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := engine.ConfigureRoutingReplace(c.Request.Context(), cfg.Routing); err != nil {
@@ -4078,7 +4117,7 @@ func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cfg.Firewall.Rules)
@@ -4094,7 +4133,7 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, existing := range cfg.Firewall.Rules {
@@ -4120,7 +4159,7 @@ func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		id := c.Param("id")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		original := len(cfg.Firewall.Rules)
@@ -4136,7 +4175,7 @@ func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg.Firewall.Rules = filtered
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -4153,7 +4192,7 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		updated := false

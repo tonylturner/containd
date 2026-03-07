@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package engine
 
 import (
@@ -9,16 +12,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/capture"
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/enforce"
-	"github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/dp/flow"
-	"github.com/containd/containd/pkg/dp/ics/modbus"
-	"github.com/containd/containd/pkg/dp/ids"
-	"github.com/containd/containd/pkg/dp/itdpi"
-	"github.com/containd/containd/pkg/dp/rules"
-	"github.com/containd/containd/pkg/dp/verdict"
+	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
+	"github.com/tonylturner/containd/pkg/dp/ids"
+	"github.com/tonylturner/containd/pkg/dp/itdpi"
+	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 // Engine coordinates capture and rule enforcement components.
@@ -101,6 +104,7 @@ func New(cfg Config) (*Engine, error) {
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
 func (e *Engine) Reconfigure(fresh *Engine) {
+	e.flowMu.Lock()
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
 	e.applier = fresh.applier
@@ -109,7 +113,6 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.eventStore = fresh.eventStore
 	e.avSink = fresh.avSink
 	e.inspectAll = fresh.inspectAll
-	e.flowMu.Lock()
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.flowMu.Unlock()

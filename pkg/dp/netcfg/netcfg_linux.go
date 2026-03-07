@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package netcfg
@@ -15,7 +18,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"golang.org/x/sys/unix"
 )
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package compile
 
 import (
@@ -7,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containd/containd/pkg/cp/config"
-	dprules "github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // CompileSnapshot compiles a control-plane running config into a data-plane snapshot.

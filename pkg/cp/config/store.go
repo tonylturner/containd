@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package config
 
 import (
@@ -6,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -329,7 +332,7 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 			return
 		}
 		if err := s.rollbackLocked(bg); err != nil {
-			log.Printf("auto-rollback failed: %v", err)
+			slog.Error("auto-rollback failed", "error", err)
 			return
 		}
 		_ = s.clearPendingLocked(bg)

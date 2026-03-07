@@ -32,6 +32,8 @@ This file tracks third‑party/external components that containd embeds, vendors
 | OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `containd mgmt` when enabled with a foreground config (no `daemon`). |
 | xterm.js | In-app terminal emulator | MIT | Used by the in-app console UI (`ui/components/Console.tsx`). |
 | nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Userspace `nft` binary is copied into the engine image from Debian packages. |
+| ClamAV | Antivirus scanning (ICAP pipeline) | GPL-2.0-only | Embedded `clamd`/`freshclam` binaries; executed as separate processes, not linked into `containd`. |
+| tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
 | Distroless base (`base-debian12`) | Minimal runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
 ---

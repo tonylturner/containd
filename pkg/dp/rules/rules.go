@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package rules
 
 // Snapshot is an immutable rule set used by the data-plane fast path.

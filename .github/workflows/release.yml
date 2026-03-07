@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025 containd Authors
+#
+# NOTE: After the first push, make the GHCR packages public so users can pull
+# without authentication: repo → Packages → Package settings → Change visibility → Public.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # needed for Cosign keyless signing
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_MGMT: ghcr.io/${{ github.repository }}
+  IMAGE_ENGINE: ghcr.io/${{ github.repository }}-engine
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push mgmt image
+        id: build-mgmt
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mgmt
+          push: true
+          tags: |
+            ${{ env.IMAGE_MGMT }}:${{ steps.meta.outputs.version }}
+            ${{ env.IMAGE_MGMT }}:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push engine image
+        id: build-engine
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.engine
+          push: true
+          tags: |
+            ${{ env.IMAGE_ENGINE }}:${{ steps.meta.outputs.version }}
+            ${{ env.IMAGE_ENGINE }}:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Cosign keyless signing (uses GitHub OIDC identity)
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign mgmt image
+        run: cosign sign --yes ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+
+      - name: Sign engine image
+        run: cosign sign --yes ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
+
+      # SBOM generation with Syft, attached to the signed images
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+          output-file: sbom-mgmt.spdx.json
+          format: spdx-json
+
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
+          output-file: sbom-engine.spdx.json
+          format: spdx-json
+
+      - name: Attach SBOM to mgmt image
+        run: cosign attach sbom --sbom sbom-mgmt.spdx.json ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+
+      - name: Attach SBOM to engine image
+        run: cosign attach sbom --sbom sbom-engine.spdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
+
+      - name: Upload SBOMs as release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboms
+          path: |
+            sbom-mgmt.spdx.json
+            sbom-engine.spdx.json

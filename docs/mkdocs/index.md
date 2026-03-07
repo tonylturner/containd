@@ -13,4 +13,4 @@ Welcome. This documentation is meant to be rendered in-app (Help icon) and as a 
 ## Documentation notes
 
 - Images and diagrams should go under `docs/mkdocs/assets/` and be referenced as `assets/<file>`.
-- See [CHANGELOG.md](https://github.com/containd/containd/blob/main/CHANGELOG.md) for release history.
+- See [CHANGELOG.md](https://github.com/tonylturner/containd/blob/main/CHANGELOG.md) for release history.

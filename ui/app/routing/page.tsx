@@ -640,7 +640,7 @@ export default function RoutingPage() {
                 {(cfg.gateways ?? []).length === 0 && (
                   <tr>
                     <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                      No gateways configured.
+                      No gateways configured. Add a default gateway to enable outbound routing.
                     </td>
                   </tr>
                 )}
@@ -781,7 +781,7 @@ export default function RoutingPage() {
                 {(cfg.routes ?? []).length === 0 && (
                   <tr>
                     <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                      No static routes configured.
+                      No static routes configured. Static routes direct traffic to specific subnets via a gateway.
                     </td>
                   </tr>
                 )}

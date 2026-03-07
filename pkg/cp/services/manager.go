@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -8,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
-	dpevents "github.com/containd/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
 // ManagerOptions control where generated service configs are written.

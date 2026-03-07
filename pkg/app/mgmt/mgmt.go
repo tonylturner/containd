@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package mgmtapp
 
 import (
@@ -11,7 +14,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,16 +24,18 @@ import (
 	"sync"
 	"time"
 
-	engineapi "github.com/containd/containd/api/engine"
-	httpapi "github.com/containd/containd/api/http"
-	"github.com/containd/containd/pkg/common"
-	"github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/cp/services"
-	"github.com/containd/containd/pkg/cp/users"
-	dpevents "github.com/containd/containd/pkg/dp/events"
-	"github.com/containd/containd/pkg/mp/sshserver"
+	"go.uber.org/zap"
+
+	engineapi "github.com/tonylturner/containd/api/engine"
+	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/services"
+	"github.com/tonylturner/containd/pkg/cp/users"
+	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/mp/sshserver"
 	"github.com/gin-gonic/gin"
 )
 
@@ -46,17 +50,17 @@ type mgmtHealthResponse struct {
 type Options struct{}
 
 func Run(ctx context.Context, _ Options) error {
-	logger := logging.New("[mgmt]")
+	logger := logging.NewService("mgmt")
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
 	switch {
 	case jwtSecret == "containd-dev-secret-change-me":
-		logger.Println("WARNING: ============================================================")
-		logger.Println("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
-		logger.Println("WARNING: This is insecure. Set a unique value in .env for any")
-		logger.Println("WARNING: deployment beyond local development.")
-		logger.Println("WARNING: ============================================================")
+		logger.Warn("WARNING: ============================================================")
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
+		logger.Warn("WARNING: This is insecure. Set a unique value in .env for any")
+		logger.Warn("WARNING: deployment beyond local development.")
+		logger.Warn("WARNING: ============================================================")
 	case jwtSecret == "":
-		logger.Println("WARNING: CONTAIND_JWT_SECRET is empty; auth tokens will not be signed.")
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is empty; auth tokens will not be signed.")
 	}
 	store := mustInitStore()
 	defer store.Close()
@@ -95,11 +99,11 @@ func Run(ctx context.Context, _ Options) error {
 	if engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", ""); engineURL != "" {
 		if !strings.Contains(engineURL, "://") {
 			engineURL = "http://" + engineURL
-			logger.Printf("WARNING: CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
+			logger.Warnf("CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
 		}
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
-	startDHCPLeaseAuditIngestor(logger, engineClient, auditStore)
+	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
 	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
 	// Best-effort initial service render on startup.
@@ -146,7 +150,7 @@ func Run(ctx context.Context, _ Options) error {
 	// Add CORS and frame-embedding support for external applications (e.g., RangerDanger)
 	allowedOrigins := getAllowedOrigins()
 	if len(allowedOrigins) > 0 {
-		logger.Printf("CORS/frame-embedding enabled for origins: %v", allowedOrigins)
+		logger.Infof("CORS/frame-embedding enabled for origins: %v", allowedOrigins)
 		handler = corsHandler(handler, allowedOrigins)
 		handler = frameOptionsHandler(handler, allowedOrigins)
 	}
@@ -158,7 +162,7 @@ func Run(ctx context.Context, _ Options) error {
 		var err error
 		tlsCert, tlsKey, err = ensureSelfSignedTLSFiles(tlsCert, tlsKey, detectIPs())
 		if err != nil {
-			logger.Printf("https disabled: failed to ensure TLS cert: %v", err)
+			logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
 			enableHTTPS = false
 		}
 	}
@@ -228,7 +232,7 @@ func Run(ctx context.Context, _ Options) error {
 	}
 }
 
-func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStore audit.Store) {
+func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger, engineClient any, auditStore audit.Store) {
 	if logger == nil || auditStore == nil || engineClient == nil {
 		return
 	}
@@ -245,7 +249,13 @@ func startDHCPLeaseAuditIngestor(logger *log.Logger, engineClient any, auditStor
 		defer ticker.Stop()
 
 		var lastID uint64
-		for range ticker.C {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			evs, err := ec.ListEvents(ctx, 1000)
 			cancel()
@@ -313,7 +323,7 @@ func addrFromEnv(key, fallback string) string {
 	return fallback
 }
 
-func ensureDevCompatUsers(logger *log.Logger, userStore users.Store) {
+func ensureDevCompatUsers(logger *zap.SugaredLogger, userStore users.Store) {
 	// Dev convenience only: if the operator is using the example JWT secret, we provision
 	// an additional admin user "containerd"/"containerd" so early demos don't get stuck
 	// on mismatched credentials. This is intentionally NOT enabled once the secret is changed.
@@ -335,7 +345,7 @@ func ensureDevCompatUsers(logger *log.Logger, userStore users.Store) {
 		LastName:  "Admin",
 		Role:      "admin",
 	}, "containerd"); err == nil {
-		logger.Println("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
+		logger.Info("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
 	}
 }
 
@@ -435,7 +445,7 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func ensureDefaultConfig(logger *log.Logger, store config.Store) {
+func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
 	if store == nil {
 		return
 	}
@@ -476,13 +486,13 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 		}
 		if changed {
 			if err := store.Save(context.Background(), cfg); err != nil {
-				logger.Printf("failed to backfill default config values: %v", err)
+				logger.Errorf("failed to backfill default config values: %v", err)
 			}
 		}
 		return
 	}
 	if !errors.Is(err, config.ErrNotFound) {
-		logger.Printf("failed to load config (continuing): %v", err)
+		logger.Warnf("failed to load config (continuing): %v", err)
 		return
 	}
 	def := config.DefaultConfig()
@@ -495,10 +505,10 @@ func ensureDefaultConfig(logger *log.Logger, store config.Store) {
 	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
 	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 	if err := store.Save(context.Background(), def); err != nil {
-		logger.Printf("failed to initialize default config: %v", err)
+		logger.Errorf("failed to initialize default config: %v", err)
 		return
 	}
-	logger.Printf("initialized default config")
+	logger.Info("initialized default config")
 }
 
 func ensureLoopbackHTTPAddr(addr string) string {
@@ -1028,7 +1038,7 @@ func SSHAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
 	return sshAllowedOnInterface(cfg, ifaceName)
 }
 
-func startSSH(logger *log.Logger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
+func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
 	ctx := context.Background()
 	sshAddr := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
 	authKeysDir := common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", "")
@@ -1108,7 +1118,7 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 	}
 	srv, err := sshserver.New(opts)
 	if err != nil {
-		logger.Printf("ssh disabled: %v", err)
+		logger.Warnf("ssh disabled: %v", err)
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
@@ -1120,59 +1130,59 @@ func startSSH(logger *log.Logger, store config.Store, userStore users.Store, aud
 			bootstrapUser = "containd"
 		}
 		if err := srv.SeedAuthorizedKey(bootstrapUser, bootstrapKey); err != nil {
-			logger.Printf("ssh bootstrap key seed failed: %v", err)
+			logger.Errorf("ssh bootstrap key seed failed: %v", err)
 		}
 	}
 
 	go func() {
 		if err := srv.ListenAndServe(context.Background()); err != nil {
-			logger.Printf("ssh server exited: %v", err)
+			logger.Errorf("ssh server exited: %v", err)
 		}
 	}()
-	logger.Printf("ssh enabled on %s (admin only)", sshAddr)
+	logger.Infof("ssh enabled on %s (admin only)", sshAddr)
 	return sshAddr, true
 }
 
-func printStartupHints(logger *log.Logger, httpAddr string, httpLoopbackAddr string, httpsAddr string, httpsLoopbackAddr string, enableHTTP bool, enableHTTPS bool, sshAddr string, sshEnabled bool) {
+func printStartupHints(logger *zap.SugaredLogger, httpAddr string, httpLoopbackAddr string, httpsAddr string, httpsLoopbackAddr string, enableHTTP bool, enableHTTPS bool, sshAddr string, sshEnabled bool) {
 	httpPort := portOf(httpAddr)
 	httpsPort := portOf(httpsAddr)
 	sshPort := portOf(sshAddr)
 
-	logger.Println("------------------------------------------------------------")
-	logger.Println("containd access")
+	logger.Info("------------------------------------------------------------")
+	logger.Info("containd access")
 
 	if enableHTTP && httpPort != "" {
-		logger.Printf("UI/API (HTTP):  http://localhost:%s", httpPort)
+		logger.Infof("UI/API (HTTP):  http://localhost:%s", httpPort)
 	}
 	if enableHTTPS && httpsPort != "" {
-		logger.Printf("UI/API (HTTPS): https://localhost:%s (self-signed by default)", httpsPort)
+		logger.Infof("UI/API (HTTPS): https://localhost:%s (self-signed by default)", httpsPort)
 	}
 
 	if sshEnabled && sshPort != "" {
-		logger.Printf("SSH CLI: ssh -p %s containd@localhost", sshPort)
-		logger.Println("         then type: wizard or menu")
+		logger.Infof("SSH CLI: ssh -p %s containd@localhost", sshPort)
+		logger.Info("         then type: wizard or menu")
 	}
 
 	ips := detectIPs()
 	if len(ips) > 0 && httpPort != "" {
-		logger.Printf("Container IPs: %s", strings.Join(ips, ", "))
+		logger.Infof("Container IPs: %s", strings.Join(ips, ", "))
 		if enableHTTP && bindsAll(httpAddr) {
 			for _, ip := range ips {
-				logger.Printf("UI/API via IP (HTTP):  http://%s:%s", ip, httpPort)
+				logger.Infof("UI/API via IP (HTTP):  http://%s:%s", ip, httpPort)
 				if sshEnabled && sshPort != "" {
-					logger.Printf("SSH via IP:    ssh -p %s containd@%s", sshPort, ip)
+					logger.Infof("SSH via IP:    ssh -p %s containd@%s", sshPort, ip)
 				}
 			}
 		} else if enableHTTP && hostOnly(httpAddr) {
-			logger.Printf("UI/API bind is restricted to %s; use localhost or reconfigure.", httpAddr)
+			logger.Infof("UI/API bind is restricted to %s; use localhost or reconfigure.", httpAddr)
 		}
 	}
 
-	logger.Println("Initial login: username=containd password=containd (change immediately)")
-	logger.Println("Production note: add SSH key and disable password auth after provisioning.")
-	logger.Println("  - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
-	logger.Println("Tip: docker compose logs -f containd")
-	logger.Println("------------------------------------------------------------")
+	logger.Info("Initial login: username=containd password=containd (change immediately)")
+	logger.Info("Production note: add SSH key and disable password auth after provisioning.")
+	logger.Info("  - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
+	logger.Info("Tip: docker compose logs -f containd")
+	logger.Info("------------------------------------------------------------")
 }
 
 func portOf(addr string) string {
@@ -1277,11 +1287,11 @@ func isRFC1918(ip net.IP) bool {
 func mustInitStore() config.Store {
 	dbPath := common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		logging.New("[mgmt]").Fatalf("failed to create config dir: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to create config dir: %v", err)
 	}
 	store, err := config.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open config store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open config store: %v", err)
 	}
 	return store
 }
@@ -1289,11 +1299,11 @@ func mustInitStore() config.Store {
 func mustInitAuditStore() audit.Store {
 	dbPath := common.Env("CONTAIND_AUDIT_DB", filepath.Join("data", "audit.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		logging.New("[mgmt]").Fatalf("failed to create audit dir: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to create audit dir: %v", err)
 	}
 	store, err := audit.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open audit store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open audit store: %v", err)
 	}
 	return store
 }
@@ -1306,15 +1316,15 @@ func mustInitUsersStore() users.Store {
 		fallback := filepath.Join("data", "users.db")
 		if fallback != dbPath {
 			_ = os.MkdirAll(filepath.Dir(fallback), 0o755)
-			logging.New("[mgmt]").Printf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
+			logging.NewService("mgmt").Warnf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
 			dbPath = fallback
 		} else {
-			logging.New("[mgmt]").Fatalf("failed to create users dir: %v", err)
+			logging.NewService("mgmt").Fatalf("failed to create users dir: %v", err)
 		}
 	}
 	store, err := users.NewSQLiteStore(dbPath)
 	if err != nil {
-		logging.New("[mgmt]").Fatalf("failed to open users store: %v", err)
+		logging.NewService("mgmt").Fatalf("failed to open users store: %v", err)
 	}
 	return store
 }

@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
 	"net/http"
 
-	"github.com/containd/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,7 +18,7 @@ func listUsersHandler(store users.Store) gin.HandlerFunc {
 		}
 		us, err := store.List(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, us)

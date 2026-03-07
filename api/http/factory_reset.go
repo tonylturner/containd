@@ -1,12 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
 	"net/http"
 	"strings"
 
-	"github.com/containd/containd/pkg/cp/audit"
-	"github.com/containd/containd/pkg/cp/config"
-	"github.com/containd/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 )
 
@@ -50,11 +53,11 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 			return
 		}
 		if err := us.WipeAll(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := userStore.EnsureDefaultAdmin(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -69,7 +72,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 			return
 		}
 		if err := cs.WipeAll(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -86,7 +89,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 		def.System.SSH.ListenAddr = ":2222"
 		def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 		if err := cfgStore.Save(ctx, def); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -106,16 +109,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "reset",
 			"loggedOut": true,
-			"login": gin.H{
-				"username": "containd",
-				"password": "containd",
-			},
-			"message": "Factory reset completed; you have been logged out.",
-			"nextSteps": []string{
-				"Log in with containd/containd",
-				"Change the default password immediately",
-				"Enroll an SSH key and disable SSH password auth",
-			},
+			"message": "Factory reset completed. Log in with the default credentials and change the password immediately.",
 		})
 	}
 }

@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package dpi
 
 import (
 	"time"
 
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // ParsedPacket is a minimal packet representation for DPI decoders.

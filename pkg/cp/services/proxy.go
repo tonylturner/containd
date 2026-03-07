@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -16,8 +19,8 @@ import (
 	"text/template"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
@@ -266,7 +269,7 @@ func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardPr
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			err = fmt.Errorf("%v: %s", err, msg)
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
 		m.mu.Lock()
 		m.lastEnvoyError = err.Error()
@@ -292,7 +295,7 @@ func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReversePr
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
-			err = fmt.Errorf("%v: %s", err, msg)
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
 		m.mu.Lock()
 		m.lastNginxError = err.Error()

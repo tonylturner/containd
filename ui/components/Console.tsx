@@ -480,7 +480,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         if (!alive || !cmds) return;
         commandsRef.current = cmds.map((cmd) => cmd.toLowerCase());
       })
-      .catch(() => {});
+      .catch((err) => console.warn("failed to list CLI commands", err));
     return () => {
       alive = false;
     };

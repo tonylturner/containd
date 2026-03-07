@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -8,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 // ICAPClient is a minimal ICAP client to probe servers and perform simple scans.

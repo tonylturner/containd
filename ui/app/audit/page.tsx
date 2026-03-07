@@ -57,7 +57,7 @@ export default function AuditPage() {
             {records.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                  No audit records yet.
+                  No audit records yet. Administrative actions will appear here automatically.
                 </td>
               </tr>
             )}

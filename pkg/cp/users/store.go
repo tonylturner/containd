@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package users
 
 import (
@@ -167,25 +170,25 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 			return nil
 		}
 		// Otherwise create it (explicit operator intent).
-		_, err := s.Create(ctx, User{
+		_, err := s.createUser(ctx, User{
 			Username:  username,
 			FirstName: "Default",
 			LastName:  "Admin",
 			Role:      "admin",
 			Email:     "",
-		}, password)
+		}, password, true)
 		return err
 	}
 
 	// Fresh DB: always seed the default admin with password change required.
-	_, err := s.Create(ctx, User{
+	_, err := s.createUser(ctx, User{
 		Username:           username,
 		FirstName:          "Default",
 		LastName:           "Admin",
 		Role:               "admin",
 		Email:              "",
 		MustChangePassword: password == "containd",
-	}, password)
+	}, password, true)
 	return err
 }
 
@@ -243,15 +246,47 @@ func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, erro
 	return &u, nil
 }
 
+func validatePassword(pw string) error {
+	if pw == "" {
+		return errors.New("password required")
+	}
+	if len(pw) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, r := range pw {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return errors.New("password must contain uppercase, lowercase, and a digit")
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Create(ctx context.Context, u User, password string) (*User, error) {
+	return s.createUser(ctx, u, password, false)
+}
+
+func (s *SQLiteStore) createUser(ctx context.Context, u User, password string, bootstrap bool) (*User, error) {
 	if strings.TrimSpace(u.Username) == "" {
 		return nil, errors.New("username required")
 	}
 	if u.Role != "admin" && u.Role != "view" {
 		return nil, fmt.Errorf("invalid role %q", u.Role)
 	}
-	if password == "" {
-		return nil, errors.New("password required")
+	if bootstrap {
+		if password == "" {
+			return nil, errors.New("password required")
+		}
+	} else if err := validatePassword(password); err != nil {
+		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -348,8 +383,8 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {
-	if password == "" {
-		return errors.New("password required")
+	if err := validatePassword(password); err != nil {
+		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

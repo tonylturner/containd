@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package verdict
 
 import (
 	"time"
 
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Action describes how the data plane should treat a flow or asset.

@@ -126,7 +126,7 @@ export default function IDSPage() {
             {rules.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                  No IDS rules configured.
+                  No IDS rules configured. Upload Suricata rules or create custom rules to enable intrusion detection.
                 </td>
               </tr>
             )}

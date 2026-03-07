@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025 containd Authors
+
 name: CI
 
 on:
@@ -13,10 +16,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Verify go.mod is tidy
+        run: go mod tidy && git diff --exit-code go.mod go.sum
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
 
   lint-go:
     runs-on: ubuntu-latest
@@ -28,7 +33,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64
 
   docs:
     runs-on: ubuntu-latest
@@ -54,6 +59,9 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Install deps
         run: npm ci
+        working-directory: ui
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high || true
         working-directory: ui
       - name: Lint
         run: npm run lint
@@ -85,5 +93,5 @@ jobs:
         with:
           image-ref: containd/containd:ci
           format: table
-          exit-code: 0
-          severity: CRITICAL,HIGH
+          exit-code: 1
+          severity: CRITICAL

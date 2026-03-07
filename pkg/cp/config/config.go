@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package config
 
 import (
@@ -852,7 +855,7 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 		}
 		for _, addr := range iface.Addresses {
 			if _, _, err := net.ParseCIDR(addr); err != nil {
-				return fmt.Errorf("interface %s has invalid CIDR %q: %v", iface.Name, addr, err)
+				return fmt.Errorf("interface %s has invalid CIDR %q: %w", iface.Name, addr, err)
 			}
 		}
 	}
@@ -923,7 +926,7 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				continue
 			}
 			if _, _, err := net.ParseCIDR(cidr); err != nil {
-				return fmt.Errorf("rule %s has invalid CIDR %q: %v", r.ID, cidr, err)
+				return fmt.Errorf("rule %s has invalid CIDR %q: %w", r.ID, cidr, err)
 			}
 		}
 		for _, p := range r.Protocols {
@@ -1032,7 +1035,7 @@ func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}, zoneIf
 		}
 		allowed, err := parseIPv4CIDRs(pf.AllowedSources)
 		if err != nil {
-			return fmt.Errorf("port-forward %s has invalid allowedSources: %v", pf.ID, err)
+			return fmt.Errorf("port-forward %s has invalid allowedSources: %w", pf.ID, err)
 		}
 
 		binding := portForwardBinding{
@@ -1261,13 +1264,13 @@ func validateObjects(objects []Object) error {
 		case ObjectHost:
 			for _, addr := range obj.Addresses {
 				if err := validateObjectHostAddress(addr); err != nil {
-					return fmt.Errorf("object %s has invalid host address %q: %v", obj.ID, addr, err)
+					return fmt.Errorf("object %s has invalid host address %q: %w", obj.ID, addr, err)
 				}
 			}
 		case ObjectSubnet:
 			for _, addr := range obj.Addresses {
 				if err := validateObjectSubnetAddress(addr); err != nil {
-					return fmt.Errorf("object %s has invalid subnet %q: %v", obj.ID, addr, err)
+					return fmt.Errorf("object %s has invalid subnet %q: %w", obj.ID, addr, err)
 				}
 			}
 		case ObjectGroup:
@@ -1281,7 +1284,7 @@ func validateObjects(objects []Object) error {
 					return fmt.Errorf("object %s service protocol name cannot be empty", obj.ID)
 				}
 				if err := validatePortString(p.Port); err != nil {
-					return fmt.Errorf("object %s service protocol port %q invalid: %v", obj.ID, p.Port, err)
+					return fmt.Errorf("object %s service protocol port %q invalid: %w", obj.ID, p.Port, err)
 				}
 			}
 		default:
@@ -1430,7 +1433,7 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 			dst = "0.0.0.0/0"
 		}
 		if _, _, err := net.ParseCIDR(dst); err != nil {
-			return fmt.Errorf("routing.routes dst invalid %q: %v", rt.Dst, err)
+			return fmt.Errorf("routing.routes dst invalid %q: %w", rt.Dst, err)
 		}
 		if gw := strings.TrimSpace(rt.Gateway); gw != "" {
 			if net.ParseIP(gw) == nil {
@@ -1468,12 +1471,12 @@ func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 		}
 		if src := strings.TrimSpace(rule.Src); src != "" {
 			if _, _, err := net.ParseCIDR(src); err != nil {
-				return fmt.Errorf("routing.rules src invalid %q: %v", rule.Src, err)
+				return fmt.Errorf("routing.rules src invalid %q: %w", rule.Src, err)
 			}
 		}
 		if dst := strings.TrimSpace(rule.Dst); dst != "" {
 			if _, _, err := net.ParseCIDR(dst); err != nil {
-				return fmt.Errorf("routing.rules dst invalid %q: %v", rule.Dst, err)
+				return fmt.Errorf("routing.rules dst invalid %q: %w", rule.Dst, err)
 			}
 		}
 	}
@@ -1713,7 +1716,7 @@ func validateDHCP(d DHCPConfig) error {
 			return errors.New("dhcp reservation iface is required")
 		}
 		if _, err := net.ParseMAC(strings.ToLower(strings.TrimSpace(r.MAC))); err != nil {
-			return fmt.Errorf("dhcp reservation %s mac invalid: %v", r.Iface, err)
+			return fmt.Errorf("dhcp reservation %s mac invalid: %w", r.Iface, err)
 		}
 		ip := net.ParseIP(strings.TrimSpace(r.IP))
 		if ip == nil || ip.To4() == nil {

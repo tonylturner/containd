@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package pcap
 
 import (
@@ -13,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 const defaultDir = "/data/pcaps"

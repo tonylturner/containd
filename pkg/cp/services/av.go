@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package services
 
 import (
@@ -9,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	commonlog "github.com/containd/containd/pkg/common/logging"
-	"github.com/containd/containd/pkg/cp/config"
+	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 

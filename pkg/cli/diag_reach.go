@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package cli
 
 import (
@@ -11,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )

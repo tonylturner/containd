@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build !linux
 
 package netcfg
@@ -6,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {

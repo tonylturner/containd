@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package cli
 
 import (
@@ -8,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containd/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 )
 
 func showConntrackAPI(api *API) Command {

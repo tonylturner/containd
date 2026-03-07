@@ -4,7 +4,7 @@ import * as React from "react";
 import { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { api } from "../lib/api";
+import { type User, api } from "../lib/api";
 
 type NavItem = { href: string; label: string };
 type NavGroup = { label: string; items: NavItem[]; defaultCollapsed?: boolean };
@@ -102,7 +102,7 @@ export function Shell({
   const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
   const [authChecked, setAuthChecked] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
-  const [me, setMe] = React.useState<any>(null);
+  const [me, setMe] = React.useState<User | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<"profile" | "password">("profile");
@@ -220,12 +220,13 @@ export function Shell({
             <div className="h-2 w-2 rounded-full bg-mint" />
             <span className="text-lg font-semibold text-white">containd</span>
           </div>
-          <nav className="px-2 pb-6 text-sm text-slate-200">
+          <nav aria-label="Main navigation" className="px-2 pb-6 text-sm text-slate-200">
             {navGroups.map((group) => (
               <div key={group.label} className="mb-3">
                 <button
                   type="button"
                   onClick={() => toggle(group.label)}
+                  aria-expanded={!collapsed[group.label]}
                   className="flex w-full items-center justify-between px-3 py-2 text-xs uppercase tracking-wide text-slate-400 hover:text-slate-200"
                 >
                   <span>{group.label}</span>
@@ -260,6 +261,8 @@ export function Shell({
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
+                aria-expanded={menuOpen}
+                aria-label="User menu"
                 className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-slate-200 hover:bg-white/5"
               >
                 <div className="flex items-center gap-2">
@@ -315,7 +318,7 @@ export function Shell({
           )}
         </aside>
 
-        <main className="flex-1 px-6 py-8">
+        <main aria-label={title} className="flex-1 px-6 py-8">
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
@@ -339,6 +342,11 @@ export function Shell({
             )}
             {authChecked && (
               <>
+                {me?.labMode && (
+                  <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+                    <strong>Lab mode</strong> — Authentication is relaxed. This configuration is not suitable for production use.
+                  </div>
+                )}
                 <div className="mb-6 flex items-center justify-between gap-4">
                   <h1 className="text-2xl font-bold text-white">{title}</h1>
                   <div className="flex items-center gap-2">
@@ -384,7 +392,7 @@ export function Shell({
             if (!me.mustChangePassword) setProfileOpen(false);
           }}
           onSaved={(u) => setMe(u)}
-          onPasswordChanged={() => setMe((prev: any) => prev ? { ...prev, mustChangePassword: false } : prev)}
+          onPasswordChanged={() => setMe((prev) => prev ? { ...prev, mustChangePassword: false } : prev)}
         />
       )}
     </div>
@@ -399,11 +407,11 @@ function ProfileModal({
   onSaved,
   onPasswordChanged,
 }: {
-  me: any;
+  me: User;
   initialTab: "profile" | "password";
   forcePassword?: boolean;
   onClose: () => void;
-  onSaved: (u: any) => void;
+  onSaved: (u: User) => void;
   onPasswordChanged?: () => void;
 }) {
   const [firstName, setFirstName] = React.useState(me.firstName ?? "");
@@ -489,21 +497,27 @@ function ProfileModal({
 
         <div className="grid gap-2 md:grid-cols-2">
           <input
+            id="profile-firstName"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
             placeholder="first name"
+            aria-label="First name"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
           <input
+            id="profile-lastName"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
             placeholder="last name"
+            aria-label="Last name"
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
           <input
+            id="profile-email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="email"
+            aria-label="Email"
             className="md:col-span-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
           />
           <div className="md:col-span-2 text-xs text-slate-400">
@@ -532,6 +546,8 @@ function ProfileModal({
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
               placeholder="current password"
+              aria-label="Current password"
+              autoComplete="current-password"
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
             <input
@@ -539,6 +555,8 @@ function ProfileModal({
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="new password"
+              aria-label="New password"
+              autoComplete="new-password"
               ref={passwordRef}
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />

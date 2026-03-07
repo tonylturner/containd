@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build linux
 
 package dhcpd
@@ -17,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 // Lease represents a DHCPv4 lease handed out by the embedded DHCP server.

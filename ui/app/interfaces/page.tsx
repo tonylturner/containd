@@ -7,6 +7,7 @@ import Link from "next/link";
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
+import { validateCIDRList, validateIP } from "../../lib/validate";
 
 function firstIPv4CIDR(addrs: string[] | null | undefined): string | null {
   for (const a of addrs ?? []) {
@@ -161,6 +162,10 @@ export default function InterfacesPage() {
       setError("Interface name is required.");
       return;
     }
+    if (addresses.trim()) {
+      const addrErr = validateCIDRList(addresses);
+      if (addrErr) { setError(addrErr); return; }
+    }
     setSaving(true);
     const base: Interface = {
       name: name.trim(),
@@ -228,6 +233,14 @@ export default function InterfacesPage() {
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
     setError(null);
     setNotice(null);
+    if (patch.addresses?.length) {
+      const addrErr = validateCIDRList(patch.addresses.join(", "));
+      if (addrErr) { setError(addrErr); return; }
+    }
+    if (patch.gateway) {
+      const gwErr = validateIP(patch.gateway);
+      if (gwErr) { setError(gwErr); return; }
+    }
     const updated = await api.updateInterface(ifaceName, patch);
     if (!updated) {
       setError("Failed to update interface.");
@@ -442,7 +455,7 @@ export default function InterfacesPage() {
             {ifaces.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={10}>
-                  No interfaces configured.
+                  No interfaces configured. Create an interface above to bind a network port to a zone.
                 </td>
               </tr>
             )}

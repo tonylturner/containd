@@ -1,0 +1,32 @@
+# containd — standalone deployment
+# Usage:
+#   curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
+#   docker compose up -d
+#
+# Web UI:  http://localhost:8080
+# HTTPS:   https://localhost:8443
+# SSH CLI: ssh -p 2222 containd@localhost
+# Default credentials: containd / containd (change on first login)
+
+services:
+  containd:
+    image: ghcr.io/tonylturner/containd:latest
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+    environment:
+      - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:-changeme-generate-a-random-secret}
+      - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+      - "2222:2222"
+    volumes:
+      - containd-data:/data
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+
+volumes:
+  containd-data:

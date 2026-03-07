@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
@@ -11,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,7 +42,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 		}
 		cfg, err := store.Load(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -108,7 +111,7 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 
 		cfg, err := store.Load(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		certFile := firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "/data/tls/server.crt")
@@ -124,21 +127,21 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 		}
 
 		if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := os.MkdirAll(filepath.Dir(keyFile), 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		// Write key first with restrictive perms, then cert.
 		if err := os.WriteFile(keyFile, []byte(req.KeyPEM+"\n"), 0o600); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := os.WriteFile(certFile, []byte(req.CertPEM+"\n"), 0o644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -173,7 +176,7 @@ func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 
 		cfg, err := store.Load(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		path := firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "/data/tls/trusted_ca.pem")
@@ -182,11 +185,11 @@ func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		if err := os.WriteFile(path, []byte(pemText+"\n"), 0o644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "updated"})

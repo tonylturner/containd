@@ -441,6 +441,7 @@ export type User = {
   email?: string;
   role: UserRole;
   mustChangePassword?: boolean;
+  labMode?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package itdpi
 
 import (
@@ -9,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // HTTPDecoder emits minimal plaintext HTTP request/response metadata.

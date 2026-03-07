@@ -1,13 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package httpapi
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/common/ratelimit"
-	"github.com/containd/containd/pkg/cp/users"
+	"github.com/tonylturner/containd/pkg/common/ratelimit"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -65,7 +69,7 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		loginLimiter.Success(key)
 		sess, err := userStore.CreateSession(c.Request.Context(), u.ID, idleTTL, maxTTL)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		secret := jwtSecret()
@@ -122,9 +126,10 @@ func logoutHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 func meHandler(userStore users.Store) gin.HandlerFunc {
+	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
 		if userStore == nil {
-			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey)})
+			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey), "labMode": lab})
 			return
 		}
 		uid := c.GetString(ctxUserKey)
@@ -133,7 +138,25 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
-		c.JSON(http.StatusOK, u.User)
+		resp := gin.H{
+			"id":       u.ID,
+			"username": u.Username,
+			"role":     u.Role,
+			"labMode":  lab,
+		}
+		if u.FirstName != "" {
+			resp["firstName"] = u.FirstName
+		}
+		if u.LastName != "" {
+			resp["lastName"] = u.LastName
+		}
+		if u.Email != "" {
+			resp["email"] = u.Email
+		}
+		if u.MustChangePassword {
+			resp["mustChangePassword"] = true
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 

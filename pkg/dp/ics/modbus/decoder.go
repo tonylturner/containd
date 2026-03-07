@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package modbus
 
 import (
@@ -6,8 +9,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/dpi"
-	"github.com/containd/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // Decoder implements dpi.Decoder for Modbus/TCP visibility.

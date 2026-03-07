@@ -20,14 +20,11 @@ containd is a single-image appliance that combines zone-based firewalling, ICS p
 
 ## Quick Start
 
-### Docker Compose (recommended)
+### Deploy (recommended)
 
 ```bash
-git clone https://github.com/containd/containd.git
-cd containd
-cp .env.example .env
-# Edit .env — at minimum, set CONTAIND_JWT_SECRET to a unique value
-docker compose up -d --build
+curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
+docker compose up -d
 ```
 
 Once running:
@@ -40,10 +37,10 @@ Once running:
 
 Default admin credentials: `containd` / `containd` — change these on first login.
 
-Print full connection details:
+For production, set a unique JWT secret:
 
 ```bash
-bash scripts/containd-connect
+CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
 ```
 
 ### Standalone Container
@@ -54,11 +51,11 @@ docker run -d \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   -p 8080:8080 -p 8443:8443 -p 2222:2222 \
   -v containd-data:/data \
-  -e CONTAIND_JWT_SECRET=your-secret-here \
-  containd/containd:latest
+  -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
+  ghcr.io/tonylturner/containd:latest
 ```
 
-### From Source
+### From Source (development)
 
 ```bash
 # Build the Go binary
@@ -83,7 +80,7 @@ The binary supports three modes: `containd all` (default, combined appliance), `
 
 ## Docker Compose Lab Topology
 
-The included `docker-compose.yml` creates a lab environment with 8 isolated networks representing firewall ports:
+The included `docker-compose.yml` (at the repo root) creates a lab environment with 8 isolated networks representing firewall ports:
 
 | Network | Subnet | Interface |
 |---------|--------|-----------|

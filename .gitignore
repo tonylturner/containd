@@ -68,3 +68,14 @@ docs/spec-archive/
 # Editor/IDE
 .idea/
 .vscode/
+
+# AI tools
+.claude/
+.cursor/
+.cursorrules
+.cursorignore
+.aider*
+.codeium/
+.windsurf/
+.copilot/
+CLAUDE.md

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 //go:build !linux
 
 package netcfg
@@ -5,7 +8,7 @@ package netcfg
 import (
 	"context"
 
-	"github.com/containd/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyOptions) error {

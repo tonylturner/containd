@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
 package enforce
 
 import (
@@ -12,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containd/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Compiler turns a dp rules.Snapshot into an nftables ruleset.

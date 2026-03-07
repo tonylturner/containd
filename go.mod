@@ -1,4 +1,4 @@
-module github.com/containd/containd
+module github.com/tonylturner/containd
 
 go 1.25.5
 

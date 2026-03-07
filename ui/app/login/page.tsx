@@ -19,8 +19,8 @@ export default function LoginPage() {
 function LoginInner() {
   const params = useSearchParams();
   const paramsKey = params?.toString() ?? "";
-  const [username, setUsername] = useState("containd");
-  const [password, setPassword] = useState("containd");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -124,19 +124,21 @@ function LoginInner() {
         )}
 
         <form onSubmit={onSubmit} className="grid gap-3">
-          <label className="text-xs uppercase tracking-wide text-slate-400">
+          <label htmlFor="login-username" className="text-xs uppercase tracking-wide text-slate-400">
             Username
           </label>
           <input
+            id="login-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             autoComplete="username"
           />
-          <label className="mt-2 text-xs uppercase tracking-wide text-slate-400">
+          <label htmlFor="login-password" className="mt-2 text-xs uppercase tracking-wide text-slate-400">
             Password
           </label>
           <input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
