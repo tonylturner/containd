@@ -106,7 +106,7 @@ RUN apk add --no-cache curl && \
     echo "c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee  /tini" | sha256sum -c && \
     chmod +x /tini
 
-FROM golang:1.25.5-alpine AS builder
+FROM golang:1.25.7-alpine AS builder
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
