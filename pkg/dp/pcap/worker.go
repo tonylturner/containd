@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -240,7 +241,7 @@ func buildForwarders(iface string, cfg config.PCAPConfig) []*forwardSink {
 		if t.Host == "" || t.Port == 0 {
 			continue
 		}
-		target := fmt.Sprintf("%s:%d", t.Host, t.Port)
+		target := net.JoinHostPort(t.Host, strconv.Itoa(int(t.Port)))
 		network := "udp"
 		if strings.ToLower(t.Proto) == "tcp" {
 			network = "tcp"

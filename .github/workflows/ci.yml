@@ -33,7 +33,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64
+          version: v2
 
   docs:
     runs-on: ubuntu-latest
@@ -43,6 +43,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+          cache-dependency-path: docs/requirements-mkdocs.txt
       - name: Install MkDocs deps
         run: pip install -r docs/requirements-mkdocs.txt
       - name: Build docs
