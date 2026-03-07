@@ -3677,26 +3677,10 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			}
 			usedDev := map[string]bool{}
 
-			// Prefer the kernel's default-route egress device for WAN when available.
-			// This avoids confusing assignments in container labs where extra virtual/tunnel
-			// interfaces may exist but are not the actual "uplink".
-			if wanIface, ok := ifaceByName["wan"]; ok && wanIface != nil {
-				defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
-				if defDev != "" && !usedDev[defDev] {
-					if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
-						assignments["wan"] = defDev
-						usedDev[defDev] = true
-					}
-				}
-			}
-
 			// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
-			// prefer those exact/prefix matches next.
+			// prefer those exact/prefix matches first.
 			for _, logical := range order {
 				if _, ok := ifaceByName[logical]; !ok {
-					continue
-				}
-				if _, already := assignments[logical]; already {
 					continue
 				}
 				for _, cand := range candidates {
@@ -3711,6 +3695,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 				}
 			}
 
+			// Match by IPv4 subnet on the interface (e.g. docker-compose lab subnets).
 			for _, logical := range order {
 				if _, ok := ifaceByName[logical]; !ok {
 					continue
@@ -3734,6 +3719,19 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 						assignments[logical] = cand.name
 						usedDev[cand.name] = true
 						break
+					}
+				}
+			}
+
+			// Fall back: use the kernel's default-route egress device for WAN if still unassigned.
+			if _, ok := ifaceByName["wan"]; ok {
+				if _, already := assignments["wan"]; !already {
+					defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
+					if defDev != "" && !usedDev[defDev] {
+						if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+							assignments["wan"] = defDev
+							usedDev[defDev] = true
+						}
 					}
 				}
 			}

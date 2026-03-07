@@ -238,6 +238,7 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		config.ReverseProxyConfig
 		CertsDir      string
 		AccessLogPath string
+		PidPath       string
 	}
 
 	var buf bytes.Buffer
@@ -245,6 +246,7 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		ReverseProxyConfig: cfg,
 		CertsDir:           m.CertsDir,
 		AccessLogPath:      nginxAccessLogPath,
+		PidPath:            filepath.Join(m.BaseDir, "nginx.pid"),
 	}); err != nil {
 		return err
 	}
@@ -706,6 +708,7 @@ admin:
 `
 
 const nginxReverseTemplate = `
+pid {{ .PidPath }};
 events {}
 
 http {
