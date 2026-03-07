@@ -291,29 +291,40 @@ func matchSchedule(entry Entry, ctx EvalContext) bool {
 		}
 	}
 	// Check time window.
-	if entry.Schedule.StartTime != "" && entry.Schedule.EndTime != "" {
-		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
-		if entry.Schedule.StartTime <= entry.Schedule.EndTime {
-			// Normal range, e.g. 09:00–17:00.
-			if hhmm < entry.Schedule.StartTime || hhmm > entry.Schedule.EndTime {
+	hasStart := entry.Schedule.StartTime != ""
+	hasEnd := entry.Schedule.EndTime != ""
+	if hasStart || hasEnd {
+		hhmm := formatHHMM(now.Hour(), now.Minute())
+		if hasStart && hasEnd {
+			if entry.Schedule.StartTime <= entry.Schedule.EndTime {
+				// Normal range, e.g. 09:00–17:00.
+				if hhmm < entry.Schedule.StartTime || hhmm > entry.Schedule.EndTime {
+					return false
+				}
+			} else {
+				// Overnight range, e.g. 22:00–06:00.
+				if hhmm < entry.Schedule.StartTime && hhmm > entry.Schedule.EndTime {
+					return false
+				}
+			}
+		} else if hasStart {
+			if hhmm < entry.Schedule.StartTime {
 				return false
 			}
 		} else {
-			// Overnight range, e.g. 22:00–06:00.
-			if hhmm < entry.Schedule.StartTime && hhmm > entry.Schedule.EndTime {
+			if hhmm > entry.Schedule.EndTime {
 				return false
 			}
 		}
-	} else if entry.Schedule.StartTime != "" {
-		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
-		if hhmm < entry.Schedule.StartTime {
-			return false
-		}
-	} else if entry.Schedule.EndTime != "" {
-		hhmm := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
-		if hhmm > entry.Schedule.EndTime {
-			return false
-		}
 	}
 	return true
+}
+
+// formatHHMM returns "HH:MM" without fmt.Sprintf allocation.
+func formatHHMM(h, m int) string {
+	return string([]byte{
+		byte('0' + h/10), byte('0' + h%10),
+		':',
+		byte('0' + m/10), byte('0' + m%10),
+	})
 }

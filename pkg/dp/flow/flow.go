@@ -5,8 +5,9 @@ package flow
 
 import (
 	"net"
-	"time"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // Key represents a 5-tuple flow key with direction.
@@ -27,14 +28,25 @@ const (
 )
 
 // Hash provides a simple string hash for map usage.
+// Uses strings.Builder to minimize allocations on the hot path.
 func (k Key) Hash() string {
-	return k.SrcIP.String() + "|" + k.DstIP.String() + "|" +
-		uint16ToStr(k.SrcPort) + "|" + uint16ToStr(k.DstPort) + "|" +
-		uint8ToStr(k.Proto) + "|" + uint8ToStr(uint8(k.Dir))
+	var b strings.Builder
+	b.Grow(64) // pre-allocate typical size
+	b.WriteString(k.SrcIP.String())
+	b.WriteByte('|')
+	b.WriteString(k.DstIP.String())
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatUint(uint64(k.SrcPort), 10))
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatUint(uint64(k.DstPort), 10))
+	b.WriteByte('|')
+	b.WriteByte('0' + k.Proto/100%10)
+	b.WriteByte('0' + k.Proto/10%10)
+	b.WriteByte('0' + k.Proto%10)
+	b.WriteByte('|')
+	b.WriteByte('0' + byte(k.Dir))
+	return b.String()
 }
-
-func uint16ToStr(v uint16) string { return strconv.FormatUint(uint64(v), 10) }
-func uint8ToStr(v uint8) string   { return strconv.FormatUint(uint64(v), 10) }
 
 // State holds runtime flow state and timestamps.
 type State struct {

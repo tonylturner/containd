@@ -200,7 +200,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	// Prometheus metrics endpoint (unauthenticated for scraping).
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
-	api.POST("/auth/login", loginHandler(userStore))
+	api.POST("/auth/login", rateLimitSensitive(), loginHandler(userStore))
 	// Logout is intentionally unauthenticated so clients can always clear cookies
 	// even if their session expired or local token state is gone.
 	api.POST("/auth/logout", logoutHandler(userStore))
@@ -652,8 +652,19 @@ func configBackupDir() string {
 }
 
 func configBackupPaths(id string) (string, string) {
+	// Sanitize to prevent path traversal: only allow alphanumeric, hyphens, underscores.
+	clean := filepath.Base(id)
+	for _, r := range clean {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			clean = ""
+			break
+		}
+	}
+	if clean == "" || clean == "." || clean == ".." {
+		clean = "invalid"
+	}
 	dir := configBackupDir()
-	return filepath.Join(dir, id+".json"), filepath.Join(dir, id+".meta.json")
+	return filepath.Join(dir, clean+".json"), filepath.Join(dir, clean+".meta.json")
 }
 
 func newConfigBackupID() (string, error) {
@@ -3289,7 +3300,7 @@ func uploadPCAPHandler(engine EngineClient) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to rewind file"})
 			return
 		}
-		item, err := engine.UploadPcap(c.Request.Context(), header.Filename, file)
+		item, err := engine.UploadPcap(c.Request.Context(), filepath.Base(header.Filename), file)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

@@ -332,7 +332,6 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	}
 	hash := key.Hash()
 	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
 	state, ok := e.flows[hash]
 	if !ok {
 		state = flow.NewState(key, now)
@@ -341,15 +340,23 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 		metrics.FlowsActive.Inc()
 	}
 	state.Touch(uint64(len(pkt.Payload)), now)
-	e.sweepFlows(now)
+	// Only check if sweep is due under the existing lock; do the actual
+	// sweep outside the critical path if needed.
+	needsSweep := now.Sub(e.lastSweep) >= 30*time.Second
+	if needsSweep {
+		e.lastSweep = now
+	}
+	e.flowMu.Unlock()
+
+	if needsSweep {
+		e.sweepFlows(now)
+	}
 	return state
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
-	if now.Sub(e.lastSweep) < 30*time.Second {
-		return
-	}
-	e.lastSweep = now
+	e.flowMu.Lock()
+	defer e.flowMu.Unlock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)

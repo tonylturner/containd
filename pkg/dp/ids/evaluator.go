@@ -8,11 +8,27 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+// idsRegexCache caches compiled regex patterns to avoid per-packet compilation.
+var idsRegexCache sync.Map
+
+func cachedRegexp(pattern string) (*regexp.Regexp, error) {
+	if v, ok := idsRegexCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	idsRegexCache.Store(pattern, re)
+	return re, nil
+}
 
 // Evaluator matches DPI events against snapshot IDS rules.
 type Evaluator struct {
@@ -154,7 +170,7 @@ func evalOp(op string, actual any, expected any) bool {
 		if !ok || es == "" {
 			return false
 		}
-		re, err := regexp.Compile(es)
+		re, err := cachedRegexp(es)
 		if err != nil {
 			return false
 		}

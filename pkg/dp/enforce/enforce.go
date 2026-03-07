@@ -147,7 +147,11 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 				proto + " dport " + strconv.Itoa(dstPort),
 			}
 			if len(pf.AllowedSources) > 0 {
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+				validated, err := validateCIDRList(pf.AllowedSources)
+				if err != nil {
+					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+				}
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
 			}
 			// Accept after DNAT; proto match is implicit via ct original clause.
 			parts = append(parts, "accept")
@@ -205,7 +209,11 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 				fmt.Sprintf("iifname @%s", ingSet),
 			}
 			if len(pf.AllowedSources) > 0 {
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+				validated, err := validateCIDRList(pf.AllowedSources)
+				if err != nil {
+					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+				}
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
 			}
 			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
 			if dstPort > 0 && dstPort != pf.ListenPort {
@@ -389,6 +397,29 @@ func sanitizeIdent(s string) string {
 		return "zone"
 	}
 	return out.String()
+}
+
+// validateCIDRList validates that each entry is a valid IP address or CIDR
+// notation. This prevents injection of arbitrary nftables syntax through
+// user-supplied source addresses.
+func validateCIDRList(sources []string) ([]string, error) {
+	out := make([]string, 0, len(sources))
+	for _, s := range sources {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if ip := net.ParseIP(s); ip != nil {
+			out = append(out, s)
+			continue
+		}
+		if _, _, err := net.ParseCIDR(s); err == nil {
+			out = append(out, s)
+			continue
+		}
+		return nil, fmt.Errorf("invalid source address %q: must be IP or CIDR", s)
+	}
+	return out, nil
 }
 
 // Applier installs an nftables ruleset.

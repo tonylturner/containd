@@ -262,11 +262,21 @@ func containsStr(fieldVal, condVal any) bool {
 	return strings.Contains(fs, cs)
 }
 
+// sigRegexCache caches compiled regex patterns to avoid per-packet compilation.
+var sigRegexCache sync.Map
+
 func matchesRegex(fieldVal, condVal any) bool {
 	pattern := fmt.Sprintf("%v", condVal)
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return false
+	var re *regexp.Regexp
+	if v, ok := sigRegexCache.Load(pattern); ok {
+		re = v.(*regexp.Regexp)
+	} else {
+		var err error
+		re, err = regexp.Compile(pattern)
+		if err != nil {
+			return false
+		}
+		sigRegexCache.Store(pattern, re)
 	}
 	return re.MatchString(fmt.Sprintf("%v", fieldVal))
 }

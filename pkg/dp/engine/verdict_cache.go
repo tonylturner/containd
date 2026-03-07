@@ -45,17 +45,19 @@ func NewVerdictCache(ttl time.Duration, maxSize int) *VerdictCache {
 func (vc *VerdictCache) Get(flowHash string) (verdict.Verdict, bool) {
 	vc.mu.RLock()
 	entry, ok := vc.entries[flowHash]
-	vc.mu.RUnlock()
 	if !ok {
+		vc.mu.RUnlock()
 		return verdict.Verdict{}, false
 	}
-	if time.Since(entry.createdAt) > vc.ttl {
-		vc.mu.Lock()
-		delete(vc.entries, flowHash)
-		vc.mu.Unlock()
+	v := entry.verdict
+	expired := time.Since(entry.createdAt) > vc.ttl
+	vc.mu.RUnlock()
+	if expired {
+		// Lazy eviction — don't bother locking for write here;
+		// the next Put or evictExpiredLocked will clean it up.
 		return verdict.Verdict{}, false
 	}
-	return entry.verdict, true
+	return v, true
 }
 
 // Put stores a verdict for the given flow hash.

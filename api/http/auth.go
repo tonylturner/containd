@@ -51,11 +51,24 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 	secret := jwtSecret()
 	return func(c *gin.Context) {
 		if lab {
-			// In lab mode we still require a token to keep login/logout semantics,
-			// but we do not validate signatures or sessions.
-			if bearerOrCookie(c) == "" {
+			// In lab mode we still validate JWT signatures but skip session checks.
+			raw := bearerOrCookie(c)
+			if raw == "" {
 				abortJSON(c, http.StatusUnauthorized, "login required")
 				return
+			}
+			if len(secret) > 0 {
+				claims := jwt.MapClaims{}
+				parsed, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+					if t.Method.Alg() != "HS256" {
+						return nil, jwt.ErrSignatureInvalid
+					}
+					return secret, nil
+				})
+				if err != nil || !parsed.Valid {
+					abortJSON(c, http.StatusUnauthorized, "invalid token")
+					return
+				}
 			}
 			c.Set(ctxRoleKey, string(roleAdmin))
 			if userStore != nil {
@@ -101,7 +114,7 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 
 		claims := jwt.MapClaims{}
 		parsed, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			if t.Method.Alg() != "HS256" {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return secret, nil
@@ -187,6 +200,22 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 		c.Set(ctxSessionKey, jti)
 		// Populate audit actor hooks.
 		c.Set("actor", u.Username)
+
+		// Enforce MustChangePassword server-side: only allow password change
+		// and session/identity endpoints until the password is updated.
+		if u.MustChangePassword {
+			path := c.Request.URL.Path
+			allowed := strings.HasSuffix(path, "/auth/me") ||
+				strings.HasSuffix(path, "/auth/me/password") ||
+				strings.HasSuffix(path, "/auth/session") ||
+				strings.HasSuffix(path, "/auth/logout") ||
+				strings.HasSuffix(path, "/health")
+			if !allowed {
+				abortJSON(c, http.StatusForbidden, "password change required")
+				return
+			}
+		}
+
 		c.Next()
 	}
 }
@@ -223,13 +252,13 @@ func setAuthCookie(c *gin.Context, token string, exp time.Time) {
 	if maxAge < 0 {
 		maxAge = 0
 	}
-	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetSameSite(http.SameSiteStrictMode)
 	secure := cookieSecure(c)
 	c.SetCookie("containd_token", token, maxAge, "/", "", secure, true)
 }
 
 func clearAuthCookie(c *gin.Context) {
-	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetSameSite(http.SameSiteStrictMode)
 	secure := cookieSecure(c)
 	c.SetCookie("containd_token", "", -1, "/", "", secure, true)
 }

@@ -69,6 +69,7 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time) []byte
 		sb = &StreamBuffer{
 			flowKey: flowKey,
 			maxSize: r.maxSize,
+			buf:     make([]byte, 0, min(len(payload)*4, r.maxSize)),
 		}
 		r.streams[flowKey] = sb
 		r.ActiveStreams++

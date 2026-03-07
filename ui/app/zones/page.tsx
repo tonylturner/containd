@@ -48,6 +48,7 @@ export default function ZonesPage() {
   }
 
   async function onDelete(zoneName: string) {
+    if (!confirm("Delete this zone? This cannot be undone.")) return;
     setError(null);
     const ok = await api.deleteZone(zoneName);
     if (!ok) {

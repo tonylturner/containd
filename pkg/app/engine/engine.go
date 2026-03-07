@@ -115,6 +115,13 @@ func Run(ctx context.Context, opts Options) error {
 	mux := http.NewServeMux()
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if dpEngine == nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ready"})
+	})
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))

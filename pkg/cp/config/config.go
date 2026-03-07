@@ -206,8 +206,6 @@ type DHCPConfig struct {
 	Router         string            `json:"router,omitempty"`         // default gateway handed to clients
 	DNSServers     []string          `json:"dnsServers,omitempty"`     // DNS servers handed to clients
 	Domain         string            `json:"domain,omitempty"`         // optional domain
-	Authoritative  bool              `json:"authoritative,omitempty"`  // authoritative mode (lab default)
-	EnableConflict bool              `json:"enableConflict,omitempty"` // conflict detection (phased)
 }
 
 type DHCPPool struct {
