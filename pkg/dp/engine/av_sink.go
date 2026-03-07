@@ -5,9 +5,7 @@ package engine
 
 import (
 	"context"
-	"net"
 	"strconv"
-	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
@@ -53,11 +51,3 @@ func srcDestStrings(state *flow.State) (string, string) {
 	return src, dst
 }
 
-// splitHostPort parses host:port strings and returns srcIP, dstIP, dport, proto.
-func splitHostPort(src, dst string) (net.IP, net.IP, string, string) {
-	srcHost, _, _ := strings.Cut(src, ":")
-	dstHost, dstPort, _ := strings.Cut(dst, ":")
-	sip := net.ParseIP(strings.TrimSpace(srcHost))
-	dip := net.ParseIP(strings.TrimSpace(dstHost))
-	return sip, dip, strings.TrimSpace(dstPort), "tcp"
-}

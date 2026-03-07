@@ -67,8 +67,8 @@ func listARP() ([]arpEntry, error) {
 		mac := fields[3]
 		iface := fields[5]
 
-		state := "reachable"
 		// Typical flags: 0x0 (incomplete), 0x2 (complete)
+		var state string
 		switch flags {
 		case "0x0":
 			state = "incomplete"

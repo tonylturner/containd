@@ -603,11 +603,11 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 	if ipnet == nil {
 		return nil
 	}
-	family := unix.AF_INET
 	ip := ipnet.IP
 	if ip == nil {
 		return nil
 	}
+	var family int
 	if ip4 := ip.To4(); ip4 != nil {
 		ip = ip4
 		family = unix.AF_INET
@@ -703,11 +703,11 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 	if ipnet == nil {
 		return nil
 	}
-	family := unix.AF_INET
 	ip := ipnet.IP
 	if ip == nil {
 		return nil
 	}
+	var family int
 	if ip4 := ip.To4(); ip4 != nil {
 		ip = ip4
 		family = unix.AF_INET

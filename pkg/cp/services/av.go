@@ -594,10 +594,6 @@ func (m *AVManager) startClamd(ctx context.Context, cfg config.ClamAVConfig) {
 		// already running
 		return
 	}
-	sock := strings.TrimSpace(cfg.SocketPath)
-	if sock == "" {
-		sock = m.clamdSocket
-	}
 	cmd := exec.CommandContext(ctx, m.clamdPath, "--foreground=yes", fmt.Sprintf("--config-file=%s", "/etc/clamav/clamd.conf"))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

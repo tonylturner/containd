@@ -75,7 +75,7 @@ func (m *Manager) Start(ctx context.Context, cfg config.PCAPConfig) error {
 
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		m.setError(err)
-		m.Stop()
+		_ = m.Stop()
 		return err
 	}
 
@@ -112,21 +112,6 @@ func (m *Manager) Stop() error {
 	}
 	m.wg.Wait()
 	return nil
-}
-
-func (m *Manager) requestStop() {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return
-	}
-	cancel := m.cancel
-	m.running = false
-	m.cancel = nil
-	m.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
 }
 
 func (m *Manager) Status() Status {

@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -674,19 +673,3 @@ func nextFreeIP(dev string, pl pool, m *Manager) (net.IP, error) {
 	return nil, errors.New("no free leases available")
 }
 
-func mustIPv4(ip net.IP) (net.IP, error) {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return nil, errors.New("expected IPv4")
-	}
-	return ip4, nil
-}
-
-func parsePort(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	v, _ := strconv.Atoi(s)
-	return v
-}

@@ -5,7 +5,6 @@ package cli
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -533,49 +532,6 @@ func diagCapture() Command {
 		fmt.Fprintf(out, "captured %d packets to %s\n", n, outPath)
 		return nil
 	}
-}
-
-func writePCAPGlobalHeader(w io.Writer, snaplen uint32) error {
-	// https://wiki.wireshark.org/Development/LibpcapFileFormat
-	type hdr struct {
-		Magic        uint32
-		VersionMajor uint16
-		VersionMinor uint16
-		ThisZone     int32
-		SigFigs      uint32
-		SnapLen      uint32
-		Network      uint32
-	}
-	h := hdr{
-		Magic:        0xa1b2c3d4,
-		VersionMajor: 2,
-		VersionMinor: 4,
-		ThisZone:     0,
-		SigFigs:      0,
-		SnapLen:      snaplen,
-		Network:      1, // LINKTYPE_ETHERNET
-	}
-	return binary.Write(w, binary.LittleEndian, h)
-}
-
-func writePCAPPacket(w io.Writer, ts time.Time, data []byte) error {
-	type rec struct {
-		TsSec   uint32
-		TsUsec  uint32
-		InclLen uint32
-		OrigLen uint32
-	}
-	r := rec{
-		TsSec:   uint32(ts.Unix()),
-		TsUsec:  uint32(ts.Nanosecond() / 1000),
-		InclLen: uint32(len(data)),
-		OrigLen: uint32(len(data)),
-	}
-	if err := binary.Write(w, binary.LittleEndian, r); err != nil {
-		return err
-	}
-	_, err := w.Write(data)
-	return err
 }
 
 func resolveIPv4(host string) (net.IP, error) {

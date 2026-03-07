@@ -39,14 +39,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type mgmtHealthResponse struct {
-	Status     string `json:"status"`
-	Component  string `json:"component"`
-	Build      string `json:"build"`
-	CommitHash string `json:"commitHash,omitempty"`
-	Time       string `json:"time"`
-}
-
 type Options struct{}
 
 func Run(ctx context.Context, _ Options) error {
@@ -316,13 +308,6 @@ func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger,
 	}()
 }
 
-func addrFromEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 func ensureDevCompatUsers(logger *zap.SugaredLogger, userStore users.Store) {
 	// Dev convenience only: if the operator is using the example JWT secret, we provision
 	// an additional admin user "containerd"/"containerd" so early demos don't get stuck
@@ -356,15 +341,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func health(c *gin.Context) {
-	c.JSON(http.StatusOK, mgmtHealthResponse{
-		Status:    "ok",
-		Component: "mgmt",
-		Build:     config.BuildVersion,
-		Time:      time.Now().UTC().Format(time.RFC3339Nano),
-	})
 }
 
 func serveStaticUI(router *gin.Engine) {

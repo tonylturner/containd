@@ -910,30 +910,6 @@ func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
-func readLine(r *bufio.Reader) (string, bool) {
-	var buf []byte
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return "", false
-		}
-		// Ctrl-D (EOT) -> treat as EOF (exit session) if no input collected.
-		if b == 0x04 && len(buf) == 0 {
-			return "", false
-		}
-		// Ctrl-C (ETX) -> interrupt.
-		if b == 0x03 {
-			return "\x03", true
-		}
-		// Accept both \n and \r as line terminators (most SSH clients send \r).
-		if b == '\n' || b == '\r' {
-			break
-		}
-		buf = append(buf, b)
-	}
-	return string(buf), true
-}
-
 func readLineInteractive(r *bufio.Reader, echo io.Writer) (string, bool) {
 	var buf []byte
 	for {

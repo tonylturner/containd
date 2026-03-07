@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -508,13 +507,6 @@ func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 		}
 		writeJSON(w, resp{Leases: mgr.Leases(), Status: mgr.Status()})
 	}
-}
-
-func addrFromEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func conntrackHandler() http.HandlerFunc {
@@ -1038,22 +1030,6 @@ func firstNonEmpty(v, fallback string) string {
 		return fallback
 	}
 	return v
-}
-
-func parseListEnv(key string) []string {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 

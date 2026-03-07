@@ -29,8 +29,6 @@ import (
 const defaultServicesDir = "/data/services"
 
 const defaultCertsDir = "/data/certs"
-const envoyAccessLogPath = "/data/logs/envoy-access.log"
-const nginxAccessLogPath = "/data/logs/nginx-access.log"
 
 type ProxyOptions struct {
 	BaseDir   string
@@ -203,7 +201,7 @@ func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
 		"ListenPort":     port,
 		"Domains":        string(domainsJSON),
 		"LogRequests":    cfg.LogRequests,
-		"AccessLogPath":  envoyAccessLogPath,
+		"AccessLogPath":  filepath.Join(filepath.Dir(m.BaseDir), "logs", "envoy-access.log"),
 		"Upstream":       cfg.Upstream,
 		"HasUpstream":    cfg.Upstream != "",
 		"ListenZones":    cfg.ListenZones,
@@ -241,11 +239,12 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		PidPath       string
 	}
 
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, tmplData{
 		ReverseProxyConfig: cfg,
 		CertsDir:           m.CertsDir,
-		AccessLogPath:      nginxAccessLogPath,
+		AccessLogPath:      filepath.Join(logDir, "nginx-access.log"),
 		PidPath:            filepath.Join(m.BaseDir, "nginx.pid"),
 	}); err != nil {
 		return err
@@ -494,13 +493,14 @@ func (m *ProxyManager) syncAccessTailers(cfg config.ProxyConfig) {
 		m.stopNginxAccessTailer()
 		return
 	}
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
 	if cfg.Forward.Enabled && cfg.Forward.LogRequests {
-		m.startEnvoyAccessTailer(envoyAccessLogPath)
+		m.startEnvoyAccessTailer(filepath.Join(logDir, "envoy-access.log"))
 	} else {
 		m.stopEnvoyAccessTailer()
 	}
 	if cfg.Reverse.Enabled && len(cfg.Reverse.Sites) > 0 {
-		m.startNginxAccessTailer(nginxAccessLogPath)
+		m.startNginxAccessTailer(filepath.Join(logDir, "nginx-access.log"))
 	} else {
 		m.stopNginxAccessTailer()
 	}

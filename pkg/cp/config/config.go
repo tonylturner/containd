@@ -1621,10 +1621,6 @@ func validateAV(cfg AVConfig) error {
 	if fail != "open" && fail != "closed" {
 		return fmt.Errorf("services.av.failPolicy must be open or closed")
 	}
-	// Default to fail-open for ICS traffic unless explicitly disabled.
-	if !cfg.FailOpenICS {
-		// keep as provided; default handled in manager
-	}
 	if mode == "icap" {
 		if len(cfg.ICAP.Servers) == 0 {
 			return fmt.Errorf("services.av.icap.servers must not be empty when mode=icap")
