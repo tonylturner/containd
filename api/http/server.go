@@ -3319,6 +3319,21 @@ func updateObjectHandler(store config.Store) gin.HandlerFunc {
 				if obj.Name == "" {
 					obj.Name = existing.Name
 				}
+				if obj.Type == "" {
+					obj.Type = existing.Type
+				}
+				if obj.Addresses == nil {
+					obj.Addresses = existing.Addresses
+				}
+				if obj.Members == nil {
+					obj.Members = existing.Members
+				}
+				if obj.Protocols == nil {
+					obj.Protocols = existing.Protocols
+				}
+				if obj.Tags == nil {
+					obj.Tags = existing.Tags
+				}
 				cfg.Objects[i] = obj
 				updated = true
 				break

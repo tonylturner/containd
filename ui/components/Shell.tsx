@@ -183,6 +183,10 @@ export function Shell({
         return;
       }
       setMe(data);
+      if (data?.mustChangePassword) {
+        setProfileTab("password");
+        setProfileOpen(true);
+      }
       if ((data?.role ?? "") !== "admin" && pathname.startsWith("/system/") && typeof window !== "undefined") {
         window.location.href = "/forbidden";
         return;
@@ -375,8 +379,12 @@ export function Shell({
         <ProfileModal
           me={me}
           initialTab={profileTab}
-          onClose={() => setProfileOpen(false)}
+          forcePassword={!!me.mustChangePassword}
+          onClose={() => {
+            if (!me.mustChangePassword) setProfileOpen(false);
+          }}
           onSaved={(u) => setMe(u)}
+          onPasswordChanged={() => setMe((prev: any) => prev ? { ...prev, mustChangePassword: false } : prev)}
         />
       )}
     </div>
@@ -386,13 +394,17 @@ export function Shell({
 function ProfileModal({
   me,
   initialTab,
+  forcePassword,
   onClose,
   onSaved,
+  onPasswordChanged,
 }: {
   me: any;
   initialTab: "profile" | "password";
+  forcePassword?: boolean;
   onClose: () => void;
   onSaved: (u: any) => void;
+  onPasswordChanged?: () => void;
 }) {
   const [firstName, setFirstName] = React.useState(me.firstName ?? "");
   const [lastName, setLastName] = React.useState(me.lastName ?? "");
@@ -443,6 +455,8 @@ function ProfileModal({
     setCurrentPassword("");
     setNewPassword("");
     setState("idle");
+    onPasswordChanged?.();
+    onClose();
   }
 
   return (
@@ -450,14 +464,22 @@ function ProfileModal({
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-black/80 p-6 shadow-xl backdrop-blur">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Profile</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-slate-300 hover:bg-white/10"
-          >
-            Close
-          </button>
+          {!forcePassword && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-2 py-1 text-sm text-slate-300 hover:bg-white/10"
+            >
+              Close
+            </button>
+          )}
         </div>
+
+        {forcePassword && (
+          <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+            You must change the default password before continuing.
+          </div>
+        )}
 
         {error && (
           <div className="mb-3 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">

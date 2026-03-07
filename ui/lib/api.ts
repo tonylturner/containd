@@ -440,6 +440,7 @@ export type User = {
   lastName?: string;
   email?: string;
   role: UserRole;
+  mustChangePassword?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };

@@ -149,7 +149,8 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/data/logs", 0o755); err != nil {
+	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
 	if err := m.renderForward(cfg.Forward); err != nil {
