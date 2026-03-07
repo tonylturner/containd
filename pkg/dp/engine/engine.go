@@ -98,6 +98,24 @@ func New(cfg Config) (*Engine, error) {
 	return e, nil
 }
 
+// Reconfigure replaces the engine's internal state from a freshly created
+// engine without copying atomic or mutex fields (which are not safe to copy).
+func (e *Engine) Reconfigure(fresh *Engine) {
+	e.capture = fresh.capture
+	e.compiler = fresh.compiler
+	e.applier = fresh.applier
+	e.updater = fresh.updater
+	e.dpiMgr = fresh.dpiMgr
+	e.eventStore = fresh.eventStore
+	e.avSink = fresh.avSink
+	e.inspectAll = fresh.inspectAll
+	e.flowMu.Lock()
+	e.flows = fresh.flows
+	e.lastSweep = fresh.lastSweep
+	e.flowMu.Unlock()
+	e.started.Store(false)
+}
+
 func (e *Engine) Start(ctx context.Context) error {
 	if e.started.Swap(true) {
 		return nil

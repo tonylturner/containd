@@ -1,3 +1,4 @@
+// Deprecated: use cmd/containd with "mgmt" subcommand instead.
 package main
 
 import (

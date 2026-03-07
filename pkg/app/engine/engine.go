@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containd/containd/pkg/common"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/config"
 	"github.com/containd/containd/pkg/cp/services"
@@ -46,7 +47,7 @@ type healthResponse struct {
 func Run(ctx context.Context, opts Options) error {
 	addr := opts.Addr
 	if addr == "" {
-		addr = addrFromEnv("NGFW_ENGINE_ADDR", ":8081")
+		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
 	}
 	logger := logging.New("[engine]")
 	ownership := newOwnershipManager(logger)
@@ -64,7 +65,7 @@ func Run(ctx context.Context, opts Options) error {
 	dpEngine, err := engine.New(engine.Config{
 		Capture:    capture.Config{Interfaces: ifaces},
 		Enforce:    engine.EnforceConfig{Enabled: enforceEnabled, TableName: enforceTable, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(enforceTable)},
-		InspectAll: os.Getenv("NGFW_DPI_MOCK") == "1",
+		InspectAll: common.Env("CONTAIND_DPI_MOCK", "") == "1",
 	})
 	if err != nil {
 		return fmt.Errorf("failed to init dp engine: %w", err)
@@ -651,8 +652,7 @@ func configHandler(logger *log.Logger, dpEngine *engine.Engine) http.HandlerFunc
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			// Swap pointer by copying fields.
-			*dpEngine = *newEngine
+			dpEngine.Reconfigure(newEngine)
 			go func() {
 				if err := dpEngine.Start(context.Background()); err != nil {
 					logger.Printf("capture start failed: %v", err)

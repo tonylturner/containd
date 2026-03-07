@@ -1,3 +1,4 @@
+// Deprecated: use cmd/containd with "engine" subcommand instead.
 package main
 
 import (

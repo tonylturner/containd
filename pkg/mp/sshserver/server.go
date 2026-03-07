@@ -90,6 +90,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	cfg := &ssh.ServerConfig{
 		PasswordCallback:  s.passwordCallback(),
 		PublicKeyCallback: s.publicKeyCallback(),
+		BannerCallback: func(conn ssh.ConnMetadata) string {
+			return "containd ICS/OT firewall\r\n"
+		},
 	}
 	cfg.AddHostKey(signer)
 

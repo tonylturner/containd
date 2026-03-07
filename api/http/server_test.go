@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -189,6 +190,14 @@ func (m *mockEngine) ReplayPcap(ctx context.Context, req pcap.ReplayRequest) err
 
 func (m *mockEngine) DownloadPcap(ctx context.Context, name string) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+}
+
+func (m *mockEngine) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error {
+	return nil
+}
+
+func (m *mockEngine) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
+	return nil
 }
 
 func TestGetConfigNotFound(t *testing.T) {

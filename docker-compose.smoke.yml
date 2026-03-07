@@ -11,17 +11,16 @@ services:
       - NET_BIND_SERVICE
     environment:
       - CONTAIND_MODE=all
-      - NGFW_ENGINE_ADDR=:8081
-      - NGFW_MGMT_ADDR=:18080
-      - NGFW_MGMT_HTTPS_ADDR=:18443
-      - NGFW_ENGINE_URL=http://127.0.0.1:8081
+      - CONTAIND_ENGINE_ADDR=:8081
+      - CONTAIND_MGMT_ADDR=:18080
+      - CONTAIND_MGMT_HTTPS_ADDR=:18443
       - CONTAIND_ENGINE_URL=http://127.0.0.1:8081
       - CONTAIND_ADMIN_TOKEN=devtoken
       - CONTAIND_LAB_MODE=1
       - CONTAIND_JWT_SECRET=
-      - NGFW_CONFIG_DB=/data/config.db
-      - NGFW_AUDIT_DB=/data/audit.db
-      - NGFW_USERS_DB=/data/users.db
+      - CONTAIND_CONFIG_DB=/data/config.db
+      - CONTAIND_AUDIT_DB=/data/audit.db
+      - CONTAIND_USERS_DB=/data/users.db
     volumes:
       - ./data-smoke:/data
       - ./ui/out:/var/lib/ngfw/ui:ro

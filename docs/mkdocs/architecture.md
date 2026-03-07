@@ -14,7 +14,7 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 
 ## Packaging
 - Containers at repo root (`Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
-- Host deployment to run `containd all` (or split commands); config DB default `data/config.db` (env `NGFW_CONFIG_DB`).
+- Host deployment to run `containd all` (or split commands); config DB default `data/config.db` (env `CONTAIND_CONFIG_DB`).
 
 ## Module boundaries (current)
 - `api/http`: `/api/v1` health, config lifecycle (candidate/commit/commit-confirmed/rollback/export/import/backups), CRUD (zones/interfaces/rules/assets), services, audit, and telemetry endpoints.

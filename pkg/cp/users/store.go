@@ -23,14 +23,15 @@ var (
 )
 
 type User struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	FirstName string    `json:"firstName,omitempty"`
-	LastName  string    `json:"lastName,omitempty"`
-	Email     string    `json:"email,omitempty"`
-	Role      string    `json:"role"` // admin|view
-	CreatedAt time.Time `json:"createdAt,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	FirstName          string    `json:"firstName,omitempty"`
+	LastName           string    `json:"lastName,omitempty"`
+	Email              string    `json:"email,omitempty"`
+	Role               string    `json:"role"` // admin|view
+	MustChangePassword bool      `json:"mustChangePassword,omitempty"`
+	CreatedAt          time.Time `json:"createdAt,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt,omitempty"`
 }
 
 type StoredUser struct {
@@ -120,6 +121,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT,
   role TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -135,6 +137,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create users schema: %w", err)
 	}
+	// Migrate existing databases: add must_change_password column if missing.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -173,19 +177,20 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 		return err
 	}
 
-	// Fresh DB: always seed the default admin.
+	// Fresh DB: always seed the default admin with password change required.
 	_, err := s.Create(ctx, User{
-		Username:  username,
-		FirstName: "Default",
-		LastName:  "Admin",
-		Role:      "admin",
-		Email:     "",
+		Username:           username,
+		FirstName:          "Default",
+		LastName:           "Admin",
+		Role:               "admin",
+		Email:              "",
+		MustChangePassword: password == "containd",
 	}, password)
 	return err
 }
 
 func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, created_at, updated_at FROM users ORDER BY username ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, must_change_password, created_at, updated_at FROM users ORDER BY username ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -194,7 +199,7 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		var cAt, uAt int64
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &cAt, &uAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.MustChangePassword, &cAt, &uAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt = time.Unix(cAt, 0).UTC()
@@ -209,10 +214,10 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 
 func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*StoredUser, error) {
 	username = strings.TrimSpace(username)
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, created_at, updated_at FROM users WHERE username = ?`, username)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at FROM users WHERE username = ?`, username)
 	var u StoredUser
 	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -224,10 +229,10 @@ func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*Stor
 }
 
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at FROM users WHERE id = ?`, id)
 	var u StoredUser
 	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -256,9 +261,13 @@ func (s *SQLiteStore) Create(ctx context.Context, u User, password string) (*Use
 	u.ID = newID()
 	u.CreatedAt = now
 	u.UpdatedAt = now
+	mustChange := 0
+	if u.MustChangePassword {
+		mustChange = 1
+	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), now.Unix(), now.Unix())
+		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), mustChange, now.Unix(), now.Unix())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrUsernameTaken
@@ -347,7 +356,7 @@ func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password strin
 		return fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}

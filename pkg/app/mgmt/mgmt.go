@@ -24,6 +24,7 @@ import (
 
 	engineapi "github.com/containd/containd/api/engine"
 	httpapi "github.com/containd/containd/api/http"
+	"github.com/containd/containd/pkg/common"
 	"github.com/containd/containd/pkg/common/logging"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/config"
@@ -46,9 +47,16 @@ type Options struct{}
 
 func Run(ctx context.Context, _ Options) error {
 	logger := logging.New("[mgmt]")
-	if strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")) == "containd-dev-secret-change-me" {
+	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
+	switch {
+	case jwtSecret == "containd-dev-secret-change-me":
+		logger.Println("WARNING: ============================================================")
 		logger.Println("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
-		logger.Println("         Change it in `.env` before any real deployment.")
+		logger.Println("WARNING: This is insecure. Set a unique value in .env for any")
+		logger.Println("WARNING: deployment beyond local development.")
+		logger.Println("WARNING: ============================================================")
+	case jwtSecret == "":
+		logger.Println("WARNING: CONTAIND_JWT_SECRET is empty; auth tokens will not be signed.")
 	}
 	store := mustInitStore()
 	defer store.Close()
@@ -62,7 +70,7 @@ func Run(ctx context.Context, _ Options) error {
 
 	cfg, _ := store.Load(context.Background())
 
-	httpAddr := addrFromEnv("NGFW_MGMT_ADDR", "")
+	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
 	if httpAddr == "" && cfg != nil {
 		httpAddr = firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
 	}
@@ -70,7 +78,7 @@ func Run(ctx context.Context, _ Options) error {
 		httpAddr = ":8080"
 	}
 	httpsAddr := ""
-	if v := strings.TrimSpace(os.Getenv("NGFW_MGMT_HTTPS_ADDR")); v != "" {
+	if v := common.EnvTrimmed("CONTAIND_MGMT_HTTPS_ADDR", ""); v != "" {
 		httpsAddr = v
 	}
 	if cfg != nil {
@@ -84,12 +92,10 @@ func Run(ctx context.Context, _ Options) error {
 	enableHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true)
 
 	var engineClient httpapi.EngineClient
-	if engineURL := strings.TrimSpace(os.Getenv("NGFW_ENGINE_URL")); engineURL != "" {
-		// Be forgiving: allow "127.0.0.1:8081" in env files and treat it as http://127.0.0.1:8081.
-		// This prevents the UI from losing interface runtime state due to a missing URL scheme.
+	if engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", ""); engineURL != "" {
 		if !strings.Contains(engineURL, "://") {
 			engineURL = "http://" + engineURL
-			logger.Printf("WARNING: NGFW_ENGINE_URL missing scheme; using %q", engineURL)
+			logger.Printf("WARNING: CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
 		}
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
@@ -403,7 +409,7 @@ func serveStaticUI(router *gin.Engine) {
 
 func pickUIDir() string {
 	// Allow override for packaged builds.
-	if override := os.Getenv("NGFW_UI_DIR"); override != "" {
+	if override := common.Env("CONTAIND_UI_DIR", ""); override != "" {
 		if dirExists(override) {
 			return override
 		}
@@ -1024,12 +1030,12 @@ func SSHAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
 
 func startSSH(logger *log.Logger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
 	ctx := context.Background()
-	sshAddr := addrFromEnv("NGFW_SSH_ADDR", "")
-	authKeysDir := os.Getenv("NGFW_SSH_AUTH_KEYS_DIR")
-	hostKeyPath := os.Getenv("NGFW_SSH_HOST_KEY")
-	bootstrapKey := strings.TrimSpace(os.Getenv("NGFW_SSH_BOOTSTRAP_ADMIN_KEY"))
-	bootstrapUser := strings.TrimSpace(os.Getenv("NGFW_SSH_BOOTSTRAP_ADMIN_USER"))
-	allowPasswordEnv := strings.TrimSpace(os.Getenv("NGFW_SSH_ALLOW_PASSWORD"))
+	sshAddr := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
+	authKeysDir := common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", "")
+	hostKeyPath := common.Env("CONTAIND_SSH_HOST_KEY", "")
+	bootstrapKey := common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY", "")
+	bootstrapUser := common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_USER", "")
+	allowPasswordEnv := common.EnvTrimmed("CONTAIND_SSH_ALLOW_PASSWORD", "")
 
 	cfg, _ := store.Load(ctx)
 	if sshAddr == "" && cfg != nil && cfg.System.SSH.ListenAddr != "" {
@@ -1164,7 +1170,7 @@ func printStartupHints(logger *log.Logger, httpAddr string, httpLoopbackAddr str
 
 	logger.Println("Initial login: username=containd password=containd (change immediately)")
 	logger.Println("Production note: add SSH key and disable password auth after provisioning.")
-	logger.Println("  - NGFW_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
+	logger.Println("  - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
 	logger.Println("Tip: docker compose logs -f containd")
 	logger.Println("------------------------------------------------------------")
 }
@@ -1269,7 +1275,7 @@ func isRFC1918(ip net.IP) bool {
 }
 
 func mustInitStore() config.Store {
-	dbPath := addrFromEnv("NGFW_CONFIG_DB", filepath.Join("data", "config.db"))
+	dbPath := common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logging.New("[mgmt]").Fatalf("failed to create config dir: %v", err)
 	}
@@ -1281,7 +1287,7 @@ func mustInitStore() config.Store {
 }
 
 func mustInitAuditStore() audit.Store {
-	dbPath := addrFromEnv("NGFW_AUDIT_DB", filepath.Join("data", "audit.db"))
+	dbPath := common.Env("CONTAIND_AUDIT_DB", filepath.Join("data", "audit.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logging.New("[mgmt]").Fatalf("failed to create audit dir: %v", err)
 	}
@@ -1293,7 +1299,7 @@ func mustInitAuditStore() audit.Store {
 }
 
 func mustInitUsersStore() users.Store {
-	dbPath := addrFromEnv("NGFW_USERS_DB", filepath.Join("data", "users.db"))
+	dbPath := common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		// If the requested path isn't writable (common in distroless/nonroot),
 		// fall back to a local data dir that should be writable in dev images.

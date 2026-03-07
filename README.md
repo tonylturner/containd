@@ -68,7 +68,7 @@ go build -o containd ./cmd/containd
 cd ui && npm ci && npm run build && cd ..
 
 # Run the combined appliance
-NGFW_UI_DIR=ui/out ./containd all
+CONTAIND_UI_DIR=ui/out ./containd all
 ```
 
 ## Architecture

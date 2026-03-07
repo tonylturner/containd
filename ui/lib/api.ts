@@ -376,6 +376,15 @@ export type Asset = {
   description?: string;
 };
 
+export type DashboardData = {
+  health: HealthResponse & { commit?: string; hostname?: string };
+  counts: { assets: number; zones: number; interfaces: number; rules: number };
+  eventStats: { total: number; idsAlerts: number; modbusWrites: number; avDetections: number; avBlocks: number };
+  services: Record<string, unknown> | null;
+  user: User | null;
+  lastActivity: AuditRecord | null;
+};
+
 export type AuditRecord = {
   id: number;
   timestamp: string;
@@ -1095,6 +1104,9 @@ export const api = {
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
+
+  // Dashboard (aggregated)
+  getDashboard: () => getJSON<DashboardData>("/api/v1/dashboard"),
 
   // System TLS
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),

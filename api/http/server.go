@@ -24,6 +24,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kballard/go-shellquote"
 
+	"github.com/containd/containd/pkg/common"
 	"github.com/containd/containd/pkg/cli"
 	"github.com/containd/containd/pkg/cp/audit"
 	"github.com/containd/containd/pkg/cp/compile"
@@ -158,6 +159,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/auth/session", authSessionHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", changeMyPasswordHandler(userStore))
+		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
@@ -500,10 +502,10 @@ type configBackupRequest struct {
 }
 
 func configBackupDir() string {
-	if v := strings.TrimSpace(os.Getenv("NGFW_CONFIG_BACKUP_DIR")); v != "" {
+	if v := common.EnvTrimmed("CONTAIND_CONFIG_BACKUP_DIR", ""); v != "" {
 		return v
 	}
-	if dbPath := strings.TrimSpace(os.Getenv("NGFW_CONFIG_DB")); dbPath != "" {
+	if dbPath := common.EnvTrimmed("CONTAIND_CONFIG_DB", ""); dbPath != "" {
 		return filepath.Join(filepath.Dir(dbPath), "config-backups")
 	}
 	return filepath.Join("data", "config-backups")

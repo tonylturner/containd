@@ -13,6 +13,7 @@ import (
 
 	engineapp "github.com/containd/containd/pkg/app/engine"
 	mgmtapp "github.com/containd/containd/pkg/app/mgmt"
+	"github.com/containd/containd/pkg/common"
 	"github.com/containd/containd/pkg/cp/config"
 )
 
@@ -54,7 +55,7 @@ func main() {
 }
 
 func runHealthcheck() error {
-	addr := os.Getenv("NGFW_MGMT_ADDR")
+	addr := common.Env("CONTAIND_MGMT_ADDR", "")
 	if addr == "" {
 		addr = ":8080"
 	}
