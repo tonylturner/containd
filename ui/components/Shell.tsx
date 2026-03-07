@@ -5,6 +5,7 @@ import { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type User, api } from "../lib/api";
+import { Breadcrumbs } from "./Breadcrumbs";
 
 type NavItem = { href: string; label: string };
 type NavGroup = { label: string; items: NavItem[]; defaultCollapsed?: boolean };
@@ -161,6 +162,18 @@ export function Shell({
     return () => window.removeEventListener("containd:auth:expired", onExpired as EventListener);
   }, [redirectToLogin]);
 
+  // Listen for 403 "password change required" from any API call and force-open the password modal.
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPasswordRequired = () => {
+      setProfileTab("password");
+      setProfileOpen(true);
+      setMe((prev) => prev ? { ...prev, mustChangePassword: true } : prev);
+    };
+    window.addEventListener("containd:auth:password_change_required", onPasswordRequired as EventListener);
+    return () => window.removeEventListener("containd:auth:password_change_required", onPasswordRequired as EventListener);
+  }, []);
+
   React.useEffect(() => {
     if (pathname.startsWith("/login")) {
       setAuthChecked(true);
@@ -210,6 +223,9 @@ export function Shell({
 
   return (
     <div className="relative min-h-screen overflow-hidden text-slate-100">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white">
+        Skip to main content
+      </a>
       <div className="pointer-events-none absolute inset-0 opacity-30">
         <div className="grid-overlay h-full w-full" />
       </div>
@@ -318,7 +334,7 @@ export function Shell({
           )}
         </aside>
 
-        <main aria-label={title} className="flex-1 px-6 py-8">
+        <main id="main-content" aria-label={title} className="flex-1 px-6 py-8">
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
@@ -356,6 +372,7 @@ export function Shell({
                       target="_blank"
                       rel="noreferrer"
                       title="Help & documentation"
+                      aria-label="Help & documentation"
                       className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
                     >
                       <svg
@@ -376,6 +393,7 @@ export function Shell({
                     </a>
                   </div>
                 </div>
+                <Breadcrumbs />
                 {children}
               </>
             )}
@@ -468,10 +486,10 @@ function ProfileModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-labelledby="profile-modal-title">
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-black/80 p-6 shadow-xl backdrop-blur">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Profile</h2>
+          <h2 id="profile-modal-title" className="text-lg font-semibold text-white">Profile</h2>
           {!forcePassword && (
             <button
               type="button"

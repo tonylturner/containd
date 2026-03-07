@@ -28,6 +28,11 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	return state.Key.SrcPort == 20000 || state.Key.DstPort == 20000
 }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{20000}, nil
+}
+
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
 	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil

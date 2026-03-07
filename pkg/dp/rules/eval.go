@@ -38,22 +38,97 @@ type ICSContext struct {
 	WriteOnly    bool
 }
 
+// compiledAddr holds a pre-parsed ICS address or address range.
+type compiledAddr struct {
+	low, high int64
+}
+
+// compiledPort holds a pre-parsed protocol port or port range.
+type compiledPort struct {
+	low, high uint16
+}
+
+// compiledEntry pairs an Entry with pre-parsed address and port data so that
+// string parsing is done once at load time rather than on every packet.
+type compiledEntry struct {
+	Entry
+	addresses []compiledAddr // pre-parsed ICS addresses
+	ports     []compiledPort // pre-parsed protocol port ranges (one per Protocol)
+}
+
 // Evaluator evaluates a snapshot for a given context and returns an action.
 type Evaluator struct {
 	snapshot *Snapshot
+	compiled []compiledEntry
 }
 
 func NewEvaluator(snap *Snapshot) *Evaluator {
-	return &Evaluator{snapshot: snap}
+	ev := &Evaluator{snapshot: snap}
+	ev.compile()
+	return ev
+}
+
+// compile pre-parses address and port range strings from every firewall entry.
+func (e *Evaluator) compile() {
+	if e.snapshot == nil {
+		return
+	}
+	e.compiled = make([]compiledEntry, len(e.snapshot.Firewall))
+	for i, entry := range e.snapshot.Firewall {
+		ce := compiledEntry{Entry: entry}
+
+		// Pre-parse ICS addresses.
+		if len(entry.ICS.Addresses) > 0 {
+			ce.addresses = make([]compiledAddr, 0, len(entry.ICS.Addresses))
+			for _, spec := range entry.ICS.Addresses {
+				if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
+					low, okLow := parseAddr(parts[0])
+					high, okHigh := parseAddr(parts[1])
+					if okLow && okHigh {
+						ce.addresses = append(ce.addresses, compiledAddr{low: low, high: high})
+						continue
+					}
+				}
+				// Single value.
+				if val, ok := parseAddr(spec); ok {
+					ce.addresses = append(ce.addresses, compiledAddr{low: val, high: val})
+				}
+			}
+		}
+
+		// Pre-parse protocol port ranges.
+		ce.ports = make([]compiledPort, len(entry.Protocols))
+		for j, p := range entry.Protocols {
+			if p.Port == "" {
+				continue
+			}
+			if parts := strings.SplitN(p.Port, "-", 2); len(parts) == 2 {
+				lo, errLo := strconv.ParseUint(parts[0], 10, 16)
+				hi, errHi := strconv.ParseUint(parts[1], 10, 16)
+				if errLo == nil && errHi == nil {
+					ce.ports[j] = compiledPort{low: uint16(lo), high: uint16(hi)}
+					continue
+				}
+			}
+			// Single port.
+			v, err := strconv.ParseUint(p.Port, 10, 16)
+			if err == nil {
+				ce.ports[j] = compiledPort{low: uint16(v), high: uint16(v)}
+			}
+		}
+
+		e.compiled[i] = ce
+	}
 }
 
 func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 	if e.snapshot == nil {
 		return ActionDeny
 	}
-	for _, entry := range e.snapshot.Firewall {
-		if matchZones(entry, ctx) && matchCIDRs(entry, ctx) && matchProto(entry, ctx) && matchIdentities(entry, ctx) && matchICS(entry, ctx) && matchSchedule(entry, ctx) {
-			return entry.Action
+	for i := range e.compiled {
+		ce := &e.compiled[i]
+		if matchZones(ce.Entry, ctx) && matchCIDRs(ce.Entry, ctx) && matchProtoCompiled(ce, ctx) && matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce.Entry, ctx) {
+			return ce.Action
 		}
 	}
 	if e.snapshot.Default != "" {
@@ -92,6 +167,27 @@ func matchProto(entry Entry, ctx EvalContext) bool {
 		}
 		if p.Port != "" {
 			if !portMatches(p.Port, ctx.Port) {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// matchProtoCompiled uses pre-parsed port ranges for fast evaluation.
+func matchProtoCompiled(ce *compiledEntry, ctx EvalContext) bool {
+	if len(ce.Protocols) == 0 {
+		return true
+	}
+	for j, p := range ce.Protocols {
+		if p.Name != "" && p.Name != ctx.Proto {
+			continue
+		}
+		if p.Port != "" {
+			cp := ce.ports[j]
+			pv, err := strconv.ParseUint(ctx.Port, 10, 16)
+			if err != nil || uint16(pv) < cp.low || uint16(pv) > cp.high {
 				continue
 			}
 		}
@@ -156,6 +252,59 @@ func matchICS(entry Entry, ctx EvalContext) bool {
 		return false
 	}
 	if entry.ICS.WriteOnly && !ctx.ICS.WriteOnly {
+		return false
+	}
+	return true
+}
+
+// matchICSCompiled uses pre-parsed addresses for fast evaluation.
+func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
+	if icsPredicateEmpty(ce.ICS) {
+		return true
+	}
+	if ctx.ICS == nil {
+		return false
+	}
+	if ce.ICS.Protocol != "" && ce.ICS.Protocol != ctx.ICS.Protocol {
+		return false
+	}
+	if len(ce.ICS.FunctionCode) > 0 {
+		match := false
+		for _, fc := range ce.ICS.FunctionCode {
+			if fc == ctx.ICS.FunctionCode {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	if ce.ICS.UnitID != nil {
+		if ctx.ICS.UnitID == nil || *ce.ICS.UnitID != *ctx.ICS.UnitID {
+			return false
+		}
+	}
+	if len(ce.addresses) > 0 {
+		ctxVal, ok := parseAddr(ctx.ICS.Address)
+		if !ok {
+			return false
+		}
+		matched := false
+		for _, a := range ce.addresses {
+			if ctxVal >= a.low && ctxVal <= a.high {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if ce.ICS.ReadOnly && !ctx.ICS.ReadOnly {
+		return false
+	}
+	if ce.ICS.WriteOnly && !ctx.ICS.WriteOnly {
 		return false
 	}
 	return true

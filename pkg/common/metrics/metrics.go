@@ -83,3 +83,43 @@ var (
 		Help:      "Whether a managed service is running (1) or stopped (0).",
 	}, []string{"service"})
 )
+
+// Cache metrics.
+var (
+	VerdictCacheHits = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "engine",
+		Name:      "verdict_cache_hits_total",
+		Help:      "Total verdict cache hits.",
+	})
+	VerdictCacheMisses = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "engine",
+		Name:      "verdict_cache_misses_total",
+		Help:      "Total verdict cache misses.",
+	})
+)
+
+// Goroutine and resource metrics.
+var GoroutinesActive = promauto.NewGauge(prometheus.GaugeOpts{
+	Namespace: namespace,
+	Subsystem: "runtime",
+	Name:      "goroutines_active",
+	Help:      "Number of active goroutines.",
+})
+
+// DPI decoder metrics.
+var DecoderPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Namespace: namespace,
+	Subsystem: "dpi",
+	Name:      "decoder_packets_total",
+	Help:      "Packets processed per decoder protocol.",
+}, []string{"protocol"})
+
+// IDS metrics.
+var IDSRulesLoaded = promauto.NewGauge(prometheus.GaugeOpts{
+	Namespace: namespace,
+	Subsystem: "ids",
+	Name:      "rules_loaded",
+	Help:      "Number of IDS rules currently loaded.",
+})

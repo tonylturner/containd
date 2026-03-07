@@ -13,7 +13,7 @@ import (
 
 func getOSRoutingHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "os routing view is only supported on linux"})
+		apiError(c, http.StatusNotImplemented, "os routing view is only supported on linux")
 	}
 }
 

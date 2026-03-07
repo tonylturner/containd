@@ -31,6 +31,11 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	}
 }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{44818}, []uint16{2222}
+}
+
 // cipCommands are EIP commands that carry CIP messages.
 var cipCommands = map[uint16]bool{
 	0x006F: true, // SendRRData

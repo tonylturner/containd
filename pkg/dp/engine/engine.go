@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,6 +160,19 @@ func (e *Engine) Start(ctx context.Context) error {
 	if err := e.capture.Start(ctx, e.handlePacket); err != nil {
 		return err
 	}
+	// Periodically update the active goroutine gauge.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				metrics.GoroutinesActive.Set(float64(runtime.NumGoroutine()))
+			}
+		}
+	}()
 	return nil
 }
 

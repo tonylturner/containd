@@ -37,7 +37,7 @@ type tlsInfoResponse struct {
 func getTLSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
 			return
 		}
 		cfg, err := store.Load(c.Request.Context())
@@ -88,24 +88,24 @@ type setTLSCertRequest struct {
 func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
 			return
 		}
 		var req setTLSCertRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		req.CertPEM = strings.TrimSpace(req.CertPEM)
 		req.KeyPEM = strings.TrimSpace(req.KeyPEM)
 		if req.CertPEM == "" || req.KeyPEM == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "certPEM and keyPEM required"})
+			apiError(c, http.StatusBadRequest, "certPEM and keyPEM required")
 			return
 		}
 
 		// Validate the pair before writing.
 		if _, err := tls.X509KeyPair([]byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cert/key pair", "detail": err.Error()})
+			apiErrorDetail(c, http.StatusBadRequest, "invalid cert/key pair", err.Error())
 			return
 		}
 
@@ -118,11 +118,11 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 		keyFile := firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "/data/tls/server.key")
 
 		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tlsCertFile must be under /data"})
+			apiError(c, http.StatusBadRequest, "tlsCertFile must be under /data")
 			return
 		}
 		if !strings.HasPrefix(filepath.Clean(keyFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tlsKeyFile must be under /data"})
+			apiError(c, http.StatusBadRequest, "tlsKeyFile must be under /data")
 			return
 		}
 
@@ -156,21 +156,21 @@ type setTrustedCARequest struct {
 func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
 			return
 		}
 		var req setTrustedCARequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		pemText := strings.TrimSpace(req.PEM)
 		if pemText == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "pem required"})
+			apiError(c, http.StatusBadRequest, "pem required")
 			return
 		}
 		if _, err := readAnyPEM(pemText); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid PEM", "detail": err.Error()})
+			apiErrorDetail(c, http.StatusBadRequest, "invalid PEM", err.Error())
 			return
 		}
 
@@ -181,7 +181,7 @@ func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 		}
 		path := firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "/data/tls/trusted_ca.pem")
 		if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "trustedCAFile must be under /data"})
+			apiError(c, http.StatusBadRequest, "trustedCAFile must be under /data")
 			return
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

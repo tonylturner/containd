@@ -39,17 +39,36 @@ type Decoder interface {
 	OnFlowEnd(state *flow.State) ([]Event, error)
 }
 
+// PortHinter is an optional interface that decoders can implement to
+// declare the TCP/UDP ports they handle. This allows the Manager to
+// build a port-based index and skip calling Supports() on every decoder
+// for every packet. Decoders that do not implement PortHinter are
+// consulted for every packet via the fallback path.
+type PortHinter interface {
+	// Ports returns the TCP and UDP ports this decoder handles.
+	// Return nil slices if the decoder uses custom Supports() logic.
+	Ports() (tcpPorts, udpPorts []uint16)
+}
+
 // Manager dispatches packets to registered decoders.
 type Manager struct {
 	decoders    []Decoder
+	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
+	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
+	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *Reassembler
 }
 
 func NewManager(decoders ...Decoder) *Manager {
-	return &Manager{
-		decoders:    decoders,
+	m := &Manager{
+		tcpByPort:   make(map[uint16][]Decoder),
+		udpByPort:   make(map[uint16][]Decoder),
 		reassembler: NewReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 	}
+	for _, d := range decoders {
+		m.Add(d)
+	}
+	return m
 }
 
 // Decoders returns the registered decoders.
@@ -65,6 +84,54 @@ func (m *Manager) Add(dec Decoder) {
 		return
 	}
 	m.decoders = append(m.decoders, dec)
+	if ph, ok := dec.(PortHinter); ok {
+		tcpPorts, udpPorts := ph.Ports()
+		if len(tcpPorts) > 0 || len(udpPorts) > 0 {
+			for _, p := range tcpPorts {
+				m.tcpByPort[p] = append(m.tcpByPort[p], dec)
+			}
+			for _, p := range udpPorts {
+				m.udpByPort[p] = append(m.udpByPort[p], dec)
+			}
+			return
+		}
+	}
+	// Decoder has no port hint — consult on every packet.
+	m.anyDecoders = append(m.anyDecoders, dec)
+}
+
+// candidates returns the decoders that may handle the given flow based
+// on port indexing, plus all fallback (anyDecoders) decoders.
+func (m *Manager) candidates(state *flow.State) []Decoder {
+	var portMap map[uint16][]Decoder
+	switch state.Key.Proto {
+	case 6: // TCP
+		portMap = m.tcpByPort
+	case 17: // UDP
+		portMap = m.udpByPort
+	}
+
+	// Collect port-indexed decoders for both src and dst ports.
+	var indexed []Decoder
+	if portMap != nil {
+		if decs := portMap[state.Key.SrcPort]; len(decs) > 0 {
+			indexed = append(indexed, decs...)
+		}
+		if decs := portMap[state.Key.DstPort]; len(decs) > 0 {
+			// Avoid duplicates when SrcPort == DstPort.
+			if state.Key.SrcPort != state.Key.DstPort {
+				indexed = append(indexed, decs...)
+			}
+		}
+	}
+
+	if len(indexed) == 0 {
+		return m.anyDecoders
+	}
+	if len(m.anyDecoders) == 0 {
+		return indexed
+	}
+	return append(indexed, m.anyDecoders...)
 }
 
 // OnPacket passes the packet to decoders that support the flow.
@@ -92,7 +159,7 @@ func (m *Manager) OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error
 	}
 
 	var out []Event
-	for _, d := range m.decoders {
+	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {
 			continue
 		}
@@ -127,7 +194,7 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	}
 
 	var out []Event
-	for _, d := range m.decoders {
+	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {
 			continue
 		}

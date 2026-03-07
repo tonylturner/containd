@@ -6,6 +6,8 @@ import Link from "next/link";
 import { api, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
+import { useTableControls } from "../../hooks/useTableControls";
+import { SearchBar, SortableHeader, Pagination } from "../../components/TableControls";
 
 export default function ZonesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
@@ -68,6 +70,11 @@ export default function ZonesPage() {
     refresh();
   }
 
+  const table = useTableControls(zones, {
+    defaultSort: "name",
+    searchKeys: ["name", "alias"],
+  });
+
   const tips: Tip[] = [
     {
       id: "zones:create",
@@ -112,27 +119,39 @@ export default function ZonesPage() {
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <h2 className="text-sm font-semibold text-white">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="name (e.g. ot)"
-            disabled={!isAdmin()}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-          />
-          <input
-            value={alias}
-            onChange={(e) => setAlias(e.target.value)}
-            placeholder="alias (optional)"
-            disabled={!isAdmin()}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-          />
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="description"
-            disabled={!isAdmin()}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-1"
-          />
+          <div>
+            <label htmlFor="zone-name" className="sr-only">Zone name</label>
+            <input
+              id="zone-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="name (e.g. ot)"
+              disabled={!isAdmin()}
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="zone-alias" className="sr-only">Zone alias</label>
+            <input
+              id="zone-alias"
+              value={alias}
+              onChange={(e) => setAlias(e.target.value)}
+              placeholder="alias (optional)"
+              disabled={!isAdmin()}
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="zone-description" className="sr-only">Zone description</label>
+            <input
+              id="zone-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="description"
+              disabled={!isAdmin()}
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-1"
+            />
+          </div>
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p className="text-sm text-amber">{error}</p>}
@@ -148,25 +167,31 @@ export default function ZonesPage() {
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      <div className="mt-6 flex items-center gap-3">
+        <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search zones..." />
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
         <table className="w-full text-sm">
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Alias</th>
-              <th className="px-4 py-3">Description</th>
+              <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+              <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+              <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {zones.length === 0 && (
+            {table.data.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={4}>
-                  No zones configured. Create zones (e.g. WAN, DMZ, OT) to segment network traffic.
+                  {zones.length === 0
+                    ? "No zones configured. Create zones (e.g. WAN, DMZ, OT) to segment network traffic."
+                    : "No zones match your search."}
                 </td>
               </tr>
             )}
-            {zones.map((z) => (
+            {table.data.map((z) => (
               <ZoneRow
                 key={z.name}
                 zone={z}
@@ -177,6 +202,7 @@ export default function ZonesPage() {
             ))}
           </tbody>
         </table>
+        <Pagination page={table.page} totalPages={table.totalPages} totalItems={table.totalItems} onPage={table.setPage} />
       </div>
     </Shell>
   );

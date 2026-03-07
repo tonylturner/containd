@@ -90,6 +90,11 @@ type MMSDecoder struct{}
 // NewMMSDecoder returns a new MMS protocol decoder.
 func NewMMSDecoder() *MMSDecoder { return &MMSDecoder{} }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *MMSDecoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{102}, nil
+}
+
 // Supports returns true for TCP flows on port 102 (shared with S7comm).
 func (d *MMSDecoder) Supports(state *flow.State) bool {
 	if state == nil {

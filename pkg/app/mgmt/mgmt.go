@@ -75,7 +75,7 @@ func Run(ctx context.Context, _ Options) error {
 
 	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
 	if httpAddr == "" && cfg != nil {
-		httpAddr = firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
+		httpAddr = common.FirstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
 	}
 	if httpAddr == "" {
 		httpAddr = ":8080"
@@ -326,15 +326,6 @@ func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger,
 			}
 		}
 	}()
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func serveStaticUI(router *gin.Engine) {
