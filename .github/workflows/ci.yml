@@ -90,10 +90,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.31.0
-        with:
-          image-ref: containd/containd:ci
-          format: table
-          exit-code: '1'
-          severity: HIGH,CRITICAL
-          trivyignores: .trivyignore
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}/.trivyignore:/root/.trivyignore:ro \
+            ghcr.io/aquasecurity/trivy:0.62.1 \
+            image --exit-code 1 --severity HIGH,CRITICAL --ignorefile /root/.trivyignore --format table \
+            containd/containd:ci
