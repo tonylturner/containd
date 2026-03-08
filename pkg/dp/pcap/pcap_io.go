@@ -16,6 +16,7 @@ const (
 	pcapMagic        = 0xa1b2c3d4
 	pcapVersionMajor = 2
 	pcapVersionMinor = 4
+	maxPCAPPacketLen = 16 * 1024 * 1024
 )
 
 func writePCAPGlobalHeader(w io.Writer, snaplen uint32) error {
@@ -59,18 +60,24 @@ func readPCAPGlobalHeader(r io.Reader) (uint32, error) {
 	return snaplen, nil
 }
 
-func readPCAPPacket(r io.Reader) (time.Time, []byte, error) {
+func readPCAPPacket(r io.Reader, snaplen uint32) (time.Time, []byte, error) {
 	rec := make([]byte, 16)
 	if _, err := io.ReadFull(r, rec); err != nil {
 		return time.Time{}, nil, err
 	}
 	sec := binary.LittleEndian.Uint32(rec[0:])
 	usec := binary.LittleEndian.Uint32(rec[4:])
-	origLen := binary.LittleEndian.Uint32(rec[8:])
-	if origLen == 0 {
+	inclLen := binary.LittleEndian.Uint32(rec[8:])
+	if inclLen == 0 {
 		return time.Unix(int64(sec), int64(usec)*1000), nil, nil
 	}
-	data := make([]byte, origLen)
+	if inclLen > snaplen {
+		return time.Time{}, nil, fmt.Errorf("pcap packet length %d exceeds snaplen %d", inclLen, snaplen)
+	}
+	if inclLen > maxPCAPPacketLen {
+		return time.Time{}, nil, fmt.Errorf("pcap packet length %d exceeds maximum %d", inclLen, maxPCAPPacketLen)
+	}
+	data := make([]byte, inclLen)
 	if _, err := io.ReadFull(r, data); err != nil {
 		return time.Time{}, nil, err
 	}
