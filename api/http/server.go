@@ -501,13 +501,10 @@ func patchSyslogHandler(store config.Store, services ServicesApplier) gin.Handle
 }
 
 func healthHandler(c *gin.Context) {
-	hostname, _ := os.Hostname()
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
 		"component": "mgmt",
 		"build":     config.BuildVersion,
-		"commit":    config.BuildCommit,
-		"hostname":  hostname,
 		"time":      time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
