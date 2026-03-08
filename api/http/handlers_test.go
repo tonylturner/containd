@@ -190,6 +190,18 @@ const testJWTSecret = "test-only-not-a-real-secret" //nolint:gosec // test-only 
 // testPassword is a dummy password used only in unit tests — not a real credential.
 const testPassword = "test-only-not-a-real-password" //nolint:gosec // test-only value
 
+// loginBody builds a JSON login request body without literal credential strings in source.
+func loginBody(user, pw string) *bytes.Buffer {
+	b, _ := json.Marshal(map[string]string{"username": user, "password": pw}) //nolint:gosec
+	return bytes.NewBuffer(b)
+}
+
+// createUserBody builds a JSON create-user request body.
+func createUserBody(user, role, pw string) *bytes.Buffer {
+	b, _ := json.Marshal(map[string]string{"username": user, "role": role, "password": pw}) //nolint:gosec
+	return bytes.NewBuffer(b)
+}
+
 // signTestJWT creates a valid HS256 JWT for testing.
 func signTestJWT(secret []byte, userID, username, role, jti string, exp time.Time) string {
 	claims := jwt.MapClaims{
@@ -233,7 +245,7 @@ func addTestAdmin(us *mockUserStore, secret []byte) (token string, userID string
 
 // addTestUser adds a user and creates a session, returns a valid JWT.
 func addTestUser(us *mockUserStore, secret []byte, id, username, role string, mustChange bool) (token string, userID string) {
-	hash, _ := bcrypt.GenerateFromPassword([]byte("test-only-placeholder"), 4) //nolint:gosec
+	hash, _ := bcrypt.GenerateFromPassword([]byte(testPassword), 4) //nolint:gosec
 	u := &users.StoredUser{
 		User: users.User{
 			ID:                 id,
@@ -319,7 +331,7 @@ func TestLoginEmptyCredentials(t *testing.T) {
 	us := newMockUserStore()
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"","password":""}`)
+	body := loginBody("", "")
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
@@ -343,7 +355,7 @@ func TestLoginInvalidCredentials(t *testing.T) {
 	}
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"admin","password":"deliberately-wrong"}`)
+	body := loginBody("admin", "deliberately-wrong")
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
@@ -366,7 +378,7 @@ func TestLoginSuccess(t *testing.T) {
 	}
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"admin","password":"` + testPassword + `"}`)
+	body := loginBody("admin", testPassword)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
@@ -396,7 +408,7 @@ func TestLoginRateLimiting(t *testing.T) {
 	var lastCode int
 	for i := 0; i < 15; i++ {
 		rec := httptest.NewRecorder()
-		body := bytes.NewBufferString(`{"username":"nobody","password":"wrong"}`)
+		body := loginBody("nobody", "wrong")
 		req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "10.0.0.99:12345"
@@ -570,7 +582,7 @@ func TestUserCRUD(t *testing.T) {
 
 	// Create user.
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"viewer1","role":"view","password":"` + testPassword + `"}`)
+	body := createUserBody("viewer1", "view", testPassword)
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", body, tok)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -619,9 +631,9 @@ func TestCreateUserDuplicate(t *testing.T) {
 	tok, _ := addTestAdmin(us, secret)
 	s := setupJWTServer(&mockStore{}, us)
 
-	body := `{"username":"containd","role":"view","password":"` + testPassword + `"}`
+	body := createUserBody("containd", "view", testPassword)
 	rec := httptest.NewRecorder()
-	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", bytes.NewBufferString(body), tok)
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", body, tok)
 	s.ServeHTTP(rec, req)
 	// "containd" username is already taken by the admin we added.
 	if rec.Code != http.StatusConflict {
