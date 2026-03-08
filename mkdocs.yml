@@ -62,4 +62,5 @@ nav:
       - IDS Rules: ids-rules.md
   - Reference:
       - Config Format: config-format.md
+      - API Reference: api-reference.md
       - SPDX: SPDX.md
