@@ -14,6 +14,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
+const maxPCAPRecordSize = 16 << 20 // 16 MiB
+
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
 	Events      []dpi.Event      `json:"events"`
@@ -43,7 +45,6 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
 	}
-	_ = snaplen
 
 	mgr := dpi.NewManager(decoders...)
 
@@ -58,7 +59,7 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	var firstTS, lastTS time.Time
 
 	for {
-		ts, data, err := readPCAPRecord(r)
+		ts, data, err := readPCAPRecord(r, snaplen)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
@@ -191,7 +192,7 @@ func readPCAPHeader(r io.Reader) (uint32, error) {
 }
 
 // readPCAPRecord reads a single PCAP packet record (16-byte header + data).
-func readPCAPRecord(r io.Reader) (time.Time, []byte, error) {
+func readPCAPRecord(r io.Reader, snaplen uint32) (time.Time, []byte, error) {
 	rec := make([]byte, 16)
 	if _, err := io.ReadFull(r, rec); err != nil {
 		return time.Time{}, nil, err
@@ -199,6 +200,12 @@ func readPCAPRecord(r io.Reader) (time.Time, []byte, error) {
 	sec := binary.LittleEndian.Uint32(rec[0:])
 	usec := binary.LittleEndian.Uint32(rec[4:])
 	inclLen := binary.LittleEndian.Uint32(rec[8:])
+	if snaplen > 0 && inclLen > snaplen {
+		return time.Time{}, nil, fmt.Errorf("invalid captured length %d exceeds snaplen %d", inclLen, snaplen)
+	}
+	if inclLen > maxPCAPRecordSize {
+		return time.Time{}, nil, fmt.Errorf("invalid captured length %d exceeds maximum %d", inclLen, maxPCAPRecordSize)
+	}
 	if inclLen == 0 {
 		return time.Unix(int64(sec), int64(usec)*1000), nil, nil
 	}

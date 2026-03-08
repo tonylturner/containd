@@ -205,3 +205,48 @@ func TestAnalyzePacketCounting(t *testing.T) {
 		t.Errorf("flow Packets = %d, want 2", result.Flows[0].Packets)
 	}
 }
+
+func TestAnalyzeRejectsPacketLargerThanSnaplen(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Global header with snaplen=64.
+	header := make([]byte, 24)
+	binary.LittleEndian.PutUint32(header[0:], 0xa1b2c3d4)
+	binary.LittleEndian.PutUint16(header[4:], 2)
+	binary.LittleEndian.PutUint16(header[6:], 4)
+	binary.LittleEndian.PutUint32(header[16:], 64)
+	binary.LittleEndian.PutUint32(header[20:], 1)
+	buf.Write(header)
+
+	// Record claims inclLen=128 (larger than snaplen).
+	rec := make([]byte, 16)
+	binary.LittleEndian.PutUint32(rec[8:], 128)
+	binary.LittleEndian.PutUint32(rec[12:], 128)
+	buf.Write(rec)
+
+	if _, err := Analyze(bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("Analyze() error = nil, want non-nil for packet larger than snaplen")
+	}
+}
+
+func TestAnalyzeRejectsPacketLargerThanMaximum(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Global header with large snaplen so only the max record guard triggers.
+	header := make([]byte, 24)
+	binary.LittleEndian.PutUint32(header[0:], 0xa1b2c3d4)
+	binary.LittleEndian.PutUint16(header[4:], 2)
+	binary.LittleEndian.PutUint16(header[6:], 4)
+	binary.LittleEndian.PutUint32(header[16:], maxPCAPRecordSize+1)
+	binary.LittleEndian.PutUint32(header[20:], 1)
+	buf.Write(header)
+
+	rec := make([]byte, 16)
+	binary.LittleEndian.PutUint32(rec[8:], maxPCAPRecordSize+1)
+	binary.LittleEndian.PutUint32(rec[12:], maxPCAPRecordSize+1)
+	buf.Write(rec)
+
+	if _, err := Analyze(bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("Analyze() error = nil, want non-nil for oversized packet record")
+	}
+}
