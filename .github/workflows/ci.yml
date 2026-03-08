@@ -94,6 +94,6 @@ jobs:
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v ${{ github.workspace }}/.trivyignore:/root/.trivyignore:ro \
-            ghcr.io/aquasecurity/trivy:latest \
+            ghcr.io/aquasecurity/trivy:0.62.1 \
             image --exit-code 1 --severity HIGH,CRITICAL --ignorefile /root/.trivyignore --format table \
             containd/containd:ci
