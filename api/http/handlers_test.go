@@ -184,8 +184,11 @@ func hashPassword(pw string) (string, error) {
 	return string(h), err
 }
 
-// testJWTSecret is the secret used when CONTAIND_JWT_SECRET is set for JWT tests.
-const testJWTSecret = "test-jwt-secret-for-handlers"
+// testJWTSecret is a dummy HMAC key used only in unit tests — not a real credential.
+const testJWTSecret = "test-only-not-a-real-secret" //nolint:gosec // test-only value
+
+// testPassword is a dummy password used only in unit tests — not a real credential.
+const testPassword = "test-only-not-a-real-password" //nolint:gosec // test-only value
 
 // signTestJWT creates a valid HS256 JWT for testing.
 func signTestJWT(secret []byte, userID, username, role, jti string, exp time.Time) string {
@@ -230,7 +233,7 @@ func addTestAdmin(us *mockUserStore, secret []byte) (token string, userID string
 
 // addTestUser adds a user and creates a session, returns a valid JWT.
 func addTestUser(us *mockUserStore, secret []byte, id, username, role string, mustChange bool) (token string, userID string) {
-	hash, _ := bcrypt.GenerateFromPassword([]byte("password123"), 4)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("test-only-placeholder"), 4) //nolint:gosec
 	u := &users.StoredUser{
 		User: users.User{
 			ID:                 id,
@@ -333,14 +336,14 @@ func TestLoginInvalidCredentials(t *testing.T) {
 
 	us := newMockUserStore()
 	// Add a user to try wrong password against.
-	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-password"), 4)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(testPassword), 4) //nolint:gosec
 	us.users["u1"] = &users.StoredUser{
 		User:         users.User{ID: "u1", Username: "admin", Role: "admin"},
 		PasswordHash: string(hash),
 	}
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"admin","password":"wrong-password"}`)
+	body := bytes.NewBufferString(`{"username":"admin","password":"deliberately-wrong"}`)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
@@ -356,14 +359,14 @@ func TestLoginSuccess(t *testing.T) {
 	defer t.Setenv("CONTAIND_JWT_SECRET", "")
 
 	us := newMockUserStore()
-	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-password"), 4)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(testPassword), 4) //nolint:gosec
 	us.users["u1"] = &users.StoredUser{
 		User:         users.User{ID: "u1", Username: "admin", Role: "admin"},
 		PasswordHash: string(hash),
 	}
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"admin","password":"correct-password"}`)
+	body := bytes.NewBufferString(`{"username":"admin","password":"` + testPassword + `"}`)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	s.ServeHTTP(rec, req)
@@ -567,7 +570,7 @@ func TestUserCRUD(t *testing.T) {
 
 	// Create user.
 	rec := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"viewer1","role":"view","password":"Str0ng!Pass"}`)
+	body := bytes.NewBufferString(`{"username":"viewer1","role":"view","password":"` + testPassword + `"}`)
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", body, tok)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -616,7 +619,7 @@ func TestCreateUserDuplicate(t *testing.T) {
 	tok, _ := addTestAdmin(us, secret)
 	s := setupJWTServer(&mockStore{}, us)
 
-	body := `{"username":"containd","role":"view","password":"Str0ng!Pass"}`
+	body := `{"username":"containd","role":"view","password":"` + testPassword + `"}`
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", bytes.NewBufferString(body), tok)
 	s.ServeHTTP(rec, req)
