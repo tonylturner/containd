@@ -13,7 +13,7 @@ import (
 func listUsersHandler(store users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		us, err := store.List(c.Request.Context())
@@ -37,12 +37,12 @@ type createUserRequest struct {
 func createUserHandler(store users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		var req createUserRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		u := users.User{
@@ -58,7 +58,7 @@ func createUserHandler(store users.Store) gin.HandlerFunc {
 			if err == users.ErrUsernameTaken {
 				code = http.StatusConflict
 			}
-			c.JSON(code, gin.H{"error": err.Error()})
+			apiError(c, code, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, created)
@@ -68,13 +68,13 @@ func createUserHandler(store users.Store) gin.HandlerFunc {
 func updateUserHandler(store users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		id := c.Param("id")
 		var patch users.User
 		if err := c.ShouldBindJSON(&patch); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		updated, err := store.Update(c.Request.Context(), id, patch)
@@ -83,7 +83,7 @@ func updateUserHandler(store users.Store) gin.HandlerFunc {
 			if err == users.ErrNotFound {
 				code = http.StatusNotFound
 			}
-			c.JSON(code, gin.H{"error": err.Error()})
+			apiError(c, code, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, updated)
@@ -97,13 +97,13 @@ type setPasswordRequest struct {
 func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		id := c.Param("id")
 		var req setPasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		if err := store.SetPassword(c.Request.Context(), id, req.Password); err != nil {
@@ -111,7 +111,7 @@ func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
 			if err == users.ErrNotFound {
 				code = http.StatusNotFound
 			}
-			c.JSON(code, gin.H{"error": err.Error()})
+			apiError(c, code, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
@@ -121,7 +121,7 @@ func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
 func deleteUserHandler(store users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		id := c.Param("id")
@@ -133,7 +133,7 @@ func deleteUserHandler(store users.Store) gin.HandlerFunc {
 			case users.ErrLastAdmin:
 				code = http.StatusConflict
 			}
-			c.JSON(code, gin.H{"error": err.Error()})
+			apiError(c, code, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})

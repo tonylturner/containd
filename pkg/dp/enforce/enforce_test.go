@@ -72,6 +72,97 @@ func TestCompileFirewallZoneBindings(t *testing.T) {
 	}
 }
 
+func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
+	compiler := NewCompiler()
+	compiler.QueueID = 42
+
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:        "ics1",
+				Action:    rules.ActionAllow,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				ICS:       rules.ICSPredicate{Protocol: "modbus"},
+			},
+			{
+				ID:        "web",
+				Action:    rules.ActionAllow,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "80"}},
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	// The ICS entry should use queue instead of accept.
+	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+		t.Fatalf("expected queue rule for ICS entry, got:\n%s", ruleset)
+	}
+	// The non-ICS entry should still use accept.
+	if !strings.Contains(ruleset, "tcp dport 80 accept") {
+		t.Fatalf("expected accept rule for non-ICS entry, got:\n%s", ruleset)
+	}
+}
+
+func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
+	compiler := NewCompiler()
+	// QueueID is 0 (default) — no queue rules should be emitted.
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:        "ics1",
+				Action:    rules.ActionAllow,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				ICS:       rules.ICSPredicate{Protocol: "modbus"},
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(ruleset, "queue") {
+		t.Fatalf("did not expect queue rule when QueueID is 0, got:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, "tcp dport 502 accept") {
+		t.Fatalf("expected accept rule, got:\n%s", ruleset)
+	}
+}
+
+func TestIsDPIEligible(t *testing.T) {
+	tests := []struct {
+		name     string
+		entry    rules.Entry
+		eligible bool
+	}{
+		{
+			name:     "ICS modbus entry",
+			entry:    rules.Entry{ICS: rules.ICSPredicate{Protocol: "modbus"}},
+			eligible: true,
+		},
+		{
+			name:     "ICS dnp3 entry",
+			entry:    rules.Entry{ICS: rules.ICSPredicate{Protocol: "dnp3"}},
+			eligible: true,
+		},
+		{
+			name:     "plain rule no ICS",
+			entry:    rules.Entry{Action: rules.ActionAllow},
+			eligible: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDPIEligible(tt.entry); got != tt.eligible {
+				t.Fatalf("isDPIEligible() = %v, want %v", got, tt.eligible)
+			}
+		})
+	}
+}
+
 func TestNftUpdaterArgsFormatting(t *testing.T) {
 	u := NewNftUpdater("containd")
 	ip := net.ParseIP("10.1.2.3")

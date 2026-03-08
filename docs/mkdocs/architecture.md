@@ -1,8 +1,6 @@
 # containd Architecture
 
-This document is rendered from `docs/mkdocs/`.
-
-This document tracks the high-level architecture for containd as it evolves.
+High-level architecture overview.
 
 ## Planes
 - **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), capture, flow tracking, rule evaluator, DPI/IDS (selective).
@@ -22,7 +20,7 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 - `pkg/cp/services`: syslog/DNS/NTP/proxy/VPN/AV managers render configs; optional supervision of embedded daemons (Envoy/Nginx/Unbound/OpenNTPD/ClamAV) with validation + service events.
 - `pkg/common/logging`: zap-based structured logger helper (stdout + optional rotation) plus legacy prefixed UTC helpers.
 - `pkg/cli`: command registry with API-backed show/set/delete for config, commit/rollback, audit, services, and diagnostics.
-- `pkg/dp/capture`: AF_PACKET capture worker (Linux) with interface validation; NFQUEUE steering planned.
+- `pkg/dp/capture`: AF_PACKET capture worker (Linux) with interface validation.
 - `pkg/dp/rules`: immutable rule snapshots and evaluator (zones/CIDRs/proto/port ranges; ICS/identity predicates matched when present).
 - `pkg/dp/engine`: harness to start capture, swap/apply rule snapshots, evaluate contexts, and apply verdict-driven updates.
 - `pkg/dp/enforce`: nftables compile/apply skeleton with dynamic block sets.
@@ -40,12 +38,10 @@ The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse p
 ## Observability and logging
 - Structured logging uses zap with per-service service/facility tags; stdout is the primary sink for container runs, with optional JSON + file rotation (lumberjack; default 20MB / 5 backups / 7 days) under `/data/logs/` for on-appliance retention. Log level can be overridden via `CONTAIND_LOG_LEVEL` or `CONTAIND_LOG_LEVEL_<SERVICE>`; file sinks can be disabled with `CONTAIND_LOG_FILE=0`; all service loggers can target a remote syslog collector via `CONTAIND_LOG_SYSLOG_ADDR` + `CONTAIND_LOG_SYSLOG_PROTO`.
 - Syslog forwarding is configured via the syslog service config; pipeline forwards unified events over UDP/TCP with JSON or RFC5424 output, basic retry/backoff, counters, and error surfacing.
-- Unified event stream carries firewall/DPI/proxy/service/audit events; service managers emit metrics/events and will wire counters to UI sparklines and dashboards.
-- Future: add Prometheus endpoint, configurable retention/rotation defaults, and RFC5424-compliant forwarding with retries/backpressure aligned to syslog manager settings.
+- Unified event stream carries firewall/DPI/proxy/service/audit events; service managers emit metrics/events that feed UI sparklines and dashboards.
 
-## Upcoming work
-- Selective DPI steering (NFQUEUE/AF_PACKET), decision caching, and enforcement acceleration.
-- Expand unified event schema + retention and add Prometheus metrics.
-- Harden routing reconcile and DNAT validation; add richer policy predicates (ICS/identity/schedules).
-
-Further details will be refined as the roadmap advances.
+## Roadmap
+- Prometheus metrics endpoint.
+- NFQUEUE-based selective DPI steering and decision caching.
+- Richer policy predicates (identity, schedules).
+- Optional eBPF (XDP/TC) acceleration.

@@ -94,9 +94,10 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 		}
 		s.events = append(s.events, out)
 		if len(s.events) > s.capacity {
-			// Drop oldest.
+			// Drop oldest — shift in place to avoid re-allocation.
 			shift := len(s.events) - s.capacity
-			s.events = append([]Event{}, s.events[shift:]...)
+			copy(s.events, s.events[shift:])
+			s.events = s.events[:s.capacity]
 		}
 	}
 }
@@ -115,7 +116,8 @@ func (s *Store) Append(e Event) Event {
 	s.events = append(s.events, e)
 	if len(s.events) > s.capacity {
 		shift := len(s.events) - s.capacity
-		s.events = append([]Event{}, s.events[shift:]...)
+		copy(s.events, s.events[shift:])
+		s.events = s.events[:s.capacity]
 	}
 	return e
 }

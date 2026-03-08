@@ -87,6 +87,7 @@ export default function TopologyPage() {
           onClick={() => setExpanded((v) => !v)}
           className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-black/70 text-slate-200 hover:bg-black/60"
           title={expanded ? "Exit full screen" : "Full screen"}
+          aria-label="Toggle fullscreen"
         >
           <svg
             viewBox="0 0 24 24"

@@ -32,6 +32,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Handle SIGHUP for config reload (runs in background).
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	go func() {
+		for range sighupCh {
+			log.Println("received SIGHUP, config reload not yet fully implemented")
+		}
+	}()
+
 	var err error
 	switch mode {
 	case "all":

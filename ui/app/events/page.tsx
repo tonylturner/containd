@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
@@ -17,6 +17,30 @@ function EventsInner() {
   const [onlyDetections, setOnlyDetections] = useState(false);
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+
+  const filteredEvents = useMemo(
+    () =>
+      events
+        .filter((ev) => {
+          if (filter === "all") return true;
+          if (filter === "service") return ev.kind.startsWith("service.");
+          if (filter === "proxy") {
+            return ev.kind.startsWith("service.envoy.") || ev.kind.startsWith("service.nginx.");
+          }
+          if (filter === "firewall") return ev.proto === "firewall";
+          if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
+          return true;
+        })
+        .filter((ev) => {
+          if (!kindPrefix.trim()) return true;
+          return ev.kind.startsWith(kindPrefix.trim());
+        })
+        .filter((ev) => {
+          if (!onlyDetections) return true;
+          return ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow";
+        }),
+    [events, filter, kindPrefix, onlyDetections],
+  );
 
   async function refresh() {
     setError(null);
@@ -132,25 +156,7 @@ function EventsInner() {
             No events yet. Enable DPI capture or learning mode to generate events.
           </div>
         )}
-        {!loading && events
-          .filter((ev) => {
-            if (filter === "all") return true;
-            if (filter === "service") return ev.kind.startsWith("service.");
-            if (filter === "proxy") {
-              return ev.kind.startsWith("service.envoy.") || ev.kind.startsWith("service.nginx.");
-            }
-            if (filter === "firewall") return ev.proto === "firewall";
-            if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
-            return true;
-          })
-          .filter((ev) => {
-            if (!kindPrefix.trim()) return true;
-            return ev.kind.startsWith(kindPrefix.trim());
-          })
-          .filter((ev) => {
-            if (!onlyDetections) return true;
-            return ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow";
-          })
+        {!loading && filteredEvents
           .map((ev) => (
           <div
             key={ev.id}

@@ -116,6 +116,11 @@ async function captureAuthError(res: Response) {
           ? j.message
           : null;
     if (msg) setLastAuthError(msg);
+    // When the server returns 403 "password change required", notify the UI
+    // so Shell can force-open the password modal even if detected mid-session.
+    if (res.status === 403 && msg && /password change required/i.test(msg)) {
+      window.dispatchEvent(new CustomEvent("containd:auth:password_change_required"));
+    }
   } catch {
     // ignore
   }

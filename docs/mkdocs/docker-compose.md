@@ -1,7 +1,5 @@
 # Docker Compose
 
-This document is rendered from `docs/mkdocs/`.
-
 This repo ships a `docker-compose.yml` for running the combined appliance (`containd all`) with a `.env`-driven configuration. You can still run mgmt-only or engine-only by overriding the entrypoint/command or `CONTAIND_MODE`.
 
 ## Quickstart

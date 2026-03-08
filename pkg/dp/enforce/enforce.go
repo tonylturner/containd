@@ -22,6 +22,10 @@ import (
 // This is a minimal Phase 1 skeleton.
 type Compiler struct {
 	TableName string
+	// QueueID, when non-zero, causes DPI-eligible rules (those with an
+	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
+	// steering matched traffic through NFQUEUE for selective DPI.
+	QueueID int
 }
 
 func NewCompiler() *Compiler {
@@ -143,7 +147,11 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 				proto + " dport " + strconv.Itoa(dstPort),
 			}
 			if len(pf.AllowedSources) > 0 {
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+				validated, err := validateCIDRList(pf.AllowedSources)
+				if err != nil {
+					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+				}
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
 			}
 			// Accept after DNAT; proto match is implicit via ct original clause.
 			parts = append(parts, "accept")
@@ -154,7 +162,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		line, err := compileEntry(e, snap.ZoneIfaces)
+		line, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
 		if err != nil {
 			return "", err
 		}
@@ -201,7 +209,11 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 				fmt.Sprintf("iifname @%s", ingSet),
 			}
 			if len(pf.AllowedSources) > 0 {
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(pf.AllowedSources, ", ")))
+				validated, err := validateCIDRList(pf.AllowedSources)
+				if err != nil {
+					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+				}
+				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
 			}
 			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
 			if dstPort > 0 && dstPort != pf.ListenPort {
@@ -254,7 +266,7 @@ func defaultPolicy(a rules.Action) string {
 	return "drop"
 }
 
-func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error) {
+func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) (string, error) {
 	parts := []string{}
 
 	if len(e.SourceZones) > 0 {
@@ -294,6 +306,14 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 		parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
 	}
 
+	// If QueueID is set and the entry has DPI/ICS inspection enabled,
+	// emit a queue verdict instead of accept/drop so the traffic is
+	// steered through NFQUEUE for selective DPI inspection.
+	if queueID > 0 && isDPIEligible(e) {
+		parts = append(parts, fmt.Sprintf("queue num %d", queueID))
+		return strings.Join(parts, " "), nil
+	}
+
 	switch e.Action {
 	case rules.ActionAllow:
 		parts = append(parts, "accept")
@@ -303,6 +323,12 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string) (string, error)
 		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// isDPIEligible returns true if an entry requires DPI/ICS inspection and
+// should therefore be steered through NFQUEUE when a queue ID is configured.
+func isDPIEligible(e rules.Entry) bool {
+	return e.ICS.Protocol != ""
 }
 
 func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {
@@ -371,6 +397,29 @@ func sanitizeIdent(s string) string {
 		return "zone"
 	}
 	return out.String()
+}
+
+// validateCIDRList validates that each entry is a valid IP address or CIDR
+// notation. This prevents injection of arbitrary nftables syntax through
+// user-supplied source addresses.
+func validateCIDRList(sources []string) ([]string, error) {
+	out := make([]string, 0, len(sources))
+	for _, s := range sources {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if ip := net.ParseIP(s); ip != nil {
+			out = append(out, s)
+			continue
+		}
+		if _, _, err := net.ParseCIDR(s); err == nil {
+			out = append(out, s)
+			continue
+		}
+		return nil, fmt.Errorf("invalid source address %q: must be IP or CIDR", s)
+	}
+	return out, nil
 }
 
 // Applier installs an nftables ruleset.

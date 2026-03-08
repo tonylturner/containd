@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -314,7 +315,25 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 			return err
 		}
 	}
+	m.updateServiceGauges(cfg)
 	return nil
+}
+
+func (m *Manager) updateServiceGauges(cfg config.ServicesConfig) {
+	set := func(name string, enabled bool) {
+		v := 0.0
+		if enabled {
+			v = 1.0
+		}
+		metrics.ServicesRunning.WithLabelValues(name).Set(v)
+	}
+	set("dns", cfg.DNS.Enabled)
+	set("ntp", cfg.NTP.Enabled)
+	set("syslog", len(cfg.Syslog.Forwarders) > 0)
+	set("proxy", cfg.Proxy.Forward.Enabled || cfg.Proxy.Reverse.Enabled)
+	set("dhcp", cfg.DHCP.Enabled)
+	set("vpn", cfg.VPN.WireGuard.Enabled || cfg.VPN.OpenVPN.Enabled)
+	set("av", cfg.AV.Enabled)
 }
 
 // TriggerAVUpdate runs a freshclam update once (best-effort) when available.

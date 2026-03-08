@@ -26,6 +26,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
@@ -114,6 +115,13 @@ func Run(ctx context.Context, opts Options) error {
 	mux := http.NewServeMux()
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if dpEngine == nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ready"})
+	})
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
@@ -128,6 +136,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/pcap/tag", pcapTagHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/delete", pcapDeleteHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine))
+	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
@@ -1058,4 +1068,67 @@ func parseLimit(r *http.Request, def int) int {
 		return v
 	}
 	return def
+}
+
+func pcapAnalyzeUploadHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "file required", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		var decoders []dpi.Decoder
+		if dpEngine != nil && dpEngine.DPI() != nil {
+			decoders = dpEngine.DPI().Decoders()
+		}
+		result, err := pcap.Analyze(file, decoders...)
+		if err != nil {
+			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, result)
+	}
+}
+
+func pcapAnalyzeNameHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Extract name from path: /internal/pcap/analyze/<name>
+		name := strings.TrimPrefix(r.URL.Path, "/internal/pcap/analyze/")
+		name = strings.TrimSpace(name)
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		f, _, err := mgr.Open(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		defer f.Close()
+
+		var decoders []dpi.Decoder
+		if dpEngine != nil && dpEngine.DPI() != nil {
+			decoders = dpEngine.DPI().Decoders()
+		}
+		result, err := pcap.Analyze(f, decoders...)
+		if err != nil {
+			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, result)
+	}
 }

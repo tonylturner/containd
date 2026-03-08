@@ -746,6 +746,75 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	return out, nil
 }
 
+// AnalyzePcap uploads a PCAP file and runs offline DPI analysis on it.
+func (c *HTTPClient) AnalyzePcap(ctx context.Context, filename string, r io.Reader) (*pcap.AnalysisResult, error) {
+	if c.BaseURL == "" {
+		return nil, fmt.Errorf("engine BaseURL is empty")
+	}
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	go func() {
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, r); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/pcap/analyze", pr)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("engine pcap analyze status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out pcap.AnalysisResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// AnalyzePcapByName runs offline DPI analysis on an already-uploaded PCAP file.
+func (c *HTTPClient) AnalyzePcapByName(ctx context.Context, name string) (*pcap.AnalysisResult, error) {
+	if c.BaseURL == "" {
+		return nil, fmt.Errorf("engine BaseURL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/pcap/analyze/"+url.PathEscape(name), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("engine pcap analyze status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out pcap.AnalysisResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // RulesetStatus fetches the last compiled/applied nftables ruleset status from the engine.
 func (c *HTTPClient) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
 	var out dpengine.RulesetStatus

@@ -33,17 +33,17 @@ var loginLimiter = ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute)
 func loginHandler(userStore users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if userStore == nil || len(jwtSecret()) == 0 {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "JWT auth not configured"})
+			apiError(c, http.StatusServiceUnavailable, "JWT auth not configured")
 			return
 		}
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		req.Username = strings.TrimSpace(req.Username)
 		if req.Username == "" || req.Password == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "username and password required"})
+			apiError(c, http.StatusBadRequest, "username and password required")
 			return
 		}
 
@@ -51,19 +51,19 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		key := ip + "|" + strings.ToLower(req.Username)
 		if ok, retry := loginLimiter.Allow(key); !ok {
 			c.Header("Retry-After", strconv.Itoa(int(retry.Seconds())))
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts; retry later"})
+			apiError(c, http.StatusTooManyRequests, "too many login attempts; retry later")
 			return
 		}
 
 		u, err := userStore.GetByUsername(c.Request.Context(), req.Username)
 		if err != nil {
 			loginLimiter.Fail(key)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			apiError(c, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
 			loginLimiter.Fail(key)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			apiError(c, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 		loginLimiter.Success(key)
@@ -75,7 +75,7 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		secret := jwtSecret()
 		token, err := signJWT(secret, u.ID, u.Username, u.Role, sess.ID, sess.ExpiresAt)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sign token"})
+			apiError(c, http.StatusInternalServerError, "failed to sign token")
 			return
 		}
 		setAuthCookie(c, token, sess.ExpiresAt)
@@ -135,7 +135,7 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		uid := c.GetString(ctxUserKey)
 		u, err := userStore.GetByID(c.Request.Context(), uid)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			apiError(c, http.StatusNotFound, "user not found")
 			return
 		}
 		resp := gin.H{
@@ -198,19 +198,19 @@ type updateMeRequest struct {
 func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if userStore == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		uid := c.GetString(ctxUserKey)
 		var req updateMeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		patch := users.User{FirstName: req.FirstName, LastName: req.LastName, Email: req.Email}
 		u, err := userStore.Update(c.Request.Context(), uid, patch)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, u)
@@ -225,34 +225,34 @@ type changePasswordRequest struct {
 func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if userStore == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "user store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
 		uid := c.GetString(ctxUserKey)
 		var req changePasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		if req.NewPassword == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "newPassword required"})
+			apiError(c, http.StatusBadRequest, "newPassword required")
 			return
 		}
 		if req.CurrentPassword == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "currentPassword required"})
+			apiError(c, http.StatusBadRequest, "currentPassword required")
 			return
 		}
 		u, err := userStore.GetByID(c.Request.Context(), uid)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			apiError(c, http.StatusNotFound, "user not found")
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "current password invalid"})
+			apiError(c, http.StatusUnauthorized, "current password invalid")
 			return
 		}
 		if err := userStore.SetPassword(c.Request.Context(), uid, req.NewPassword); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})

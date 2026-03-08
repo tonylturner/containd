@@ -79,7 +79,7 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	case "", "afpacket":
 		return m.startAFPacket(ctx, handler)
 	case "nfqueue":
-		return errors.New("nfqueue capture is not implemented yet")
+		return m.startNFQueue(ctx, handler)
 	default:
 		return fmt.Errorf("unsupported capture mode %q", m.cfg.Mode)
 	}

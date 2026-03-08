@@ -1,7 +1,5 @@
 # SPDX – External Components
 
-This document is rendered from `docs/mkdocs/`.
-
 This file tracks third‑party/external components that containd embeds, vendors, or relies on at runtime **as part of the appliance**, along with their SPDX license identifiers.
 
 **Process**
@@ -20,6 +18,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Go (stdlib) | Control/data/mgmt plane binaries | BSD-3-Clause | Go runtime/stdlib is compiled into `containd` (we do not ship the Go toolchain in the image). |
 | Gin | REST API framework | MIT | Used in `api/http`. |
 | `github.com/golang-jwt/jwt/v5` | JWT auth | MIT | Used for UI/API auth sessions. |
+| `github.com/prometheus/client_golang` | Prometheus metrics | Apache-2.0 | Exposes `/metrics` endpoint for monitoring. |
 | `modernc.org/sqlite` | Embedded SQLite (Go) | BSD-3-Clause | Used for config/audit/users DBs. |
 | Next.js | Web UI framework | MIT | UI is built as a static export and embedded in the mgmt image. |
 | React | UI library | MIT | Via Next.js. |
@@ -34,6 +33,8 @@ This file tracks third‑party/external components that containd embeds, vendors
 | nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Userspace `nft` binary is copied into the engine image from Debian packages. |
 | ClamAV | Antivirus scanning (ICAP pipeline) | GPL-2.0-only | Embedded `clamd`/`freshclam` binaries; executed as separate processes, not linked into `containd`. |
 | tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
+| React Flow | Topology UI | MIT | Used for topology/graph screens in the UI. |
+| Recharts | Charts | MIT | Used for dashboard charts and sparklines. |
 | Distroless base (`base-debian12`) | Minimal runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
 ---
@@ -50,11 +51,3 @@ These are used to build UI/docs (CI/Docker build stages), but are not included i
 | Node.js | UI build toolchain | MIT | Used in Docker UI build stage. |
 | Python | Docs build toolchain | PSF-2.0 | Used in Docker docs build stage. |
 
----
-
-## Future Candidates (Not Yet Adopted / Not Embedded)
-
-| Component | Purpose | SPDX License | Notes |
-|---|---|---|---|
-| React Flow | Topology UI | MIT | Planned for topology/graph screens. |
-| Recharts | Charts | MIT | Candidate for dashboards. |

@@ -48,6 +48,14 @@ type PortForward struct {
 	AllowedSources []string
 }
 
+// SchedulePredicate restricts a rule to a recurring time window.
+type SchedulePredicate struct {
+	DaysOfWeek []string // e.g. ["Monday","Tuesday"]
+	StartTime  string   // HH:MM
+	EndTime    string   // HH:MM
+	Timezone   string   // IANA timezone
+}
+
 type Entry struct {
 	ID           string
 	SourceZones  []string
@@ -59,6 +67,7 @@ type Entry struct {
 	// Future predicates
 	Identities []string // user/group roles
 	ICS        ICSPredicate
+	Schedule   SchedulePredicate
 }
 
 type Action string
