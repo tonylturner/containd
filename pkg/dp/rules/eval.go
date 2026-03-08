@@ -4,7 +4,6 @@
 package rules
 
 import (
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -157,24 +156,6 @@ func matchCIDRs(entry Entry, ctx EvalContext) bool {
 	return true
 }
 
-func matchProto(entry Entry, ctx EvalContext) bool {
-	if len(entry.Protocols) == 0 {
-		return true
-	}
-	for _, p := range entry.Protocols {
-		if p.Name != "" && p.Name != ctx.Proto {
-			continue
-		}
-		if p.Port != "" {
-			if !portMatches(p.Port, ctx.Port) {
-				continue
-			}
-		}
-		return true
-	}
-	return false
-}
-
 // matchProtoCompiled uses pre-parsed port ranges for fast evaluation.
 func matchProtoCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	if len(ce.Protocols) == 0 {
@@ -214,47 +195,6 @@ func matchIdentities(entry Entry, ctx EvalContext) bool {
 		}
 	}
 	return false
-}
-
-func matchICS(entry Entry, ctx EvalContext) bool {
-	if icsPredicateEmpty(entry.ICS) {
-		return true
-	}
-	if ctx.ICS == nil {
-		return false
-	}
-	if entry.ICS.Protocol != "" && entry.ICS.Protocol != ctx.ICS.Protocol {
-		return false
-	}
-	if len(entry.ICS.FunctionCode) > 0 {
-		match := false
-		for _, fc := range entry.ICS.FunctionCode {
-			if fc == ctx.ICS.FunctionCode {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
-		}
-	}
-	if entry.ICS.UnitID != nil {
-		if ctx.ICS.UnitID == nil || *entry.ICS.UnitID != *ctx.ICS.UnitID {
-			return false
-		}
-	}
-	if len(entry.ICS.Addresses) > 0 {
-		if !matchAddress(entry.ICS.Addresses, ctx.ICS.Address) {
-			return false
-		}
-	}
-	if entry.ICS.ReadOnly && !ctx.ICS.ReadOnly {
-		return false
-	}
-	if entry.ICS.WriteOnly && !ctx.ICS.WriteOnly {
-		return false
-	}
-	return true
 }
 
 // matchICSCompiled uses pre-parsed addresses for fast evaluation.
@@ -372,23 +312,6 @@ func matchAddress(entryAddrs []string, contextAddr string) bool {
 		val, ok := parseAddr(spec)
 		if ok && val == ctxVal {
 			return true
-		}
-	}
-	return false
-}
-
-// portMatches supports single ports and ranges like "1000-2000".
-func portMatches(pattern, port string) bool {
-	if pattern == "" {
-		return true
-	}
-	if pattern == port {
-		return true
-	}
-	var low, high int
-	if n, err := fmt.Sscanf(pattern, "%d-%d", &low, &high); err == nil && n == 2 {
-		if p, err := strconv.Atoi(port); err == nil {
-			return p >= low && p <= high
 		}
 	}
 	return false

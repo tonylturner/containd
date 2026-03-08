@@ -1,0 +1,3 @@
+# glibc integer overflow in memalign — no fix available in Debian 12 yet.
+# Re-evaluate when a patched libc6 is released for bookworm.
+CVE-2026-0861

@@ -13,9 +13,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-// GOOSE Ethertype.
-const gooseEthertype = 0x88B8
-
 // GOOSEHeader represents the fixed header fields of a GOOSE frame.
 type GOOSEHeader struct {
 	APPID    uint16

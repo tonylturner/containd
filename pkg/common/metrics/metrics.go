@@ -100,7 +100,7 @@ var (
 	})
 )
 
-// Goroutine and resource metrics.
+// GoroutinesActive tracks the number of active goroutines.
 var GoroutinesActive = promauto.NewGauge(prometheus.GaugeOpts{
 	Namespace: namespace,
 	Subsystem: "runtime",
@@ -108,7 +108,7 @@ var GoroutinesActive = promauto.NewGauge(prometheus.GaugeOpts{
 	Help:      "Number of active goroutines.",
 })
 
-// DPI decoder metrics.
+// DecoderPacketsTotal counts packets processed per decoder protocol.
 var DecoderPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: namespace,
 	Subsystem: "dpi",
@@ -116,7 +116,7 @@ var DecoderPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help:      "Packets processed per decoder protocol.",
 }, []string{"protocol"})
 
-// IDS metrics.
+// IDSRulesLoaded tracks the number of IDS rules currently loaded.
 var IDSRulesLoaded = promauto.NewGauge(prometheus.GaugeOpts{
 	Namespace: namespace,
 	Subsystem: "ids",

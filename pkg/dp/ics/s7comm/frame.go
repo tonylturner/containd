@@ -9,7 +9,7 @@ import (
 	"fmt"
 )
 
-// TPKT Header (RFC 1006) — 4 bytes wrapping ISO-on-TCP.
+// TPKTHeader represents a TPKT header (RFC 1006) — 4 bytes wrapping ISO-on-TCP.
 type TPKTHeader struct {
 	Version  uint8
 	Reserved uint8
