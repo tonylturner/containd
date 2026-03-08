@@ -1,7 +1,5 @@
 # System Services
 
-This document is rendered from `docs/mkdocs/`.
-
 Tracks syslog, DNS, NTP, DHCP, VPN, proxy, and AV service configuration plus runtime status managed by `containd mgmt`.
 
 ## Syslog

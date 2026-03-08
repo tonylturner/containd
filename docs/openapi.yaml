@@ -1,0 +1,496 @@
+openapi: "3.0.3"
+info:
+  title: containd API
+  version: "1.0.0"
+  description: |
+    REST API for containd -- an ICS/OT firewall management platform.
+    Provides configuration, monitoring, and security services for
+    industrial control system network environments.
+
+    All paths below are relative to the /api/v1 base path.
+    Authenticated endpoints require a JWT obtained via POST /auth/login.
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: /api/v1
+    description: Default API base path
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT from POST /auth/login. Send as Authorization header
+        or via the token cookie set automatically on login.
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+
+    LoginResponse:
+      type: object
+      properties:
+        token: { type: string, description: Signed JWT }
+        expiresAt: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/User" }
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        username: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [admin, view] }
+        mustChangePassword: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateUserRequest:
+      type: object
+      required: [username, role, password]
+      properties:
+        username: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [admin, view] }
+        password: { type: string, format: password }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string, description: Human-readable error message }
+        detail: { type: string, description: Optional additional context }
+
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        component: { type: string, example: mgmt }
+        build: { type: string }
+        commit: { type: string }
+        hostname: { type: string }
+        time: { type: string, format: date-time }
+
+    DashboardResponse:
+      type: object
+      properties:
+        health: { $ref: "#/components/schemas/HealthResponse" }
+        counts:
+          type: object
+          properties:
+            assets: { type: integer }
+            zones: { type: integer }
+            interfaces: { type: integer }
+            rules: { type: integer }
+        eventStats:
+          type: object
+          properties:
+            total: { type: integer }
+            idsAlerts: { type: integer }
+            modbusWrites: { type: integer }
+            avDetections: { type: integer }
+            avBlocks: { type: integer }
+        services: { type: object }
+        user: { type: object }
+        lastActivity: { $ref: "#/components/schemas/AuditRecord" }
+
+    Event:
+      type: object
+      properties:
+        id: { type: integer, format: uint64 }
+        flowId: { type: string }
+        proto: { type: string }
+        kind: { type: string }
+        attributes: { type: object, additionalProperties: true }
+        timestamp: { type: string, format: date-time }
+        srcIp: { type: string }
+        dstIp: { type: string }
+        srcPort: { type: integer }
+        dstPort: { type: integer }
+        transport: { type: string, enum: [tcp, udp] }
+        hash: { type: string }
+
+    FlowSummary:
+      type: object
+      properties:
+        flowId: { type: string }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+        srcIp: { type: string }
+        dstIp: { type: string }
+        srcPort: { type: integer }
+        dstPort: { type: integer }
+        transport: { type: string }
+        application: { type: string }
+        eventCount: { type: integer, format: uint64 }
+        avDetected: { type: boolean }
+        avBlocked: { type: boolean }
+
+    AuditRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        timestamp: { type: string, format: date-time }
+        actor: { type: string }
+        source: { type: string, description: "Origin: ui, api, ssh, or cli" }
+        action: { type: string }
+        target: { type: string }
+        result: { type: string, enum: [success, failure] }
+        detail: { type: string }
+
+  parameters:
+    pathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+paths:
+  # ── Health (unauthenticated) ──────────────────────────────────────
+  /health:
+    get:
+      summary: Health check
+      security: []
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+  # ── Auth ──────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      summary: Authenticate and obtain a JWT
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: Rate-limited
+          headers:
+            Retry-After: { schema: { type: integer } }
+
+  /auth/logout:
+    post:
+      summary: Invalidate the current session
+      security: []
+      tags: [Auth]
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      summary: Get current user profile
+      tags: [Auth]
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+    patch:
+      summary: Update current user profile
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/User" }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+
+  # ── Dashboard ─────────────────────────────────────────────────────
+  /dashboard:
+    get:
+      summary: Aggregated dashboard data
+      tags: [Dashboard]
+      responses:
+        "200":
+          description: Dashboard payload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardResponse" }
+
+  # ── Config ────────────────────────────────────────────────────────
+  /config:
+    get:
+      summary: Get running configuration
+      tags: [Config]
+      responses:
+        "200":
+          description: Full device configuration
+          content:
+            application/json: { schema: { type: object } }
+    post:
+      summary: Replace running configuration (admin)
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200": { description: Configuration saved }
+        "403": { description: Admin role required }
+
+  /config/commit:
+    post:
+      summary: Commit candidate config and apply to data plane
+      tags: [Config]
+      responses:
+        "200": { description: Commit applied }
+        "403": { description: Admin role required }
+
+  /config/rollback:
+    post:
+      summary: Roll back to previous configuration
+      tags: [Config]
+      responses:
+        "200": { description: Rollback applied }
+        "403": { description: Admin role required }
+
+  # ── Users (admin) ─────────────────────────────────────────────────
+  /users:
+    get:
+      summary: List all users
+      tags: [Users]
+      responses:
+        "200":
+          description: Array of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+    post:
+      summary: Create a user
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "200":
+          description: Created user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "409": { description: Username already taken }
+
+  /users/{id}:
+    patch:
+      summary: Update a user
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/User" }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404": { description: User not found }
+    delete:
+      summary: Delete a user
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: User deleted }
+        "404": { description: User not found }
+
+  # ── Services ──────────────────────────────────────────────────────
+  # Each service endpoint follows the same pattern:
+  #   GET  returns the current config object
+  #   POST replaces the config (admin only)
+  # Additional services: /services/av, /services/proxy/forward,
+  # /services/proxy/reverse, /services/status (GET only)
+
+  /services/syslog:
+    get:
+      summary: Get syslog configuration
+      tags: [Services]
+      responses:
+        "200": { description: Syslog config, content: { application/json: { schema: { type: object } } } }
+    post:
+      summary: Set syslog configuration (admin)
+      tags: [Services]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated }
+
+  /services/dns:
+    get:
+      summary: Get DNS configuration
+      tags: [Services]
+      responses:
+        "200": { description: DNS config, content: { application/json: { schema: { type: object } } } }
+    post:
+      summary: Set DNS configuration (admin)
+      tags: [Services]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated }
+
+  /services/ntp:
+    get:
+      summary: Get NTP configuration
+      tags: [Services]
+      responses:
+        "200": { description: NTP config, content: { application/json: { schema: { type: object } } } }
+    post:
+      summary: Set NTP configuration (admin)
+      tags: [Services]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated }
+
+  /services/dhcp:
+    get:
+      summary: Get DHCP configuration
+      tags: [Services]
+      responses:
+        "200": { description: DHCP config, content: { application/json: { schema: { type: object } } } }
+    post:
+      summary: Set DHCP configuration (admin)
+      tags: [Services]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated }
+
+  /services/vpn:
+    get:
+      summary: Get VPN configuration
+      tags: [Services]
+      responses:
+        "200": { description: VPN config, content: { application/json: { schema: { type: object } } } }
+    post:
+      summary: Set VPN configuration (admin)
+      tags: [Services]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Updated }
+
+  # ── Firewall ──────────────────────────────────────────────────────
+  /firewall/rules:
+    get:
+      summary: List firewall rules
+      tags: [Firewall]
+      responses:
+        "200":
+          description: Array of firewall rules
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+    post:
+      summary: Create a firewall rule (admin)
+      tags: [Firewall]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Rule created }
+
+  /firewall/rules/{id}:
+    patch:
+      summary: Update a firewall rule (admin)
+      tags: [Firewall]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Rule updated }
+    delete:
+      summary: Delete a firewall rule (admin)
+      tags: [Firewall]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: Rule deleted }
+
+  # ── Events & Flows ────────────────────────────────────────────────
+  /events:
+    get:
+      summary: List recent ICS/network events
+      tags: [Telemetry]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 500, maximum: 5000 }
+      responses:
+        "200":
+          description: Array of events
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+
+  /flows:
+    get:
+      summary: List aggregated flow summaries
+      tags: [Telemetry]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 200, maximum: 5000 }
+      responses:
+        "200":
+          description: Array of flow summaries
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/FlowSummary" } }
+
+  # ── Audit ─────────────────────────────────────────────────────────
+  /audit:
+    get:
+      summary: List audit log records
+      tags: [Audit]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 1000 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Array of audit records
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AuditRecord" } }

@@ -27,7 +27,7 @@ func rateLimitSensitive() gin.HandlerFunc {
 		key := c.ClientIP()
 		if ok, retry := sensitiveWriteLimiter.Allow(key); !ok {
 			c.Header("Retry-After", fmt.Sprintf("%d", int(retry.Seconds())+1))
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
+			apiError(c, http.StatusTooManyRequests, "rate limit exceeded")
 			c.Abort()
 			return
 		}
@@ -52,9 +52,19 @@ func boolDefault(v *bool, def bool) bool {
 	return *v
 }
 
+// apiError sends a standardized JSON error response.
+func apiError(c *gin.Context, status int, msg string) {
+	c.JSON(status, gin.H{"error": msg})
+}
+
+// apiErrorDetail sends a standardized JSON error response with detail.
+func apiErrorDetail(c *gin.Context, status int, msg string, detail string) {
+	c.JSON(status, gin.H{"error": msg, "detail": detail})
+}
+
 func httpError(c *gin.Context, err error) {
 	if errors.Is(err, config.ErrNotFound) {
-		c.JSON(404, gin.H{"error": "config not found"})
+		apiError(c, http.StatusNotFound, "config not found")
 		return
 	}
 	internalError(c, err)
@@ -64,5 +74,5 @@ func httpError(c *gin.Context, err error) {
 // This prevents leaking file paths, stack traces, or other implementation details.
 func internalError(c *gin.Context, err error) {
 	slog.Error("internal error", "method", c.Request.Method, "path", c.Request.URL.Path, "error", err)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+	apiError(c, http.StatusInternalServerError, "internal server error")
 }

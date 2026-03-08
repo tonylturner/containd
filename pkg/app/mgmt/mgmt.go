@@ -32,6 +32,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/identity"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
@@ -44,15 +45,19 @@ type Options struct{}
 func Run(ctx context.Context, _ Options) error {
 	logger := logging.NewService("mgmt")
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
+	labMode := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	switch {
 	case jwtSecret == "containd-dev-secret-change-me":
-		logger.Warn("WARNING: ============================================================")
-		logger.Warn("WARNING: CONTAIND_JWT_SECRET is set to the default example value.")
-		logger.Warn("WARNING: This is insecure. Set a unique value in .env for any")
-		logger.Warn("WARNING: deployment beyond local development.")
-		logger.Warn("WARNING: ============================================================")
+		if !labMode {
+			return fmt.Errorf("CONTAIND_JWT_SECRET is set to the default example value; " +
+				"set a unique secret (e.g. openssl rand -hex 32) or enable CONTAIND_LAB_MODE=1 for development")
+		}
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is default (lab mode active)")
 	case jwtSecret == "":
-		logger.Warn("WARNING: CONTAIND_JWT_SECRET is empty; auth tokens will not be signed.")
+		if !labMode {
+			return fmt.Errorf("CONTAIND_JWT_SECRET is empty; set a unique secret or enable CONTAIND_LAB_MODE=1 for development")
+		}
+		logger.Warn("WARNING: CONTAIND_JWT_SECRET is empty (lab mode active)")
 	}
 	store := mustInitStore()
 	defer store.Close()
@@ -62,13 +67,15 @@ func Run(ctx context.Context, _ Options) error {
 	userStore := mustInitUsersStore()
 	defer userStore.Close()
 	_ = userStore.EnsureDefaultAdmin(context.Background())
-	ensureDevCompatUsers(logger, userStore)
 
-	cfg, _ := store.Load(context.Background())
+	cfg, err := store.Load(context.Background())
+	if err != nil && !errors.Is(err, config.ErrNotFound) {
+		logger.Warnf("failed to load config on startup: %v", err)
+	}
 
 	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
 	if httpAddr == "" && cfg != nil {
-		httpAddr = firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
+		httpAddr = common.FirstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
 	}
 	if httpAddr == "" {
 		httpAddr = ":8080"
@@ -97,10 +104,13 @@ func Run(ctx context.Context, _ Options) error {
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
-	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore)
+	identityResolver := identity.NewResolver()
+	router := httpapi.NewServerWithEngineAndServices(store, auditStore, engineClient, serviceManager, userStore, identityResolver)
 	// Best-effort initial service render on startup.
 	if cfg, err := store.Load(context.Background()); err == nil {
-		_ = serviceManager.Apply(context.Background(), cfg.Services)
+		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
+			logger.Warnf("failed to apply initial service config: %v", applyErr)
+		}
 	}
 	if serviceManager != nil {
 		serviceManager.SetEventLister(func(limit int) []dpevents.Event {
@@ -131,7 +141,7 @@ func Run(ctx context.Context, _ Options) error {
 	sshAddr, sshEnabled := startSSH(logger, store, userStore, auditStore, httpAddr, httpLoopbackAddr, ipIndex)
 
 	redirectHTTPToHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.RedirectHTTPToHTTPS }), false)
-	enableHSTS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHSTS }), false)
+	enableHSTS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHSTS }), true)
 	hstsMaxAge := cfgGetInt(cfg, func(c *config.Config) int { return c.System.Mgmt.HSTSMaxAgeSeconds }, 31536000)
 	if hstsMaxAge <= 0 {
 		hstsMaxAge = 31536000
@@ -180,7 +190,15 @@ func Run(ctx context.Context, _ Options) error {
 	if enableHTTPS {
 		reloader := newCertReloader(tlsCert, tlsKey)
 		tlsCfg := &tls.Config{
-			MinVersion:     tls.VersionTLS12,
+			MinVersion: tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			},
 			GetCertificate: reloader.GetCertificate,
 		}
 		srv, lns, err := buildHTTPSServers(handler, httpsAddr, httpsLoopbackAddr, tlsCfg)
@@ -209,8 +227,10 @@ func Run(ctx context.Context, _ Options) error {
 
 	select {
 	case <-ctx.Done():
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer shutdownCancel()
 		for _, s := range servers {
-			_ = s.Shutdown(context.Background())
+			_ = s.Shutdown(shutdownCtx)
 		}
 		return ctx.Err()
 	case err := <-errCh:
@@ -306,41 +326,6 @@ func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger,
 			}
 		}
 	}()
-}
-
-func ensureDevCompatUsers(logger *zap.SugaredLogger, userStore users.Store) {
-	// Dev convenience only: if the operator is using the example JWT secret, we provision
-	// an additional admin user "containerd"/"containerd" so early demos don't get stuck
-	// on mismatched credentials. This is intentionally NOT enabled once the secret is changed.
-	if userStore == nil {
-		return
-	}
-	if strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET")) != "containd-dev-secret-change-me" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if _, err := userStore.GetByUsername(ctx, "containerd"); err == nil {
-		return
-	}
-	if _, err := userStore.Create(ctx, users.User{
-		Username:  "containerd",
-		FirstName: "Dev",
-		LastName:  "Admin",
-		Role:      "admin",
-	}, "containerd"); err == nil {
-		logger.Info("dev: provisioned extra admin user containerd/containerd (because CONTAIND_JWT_SECRET is default)")
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func serveStaticUI(router *gin.Engine) {
@@ -768,9 +753,14 @@ func getAllowedOrigins() []string {
 	var origins []string
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p != "" {
-			origins = append(origins, p)
+		if p == "" {
+			continue
 		}
+		if p == "*" {
+			// Reject wildcard origins to prevent CORS misconfiguration.
+			continue
+		}
+		origins = append(origins, p)
 	}
 	return origins
 }
@@ -1075,8 +1065,10 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 		BaseURL:           baseURL,
 		HostKeyPath:       hostKeyPath,
 		AuthorizedKeysDir: authKeysDir,
-		AllowPassword:     allowPassword,
-		LabMode:           lab,
+		AllowPassword:       allowPassword,
+		Banner:              func() string { if cfg != nil { return cfg.System.SSH.Banner }; return "" }(),
+		HostKeyRotationDays: func() int { if cfg != nil { return cfg.System.SSH.HostKeyRotationDays }; return 0 }(),
+		LabMode:             lab,
 		JWTSecret:         []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
 		UserStore:         userStore,
 		AuditStore:        auditStore,

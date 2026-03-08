@@ -1,7 +1,5 @@
 # CLI Design
 
-This document is rendered from `docs/mkdocs/`.
-
 The CLI mirrors appliance-style workflows. Commands will call control-plane APIs/config store for configuration and show operations.
 
 ## Current CLI
@@ -100,8 +98,7 @@ Notes:
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
 
-## Future
+## Roadmap
 
-- SSH hardening (rate limiting, banners, host key persistence review).
-- Expand DP operational commands (`show routes` netlink, richer neighbor views).
-- Add deeper service controls as runtime supervision matures.
+- SSH banners and host key rotation tooling.
+- Richer neighbor and routing views in operational commands.

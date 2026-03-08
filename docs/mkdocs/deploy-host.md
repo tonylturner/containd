@@ -1,7 +1,5 @@
 # Host Deployment
 
-This document is rendered from `docs/mkdocs/`.
-
 Outlines installation and systemd service setup for running `containd engine` and `containd mgmt` on a host. Host-mode guidance is still minimal; use Docker Compose for the default appliance workflow.
 
 Container builds:

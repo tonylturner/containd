@@ -49,6 +49,35 @@ func TestCompileSnapshotFirewallMapping(t *testing.T) {
 	}
 }
 
+func TestCompileSnapshotIdentities(t *testing.T) {
+	cfg := &config.Config{
+		System: config.SystemConfig{Hostname: "containd"},
+		Zones:  []config.Zone{{Name: "lan"}},
+		Firewall: config.FirewallConfig{
+			DefaultAction: config.ActionDeny,
+			Rules: []config.Rule{
+				{
+					ID:          "id-rule",
+					SourceZones: []string{"lan"},
+					Identities:  []string{"admin", "devops"},
+					Action:      config.ActionAllow,
+				},
+			},
+		},
+	}
+	snap, err := CompileSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(snap.Firewall) != 1 {
+		t.Fatalf("expected 1 firewall entry, got %d", len(snap.Firewall))
+	}
+	entry := snap.Firewall[0]
+	if len(entry.Identities) != 2 || entry.Identities[0] != "admin" || entry.Identities[1] != "devops" {
+		t.Fatalf("expected identities [admin devops], got %v", entry.Identities)
+	}
+}
+
 func TestCompileSnapshotPortForwards(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Zones = []config.Zone{{Name: "wan"}, {Name: "lan"}}

@@ -38,8 +38,10 @@ type Options struct {
 	BaseURL           string
 	HostKeyPath       string
 	AuthorizedKeysDir string
-	AllowPassword     bool
-	LabMode           bool
+	AllowPassword       bool
+	Banner              string
+	HostKeyRotationDays int
+	LabMode             bool
 	JWTSecret         []byte
 	// AllowLocalIP can reject connections based on the destination/local IP.
 	// When nil, all destination IPs are allowed.
@@ -86,7 +88,7 @@ func New(opts Options) (*Server, error) {
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	signer, err := ensureHostKey(s.opts.HostKeyPath)
+	signer, err := ensureHostKey(s.opts.HostKeyPath, s.opts.HostKeyRotationDays)
 	if err != nil {
 		return err
 	}
@@ -95,6 +97,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		PasswordCallback:  s.passwordCallback(),
 		PublicKeyCallback: s.publicKeyCallback(),
 		BannerCallback: func(conn ssh.ConnMetadata) string {
+			if s.opts.Banner != "" {
+				return s.opts.Banner + "\r\n"
+			}
 			return "containd ICS/OT firewall\r\n"
 		},
 	}
@@ -966,9 +971,19 @@ func writeRaw(w io.Writer, s string) {
 	_, _ = io.WriteString(w, s)
 }
 
-func ensureHostKey(path string) (ssh.Signer, error) {
+func ensureHostKey(path string, rotationDays int) (ssh.Signer, error) {
 	if b, err := os.ReadFile(path); err == nil {
-		return ssh.ParsePrivateKey(b)
+		if rotationDays > 0 {
+			info, err := os.Stat(path)
+			if err == nil && time.Since(info.ModTime()) > time.Duration(rotationDays)*24*time.Hour {
+				_ = os.Remove(path)
+				// fall through to generate new key
+			} else {
+				return ssh.ParsePrivateKey(b)
+			}
+		} else {
+			return ssh.ParsePrivateKey(b)
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

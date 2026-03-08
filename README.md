@@ -112,6 +112,14 @@ export config > backup.json
 import config < backup.json
 ```
 
+### Live Config Reload
+
+The containd process supports `SIGHUP` for configuration reload. Sending the signal causes the process to re-read its environment and refresh runtime state without downtime:
+
+```bash
+kill -HUP $(pidof containd)
+```
+
 ## Documentation
 
 Full product documentation is embedded in the appliance (accessible via the Help icon in the UI) and built from `docs/mkdocs/`:
@@ -126,12 +134,18 @@ Full product documentation is embedded in the appliance (accessible via the Help
 - [IDS Rules](docs/mkdocs/ids-rules.md)
 - [Third-Party Licenses](docs/mkdocs/SPDX.md)
 
+An [OpenAPI 3.0 specification](docs/openapi.yaml) is also available for the REST API.
+
 ## Security
 
 - Default-deny firewall posture out of the box.
 - Distroless container image running as nonroot.
 - JWT-based auth with session invalidation; admin and view-only roles.
+- JWT secret validation — a strong secret is required when lab mode is disabled (`CONTAIND_LAB_MODE=0`).
 - HTTPS with auto-generated self-signed certificate; custom cert install supported.
+- TLS 1.2+ with a hardened cipher suite list.
+- Rate limiting on authentication and API endpoints.
+- Trusted-proxy awareness for deployments behind a reverse proxy (`CONTAIND_TRUSTED_PROXIES`).
 - SSH key auth supported; password auth for lab use.
 
 For production hardening guidance and vulnerability reporting, see [SECURITY.md](SECURITY.md).

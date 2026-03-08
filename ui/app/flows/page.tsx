@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
@@ -14,6 +14,11 @@ function FlowsInner() {
   const [showAVOnly, setShowAVOnly] = useState(false);
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+
+  const filteredFlows = useMemo(
+    () => flows.filter((f) => (showAVOnly ? f.avDetected || f.avBlocked : true)),
+    [flows, showAVOnly],
+  );
 
   async function refresh() {
     setError(null);
@@ -95,8 +100,7 @@ function FlowsInner() {
                 </td>
               </tr>
             )}
-            {!loading && flows
-              .filter((f) => (showAVOnly ? f.avDetected || f.avBlocked : true))
+            {!loading && filteredFlows
               .map((f) => (
               <tr
                 key={f.flowId}

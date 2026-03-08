@@ -21,11 +21,11 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 	return func(c *gin.Context) {
 		var req factoryResetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
 		if strings.TrimSpace(req.Confirm) != "NUCLEAR" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "confirmation required", "detail": "type NUCLEAR to confirm"})
+			apiErrorDetail(c, http.StatusBadRequest, "confirmation required", "type NUCLEAR to confirm")
 			return
 		}
 
@@ -37,7 +37,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 
 		// Wipe users and sessions, then re-seed default admin.
 		if userStore == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "users store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "users store unavailable")
 			return
 		}
 
@@ -49,7 +49,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 
 		us, ok := userStore.(*users.SQLiteStore)
 		if !ok {
-			c.JSON(http.StatusNotImplemented, gin.H{"error": "factory reset not supported for this users store"})
+			apiError(c, http.StatusNotImplemented, "factory reset not supported for this users store")
 			return
 		}
 		if err := us.WipeAll(ctx); err != nil {
@@ -63,12 +63,12 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 
 		// Wipe config store and re-seed defaults.
 		if cfgStore == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "config store unavailable"})
+			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
 			return
 		}
 		cs, ok := cfgStore.(*config.SQLiteStore)
 		if !ok {
-			c.JSON(http.StatusNotImplemented, gin.H{"error": "factory reset not supported for this config store"})
+			apiError(c, http.StatusNotImplemented, "factory reset not supported for this config store")
 			return
 		}
 		if err := cs.WipeAll(ctx); err != nil {

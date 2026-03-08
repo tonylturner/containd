@@ -1,5 +1,3 @@
-# eBPF Plan
+# eBPF
 
-This document is rendered from `docs/mkdocs/`.
-
-Placeholder for XDP/TC programs, compatibility strategy, and kernel-to-userspace event streaming. eBPF is optional; fallback to nftables/conntrack must remain functional.
+eBPF (XDP/TC programs) for early packet drops, hardware counters, and kernel-to-userspace event streaming is on the roadmap. The current data plane uses nftables and conntrack for enforcement, which remains the primary and fully functional path.

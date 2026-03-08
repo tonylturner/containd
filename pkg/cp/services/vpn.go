@@ -528,8 +528,18 @@ func (m *VPNManager) stopOpenVPNNoLock() error {
 		return nil
 	}
 	_ = m.ovpnCmd.Process.Signal(syscall.SIGTERM)
-	m.log.Infow("stopped openvpn", "pid", m.ovpnCmd.Process.Pid)
-	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": m.ovpnCmd.Process.Pid, "count": 1})
+	m.log.Infow("stopping openvpn", "pid", m.ovpnCmd.Process.Pid)
+	cmd := m.ovpnCmd
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+	m.log.Infow("stopped openvpn", "pid", cmd.Process.Pid)
+	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": cmd.Process.Pid, "count": 1})
 	m.ovpnRunning = false
 	m.ovpnCmd = nil
 	m.ovpnLastStop = time.Now().UTC()

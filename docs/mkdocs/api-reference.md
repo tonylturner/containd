@@ -1,0 +1,62 @@
+# API Reference
+
+containd exposes a REST API under `/api/v1`. All authenticated endpoints require a JWT obtained via `POST /auth/login`.
+
+## OpenAPI Specification
+
+A machine-readable OpenAPI 3.0 specification is maintained at [`docs/openapi.yaml`](https://github.com/tonylturner/containd/blob/main/docs/openapi.yaml). You can load this file into any OpenAPI-compatible viewer (Swagger UI, Redocly, Stoplight, etc.) for interactive exploration.
+
+The spec covers authentication, configuration lifecycle, CRUD endpoints for zones/interfaces/firewall rules/assets, embedded services, monitoring, and diagnostics.
+
+## Quick Endpoint Overview
+
+See [Config Format — API Endpoints](config-format.md#api-endpoints-initial) for a concise listing of all REST endpoints.
+
+## Environment Variables
+
+The following environment variables control runtime behavior. They are read at startup and (where noted) on `SIGHUP` reload.
+
+### Listeners
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAIND_MGMT_HTTP_ADDR` | `:8080` | HTTP listen address inside the container |
+| `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | HTTPS listen address inside the container |
+| `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
+| `CONTAIND_ENGINE_ADDR` | `:8081` | Dataplane engine listen address |
+| `CONTAIND_ENGINE_URL` | `http://127.0.0.1:8081` | URL the management plane uses to reach the engine |
+
+### Persistence
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAIND_CONFIG_DB` | `/data/config.db` | Path to the configuration SQLite database |
+| `CONTAIND_AUDIT_DB` | `/data/audit.db` | Path to the audit log SQLite database |
+| `CONTAIND_USERS_DB` | `/data/users.db` | Path to the users SQLite database |
+
+### Authentication & Security
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAIND_LAB_MODE` | `1` | Enable lab/dev defaults. Set to `0` for production (enforces strong JWT secret). |
+| `CONTAIND_JWT_SECRET` | `containd-dev-secret-change-me` | HMAC secret for JWT signing. **Must** be changed when `LAB_MODE=0`. Generate with `openssl rand -hex 32`. |
+| `CONTAIND_COOKIE_SECURE` | `0` | Force the `Secure` flag on session cookies. Set to `1` when serving behind TLS. |
+| `CONTAIND_TRUSTED_PROXIES` | *(empty)* | Comma-separated CIDRs/IPs of reverse proxies trusted for `X-Forwarded-For` headers. |
+| `CONTAIND_DEFAULT_ADMIN_USERNAME` | `containd` | Username for the initial admin account (provisioned on first run). |
+| `CONTAIND_DEFAULT_ADMIN_PASSWORD` | `containd` | Password for the initial admin account. |
+
+### SSH
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAIND_SSH_AUTH_KEYS_DIR` | `/data/ssh/authorized_keys.d` | Directory for SSH authorized-key files |
+| `CONTAIND_SSH_HOST_KEY` | `/data/ssh/host_key` | Path to the SSH host key |
+| `CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY` | *(empty)* | Optional `authorized_keys` line to seed on first boot |
+| `CONTAIND_SSH_BOOTSTRAP_ADMIN_USER` | `containd` | User associated with the bootstrap SSH key |
+
+### Dataplane
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAIND_CAPTURE_IFACES` | *(empty)* | Comma-separated list of interfaces to capture on |
+| `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable) |

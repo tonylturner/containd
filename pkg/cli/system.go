@@ -352,6 +352,38 @@ func setSystemSSHAuthorizedKeysDirAPI(api *API) Command {
 	}
 }
 
+func setSystemSSHBannerAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh banner <text>")
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.Banner = strings.Join(args, " ")
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemSSHHostKeyRotationAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh host-key-rotation <days>")
+		}
+		days, err := strconv.Atoi(strings.TrimSpace(args[0]))
+		if err != nil || days < 0 {
+			return fmt.Errorf("invalid rotation days: %s", args[0])
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.HostKeyRotationDays = days
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
 func parseBoolArg(s string) (bool, error) {
 	v := strings.ToLower(strings.TrimSpace(s))
 	switch v {

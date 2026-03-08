@@ -60,7 +60,7 @@ export default function UsersPage() {
     if (!created) {
       setSaveState("error");
       setError("Failed to create user.");
-      setTimeout(() => setSaveState("idle"), 1500);
+      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     setNewUser({
@@ -99,7 +99,7 @@ export default function UsersPage() {
     if (!updated) {
       setSaveState("error");
       setError("Failed to update user.");
-      setTimeout(() => setSaveState("idle"), 1500);
+      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     await refresh();
@@ -118,7 +118,7 @@ export default function UsersPage() {
     if (!ok) {
       setSaveState("error");
       setError("Failed to set password.");
-      setTimeout(() => setSaveState("idle"), 1500);
+      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     setSaveState("saved");
@@ -135,7 +135,7 @@ export default function UsersPage() {
     if (!ok) {
       setSaveState("error");
       setError("Failed to delete user. Ensure at least one admin remains.");
-      setTimeout(() => setSaveState("idle"), 1500);
+      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     await refresh();
@@ -330,9 +330,6 @@ export default function UsersPage() {
             </table>
           </div>
 
-          <p className="mt-3 text-xs text-slate-400">
-            State: {saveState}
-          </p>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">

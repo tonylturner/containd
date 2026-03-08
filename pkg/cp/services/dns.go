@@ -418,6 +418,7 @@ func (m *DNSManager) startStatsPoller() {
 	m.statsCancel = cancel
 	ticker := time.NewTicker(15 * time.Second)
 	go func() {
+		defer cancel()
 		defer ticker.Stop()
 		for {
 			select {
