@@ -22,7 +22,8 @@ func replayFile(ctx context.Context, path string, iface *net.Interface, ratePPS 
 		return err
 	}
 	defer f.Close()
-	if _, err := readPCAPGlobalHeader(f); err != nil {
+	snaplen, err := readPCAPGlobalHeader(f)
+	if err != nil {
 		return err
 	}
 
@@ -45,7 +46,7 @@ func replayFile(ctx context.Context, path string, iface *net.Interface, ratePPS 
 			return ctx.Err()
 		default:
 		}
-		_, data, err := readPCAPPacket(f)
+		_, data, err := readPCAPPacket(f, snaplen)
 		if err != nil {
 			if err == io.EOF {
 				return nil
