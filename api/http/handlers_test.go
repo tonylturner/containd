@@ -287,6 +287,12 @@ func TestHealthEndpoint(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", body["status"])
 	}
+	if _, ok := body["commit"]; ok {
+		t.Fatalf("health endpoint must not expose commit metadata")
+	}
+	if _, ok := body["hostname"]; ok {
+		t.Fatalf("health endpoint must not expose hostname metadata")
+	}
 }
 
 func TestHealthNoAuthRequired(t *testing.T) {
