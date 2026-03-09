@@ -7,7 +7,6 @@ import {
   api,
   isAdmin,
   fetchDataPlane,
-  setDataPlane,
   getRulesetPreview,
   type DataPlaneConfig,
   type FirewallRule,
@@ -112,7 +111,6 @@ export default function FirewallPage() {
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
   const [routing, setRouting] = useState<RoutingConfig | null>(null);
   const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
-  const [dpiSaveState, setDpiSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
@@ -228,17 +226,6 @@ export default function FirewallPage() {
     setEditing(null);
     refresh();
   }
-  async function saveDpiConfig() {
-    if (!isAdmin()) return;
-    setDpiSaveState("saving");
-    const saved = await setDataPlane({
-      captureInterfaces: dpiConfig.captureInterfaces ?? [],
-      dpiMock: dpiConfig.dpiMock ?? false,
-    });
-    setDpiSaveState(saved ? "saved" : "error");
-    setTimeout(() => setDpiSaveState("idle"), 1500);
-  }
-
   const outboundStatus = (() => {
     const isDefaultDst = (dst: string) => {
       const d = dst.trim().toLowerCase();
@@ -479,60 +466,26 @@ export default function FirewallPage() {
         )}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-white">DPI capture (required for ICS filters)</h2>
+            <h2 className="text-sm font-semibold text-white">DPI Status</h2>
             <p className="mt-1 text-xs text-slate-400">
-              DPI capture is configured here; PCAP storage is managed separately.
+              Deep packet inspection for ICS protocol filtering.
             </p>
           </div>
-          {isAdmin() && (
-            <button
-              onClick={saveDpiConfig}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
-            >
-              {dpiSaveState === "saving" ? "Saving..." : "Save"}
-            </button>
-          )}
+          <span className={`rounded-full px-2 py-0.5 text-xs ${(dpiConfig.captureInterfaces ?? []).length > 0 ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-400"}`}>
+            {(dpiConfig.captureInterfaces ?? []).length > 0 ? "Enabled" : "Disabled"}
+          </span>
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
-              Capture interfaces
-              <InfoTip label="Comma-separated interfaces to inspect for DPI (e.g., lan2, lan3)." />
-            </label>
-            <input
-              value={(dpiConfig.captureInterfaces ?? []).join(", ")}
-              disabled={!isAdmin()}
-              onChange={(e) =>
-                setDpiConfig((c) => ({
-                  ...c,
-                  captureInterfaces: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
-              placeholder="lan2, lan3"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              checked={dpiConfig.dpiMock ?? false}
-              disabled={!isAdmin()}
-              onChange={(e) => setDpiConfig((c) => ({ ...c, dpiMock: e.target.checked }))}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
-            />
-            Safe learning lab mode (DPI inspect-all)
-            <InfoTip label="Lab-only: emit synthetic Modbus events for learning and UI visibility." />
-          </label>
+        <div className="mt-2 text-xs text-slate-300">
+          Monitored interfaces: {(dpiConfig.captureInterfaces ?? []).length > 0 ? (dpiConfig.captureInterfaces ?? []).join(", ") : "none"}
         </div>
-        {!isAdmin() && (
-          <div className="mt-2 text-xs text-slate-400">View-only mode: DPI capture settings are read-only.</div>
-        )}
+        <div className="mt-2">
+          <Link href="/dataplane/" className="text-xs font-semibold text-mint hover:text-mint/80">
+            Configure DPI settings &rarr;
+          </Link>
+        </div>
       </div>
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
@@ -719,7 +672,7 @@ function EditRuleModal({
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
           <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure above).</span>
+          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-mint hover:text-mint/80">PCAP Capture</a>).</span>
         </div>
 
         {icsEnabled && (
@@ -881,7 +834,7 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
         <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure above).</span>
+        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-mint hover:text-mint/80">PCAP Capture</a>).</span>
       </div>
 
       {icsEnabled && (

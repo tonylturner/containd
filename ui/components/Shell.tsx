@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
+import { ConfigStatusBar } from "./ConfigStatusBar";
 
 type NavItem = { href: string; label: string };
 type NavGroup = { label: string; items: NavItem[]; defaultCollapsed?: boolean };
@@ -36,6 +37,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
     {
       label: "Policy",
       items: [
+        { href: "/wizard/", label: "Policy Wizard" },
         { href: "/firewall/", label: "Firewall Rules" },
         { href: "/ics/", label: "ICS Filters" },
         { href: "/templates/", label: "ICS Templates" },
@@ -384,6 +386,7 @@ export function Shell({
                     <strong>Lab mode</strong> — Authentication is relaxed. This configuration is not suitable for production use.
                   </div>
                 )}
+                <ConfigStatusBar />
                 <div className="mb-6 flex items-center justify-between gap-4">
                   <h1 className="text-2xl font-bold text-white">{title}</h1>
                   <div className="flex items-center gap-2">
