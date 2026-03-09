@@ -145,9 +145,13 @@ function ConfigPage() {
       variant: "default",
       onConfirm: async () => {
         setStatus(null);
-        const res = await api.commit();
-        setStatus(res ? "Committed." : "Commit failed.");
-        if (res) window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        const result = await api.commit();
+        if (result.ok) {
+          setStatus("Committed.");
+          window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        } else {
+          setStatus(`Commit failed: ${result.error}`);
+        }
         refresh();
       },
     });
@@ -164,8 +168,8 @@ function ConfigPage() {
       variant: "default",
       onConfirm: async () => {
         setStatus(null);
-        const res = await api.commitConfirmed(secs);
-        setStatus(res ? `Commit-confirmed started (${secs}s).` : "Commit-confirmed failed.");
+        const result = await api.commitConfirmed(secs);
+        setStatus(result.ok ? `Commit-confirmed started (${secs}s).` : `Commit-confirmed failed: ${result.error}`);
         refresh();
       },
     });
@@ -189,9 +193,13 @@ function ConfigPage() {
       variant: "danger",
       onConfirm: async () => {
         setStatus(null);
-        const res = await api.rollback();
-        setStatus(res ? "Rolled back." : "Rollback failed.");
-        if (res) window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        const result = await api.rollback();
+        if (result.ok) {
+          setStatus("Rolled back.");
+          window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        } else {
+          setStatus(`Rollback failed: ${result.error}`);
+        }
         refresh();
       },
     });

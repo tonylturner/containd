@@ -276,7 +276,17 @@ export default function AVPage() {
             <select
               value={cfg.mode ?? "icap"}
               disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, mode: e.target.value as AVConfig["mode"] }))}
+              onChange={(e) => {
+                const mode = e.target.value as AVConfig["mode"];
+                setCfg((c) => {
+                  const next = { ...c, mode };
+                  // Auto-populate required ClamAV socket path if switching to clamav mode
+                  if (mode === "clamav" && !c.clamav?.socketPath) {
+                    next.clamav = { ...(c.clamav ?? {}), socketPath: "/var/run/clamav/clamd.sock" };
+                  }
+                  return next;
+                });
+              }}
               className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="icap">ICAP (external)</option>
