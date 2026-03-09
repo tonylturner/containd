@@ -14,6 +14,8 @@ import {
 import { Shell } from "../components/Shell";
 import { Console } from "../components/Console";
 import { Skeleton } from "../components/Skeleton";
+import { Card } from "../components/Card";
+import { StatusBadge, StatusIndicator } from "../components/StatusBadge";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -30,14 +32,7 @@ type ServiceInfo = {
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [events, setEvents] = useState<TelemetryEvent[]>([]);
-  const [flows, setFlows] = useState<FlowSummary[]>([]);
-  const [stats, setStats] = useState<SystemStats | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [clock, setClock] = useState("");
-  const [simRunning, setSimRunning] = useState<boolean | null>(null);
-  const [simToggling, setSimToggling] = useState(false);
 
   // Clock
   useEffect(() => {
@@ -67,229 +62,130 @@ export default function Home() {
     };
   }, []);
 
-  const toggleSimulation = useCallback(async () => {
-    setSimToggling(true);
-    try {
-      const r = simRunning
-        ? await api.stopSimulation()
-        : await api.startSimulation();
-      if (r) setSimRunning(r.running);
-    } finally {
-      setSimToggling(false);
-    }
-  }, [simRunning]);
-
-  const health = data?.health ?? null;
-  const eventStats = data?.eventStats ?? null;
-  const servicesStatus = data?.services ?? null;
-  const hasAlerts =
-    eventStats &&
-    (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
-
-  // Derive services list from real status data, with sparklines from event history
-  const services = deriveServices(servicesStatus, events);
-
-  // Per-zone threat posture: count IDS alerts per zone from events
-  const zoneThreatMap = buildZoneThreatMap(events, zones);
-
-  // Per-zone traffic sparklines: bucket events by zone over 60s
-  const zoneSparklineMap = buildZoneSparklines(events, zones);
+  // Derive overall system health
+  const systemHealth = health ? "healthy" : "unknown";
+  const hasAlerts = eventStats && (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
   return (
     <Shell title="Dashboard">
-      {/* ── Topbar row ──────────────────────────────────────── */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4">
-          {health ? (
-            <div className="flex items-center gap-2.5">
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  hasAlerts ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
-                }`}
-              />
-              <span className="text-sm font-semibold text-white tracking-wide">
-                {health.hostname ?? "containd"}
-              </span>
-              <span className="text-xs text-slate-500">
-                {hasAlerts ? "Alerts active" : "All systems nominal"}
-              </span>
-            </div>
-          ) : (
-            <Skeleton className="h-5 w-48" />
-          )}
-          {health?.build && (
-            <span className="hidden sm:inline text-2xs text-amber-500/60 font-mono">
-              {health.build === "dev" ? "v0.1.1-beta" : `v${health.build}`}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4 text-2xs font-mono text-slate-500">
-          {services.slice(0, 4).map((s) => (
-            <Link
-              key={s.name}
-              href={s.href}
-              className="flex items-center gap-1.5 hover:text-slate-300 transition-colors"
-            >
-              {s.name}
-              <span
-                className={`inline-block h-1.5 w-1.5 rounded-full ${
-                  s.active ? "bg-emerald-400" : "bg-slate-600"
-                }`}
-              />
-            </Link>
-          ))}
-          {simRunning !== null && (
-            <button
-              type="button"
-              onClick={toggleSimulation}
-              disabled={simToggling}
-              className="flex items-center gap-2 text-2xs font-mono"
-              title={simRunning ? "Stop traffic simulation" : "Start traffic simulation"}
-            >
-              <span className={`text-2xs ${simRunning ? "text-amber-400" : "text-slate-500"}`}>SIM</span>
-              <span
-                className={`relative inline-flex h-4 w-8 items-center rounded-[2px] transition-colors ${
-                  simRunning ? "bg-amber-500" : "bg-white/10"
-                }`}
-              >
-                <span className={`inline-block h-3 w-3 rounded-[1px] bg-white transition-transform ${
-                  simRunning ? "translate-x-4" : "translate-x-0.5"
-                }`} />
-              </span>
-            </button>
-          )}
-          <span className="text-amber-500/80 tabular-nums">{clock}</span>
-        </div>
+      {/* ── Health summary row ──────────────────────────────── */}
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        {health ? (
+          <StatusIndicator
+            status={hasAlerts ? "degraded" : systemHealth as any}
+            label={health.hostname ?? "containd"}
+            sublabel={hasAlerts ? "Alerts require attention" : "All systems operational"}
+          />
+        ) : (
+          <Skeleton className="h-5 w-48" />
+        )}
+        {health && (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>Build {health.build ?? "dev"}</span>
+            <span>&middot;</span>
+            <span>{health.time ? new Date(health.time).toLocaleString() : ""}</span>
+          </div>
+        )}
       </div>
 
-      {/* ── Needs attention ─────────────────────────────────── */}
+      {/* ── Needs attention ────────────────────────────────── */}
       {hasAlerts && (
-        <div className="mb-5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 animate-fade-in">
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              className="text-amber-400 flex-shrink-0"
-            >
-              <path
-                d="M7 1L13 13H1L7 1Z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-            </svg>
+        <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 animate-fade-in">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400">Needs Attention</h2>
+          <div className="flex flex-wrap gap-3">
             {eventStats!.idsAlerts > 0 && (
-              <Link
-                href="/alerts/"
-                className="text-amber-300 hover:text-amber-200 transition-colors"
-              >
-                {eventStats!.idsAlerts} IDS alert
-                {eventStats!.idsAlerts !== 1 ? "s" : ""}
+              <Link href="/alerts/" className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300 transition-ui hover:bg-amber-500/15">
+                <StatusBadge variant="warning" dot>{eventStats!.idsAlerts} IDS alerts</StatusBadge>
               </Link>
             )}
             {eventStats!.avDetections > 0 && (
-              <Link
-                href="/events/?av=1"
-                className="text-red-400 hover:text-red-300 transition-colors"
-              >
-                {eventStats!.avDetections} AV detection
-                {eventStats!.avDetections !== 1 ? "s" : ""}
+              <Link href="/events/?av=1" className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300 transition-ui hover:bg-red-500/15">
+                <StatusBadge variant="error" dot>{eventStats!.avDetections} AV detections</StatusBadge>
               </Link>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Main grid ───────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_320px] gap-4">
-        {/* Network Pulse — spans 2 cols */}
-        <div className="lg:col-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Network Pulse
-            </h3>
-            <NetworkPulseStats flows={flows} eventStats={eventStats} />
-          </div>
-          <div className="h-[220px]">
-            <NetworkPulseCanvas zones={zones} flows={flows} events={events} />
-          </div>
-        </div>
+      {/* ── Stats row ──────────────────────────────────────── */}
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+        <StatCard label="Zones" value={zoneCount} href="/zones/" />
+        <StatCard label="Interfaces" value={ifaceCount} href="/interfaces/" />
+        <StatCard label="FW Rules" value={ruleCount} href="/firewall/" />
+        <StatCard label="ICS Rules" value={icsRuleCount} href="/ics/" />
+        <StatCard label="Assets" value={assetCount} href="/assets/" />
+      </div>
 
-        {/* Zone Status — right column, spans 2 rows */}
-        <div className="lg:row-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4 overflow-y-auto max-h-[520px]">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Zone Status
-          </h3>
-          {zones.length > 0 ? (
-            <ZoneList zones={zones} threatMap={zoneThreatMap} sparklineMap={zoneSparklineMap} />
+      {/* ── Main grid ──────────────────────────────────────── */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {/* Services */}
+        <Card title="Services">
+          {servicesStatus ? <ServicesWidget status={servicesStatus} /> : <Skeleton className="h-32 w-full" />}
+        </Card>
+
+        {/* Traffic */}
+        <Card title="Traffic">
+          {eventStats ? (
+            <div className="space-y-3">
+              <TrafficMeter label="Total events" value={eventStats.totalEvents} color="var(--primary)" />
+              <TrafficMeter label="IDS alerts" value={eventStats.idsAlerts} color="var(--warning)" />
+              <TrafficMeter label="AV detections" value={eventStats.avDetections} color="var(--error)" />
+              {eventStats.modbusWrites > 0 && (
+                <TrafficMeter label="Modbus writes" value={eventStats.modbusWrites} color="var(--orange)" />
+              )}
+            </div>
           ) : (
             <Skeleton className="h-32 w-full" />
           )}
-        </div>
+        </Card>
 
-        {/* Services */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Service Health
-          </h3>
-          <ServiceGrid services={services} />
-        </div>
+        {/* System info */}
+        <Card title="System">
+          {health ? (
+            <div className="space-y-2 text-sm">
+              <KV label="User" value={me?.username ?? "—"} />
+              <KV label="Role" value={me?.role ?? "—"} />
+              <KV
+                label="Last change"
+                value={
+                  lastAdminChange
+                    ? `${new Date(lastAdminChange.timestamp).toLocaleString()}`
+                    : "—"
+                }
+              />
+              {lastAdminChange && (
+                <div className="text-xs text-slate-500 pl-0">{lastAdminChange.action}</div>
+              )}
+            </div>
+          ) : (
+            <Skeleton className="h-32 w-full" />
+          )}
+        </Card>
+      </div>
 
-        {/* Traffic Chart */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Traffic
-            <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
-              {events.some((e) => {
-                if (!e.timestamp) return false;
-                return Date.now() - new Date(e.timestamp).getTime() < 60_000;
-              }) ? "60s window" : "24h baseline"}
-            </span>
-          </h3>
-          <div className="h-[120px] mb-3">
-            <TrafficChart events={events} />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <TrafficCounter
-              label="Total Events"
-              value={eventStats?.total ?? 0}
-              color="text-amber-400"
+      {/* ── Quick start ────────────────────────────────────── */}
+      <div className="mt-5">
+        <Card title="Quick Start">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <QuickStartRow
+              href="/interfaces/"
+              icon="/icons/docker.svg"
+              title="Interfaces"
+              desc="Assign ports and zones"
             />
             <TrafficCounter
               label="IDS Alerts"
               value={eventStats?.idsAlerts ?? 0}
               color="text-red-400"
             />
-            <TrafficCounter
-              label="Active Flows"
-              value={
-                flows.filter((f) => {
-                  if (!f.lastSeen) return false;
-                  return Date.now() - new Date(f.lastSeen).getTime() < 120_000;
-                }).length
-              }
-              color="text-emerald-400"
+            <QuickStartRow
+              href="/system/services/"
+              icon="/icons/nginx.svg"
+              title="Services"
+              desc="Enable DNS, VPN, Proxy"
             />
           </div>
-        </div>
-
-        {/* Event Stream — spans 2 cols */}
-        <div className="lg:col-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Event Stream
-          </h3>
-          <EventStream events={events} />
-        </div>
-
-        {/* System Health — replaces old stats row */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            System Health
-          </h3>
-          <SystemHealthPanel stats={stats} data={data} />
-        </div>
+        </Card>
       </div>
 
       {/* ── Console (collapsible) ──────────────────────────── */}
@@ -297,28 +193,13 @@ export default function Home() {
         <button
           type="button"
           onClick={() => setConsoleOpen((v) => !v)}
-          className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-slate-500 transition-colors hover:text-slate-300"
+          className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-slate-500 transition-ui hover:text-slate-300"
         >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <polyline points="4,17 10,11 4,5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+            <polyline points="4,17 10,11 4,5" /><line x1="12" y1="19" x2="20" y2="19" />
           </svg>
           CLI Console
-          <svg
-            viewBox="0 0 24 24"
-            className={`h-3 w-3 transition-transform duration-200 ${
-              consoleOpen ? "rotate-180" : ""
-            }`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
+          <svg viewBox="0 0 24 24" className={`h-3 w-3 transition-transform duration-200 ${consoleOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2}>
             <polyline points="6,9 12,15 18,9" />
           </svg>
         </button>
@@ -332,524 +213,93 @@ export default function Home() {
   );
 }
 
-// ── Network Pulse Stats ────────────────────────────────────────────────
-
-function NetworkPulseStats({
-  flows,
-  eventStats,
-}: {
-  flows: FlowSummary[];
-  eventStats: DashboardData["eventStats"] | null;
-}) {
-  const allowed = flows.filter((f) => !f.avBlocked).length;
-  const blocked = flows.filter((f) => f.avBlocked).length;
-  const inspected = eventStats?.idsAlerts ?? 0;
-
+function KV({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-4 text-2xs font-mono">
-      <span className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-emerald-400" />
-        <span className="text-slate-500">ALLOWED</span>
-        <span className="text-emerald-400 tabular-nums">{allowed}</span>
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-red-400" />
-        <span className="text-slate-500">BLOCKED</span>
-        <span className="text-red-400 tabular-nums">{blocked}</span>
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-amber-400" />
-        <span className="text-slate-500">INSPECT</span>
-        <span className="text-amber-400 tabular-nums">{inspected}</span>
-      </span>
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-slate-200">{value}</span>
     </div>
   );
 }
 
-// ── Network Pulse Canvas (DATA-DRIVEN) ─────────────────────────────────
-
-function NetworkPulseCanvas({
-  zones,
-  flows,
-  events,
-}: {
-  zones: Zone[];
-  flows: FlowSummary[];
-  events: TelemetryEvent[];
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
-  const packetsRef = useRef<
-    Array<{
-      fromIdx: number;
-      toIdx: number;
-      t: number;
-      speed: number;
-      color: string;
-    }>
-  >([]);
-  // Track data volume to control animation rate
-  const dataRateRef = useRef({ flowCount: 0, eventCount: 0 });
-
-  // Update data rate when props change
-  useEffect(() => {
-    dataRateRef.current = {
-      flowCount: flows.length,
-      eventCount: events.length,
-    };
-  }, [flows.length, events.length]);
-
-  // Build nodes from real zones + a CORE FW node + WAN node
-  const buildNodes = useCallback(() => {
-    const core = {
-      id: "CORE FW",
-      x: 0.5,
-      y: 0.5,
-      color: "#06b6d4",
-      r: 14,
-    };
-    const wan = { id: "WAN", x: 0.88, y: 0.48, color: "#6b7280", r: 9 };
-
-    if (zones.length === 0) {
-      return [core, wan];
-    }
-
-    const zoneNodes = zones.slice(0, 8).map((z, i) => {
-      const angle =
-        (i / Math.min(zones.length, 8)) * Math.PI * 2 - Math.PI / 2;
-      const rx = 0.32;
-      const ry = 0.35;
-      return {
-        id: (z.alias || z.name).toUpperCase().slice(0, 10),
-        x: 0.5 + Math.cos(angle) * rx,
-        y: 0.5 + Math.sin(angle) * ry,
-        color: "#22c55e",
-        r: 9,
-      };
-    });
-
-    return [...zoneNodes, core, wan];
-  }, [zones]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const n = buildNodes();
-    const coreIdx = n.findIndex((nd) => nd.id === "CORE FW");
-    const wanIdx = n.findIndex((nd) => nd.id === "WAN");
-
-    const edges: Array<{ from: number; to: number }> = [];
-    n.forEach((_, i) => {
-      if (i !== coreIdx && i !== wanIdx) edges.push({ from: i, to: coreIdx });
-    });
-    if (wanIdx >= 0 && coreIdx >= 0)
-      edges.push({ from: coreIdx, to: wanIdx });
-
-    const resize = () => {
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = canvas.offsetWidth * ratio;
-      canvas.height = canvas.offsetHeight * ratio;
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-
-    let frame = 0;
-    const packets = packetsRef.current;
-
-    function spawnPacket() {
-      if (edges.length === 0) return;
-      const { flowCount, eventCount } = dataRateRef.current;
-      // Only spawn if there's actual traffic data
-      if (flowCount === 0 && eventCount === 0) return;
-
-      const edge = edges[Math.floor(Math.random() * edges.length)];
-      const reverse = Math.random() > 0.5;
-
-      // Color based on real event distribution
-      const totalEvents = eventCount || 1;
-      const roll = Math.random();
-      let color = "#22c55e"; // allow (green)
-      if (roll < 0.05) color = "#ef4444"; // block (red) - rare
-      else if (roll < 0.15) color = "#f59e0b"; // inspect (amber)
-
-      packets.push({
-        fromIdx: reverse ? edge.to : edge.from,
-        toIdx: reverse ? edge.from : edge.to,
-        t: 0,
-        speed: 0.006 + Math.random() * 0.01,
-        color,
-      });
-    }
-
-    function draw() {
-      frame++;
-      const w = canvas!.offsetWidth;
-      const h = canvas!.offsetHeight;
-      ctx!.clearRect(0, 0, w, h);
-
-      const getPos = (idx: number) => ({
-        x: n[idx].x * w,
-        y: n[idx].y * h,
-      });
-
-      // Draw edges
-      edges.forEach((e) => {
-        const a = getPos(e.from);
-        const b = getPos(e.to);
-        ctx!.beginPath();
-        ctx!.moveTo(a.x, a.y);
-        ctx!.lineTo(b.x, b.y);
-        ctx!.strokeStyle = "rgba(245,158,11,0.1)";
-        ctx!.lineWidth = 1;
-        ctx!.stroke();
-      });
-
-      // Spawn rate proportional to data volume
-      // If quiet (0 flows), no packets. If busy, more frequent.
-      const { flowCount } = dataRateRef.current;
-      const spawnInterval = flowCount > 50 ? 10 : flowCount > 10 ? 20 : flowCount > 0 ? 40 : 0;
-      if (spawnInterval > 0 && frame % spawnInterval === 0) spawnPacket();
-
-      // Draw and advance packets
-      for (let i = packets.length - 1; i >= 0; i--) {
-        const p = packets[i];
-        if (p.fromIdx >= n.length || p.toIdx >= n.length) {
-          packets.splice(i, 1);
-          continue;
-        }
-        const a = getPos(p.fromIdx);
-        const b = getPos(p.toIdx);
-        const x = a.x + (b.x - a.x) * p.t;
-        const y = a.y + (b.y - a.y) * p.t;
-        ctx!.beginPath();
-        ctx!.arc(x, y, 3, 0, Math.PI * 2);
-        ctx!.fillStyle = p.color;
-        ctx!.shadowColor = p.color;
-        ctx!.shadowBlur = 8;
-        ctx!.fill();
-        ctx!.shadowBlur = 0;
-        p.t += p.speed;
-        if (p.t >= 1) packets.splice(i, 1);
-      }
-
-      // Draw nodes
-      n.forEach((nd) => {
-        const nx = nd.x * w;
-        const ny = nd.y * h;
-
-        // Glow
-        const grd = ctx!.createRadialGradient(nx, ny, 0, nx, ny, nd.r * 2.5);
-        grd.addColorStop(0, nd.color + "40");
-        grd.addColorStop(1, nd.color + "00");
-        ctx!.beginPath();
-        ctx!.arc(nx, ny, nd.r * 2.5, 0, Math.PI * 2);
-        ctx!.fillStyle = grd;
-        ctx!.fill();
-
-        // Node circle
-        ctx!.beginPath();
-        ctx!.arc(nx, ny, nd.r, 0, Math.PI * 2);
-        ctx!.fillStyle = "#0d1117";
-        ctx!.fill();
-        ctx!.strokeStyle = nd.color;
-        ctx!.lineWidth = 1.5;
-        ctx!.stroke();
-
-        // Label
-        ctx!.fillStyle = "rgba(148,163,184,0.8)";
-        ctx!.font = "9px monospace";
-        ctx!.textAlign = "center";
-        ctx!.fillText(nd.id, nx, ny + nd.r + 14);
-      });
-
-      animRef.current = requestAnimationFrame(draw);
-    }
-
-    animRef.current = requestAnimationFrame(draw);
-
-    return () => {
-      window.removeEventListener("resize", resize);
-      cancelAnimationFrame(animRef.current);
-    };
-  }, [buildNodes]);
-
-  return <canvas ref={canvasRef} className="w-full h-full" />;
-}
-
-// ── Zone List ──────────────────────────────────────────────────────────
-
-function ZoneList({ zones, threatMap, sparklineMap }: {
-  zones: Zone[];
-  threatMap: Record<string, ZoneThreat>;
-  sparklineMap: Record<string, number[]>;
-}) {
+function StatCard({ label, value, href }: { label: string; value: number | null; href: string }) {
   return (
-    <div className="space-y-2">
-      {zones.map((z) => {
-        const threat = threatMap[z.name] ?? { alerts: 0, blocks: 0, level: "clear" as const };
-        const sparkline = sparklineMap[z.name] ?? [];
-        const badgeInfo = zoneBadge(threat.level);
-
-        return (
-          <Link
-            key={z.name}
-            href="/zones/"
-            className="block rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider font-mono">
-                {z.alias || z.name}
-              </span>
-              <span className={`text-2xs font-mono px-1.5 py-0.5 rounded ${badgeInfo.cls}`}>
-                {badgeInfo.label}
-              </span>
-            </div>
-            {threat.alerts > 0 && (
-              <div className="text-2xs text-amber-400/80 font-mono mb-1">
-                {threat.alerts} alert{threat.alerts !== 1 ? "s" : ""}
-                {threat.blocks > 0 && ` · ${threat.blocks} block${threat.blocks !== 1 ? "s" : ""}`}
-              </div>
-            )}
-            {z.description && (
-              <div className="text-2xs text-slate-500 truncate">
-                {z.description}
-              </div>
-            )}
-            {/* Per-zone traffic sparkline */}
-            {sparkline.length > 0 && (
-              <div className="flex items-end gap-px h-4 mt-2">
-                {sparkline.map((v, i) => {
-                  const max = Math.max(...sparkline, 1);
-                  const h = Math.max(1, Math.round((v / max) * 16));
-                  return (
-                    <div
-                      key={i}
-                      className="flex-1 rounded-t-sm"
-                      style={{
-                        height: `${h}px`,
-                        background: threat.level === "critical"
-                          ? `rgba(239,68,68,${0.2 + (v / max) * 0.5})`
-                          : threat.level === "elevated"
-                            ? `rgba(245,158,11,${0.2 + (v / max) * 0.5})`
-                            : `rgba(34,197,94,${0.15 + (v / max) * 0.4})`,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </Link>
-        );
-      })}
-    </div>
+    <Link
+      href={href}
+      className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-card transition-ui hover:bg-white/[0.06] hover:border-white/[0.12]"
+    >
+      <div className="text-2xl font-semibold tabular-nums text-white">{value ?? "—"}</div>
+      <div className="mt-0.5 text-xs text-slate-500">{label}</div>
+    </Link>
   );
 }
 
-// ── Service Grid (with links + real data widgets) ──────────────────────
+function ServicesWidget({ status }: { status: Record<string, unknown> | null }) {
+  const syslogConfigured = (status?.["syslog"] as any)?.configured_forwarders > 0;
+  const proxy = status?.["proxy"] as any;
+  const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
+  const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
+  const avEnabled = (status?.["av"] as any)?.enabled;
+  const vpnActive = (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running;
 
-function ServiceGrid({ services }: { services: ServiceInfo[] }) {
+  const chips: Array<{ label: string; ok: boolean; icon?: string; href: string }> = [
+    { label: "IPS", ok: true, href: "/ids/" },
+    { label: "AV", ok: !!avEnabled, href: "/system/services/av/" },
+    { label: "VPN", ok: !!vpnActive, icon: "/icons/wireguard.svg", href: "/vpn/" },
+    { label: "Proxy", ok: envoyActive || nginxActive, icon: "/icons/envoyproxy.svg", href: "/proxies/" },
+    { label: "Syslog", ok: !!syslogConfigured, href: "/system/services/syslog/" },
+  ];
+
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {services.map((s) => (
+    <div className="grid grid-cols-3 gap-2 text-xs">
+      {chips.map((c) => (
         <Link
-          key={s.name}
-          href={s.href}
-          className={`block rounded-lg border p-3 transition-colors hover:border-white/[0.12] ${
-            s.active
-              ? "border-emerald-500/20 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.07]"
-              : "border-white/[0.06] bg-white/[0.02] opacity-50 hover:opacity-70"
+          key={c.label}
+          href={c.href}
+          className={`flex min-h-[52px] flex-col items-center justify-center rounded-lg px-2 py-2 text-center transition-ui ${
+            c.ok
+              ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15"
+              : "bg-white/[0.04] text-slate-500 hover:bg-white/[0.06]"
           }`}
         >
-          <div
-            className={`text-xs font-bold tracking-wider uppercase ${
-              s.active ? "text-emerald-400" : "text-slate-500"
-            }`}
-          >
-            {s.name}
-          </div>
-          <div className="text-2xs text-slate-500 mt-0.5 truncate">
-            {s.detail}
-          </div>
-          {/* Real sparkline from service telemetry */}
-          {s.sparkline && s.sparkline.length > 0 && (
-            <div className="flex items-end gap-0.5 h-5 mt-2">
-              {s.sparkline.map((v, i) => {
-                const max = Math.max(...s.sparkline!, 1);
-                const h = Math.max(2, Math.round((v / max) * 20));
-                return (
-                  <div
-                    key={i}
-                    className="flex-1 rounded-t-sm transition-all duration-300"
-                    style={{
-                      height: `${h}px`,
-                      background: s.active
-                        ? `rgba(34,197,94,${0.3 + (v / max) * 0.5})`
-                        : "rgba(55,65,81,0.4)",
-                    }}
-                  />
-                );
-              })}
-            </div>
+          {c.icon && (
+            <Image src={c.icon} alt="" width={14} height={14} className="mx-auto mb-1 h-3.5 w-3.5 opacity-60" />
           )}
-          {s.errorRate !== undefined && s.errorRate > 0 && (
-            <div className="text-2xs text-red-400/70 mt-1 font-mono">
-              {s.errorRate.toFixed(1)} err/min
-            </div>
-          )}
+          <span className="font-medium">{c.label}</span>
+          <span className={`mt-0.5 text-2xs ${c.ok ? "text-emerald-500" : "text-slate-600"}`}>
+            {c.ok ? "Active" : "Off"}
+          </span>
         </Link>
       ))}
     </div>
   );
 }
 
-// ── Traffic Chart (DATA-DRIVEN from real events) ───────────────────────
-
-function TrafficChart({ events }: { events: TelemetryEvent[] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
-  // Build histogram of events by second (last 60 seconds)
-  const histogramRef = useRef<number[]>(new Array(60).fill(0));
-  const isIdleRef = useRef(false);
-
-  useEffect(() => {
-    // Build a 60-second histogram from real event timestamps
-    const now = Date.now();
-    const buckets = new Array(60).fill(0);
-    for (const e of events) {
-      if (!e.timestamp) continue;
-      const age = now - new Date(e.timestamp).getTime();
-      const bucket = 59 - Math.floor(age / 1000);
-      if (bucket >= 0 && bucket < 60) buckets[bucket]++;
-    }
-
-    const hasTraffic = buckets.some((v) => v > 0);
-    isIdleRef.current = !hasTraffic;
-
-    if (!hasTraffic) {
-      // Show a 24h historical baseline pattern (simulated diurnal curve)
-      // This gives visual context instead of a flat line when idle
-      for (let i = 0; i < 60; i++) {
-        // Gentle sine wave representing typical 24h traffic pattern
-        const t = i / 60;
-        const diurnal = Math.sin(t * Math.PI * 2 - Math.PI / 2) * 0.3 + 0.5;
-        const noise = Math.sin(t * 47) * 0.08 + Math.sin(t * 23) * 0.05;
-        buckets[i] = Math.max(0.05, diurnal + noise);
-      }
-    }
-
-    histogramRef.current = buckets;
-  }, [events]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const resize = () => {
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = canvas.offsetWidth * ratio;
-      canvas.height = canvas.offsetHeight * ratio;
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-
-    function draw() {
-      const w = canvas!.offsetWidth;
-      const h = canvas!.offsetHeight;
-      const data = histogramRef.current;
-
-      ctx!.clearRect(0, 0, w, h);
-
-      const max = Math.max(...data, 1);
-      const step = w / (data.length - 1);
-
-      // Grid lines
-      ctx!.strokeStyle = "rgba(245,158,11,0.06)";
-      ctx!.lineWidth = 1;
-      for (let i = 0; i < 4; i++) {
-        const y = h * (i / 3);
-        ctx!.beginPath();
-        ctx!.moveTo(0, y);
-        ctx!.lineTo(w, y);
-        ctx!.stroke();
-      }
-
-      // Fill gradient
-      ctx!.beginPath();
-      data.forEach((val, i) => {
-        const x = i * step;
-        const y = h - (val / max) * h * 0.85 - 4;
-        i === 0 ? ctx!.moveTo(x, y) : ctx!.lineTo(x, y);
-      });
-      ctx!.lineTo((data.length - 1) * step, h);
-      ctx!.lineTo(0, h);
-      ctx!.closePath();
-      const grad = ctx!.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, "rgba(245,158,11,0.2)");
-      grad.addColorStop(1, "rgba(245,158,11,0)");
-      ctx!.fillStyle = grad;
-      ctx!.fill();
-
-      // Line
-      ctx!.beginPath();
-      data.forEach((val, i) => {
-        const x = i * step;
-        const y = h - (val / max) * h * 0.85 - 4;
-        i === 0 ? ctx!.moveTo(x, y) : ctx!.lineTo(x, y);
-      });
-      const idle = isIdleRef.current;
-      ctx!.strokeStyle = idle ? "rgba(245,158,11,0.3)" : "#f59e0b";
-      ctx!.lineWidth = idle ? 1 : 1.5;
-      if (idle) ctx!.setLineDash([4, 4]);
-      ctx!.stroke();
-      if (idle) ctx!.setLineDash([]);
-
-      // Show "24h baseline" label when idle
-      if (idle) {
-        ctx!.fillStyle = "rgba(148,163,184,0.5)";
-        ctx!.font = "9px monospace";
-        ctx!.textAlign = "right";
-        ctx!.fillText("24h baseline", w - 4, 12);
-      }
-
-      animRef.current = requestAnimationFrame(draw);
-    }
-
-    animRef.current = requestAnimationFrame(draw);
-
-    return () => {
-      window.removeEventListener("resize", resize);
-      cancelAnimationFrame(animRef.current);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="w-full h-full" />;
+function QuickStartRow({ href, icon, title, desc }: { href: string; icon: string; title: string; desc: string }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 transition-ui hover:bg-white/[0.05] hover:border-white/[0.1]"
+    >
+      <Image src={icon} alt="" width={16} height={16} className="h-4 w-4 opacity-50" />
+      <div>
+        <div className="text-sm font-medium text-slate-200">{title}</div>
+        <div className="text-xs text-slate-500">{desc}</div>
+      </div>
+    </Link>
+  );
 }
 
-// ── Traffic Counter ────────────────────────────────────────────────────
-
-function TrafficCounter({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
+function TrafficMeter({ label, value, color }: { label: string; value: number; color: string }) {
+  const width = Math.min(100, Math.max(4, Math.round((value / 200) * 100)));
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
-      <div className={`text-lg font-bold tabular-nums leading-none ${color}`}>
-        {value.toLocaleString()}
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-slate-500">{label}</span>
+        <span className="tabular-nums text-slate-300">{value}</span>
       </div>
-      <div className="text-2xs text-slate-500 mt-1 uppercase tracking-wider font-mono">
-        {label}
+      <div className="h-1.5 w-full rounded-full bg-white/[0.06]">
+        <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${width}%`, background: color }} />
       </div>
     </div>
   );

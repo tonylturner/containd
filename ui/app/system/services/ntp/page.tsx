@@ -84,14 +84,14 @@ export default function NTPPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -109,7 +109,7 @@ export default function NTPPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -118,12 +118,12 @@ export default function NTPPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-slate-400">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
@@ -171,8 +171,8 @@ export default function NTPPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Client</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-white">Client</h2>
+        <p className="mt-1 text-sm text-slate-300">
           Configure the embedded OpenNTPD client.
         </p>
 
@@ -204,7 +204,7 @@ export default function NTPPage() {
                   intervalSeconds: Number(e.target.value),
                 }))
               }
-              className="mt-1 w-full input-industrial"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
 
@@ -226,7 +226,7 @@ export default function NTPPage() {
                 }))
               }
               placeholder="pool.ntp.org\n192.0.2.10"
-              className="mt-1 w-full input-industrial"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
         </div>

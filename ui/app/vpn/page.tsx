@@ -60,8 +60,8 @@ function Badge({ tone, children, title }: { tone: "ok" | "warn" | "off" | "info"
       : tone === "warn"
         ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
         : tone === "info"
-          ? "border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
-          : "border-amber-500/[0.15] bg-white/0 text-[var(--text-muted)]";
+          ? "border-white/[0.08] bg-white/[0.03] text-slate-200"
+          : "border-white/[0.08] bg-white/0 text-slate-400";
   return (
     <span title={title} className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs ${cls}`}>
       {children}
@@ -96,7 +96,7 @@ function IssuesBanner({ title, issues }: { title: string; issues: FieldIssue[] }
   const required = issues.filter((i) => i.severity === "required");
   const recommended = issues.filter((i) => i.severity === "recommended");
   return (
-    <div className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
       <div className="font-medium text-amber-400">{title}</div>
       <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-400/90">
         {required.map((i) => (
@@ -420,14 +420,14 @@ export default function VPNPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -437,7 +437,7 @@ export default function VPNPage() {
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
             />
             Auto
           </label>
@@ -445,15 +445,15 @@ export default function VPNPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)] shadow-card">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200 shadow-card">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <p className="mb-4 text-xs text-[var(--text-muted)]">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+      <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
+        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-16 w-full" />
@@ -491,7 +491,7 @@ export default function VPNPage() {
               OpenVPN config: <span className="text-[var(--text)]">{svcStatus?.openvpn_config_path || "n/a"}</span>
             </div>
             {svcStatus?.openvpn_last_error ? (
-              <div className="md:col-span-2 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {svcStatus.openvpn_last_error}
               </div>
             ) : null}
@@ -507,17 +507,17 @@ export default function VPNPage() {
         )}
       </div>
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="relative overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-amber-500/[0.1] blur-2xl" />
+        <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-blue-500/10 blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-blue-500/25 to-sky-500/10">
+              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/[0.08] bg-gradient-to-br from-blue-500/25 to-sky-500/10">
                 <Image
                   src="/icons/wireguard.svg"
                   alt="WireGuard"
@@ -558,7 +558,7 @@ export default function VPNPage() {
             </label>
 
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
-            <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2 text-xs text-[var(--text)]">
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-slate-300">
               When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
               (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
             </div>
@@ -570,7 +570,7 @@ export default function VPNPage() {
                   value={cfg.wireguard.interface ?? "wg0"}
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, interface: e.target.value } }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div>
@@ -588,7 +588,7 @@ export default function VPNPage() {
                       wireguard: { ...c.wireguard, listenPort: Number(e.target.value) || 0 },
                     }))
                   }
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div>
@@ -605,7 +605,7 @@ export default function VPNPage() {
                       wireguard: { ...c.wireguard, listenZone: e.target.value },
                     }))
                   }
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 >
                   <option value="">default (wan)</option>
                   {zones.map((z) => (
@@ -627,7 +627,7 @@ export default function VPNPage() {
                   {interfaceOptions.map((opt) => {
                     const active = (cfg.wireguard.listenInterfaces ?? []).includes(opt.value);
                     return (
-                      <label key={opt.value} className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+                      <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-slate-200">
                         <input
                           type="checkbox"
                           checked={active}
@@ -663,7 +663,7 @@ export default function VPNPage() {
                 value={cfg.wireguard.addressCIDR ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
 
@@ -676,7 +676,7 @@ export default function VPNPage() {
                 value={cfg.wireguard.privateKey ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, privateKey: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 placeholder="(leave blank to set later)"
               />
             </div>
@@ -698,15 +698,15 @@ export default function VPNPage() {
                     // Keep text editing until valid JSON is entered.
                   }
                 }}
-                className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
           </div>
         </div>
 
-        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Runtime</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">Kernel state (engine).</p>
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
+          <h2 className="text-lg font-semibold text-white">Runtime</h2>
+          <p className="mt-1 text-sm text-slate-300">Kernel state (engine).</p>
 
           <div className="mt-4 grid gap-3 text-sm">
             <div className="flex items-center justify-between">
@@ -722,8 +722,8 @@ export default function VPNPage() {
               )}
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[var(--text)]">WireGuard API</span>
-              {wgStatus ? <span className="text-emerald-400">ok</span> : <span className="text-[var(--text-muted)]">unavailable</span>}
+              <span className="text-slate-300">WireGuard API</span>
+              {wgStatus ? <span className="text-emerald-400">ok</span> : <span className="text-slate-400">unavailable</span>}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[var(--text)]">Addresses</span>
@@ -736,7 +736,7 @@ export default function VPNPage() {
               <span className="text-[var(--text)]">{(cfg.wireguard.peers ?? []).length}</span>
             </div>
             {wgStatus?.present && (
-              <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2 text-xs text-[var(--text)]">
+              <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-slate-300">
                 <div className="flex items-center justify-between">
                   <span className="text-[var(--text-muted)]">Listen</span>
                   <span className="font-mono text-[var(--text)]">{wgStatus.listenPort ?? "\u2014"}</span>
@@ -748,8 +748,8 @@ export default function VPNPage() {
               </div>
             )}
             {wgStatus?.present && (wgStatus.peers ?? []).length > 0 && (
-              <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 p-2">
-                <div className="mb-2 text-xs text-[var(--text-muted)]">Peers (runtime)</div>
+              <div className="rounded-lg border border-white/[0.08] bg-black/20 p-2">
+                <div className="mb-2 text-xs text-slate-400">Peers (runtime)</div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs text-[var(--text)]">
                     <thead>
@@ -763,7 +763,7 @@ export default function VPNPage() {
                     </thead>
                     <tbody>
                       {(wgStatus.peers ?? []).map((p) => (
-                        <tr key={p.publicKey} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                        <tr key={p.publicKey} className="border-t border-white/[0.06] table-row-hover transition-ui">
                           <td className="px-2 py-1 font-mono">
                             {peerNameByKey.get(p.publicKey) ? (
                               <span className="font-sans text-emerald-400">{peerNameByKey.get(p.publicKey)}</span>
@@ -793,11 +793,11 @@ export default function VPNPage() {
           </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
+        <div className="relative overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
           <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-amber-500/10 blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-amber-500/25 to-rose-500/10">
+              <div className="grid h-11 w-11 place-items-center rounded-xl border border-white/[0.08] bg-gradient-to-br from-amber-500/25 to-rose-500/10">
                 <Image
                   src="/icons/openvpn.svg"
                   alt="OpenVPN"
@@ -840,7 +840,7 @@ export default function VPNPage() {
                 value={cfg.openvpn.mode ?? "client"}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, mode: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               >
                 <option value="client">client</option>
                 <option value="server">server</option>
@@ -848,7 +848,7 @@ export default function VPNPage() {
             </div>
 
             {cfg.openvpn.mode === "client" ? (
-              <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 p-3">
+              <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Client Configuration</div>
@@ -898,7 +898,7 @@ export default function VPNPage() {
                               },
                             }))
                           }
-                          className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                          className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                           placeholder="vpn.example.com"
                         />
                       </div>
@@ -920,7 +920,7 @@ export default function VPNPage() {
                               },
                             }))
                           }
-                          className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                          className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                         />
                       </div>
                     </div>
@@ -940,7 +940,7 @@ export default function VPNPage() {
                               },
                             }))
                           }
-                          className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                          className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                         >
                           <option value="udp">udp</option>
                           <option value="tcp">tcp</option>
@@ -967,7 +967,7 @@ export default function VPNPage() {
                                 },
                               }))
                             }
-                            className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                             placeholder="username"
                           />
                           <input
@@ -986,7 +986,7 @@ export default function VPNPage() {
                                 },
                               }))
                             }
-                            className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                             placeholder="password"
                           />
                         </div>
@@ -1037,8 +1037,8 @@ export default function VPNPage() {
                     </div>
                   </div>
                 ) : (
-                  <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-                    <summary className="cursor-pointer text-sm text-[var(--text)]">Advanced profile path</summary>
+                  <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
+                    <summary className="cursor-pointer text-sm text-slate-200">Advanced profile path</summary>
                     <div className="mt-3">
                       <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                         Config Path
@@ -1050,14 +1050,14 @@ export default function VPNPage() {
                         onChange={(e) =>
                           setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, configPath: e.target.value } }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                         placeholder="/data/openvpn/profiles/client.ovpn"
                       />
                     </div>
                   </details>
                 )}
 
-                <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+                <div className="mt-3 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-slate-300">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2 text-[var(--text)]">
@@ -1065,7 +1065,7 @@ export default function VPNPage() {
                         <InfoTip label="Uploads a .ovpn and sets Config Path automatically (clears managed config)." />
                       </div>
                     </div>
-                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs text-slate-200 transition-ui hover:bg-white/[0.08]">
                       <input
                         type="file"
                         accept=".ovpn,.conf,.txt"
@@ -1083,10 +1083,10 @@ export default function VPNPage() {
                 </div>
               </div>
             ) : cfg.openvpn.mode === "server" ? (
-              <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 p-3">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Server Configuration</div>
+              <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3">
+                <div className="text-xs uppercase tracking-wide text-slate-400">Server Configuration</div>
                 <div className="mt-3 grid gap-3">
-                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+                  <div className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-slate-300">
                     Enabling OpenVPN server automatically opens the listen port on the configured listen zone or interfaces
                     (default WAN) via nftables input so clients can connect.
                   </div>
@@ -1106,7 +1106,7 @@ export default function VPNPage() {
                             },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                       />
                     </div>
                     <div>
@@ -1120,7 +1120,7 @@ export default function VPNPage() {
                             openvpn: { ...c.openvpn, server: { ...(c.openvpn.server ?? defaultOpenVPNServer), proto: e.target.value } },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                       >
                         <option value="udp">udp</option>
                         <option value="tcp">tcp</option>
@@ -1143,7 +1143,7 @@ export default function VPNPage() {
                             },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                       />
                     </div>
                   </div>
@@ -1166,7 +1166,7 @@ export default function VPNPage() {
                             },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                       >
                         <option value="">default (wan)</option>
                         {zones.map((z) => (
@@ -1186,7 +1186,7 @@ export default function VPNPage() {
                           {interfaceOptions.map((opt) => {
                             const active = (cfg.openvpn.server?.listenInterfaces ?? []).includes(opt.value);
                             return (
-                              <label key={opt.value} className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+                              <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-slate-200">
                                 <input
                                   type="checkbox"
                                   checked={active}
@@ -1237,7 +1237,7 @@ export default function VPNPage() {
                           },
                         }))
                       }
-                      className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                       placeholder="vpn.example.com"
                     />
                   </div>
@@ -1285,7 +1285,7 @@ export default function VPNPage() {
                             },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                         placeholder="1.1.1.1, 8.8.8.8"
                       />
                     </div>
@@ -1312,13 +1312,13 @@ export default function VPNPage() {
                             },
                           }))
                         }
-                        className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                         placeholder="192.168.0.0/24, 10.0.0.0/8"
                       />
                     </div>
                   </div>
 
-                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
+                  <div className="rounded-lg border border-white/[0.08] bg-black/30 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <div className="flex items-center gap-2 text-[var(--text)]">
@@ -1331,13 +1331,13 @@ export default function VPNPage() {
                           value={newClientName}
                           disabled={!canEdit}
                           onChange={(e) => setNewClientName(e.target.value)}
-                          className="w-40 input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                          className="w-40 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-1.5 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                           placeholder="client name"
                         />
                         <button
                           onClick={createClient}
                           disabled={!canEdit || !newClientName.trim()}
-                          className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
                         >
                           Create
                         </button>
@@ -1346,11 +1346,11 @@ export default function VPNPage() {
                     {ovpnClients.length ? (
                       <div className="mt-3 grid gap-2">
                         {ovpnClients.map((n) => (
-                          <div key={n} className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2">
-                            <div className="font-mono text-sm text-[var(--text)]">{n}</div>
+                          <div key={n} className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2">
+                            <div className="font-mono text-sm text-slate-200">{n}</div>
                             <button
                               onClick={() => void downloadClient(n)}
-                              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
                             >
                               Download
                             </button>
@@ -1366,11 +1366,11 @@ export default function VPNPage() {
             ) : null}
 
             {svcStatus?.openvpn_last_error ? (
-              <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                 {svcStatus.openvpn_last_error}
               </div>
             ) : (
-              <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2 text-xs text-[var(--text)]">
+              <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-slate-300">
                 OpenVPN is supervised only when the binary is present and a valid config file is provided.
               </div>
             )}
@@ -1413,7 +1413,7 @@ function PEMField({
           {title}
           {tip ? <InfoTip label={tip} /> : null}
         </label>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2.5 py-1 text-[11px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] text-slate-200 transition-ui hover:bg-white/[0.08]">
           <input
             type="file"
             accept=".pem,.crt,.key,.txt"
@@ -1435,7 +1435,7 @@ function PEMField({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         rows={5}
-        className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
         placeholder="-----BEGIN ...-----"
       />
     </div>

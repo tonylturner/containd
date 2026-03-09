@@ -113,14 +113,14 @@ export default function SyslogPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -138,7 +138,7 @@ export default function SyslogPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -147,11 +147,11 @@ export default function SyslogPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-slate-400">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {status && (
-        <div className="mb-4 grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)] md:grid-cols-4">
+        <div className="mb-4 grid gap-2 rounded-xl border border-white/[0.08] bg-black/30 p-3 text-xs text-slate-200 md:grid-cols-4">
           <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
           <div>Sent: {status?.sent_total ?? 0}</div>
           <div>Failed: {status?.failed_total ?? 0}</div>
@@ -167,8 +167,8 @@ export default function SyslogPage() {
       )}
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Forwarders</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-white">Forwarders</h2>
+        <p className="mt-1 text-sm text-slate-300">
           Send unified events to external syslog collectors.
         </p>
         <p className="mt-2 text-xs text-[var(--text-muted)]">
@@ -186,7 +186,7 @@ export default function SyslogPage() {
                   format: e.target.value as SyslogConfig["format"],
                 }))
               }
-              className="ml-2 input-industrial"
+              className="ml-2 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="rfc5424">RFC5424</option>
               <option value="json">JSON</option>
@@ -206,7 +206,7 @@ export default function SyslogPage() {
                   batchSize: Number(e.target.value),
                 }))
               }
-              className="ml-2 w-24 input-industrial"
+              className="ml-2 w-24 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
           <div>
@@ -223,7 +223,7 @@ export default function SyslogPage() {
                   flushEvery: Number(e.target.value),
                 }))
               }
-              className="ml-2 w-24 input-industrial"
+              className="ml-2 w-24 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
         </div>
@@ -268,7 +268,7 @@ export default function SyslogPage() {
             onChange={(e) => setNewFwd((f) => ({ ...f, address: e.target.value }))}
             disabled={!canEdit}
             placeholder="address"
-            className="input-industrial"
+            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <input
             type="number"
@@ -276,13 +276,13 @@ export default function SyslogPage() {
             onChange={(e) => setNewFwd((f) => ({ ...f, port: Number(e.target.value) }))}
             disabled={!canEdit}
             placeholder="port"
-            className="input-industrial"
+            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <select
             value={newFwd.proto ?? "udp"}
             onChange={(e) => setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))}
             disabled={!canEdit}
-            className="input-industrial"
+            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             <option value="udp">UDP</option>
             <option value="tcp">TCP</option>
@@ -290,14 +290,14 @@ export default function SyslogPage() {
           {canEdit && (
             <button
               onClick={addForwarder}
-              className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Add
             </button>
           )}
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
+        <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08] bg-black/30">
           <table className="w-full text-sm">
             <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-[var(--text)]">
               <tr>
@@ -316,10 +316,10 @@ export default function SyslogPage() {
                 </tr>
               )}
               {(cfg.forwarders ?? []).map((f, i) => (
-                <tr key={`${f.address}-${i}`} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                  <td className="px-4 py-3 text-[var(--text)]">{f.address}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.port}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.proto ?? "udp"}</td>
+                <tr key={`${f.address}-${i}`} className="border-t border-white/[0.06] table-row-hover transition-ui">
+                  <td className="px-4 py-3 text-slate-200">{f.address}</td>
+                  <td className="px-4 py-3 text-slate-200">{f.port}</td>
+                  <td className="px-4 py-3 text-slate-200">{f.proto ?? "udp"}</td>
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button

@@ -27,6 +27,7 @@ export function ConfirmDialog({
 
   React.useEffect(() => {
     if (open) {
+      // Focus the cancel button by default for destructive actions
       setTimeout(() => confirmRef.current?.focus(), 50);
     }
   }, [open]);
@@ -44,21 +45,21 @@ export function ConfirmDialog({
 
   const confirmClass =
     variant === "danger"
-      ? "rounded-sm bg-[var(--red)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-white hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui"
+      ? "rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 focus-visible:shadow-focus-ring outline-none transition-ui"
       : variant === "warning"
-        ? "rounded-sm bg-[var(--amber)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui"
-        : "rounded-sm bg-[var(--amber)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui";
+        ? "rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 focus-visible:shadow-focus-ring outline-none transition-ui"
+        : "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 focus-visible:shadow-focus-ring outline-none transition-ui";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div className="card-industrial w-full max-w-md rounded-sm border border-amber-500/[0.2] bg-[var(--surface)] p-6 shadow-card-lg animate-slide-down">
-        <h2 id="confirm-title" className="font-display text-sm font-bold tracking-wider uppercase text-[var(--amber)]">{title}</h2>
-        <div className="mt-2 text-sm text-[var(--text)]">{message}</div>
+      <div className="w-full max-w-md rounded-xl border border-white/10 bg-surface-raised p-6 shadow-card-lg animate-slide-down">
+        <h2 id="confirm-title" className="text-base font-semibold text-white">{title}</h2>
+        <div className="mt-2 text-sm text-slate-300">{message}</div>
         <div className="mt-5 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-[var(--text-dim)] hover:text-[var(--text)] hover:border-amber-500/30 focus-visible:shadow-focus-ring outline-none transition-ui"
+            className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 hover:bg-white/10 focus-visible:shadow-focus-ring outline-none transition-ui"
           >
             {cancelLabel}
           </button>
@@ -78,6 +79,10 @@ export function ConfirmDialog({
 
 /**
  * Hook for managing confirm dialog state.
+ * Usage:
+ *   const confirm = useConfirm();
+ *   // In handler: confirm.open({ title: "Delete?", message: "...", onConfirm: () => ... });
+ *   // In JSX: <ConfirmDialog {...confirm.props} />
  */
 export function useConfirm() {
   const [state, setState] = React.useState<{

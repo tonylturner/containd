@@ -359,21 +359,21 @@ export default function PcapPage() {
               <button
                 onClick={saveSettings}
                 disabled={state !== "idle"}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
               >
                 Save settings
               </button>
               <button
                 onClick={startCapture}
                 disabled={!canStart}
-                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 transition-ui disabled:opacity-50"
               >
                 {state === "starting" ? "Starting..." : "Start capture"}
               </button>
               <button
                 onClick={stopCapture}
                 disabled={state !== "idle" || !isRunning}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
               >
                 {state === "stopping" ? "Stopping..." : "Stop"}
               </button>
@@ -386,7 +386,7 @@ export default function PcapPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {notice && (
-        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
           {notice}
         </div>
       )}
@@ -398,7 +398,7 @@ export default function PcapPage() {
               {isRunning ? "Running" : "Stopped"}
             </div>
           </div>
-          <span className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
+          <span className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-emerald-500/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
             {isRunning ? "active" : "idle"}
           </span>
         </div>
@@ -415,18 +415,18 @@ export default function PcapPage() {
           </span>
         </div>
         {status?.lastError ? (
-          <div className="mt-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+          <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
             {status.lastError}
           </div>
         ) : null}
       </Card>
       <Card padding="lg">
-        <h2 className="text-lg font-semibold text-[var(--text)]">Capture setup</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-white">Capture setup</h2>
+        <p className="mt-1 text-sm text-slate-300">
           Start/stop packet captures on selected interfaces and store PCAPs for replay.
         </p>
         {configIssues.length > 0 && (
-          <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
             <div className="font-semibold">Capture checks</div>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               {configIssues.map((issue) => (
@@ -444,14 +444,14 @@ export default function PcapPage() {
                 <button
                   onClick={() => setAllInterfaces(true)}
                   disabled={!canEdit}
-                  className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                  className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
                 >
                   All
                 </button>
                 <button
                   onClick={() => setAllInterfaces(false)}
                   disabled={!canEdit}
-                  className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                  className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
                 >
                   None
                 </button>
@@ -459,7 +459,7 @@ export default function PcapPage() {
             </div>
             <div className="mt-2 grid gap-2 md:grid-cols-4">
               {ifaceOptions.map((opt) => (
-                <label key={opt.value} className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui">
+                <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-slate-200 transition-ui">
                   <input
                     type="checkbox"
                     checked={(settings.interfaces ?? []).includes(opt.value)}
@@ -483,7 +483,7 @@ export default function PcapPage() {
                 value={settings.mode}
                 disabled={!canEdit}
                 onChange={(e) => setSettings((prev) => ({ ...prev, mode: e.target.value as CaptureMode }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               >
                 <option value="rolling">rolling</option>
                 <option value="once">once</option>
@@ -499,7 +499,7 @@ export default function PcapPage() {
                 value={settings.snaplen}
                 disabled={!canEdit}
                 onChange={(e) => setSettings((prev) => ({ ...prev, snaplen: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <div>
@@ -512,7 +512,7 @@ export default function PcapPage() {
                 value={settings.maxSizeMB}
                 disabled={!canEdit}
                 onChange={(e) => setSettings((prev) => ({ ...prev, maxSizeMB: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
           </div>
@@ -528,11 +528,11 @@ export default function PcapPage() {
                 value={settings.maxFiles}
                 disabled={!canEdit}
                 onChange={(e) => setSettings((prev) => ({ ...prev, maxFiles: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
-            <div className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Filters (tcpdump style)</div>
+            <div className="md:col-span-2 rounded-xl border border-white/[0.08] bg-black/30 p-3">
+              <div className="text-xs uppercase tracking-wide text-slate-400">Filters (tcpdump style)</div>
               <div className="mt-2 grid gap-2 md:grid-cols-3">
                 <input
                   value={settings.filter?.src ?? ""}
@@ -541,7 +541,7 @@ export default function PcapPage() {
                     setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), src: e.target.value } }))
                   }
                   placeholder="src host 10.0.0.10"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   value={settings.filter?.dst ?? ""}
@@ -550,7 +550,7 @@ export default function PcapPage() {
                     setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), dst: e.target.value } }))
                   }
                   placeholder="dst host 10.0.0.20"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <select
                   value={settings.filter?.proto ?? "any"}
@@ -561,7 +561,7 @@ export default function PcapPage() {
                       filter: { ...(prev.filter ?? {}), proto: e.target.value as "any" | "tcp" | "udp" | "icmp" },
                     }))
                   }
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 >
                   <option value="any">any proto</option>
                   <option value="tcp">tcp</option>
@@ -575,8 +575,8 @@ export default function PcapPage() {
             </div>
           </div>
 
-          <details className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-            <summary className="cursor-pointer text-sm text-[var(--text)]">Advanced capture options</summary>
+          <details className="rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
+            <summary className="cursor-pointer text-sm text-slate-200">Advanced capture options</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
                 <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
@@ -587,7 +587,7 @@ export default function PcapPage() {
                   value={settings.filePrefix}
                   disabled={!canEdit}
                   onChange={(e) => setSettings((prev) => ({ ...prev, filePrefix: e.target.value }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div>
@@ -600,7 +600,7 @@ export default function PcapPage() {
                   value={settings.rotateSeconds}
                   disabled={!canEdit}
                   onChange={(e) => setSettings((prev) => ({ ...prev, rotateSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div>
@@ -613,7 +613,7 @@ export default function PcapPage() {
                   value={settings.bufferMB}
                   disabled={!canEdit}
                   onChange={(e) => setSettings((prev) => ({ ...prev, bufferMB: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <label className="flex items-center gap-2 text-sm text-[var(--text)]">
@@ -630,7 +630,7 @@ export default function PcapPage() {
             </div>
           </details>
 
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+          <div className="rounded-xl border border-white/[0.08] bg-black/20 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">PCAP Forwarding (Remote Sensor)</div>
@@ -652,7 +652,7 @@ export default function PcapPage() {
                 return (
                 <div
                   key={iface}
-                  className="grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 md:grid-cols-[120px_1fr_120px_120px]"
+                  className="grid gap-2 rounded-lg border border-white/[0.08] bg-black/30 p-3 md:grid-cols-[120px_1fr_120px_120px]"
                 >
                   <label className="flex items-center gap-2 text-sm text-[var(--text)]">
                     <input
@@ -669,21 +669,24 @@ export default function PcapPage() {
                     disabled={!canEdit || !target.enabled}
                     onChange={(e) => updateForwardTarget(iface, { host: e.target.value })}
                     placeholder="sensor.example.local"
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
+                    className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
                   />
                   <input
                     type="number"
                     value={target.port}
                     disabled={!canEdit || !target.enabled}
                     onChange={(e) => updateForwardTarget(iface, { port: Number(e.target.value) || 0 })}
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
+                    className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
                   />
                   <select
                     value={target.proto}
                     disabled={!canEdit || !target.enabled}
                     onChange={(e) => updateForwardTarget(iface, { proto: e.target.value as "tcp" | "udp" })}
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
-                  />
+                    className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
+                  >
+                    <option value="udp">udp</option>
+                    <option value="tcp">tcp</option>
+                  </select>
                 </div>
                 );
               })}
@@ -702,31 +705,31 @@ export default function PcapPage() {
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Saved PCAPs</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">Download or replay captures from storage.</p>
+          <h2 className="text-lg font-semibold text-white">Saved PCAPs</h2>
+          <p className="mt-1 text-sm text-slate-300">Download or replay captures from storage.</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
               value={pcapQuery}
               onChange={(e) => setPcapQuery(e.target.value)}
                 placeholder="Search by name, iface, tag"
-                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:w-2/3"
+                className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:w-2/3"
               />
               <button
                 onClick={() => refresh()}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
               >
                 {refreshing ? "Refreshing..." : "Refresh"}
               </button>
             <button
               onClick={() => setPcapQuery("")}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               Clear search
             </button>
               <button
                 onClick={() => uploadInputRef.current?.click()}
                 disabled={!canEdit || uploading}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
               >
               {uploading ? "Uploading..." : "Upload PCAP"}
             </button>
@@ -743,11 +746,11 @@ export default function PcapPage() {
               Last refreshed: {lastRefresh.toLocaleTimeString()} · Auto-refresh every 8s
             </div>
           ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-            <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-slate-300">
               {pcaps.length} total
             </span>
-            <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">
+            <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-slate-300">
               {totalSizeMB.toFixed(1)} MB stored
             </span>
           </div>
@@ -755,7 +758,7 @@ export default function PcapPage() {
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text)]">
               <button
                 onClick={() => setIfaceFilter("all")}
-                className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === "all" ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
+                className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === "all" ? "bg-blue-600/20 text-blue-400" : "bg-white/[0.08] text-slate-300"}`}
               >
                 All interfaces
               </button>
@@ -763,16 +766,16 @@ export default function PcapPage() {
                 <button
                   key={iface}
                   onClick={() => setIfaceFilter(iface)}
-                  className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === iface ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
+                  className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === iface ? "bg-blue-600/20 text-blue-400" : "bg-white/[0.08] text-slate-300"}`}
                 >
                   {iface} · {stats.count}
                 </button>
               ))}
             </div>
           ) : null}
-          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
-            <table className="w-full text-left text-sm text-[var(--text)]">
-              <thead className="bg-[var(--surface)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
+            <table className="w-full text-left text-sm text-slate-200">
+              <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-3 py-2">Name</th>
                   <th className="px-3 py-2">Iface</th>
@@ -784,14 +787,14 @@ export default function PcapPage() {
               </thead>
               <tbody>
                 {visiblePcaps.length === 0 ? (
-                  <tr className="border-t border-amber-500/[0.1]">
-                    <td colSpan={6} className="px-3 py-3 text-sm text-[var(--text-muted)]">
+                  <tr className="border-t border-white/[0.06]">
+                    <td colSpan={6} className="px-3 py-3 text-sm text-slate-400">
                       No captures match your filters.
                     </td>
                   </tr>
                 ) : (
                   visiblePcaps.map((p) => (
-                    <tr key={p.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                    <tr key={p.name} className="border-t border-white/[0.06] table-row-hover transition-ui">
                       <td className="px-3 py-2">
                         <div className="font-mono text-xs text-[var(--text)]">{p.name}</div>
                         <div className="text-[11px] text-[var(--text-muted)]">{new Date(p.createdAt).toLocaleString()}</div>
@@ -802,7 +805,7 @@ export default function PcapPage() {
                         <div className="flex flex-wrap gap-1">
                           {(p.tags ?? []).length ? (
                             (p.tags ?? []).map((t) => (
-                              <span key={t} className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">
+                              <span key={t} className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] text-slate-300">
                                 {t}
                               </span>
                             ))
@@ -815,31 +818,31 @@ export default function PcapPage() {
                             value={pcapTag}
                             onChange={(e) => setPcapTag(e.target.value)}
                             placeholder="add tag"
-                            className="w-24 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            className="w-24 rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                           />
                           <button
                             onClick={() => addTag(p.name)}
                             disabled={!canEdit}
-                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
                           >
                             Add
                           </button>
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">{p.status}</span>
+                        <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] text-slate-300">{p.status}</span>
                       </td>
                       <td className="px-3 py-2 text-right">
                         <a
                           href={downloadPcapURL(p.name)}
-                          className="mr-2 inline-flex rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="mr-2 inline-flex rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-200 transition-ui hover:bg-white/[0.08]"
                         >
                           Download
                         </a>
                         <button
                           onClick={() => void replayPcap({ name: p.name, interface: p.interface })}
                           disabled={!canEdit}
-                          className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                          className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
                         >
                           Replay
                         </button>
@@ -876,8 +879,8 @@ export default function PcapPage() {
         </Card>
 
         <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Replay</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">Replay a saved PCAP back onto an interface.</p>
+          <h2 className="text-lg font-semibold text-white">Replay</h2>
+          <p className="mt-1 text-sm text-slate-300">Replay a saved PCAP back onto an interface.</p>
           <div className="mt-4 grid gap-3">
             <select
               disabled={!canEdit}
@@ -890,7 +893,7 @@ export default function PcapPage() {
                   setReplayIface(match.interface);
                 }
               }}
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
             >
               <option value="">Select a PCAP</option>
               {pcaps.map((p) => (
@@ -903,7 +906,7 @@ export default function PcapPage() {
               disabled={!canEdit}
               value={replayIface}
               onChange={(e) => setReplayIface(e.target.value)}
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
             >
               <option value="">Replay interface</option>
               {ifaceOptions.map((opt) => (
@@ -917,7 +920,7 @@ export default function PcapPage() {
               value={replayRate}
               onChange={(e) => setReplayRate(e.target.value)}
               placeholder="Replay rate (pps)"
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
             />
             <button
               disabled={!canEdit || !replayName || !replayIface}
@@ -932,7 +935,7 @@ export default function PcapPage() {
                   setNotice("Failed to start replay.");
                 }
               }}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
             >
               Start replay
             </button>

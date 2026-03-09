@@ -8,7 +8,7 @@ type SkeletonProps = {
 
 export function Skeleton({ className = "" }: SkeletonProps) {
   return (
-    <div className={`animate-pulse rounded-sm bg-amber-500/[0.06] ${className}`} aria-hidden="true" />
+    <div className={`animate-pulse rounded-lg bg-white/[0.06] ${className}`} aria-hidden="true" />
   );
 }
 
@@ -25,14 +25,14 @@ export function SkeletonList({ rows = 5 }: { rows?: number }) {
 /** Table-shaped skeleton for loading states within data tables */
 export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
   return (
-    <div className="card-industrial rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
-      <div className="flex gap-4 border-b border-amber-500/[0.1] bg-[var(--surface2)] px-4 py-3">
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+      <div className="flex gap-4 border-b border-white/[0.06] bg-white/[0.02] px-4 py-3">
         {Array.from({ length: cols }).map((_, i) => (
           <Skeleton key={i} className="h-3 flex-1" />
         ))}
       </div>
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex gap-4 border-b border-amber-500/[0.06] px-4 py-3 last:border-b-0">
+        <div key={i} className="flex gap-4 border-b border-white/[0.04] px-4 py-3 last:border-b-0">
           {Array.from({ length: cols }).map((_, j) => (
             <Skeleton key={j} className="h-3 flex-1" />
           ))}

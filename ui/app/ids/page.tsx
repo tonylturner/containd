@@ -3,89 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Shell } from "../../components/Shell";
-import {
-  api,
-  isAdmin,
-  type IDSConfig,
-  type IDSRule,
-  type IDSRuleSource,
-  type RuleGroup,
-} from "../../lib/api";
+import { api, isAdmin, type IDSConfig, type IDSRule } from "../../lib/api";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
-import { Pagination } from "../../components/TableControls";
 import {
   ConfirmDialog,
   useConfirm,
 } from "../../components/ConfirmDialog";
-
-/* ── Constants ── */
-
-const FORMAT_OPTIONS = [
-  { value: "", label: "Auto-detect" },
-  { value: "suricata", label: "Suricata" },
-  { value: "snort", label: "Snort" },
-  { value: "yara", label: "YARA" },
-  { value: "sigma", label: "Sigma" },
-] as const;
-
-const EXPORT_FORMATS = [
-  { value: "suricata", label: "Suricata (.rules)", ext: ".rules" },
-  { value: "snort", label: "Snort (.rules)", ext: ".rules" },
-  { value: "yara", label: "YARA (.yar)", ext: ".yar" },
-  { value: "sigma", label: "Sigma (.yml)", ext: ".yml" },
-] as const;
-
-const PAGE_SIZES = [10, 25, 50, 100];
-
-const FORMAT_BADGE_COLOR: Record<string, string> = {
-  suricata: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
-  snort: "text-orange-400 bg-orange-500/10 border-orange-500/20",
-  yara: "text-purple-400 bg-purple-500/10 border-purple-500/20",
-  sigma: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-  native: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-};
-
-const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-
-/* ── Helpers ── */
-
-function isRuleEnabled(r: IDSRule): boolean {
-  return r.enabled === undefined || r.enabled === null || r.enabled === true;
-}
-
-function ruleMatchesFilter(r: IDSRule, q: string): boolean {
-  return (
-    r.id.toLowerCase().includes(q) ||
-    (r.title ?? "").toLowerCase().includes(q) ||
-    (r.message ?? "").toLowerCase().includes(q) ||
-    (r.proto ?? "").toLowerCase().includes(q) ||
-    (r.severity ?? "").toLowerCase().includes(q) ||
-    (r.sourceFormat ?? "").toLowerCase().includes(q) ||
-    (r.description ?? "").toLowerCase().includes(q)
-  );
-}
-
-function ruleMatchesAdvanced(r: IDSRule, filters: AdvancedFilters): boolean {
-  if (filters.format && (r.sourceFormat ?? "native") !== filters.format) return false;
-  if (filters.severity && (r.severity ?? "low") !== filters.severity) return false;
-  if (filters.proto && (r.proto ?? "") !== filters.proto) return false;
-  if (filters.status === "enabled" && !isRuleEnabled(r)) return false;
-  if (filters.status === "disabled" && isRuleEnabled(r)) return false;
-  return true;
-}
-
-type AdvancedFilters = {
-  format: string;
-  severity: string;
-  proto: string;
-  status: string;
-};
-
-const EMPTY_FILTERS: AdvancedFilters = { format: "", severity: "", proto: "", status: "" };
-
-/* ── Page ── */
 
 export default function IDSPage() {
   const canEdit = isAdmin();
@@ -93,8 +18,6 @@ export default function IDSPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
-  const [sources, setSources] = useState<IDSRuleSource[]>([]);
-  const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources" | "groups">("rules");
   const confirm = useConfirm();
 
   async function refresh() {
@@ -118,49 +41,14 @@ export default function IDSPage() {
     if (!canEdit) return;
     confirm.open({
       title: "Remove IDS Rule",
-      message: `Remove rule "${id}"? Unsaved until you click Save.`,
+      message: `Are you sure you want to remove rule "${id}"? This change is not saved until you click Save.`,
       confirmLabel: "Remove",
       variant: "danger",
       onConfirm: () => {
-        setIds((prev) => ({ ...prev, rules: (prev.rules ?? []).filter((r) => r.id !== id) }));
+        const existing = ids.rules ?? [];
+        setIds({ ...ids, rules: existing.filter((r) => r.id !== id) });
       },
     });
-  }
-
-  function onBulkDelete(ruleIds: string[]) {
-    if (!canEdit) return;
-    confirm.open({
-      title: "Remove selected rules",
-      message: `Remove ${ruleIds.length} selected rule${ruleIds.length !== 1 ? "s" : ""}? Unsaved until you click Save.`,
-      confirmLabel: "Remove",
-      variant: "danger",
-      onConfirm: () => {
-        const set = new Set(ruleIds);
-        setIds((prev) => ({ ...prev, rules: (prev.rules ?? []).filter((r) => !set.has(r.id)) }));
-      },
-    });
-  }
-
-  function onBulkToggle(ruleIds: string[], enabled: boolean) {
-    if (!canEdit) return;
-    const set = new Set(ruleIds);
-    setIds((prev) => ({
-      ...prev,
-      rules: (prev.rules ?? []).map((r) => set.has(r.id) ? { ...r, enabled } : r),
-    }));
-  }
-
-  function onToggleRule(id: string) {
-    if (!canEdit) return;
-    setIds((prev) => ({
-      ...prev,
-      rules: (prev.rules ?? []).map((r) => r.id === id ? { ...r, enabled: !isRuleEnabled(r) } : r),
-    }));
-  }
-
-  function flashSuccess(msg: string) {
-    setSuccess(msg);
-    setTimeout(() => setSuccess(null), 4000);
   }
 
   const rules = useMemo(() => ids.rules ?? [], [ids.rules]);
@@ -180,11 +68,17 @@ export default function IDSPage() {
       title="IDS Rules"
       actions={
         <div className="flex items-center gap-2">
-          <button onClick={refresh} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+          >
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
+            <button
+              onClick={onSave}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+            >
               Save
             </button>
           )}
@@ -192,38 +86,111 @@ export default function IDSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      {error && <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
-      {success && <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
 
       <div className="mb-6 flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-[var(--text)]">
           <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-          Enable IDS engine
+            className="h-4 w-4 rounded border-white/20 bg-black/30"
+          />
+          Enable native IDS
         </label>
         <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
           {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled
         </span>
       </div>
 
-      {/* Tab bar */}
-      <div className="mb-4 flex gap-1 border-b border-amber-500/[0.1] overflow-x-auto">
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`shrink-0 px-4 py-2 text-sm transition-ui border-b-2 -mb-px ${
-              activeTab === t.key ? "border-amber-500 text-amber-400" : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
-            }`}>
-            {t.label}
-            {t.count !== undefined && (
-              <span className="ml-1.5 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-xs tabular-nums">{t.count.toLocaleString()}</span>
+      {canEdit && (
+        <SigmaImportCard
+          value={sigmaText}
+          onChange={setSigmaText}
+          onConvert={onConvertSigma}
+        />
+      )}
+
+      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
+        <table className="w-full text-sm">
+          <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+            <tr>
+              <th className="px-4 py-3">ID</th>
+              <th className="px-4 py-3">Title</th>
+              <th className="px-4 py-3">Proto/Kind</th>
+              <th className="px-4 py-3">When</th>
+              <th className="px-4 py-3">Severity</th>
+              <th className="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.length === 0 && (
+              <tr>
+                <td className="px-4 py-8" colSpan={6}>
+                  <EmptyState
+                    title="No IDS rules configured"
+                    description="Upload Suricata rules or create custom rules to enable intrusion detection."
+                  />
+                </td>
+              </tr>
             )}
-          </button>
-        ))}
+            {rules.map((r) => (
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-white">
+                  {r.id}
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  {r.title || r.message || "\u2014"}
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  {(r.proto || "*") + " / " + (r.kind || "*")}
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  <span title={conditionSummary(r.when)}>
+                    {conditionSummary(r.when) || "\u2014"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-200">
+                  <StatusBadge
+                    variant={
+                      r.severity === "critical" || r.severity === "high"
+                        ? "error"
+                        : r.severity === "medium"
+                          ? "warning"
+                          : "success"
+                    }
+                  >
+                    {r.severity || "low"}
+                  </StatusBadge>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(r.id)}
+                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {activeTab === "rules" && (
@@ -249,6 +216,7 @@ export default function IDSPage() {
           setEditing(null);
         }} />
       )}
+
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );
@@ -603,65 +571,31 @@ function GroupsPanel({ groups, rules, canEdit, onUpdate }: {
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-[var(--text-muted)]">
-        Organize rules into groups by protocol, vendor, or use case. Groups use filter expressions
-        to match rules (e.g. <code className="text-amber-400/70">proto:modbus</code>, <code className="text-amber-400/70">format:suricata</code>, <code className="text-amber-400/70">severity:critical</code>).
-      </p>
-
-      {canEdit && (
-        <Card title="Create group">
-          <div className="flex flex-wrap gap-2 items-end">
-            <div className="flex-1 min-w-[150px]">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ICS/Modbus"
-                className="input-industrial w-full text-sm" />
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Filter</label>
-              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="proto:modbus"
-                className="input-industrial w-full text-sm font-mono" />
-            </div>
-            <button onClick={onCreate} disabled={!name.trim()}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
-              Create
-            </button>
-          </div>
-        </Card>
-      )}
-
-      {groups.length === 0 ? (
-        <EmptyState title="No rule groups" description="Create groups to organize large rule sets by protocol or vendor." />
-      ) : (
-        <div className="space-y-2">
-          {groups.map((g) => (
-            <div key={g.id} className={`flex items-center gap-3 rounded-sm border p-3 transition-ui ${
-              g.enabled ? "border-amber-500/[0.15] bg-[var(--surface)]" : "border-white/[0.05] bg-[var(--surface)] opacity-60"
-            }`}>
-              {canEdit && (
-                <button onClick={() => onToggle(g.id)} title={g.enabled ? "Disable group" : "Enable group"}
-                  className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${g.enabled ? "bg-emerald-500/30" : "bg-white/10"}`}>
-                  <span className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${g.enabled ? "translate-x-[18px] bg-emerald-400" : "translate-x-[3px] bg-white/30"}`} />
-                </button>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[var(--text)]">{g.name}</span>
-                  {g.filter && <code className="text-[10px] text-amber-400/60 font-mono truncate">{g.filter}</code>}
-                </div>
-                {g.description && <p className="text-xs text-[var(--text-muted)] mt-0.5">{g.description}</p>}
-              </div>
-              <span className="text-xs text-[var(--text-muted)] tabular-nums shrink-0">
-                {(groupStats[g.id] ?? 0).toLocaleString()} rules
-              </span>
-              {canEdit && (
-                <button onClick={() => onRemove(g.id)} className="text-xs text-red-400 hover:text-red-300 transition-ui">Del</button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <Card title="Import Sigma Rule" titleRight={
+      <input
+        type="file"
+        accept=".yml,.yaml,text/yaml"
+        onChange={onFile}
+        className="text-xs text-slate-300"
+      />
+    }>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Paste Sigma YAML here"
+        rows={8}
+        className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+      />
+      <div className="mt-2 flex justify-end">
+        <button
+          onClick={onConvert}
+          disabled={!value.trim()}
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+        >
+          Convert & Add
+        </button>
+      </div>
+    </Card>
   );
 }
 
@@ -856,17 +790,42 @@ function EditRuleModal({ rule, onClose, onSave }: { rule: IDSRule; onClose: () =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-3xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+      <div className="w-full max-w-3xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Edit: {rule.id}</h2>
-          <button onClick={onClose} className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Close</button>
+          <h2 className="text-lg font-semibold text-white">
+            Edit IDS rule {rule.id}
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
+          >
+            Close
+          </button>
         </div>
-        {err && <div className="mb-3 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{err}</div>}
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={16}
-          className="w-full input-industrial font-mono text-xs" />
+        {err && (
+          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            {err}
+          </div>
+        )}
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={14}
+          className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+        />
         <div className="mt-3 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
-          <button onClick={save} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">Save rule</button>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+          >
+            Save rule
+          </button>
         </div>
       </div>
     </div>

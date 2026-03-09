@@ -86,17 +86,17 @@ export default function SystemSettingsPage() {
   return (
     <Shell title="System Settings">
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: admin access required to change system settings.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       {status && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
           {status}
         </div>
       )}
@@ -107,7 +107,7 @@ export default function SystemSettingsPage() {
             <h2 className="text-lg font-semibold text-[var(--text)]">Management HTTPS</h2>
             <button
               onClick={refresh}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               Refresh
             </button>
@@ -130,7 +130,7 @@ export default function SystemSettingsPage() {
               accept=".pem,.crt,.cer"
               disabled={!canEdit}
               onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <label className="mt-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">Private key (PEM)</label>
             <input
@@ -138,12 +138,12 @@ export default function SystemSettingsPage() {
               accept=".pem,.key"
               disabled={!canEdit}
               onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <button
               onClick={uploadCert}
               disabled={!canEdit}
-              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+              className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-60"
             >
               Upload cert/key
             </button>
@@ -154,8 +154,8 @@ export default function SystemSettingsPage() {
         </Card>
 
         <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Trusted CAs (outbound)</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">
+          <h2 className="text-lg font-semibold text-white">Trusted CAs (outbound)</h2>
+          <p className="mt-1 text-sm text-slate-200">
             By default, containd uses the OS trust store. You can optionally provide an additional PEM bundle for outbound TLS.
           </p>
           <div className="mt-4 grid gap-2">
@@ -165,12 +165,12 @@ export default function SystemSettingsPage() {
               accept=".pem,.crt,.cer"
               disabled={!canEdit}
               onChange={(e) => setCAFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <button
               onClick={uploadCA}
               disabled={!canEdit}
-              className="mt-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-60"
+              className="mt-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-60"
             >
               Upload CA bundle
             </button>
@@ -179,9 +179,9 @@ export default function SystemSettingsPage() {
       </div>
 
       <Card className="mt-4" padding="lg">
-        <h2 className="text-lg font-semibold text-[var(--text)]">User Preferences</h2>
-        <div className="mt-4 grid gap-4 text-sm text-[var(--text)] md:grid-cols-2">
-          <label className="flex items-center justify-between gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+        <h2 className="text-lg font-semibold text-white">User Preferences</h2>
+        <div className="mt-4 grid gap-4 text-sm text-slate-200 md:grid-cols-2">
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2">
             <span>Show contextual tips</span>
             <input
               type="checkbox"
@@ -194,7 +194,7 @@ export default function SystemSettingsPage() {
               className="h-4 w-4"
             />
           </label>
-          <label className="flex items-center justify-between gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2">
             <span>Persist CLI history</span>
             <input
               type="checkbox"
@@ -213,7 +213,7 @@ export default function SystemSettingsPage() {
             onClick={() => {
               clearDismissedTips();
             }}
-            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Reset dismissed tips
           </button>
@@ -222,7 +222,7 @@ export default function SystemSettingsPage() {
       </Card>
 
       <Card className="mt-4" padding="lg">
-        <p className="text-sm text-[var(--text)]">
+        <p className="text-sm text-slate-200">
           CLI shortcuts:
         </p>
         <pre className="mt-3 rounded-sm bg-[var(--surface)] p-3 text-xs text-[var(--text)]">

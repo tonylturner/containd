@@ -218,7 +218,7 @@ export default function FirewallPage() {
       body: (
         <>
           Define zones in{" "}
-          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
             Zones
           </Link>{" "}
           so you can target them in rules.
@@ -238,7 +238,7 @@ export default function FirewallPage() {
       body: (
         <>
           Turn on SNAT in{" "}
-          <Link href="/nat/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/nat/" className="font-semibold text-blue-400 hover:text-blue-300">
             NAT
           </Link>{" "}
           to allow LAN hosts to reach the Internet.
@@ -457,7 +457,7 @@ export default function FirewallPage() {
             <button
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting}
-              className="rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--amber)] transition-ui hover:brightness-110/15 disabled:opacity-50"
+              className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-sm text-blue-400 transition-ui hover:bg-blue-500/15 disabled:opacity-50"
               title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
               {quickStarting ? "Enabling..." : "Quick start (LAN\u2192WAN)"}
@@ -465,7 +465,7 @@ export default function FirewallPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -473,7 +473,7 @@ export default function FirewallPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -510,12 +510,12 @@ export default function FirewallPage() {
         )}
       </Card>
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
@@ -531,39 +531,59 @@ export default function FirewallPage() {
           {isAdmin() && (
             <button
               onClick={loadRulesetPreview}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               {rulesetState === "loading" ? "Loading..." : "Preview"}
             </button>
           )}
         </div>
         {!isAdmin() && (
-          <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
             View-only mode: ruleset preview requires admin access.
           </div>
         )}
         {rulesetState === "error" && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Failed to load ruleset preview.
           </div>
         )}
         {rulesetPreview?.engineStatusError && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Engine status unavailable: {rulesetPreview.engineStatusError}
           </div>
         )}
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xl border border-white/[0.08] bg-black/60 p-4 text-xs text-slate-200">
             {rulesetPreview.ruleset}
           </pre>
         )}
       </Card>
 
-      <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
+      <Card padding="md" className="mt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white">DPI Status</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Deep packet inspection for ICS protocol filtering.
+            </p>
+          </div>
+          <StatusBadge variant={(dpiConfig.captureInterfaces ?? []).length > 0 ? "success" : "neutral"} dot>
+            {(dpiConfig.captureInterfaces ?? []).length > 0 ? "Enabled" : "Disabled"}
+          </StatusBadge>
+        </div>
+        <div className="mt-2 text-xs text-slate-300">
+          Monitored interfaces: {(dpiConfig.captureInterfaces ?? []).length > 0 ? (dpiConfig.captureInterfaces ?? []).join(", ") : "none"}
+        </div>
+        <div className="mt-2">
+          <Link href="/dataplane/" className="text-xs font-semibold text-blue-400 hover:text-blue-300">
+            Configure DPI settings &rarr;
+          </Link>
+        </div>
+      </Card>
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
-      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
+      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
             <tr>
@@ -588,10 +608,10 @@ export default function FirewallPage() {
               </tr>
             )}
             {rules.map((r) => (
-              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{r.id}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.description || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-white">{r.id}</td>
+                <td className="px-4 py-3 text-slate-200">{r.description || "\u2014"}</td>
+                <td className="px-4 py-3 text-slate-200">
                   {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
                   {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
                 </td>
@@ -604,7 +624,7 @@ export default function FirewallPage() {
                       <StatusBadge variant="neutral">
                         {r.ics.mode === "learn" ? "safe learning" : "enforce"}
                       </StatusBadge>
-                      <span className="text-xs text-[var(--text)]">
+                      <span className="text-xs text-slate-300">
                         {r.ics.protocol} fc={(r.ics.functionCode ?? []).join(",") || "*"}
                       </span>
                     </div>
@@ -618,7 +638,7 @@ export default function FirewallPage() {
                 <td className="px-4 py-3 text-right">
                   {isAdmin() && (
                     <>
-                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Edit</button>
+                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]">Edit</button>
                       <button
                         onClick={() => {
                           confirm.open({
@@ -722,65 +742,82 @@ function EditRuleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--surface)] px-4 animate-fade-in">
-      <div className="w-full max-w-2xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-2xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Edit rule {rule.id}</h2>
-          <button onClick={onClose} className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Close</button>
+          <h2 className="text-lg font-semibold text-white">Edit rule {rule.id}</h2>
+          <button onClick={onClose} className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]">Close</button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
-          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-3" />
+          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="">Source zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           {zones.length === 0 && (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
-              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">Create a zone</Link> to target policies.
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300 md:col-span-2">
+              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">Create a zone</Link> to target policies.
             </div>
           )}
-          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
+          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="">Dest zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="input-industrial">
+          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="ALLOW">ALLOW</option>
             <option value="DENY">DENY</option>
           </select>
-          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
-          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
-          <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
+          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+          <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>
             <option value="icmp">icmp</option>
           </select>
-          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
             ICS Protocol Filter
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
-          <span className="text-xs text-[var(--text-muted)] md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-          <span className="text-xs text-[var(--text-muted)] md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-[var(--amber)] hover:text-[var(--amber)]">PCAP Capture</a>).</span>
+          <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-blue-400 hover:text-blue-300">PCAP Capture</a>).</span>
         </div>
 
         {icsEnabled && (
-          <ICSPredicateFields
-            protocol={icsProtocol} onProtocolChange={setIcsProtocol}
-            mode={mode} onModeChange={setMode}
-            functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
-            addresses={addresses} onAddressesChange={setAddresses}
-            unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
-            objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
-            readOnly={readOnly} onReadOnlyChange={setReadOnly}
-            writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
-          />
+          <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.08] bg-black/30 p-4 md:grid-cols-4">
+            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
+              {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
+            </select>
+            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1">
+              <option value="learn">safe learning</option>
+              <option value="enforce">enforce</option>
+            </select>
+            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+            {icsMeta.showUnitId && (
+              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+            )}
+            {icsMeta.showObjectClasses && (
+              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+            )}
+            <div className="flex items-center gap-4 text-sm text-slate-200">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
+                Read-only
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
+                Write-only
+              </label>
+            </div>
+          </div>
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
-          <button onClick={save} className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
+          <button onClick={onClose} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]">Cancel</button>
+          <button onClick={save} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500">Save changes</button>
         </div>
       </div>
     </div>
@@ -866,38 +903,38 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
 
   return (
     <Card padding="lg" className="mt-6">
-      <h2 className="text-sm font-semibold text-[var(--text)]">Create rule</h2>
+      <h2 className="text-sm font-semibold text-white">Create rule</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-2" />
+        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
+        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="">Source zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
         {zones.length === 0 && (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
-            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">Create a zone</Link> to target policies.
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300 md:col-span-2">
+            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">Create a zone</Link> to target policies.
           </div>
         )}
-        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
+        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="">Dest zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
-        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial" />
-        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial" />
+        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
+        <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
           <option value="icmp">icmp</option>
         </select>
-        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="input-industrial">
+        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
         </select>
@@ -906,170 +943,47 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
           ICS Protocol Filter
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
-        <span className="text-xs text-[var(--text-muted)] md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-        <span className="text-xs text-[var(--text-muted)] md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-[var(--amber)] hover:text-[var(--amber)]">PCAP Capture</a>).</span>
+        <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-blue-400 hover:text-blue-300">PCAP Capture</a>).</span>
       </div>
 
       {icsEnabled && (
-        <ICSPredicateFields
-          protocol={icsProtocol} onProtocolChange={setIcsProtocol}
-          mode={mode} onModeChange={setMode}
-          functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
-          addresses={addresses} onAddressesChange={setAddresses}
-          unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
-          objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
-          readOnly={readOnly} onReadOnlyChange={setReadOnly}
-          writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
-        />
+        <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.08] bg-black/30 p-4 md:grid-cols-4">
+          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
+            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
+          </select>
+          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1">
+            <option value="learn">safe learning</option>
+            <option value="enforce">enforce</option>
+          </select>
+          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+          {icsMeta.showUnitId && (
+            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+          )}
+          {icsMeta.showObjectClasses && (
+            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+          )}
+          <div className="flex items-center gap-4 text-sm text-slate-200">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
+              Read-only
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
+              Write-only
+            </label>
+          </div>
+        </div>
       )}
 
       <div className="mt-3 flex items-center justify-between">
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <button onClick={submit} disabled={saving} className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+        <button onClick={submit} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50">
           {saving ? "Creating..." : "Create rule"}
         </button>
       </div>
     </Card>
-  );
-}
-
-/* ── Shared ICS Predicate Fields ── */
-
-function ICSPredicateFields({
-  protocol, onProtocolChange,
-  mode, onModeChange,
-  functionCodes, onFunctionCodesChange,
-  addresses, onAddressesChange,
-  unitId, onUnitIdChange,
-  objectClasses, onObjectClassesChange,
-  readOnly, onReadOnlyChange,
-  writeOnly, onWriteOnlyChange,
-}: {
-  protocol: string; onProtocolChange: (v: string) => void;
-  mode: string; onModeChange: (v: "enforce" | "learn") => void;
-  functionCodes: string; onFunctionCodesChange: (v: string) => void;
-  addresses: string; onAddressesChange: (v: string) => void;
-  unitId: string; onUnitIdChange: (v: string) => void;
-  objectClasses: string; onObjectClassesChange: (v: string) => void;
-  readOnly: boolean; onReadOnlyChange: (v: boolean) => void;
-  writeOnly: boolean; onWriteOnlyChange: (v: boolean) => void;
-}) {
-  const meta = icsProtoMeta(protocol);
-  const [showHelp, setShowHelp] = useState(false);
-
-  return (
-    <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 space-y-3">
-      {/* Row 1: Protocol + Mode */}
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="md:col-span-2">
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">ICS Protocol</label>
-          <select value={protocol} onChange={(e) => onProtocolChange(e.target.value)} className="input-industrial w-full">
-            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Rule Mode</label>
-          <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
-            <option value="learn">Learning (passive)</option>
-            <option value="enforce">Enforcement (active)</option>
-          </select>
-        </div>
-        <div className="flex items-end">
-          <button
-            onClick={() => setShowHelp(!showHelp)}
-            className="rounded-sm border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
-          >
-            {showHelp ? "Hide" : "Show"} protocol reference
-          </button>
-        </div>
-      </div>
-
-      {/* Protocol reference panel */}
-      {showHelp && (
-        <div className="rounded-sm border border-blue-500/[0.1] bg-blue-500/[0.03] p-3 space-y-2">
-          <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <div className="text-[10px] font-medium text-[var(--text)]">{meta.fcLabel}</div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.fcHelp}</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-medium text-[var(--text)]">{meta.addrLabel}</div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.addrHelp}</div>
-            </div>
-          </div>
-          {meta.notes && (
-            <div className="text-[10px] text-[var(--text-dim)] border-t border-white/[0.04] pt-2 mt-2">{meta.notes}</div>
-          )}
-        </div>
-      )}
-
-      {/* Row 2: Function codes + Addresses */}
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.fcLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
-          <input value={functionCodes} onChange={(e) => onFunctionCodesChange(e.target.value)} placeholder={meta.fcPlaceholder || `${meta.fcLabel}`} className="input-industrial w-full" />
-        </div>
-        <div>
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.addrLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
-          <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder={meta.addrPlaceholder || meta.addrLabel} className="input-industrial w-full" />
-        </div>
-      </div>
-
-      {/* Row 3: Protocol-specific fields */}
-      <div className="grid gap-3 md:grid-cols-3">
-        {meta.showUnitId && (
-          <div>
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Unit ID <span className="text-[var(--text-dim)]">(0-255, Modbus slave)</span></label>
-            <input value={unitId} onChange={(e) => onUnitIdChange(e.target.value)} placeholder="e.g. 1" className="input-industrial w-full" />
-          </div>
-        )}
-        {meta.showObjectClasses && (
-          <div className="md:col-span-2">
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">CIP Object Classes <span className="text-[var(--text-dim)]">(hex csv)</span></label>
-            <input value={objectClasses} onChange={(e) => onObjectClassesChange(e.target.value)} placeholder="0x02, 0x04, 0x66" className="input-industrial w-full" />
-          </div>
-        )}
-        {meta.showStationAddrs && (
-          <div className="md:col-span-2">
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Station Addresses <span className="text-[var(--text-dim)]">(source/destination, 0-65534)</span></label>
-            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
-          </div>
-        )}
-        {meta.showDbNumber && (
-          <div>
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">DB Numbers <span className="text-[var(--text-dim)]">(Siemens data blocks)</span></label>
-            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="DB1, DB100" className="input-industrial w-full" />
-          </div>
-        )}
-        {meta.showObjectType && (
-          <div>
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Object Type <span className="text-[var(--text-dim)]">(BACnet)</span></label>
-            <input disabled placeholder="analog-input, binary-output" className="input-industrial w-full opacity-60" title="Object type filtering coming soon" />
-          </div>
-        )}
-        {meta.showPropertyId && (
-          <div>
-            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Property ID <span className="text-[var(--text-dim)]">(BACnet)</span></label>
-            <input disabled placeholder="85 (present-value)" className="input-industrial w-full opacity-60" title="Property ID filtering coming soon" />
-          </div>
-        )}
-      </div>
-
-      {/* Row 4: Direction filter */}
-      <div className="flex items-center gap-4 text-sm text-[var(--text)]">
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-          Read-only
-          <InfoTip label="Only match read operations (function codes that read data without modifying state)." />
-        </label>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={writeOnly} onChange={(e) => onWriteOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-          Write-only
-          <InfoTip label="Only match write/control operations (function codes that modify device state)." />
-        </label>
-      </div>
-    </div>
   );
 }
 

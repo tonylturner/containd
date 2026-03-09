@@ -316,35 +316,36 @@ export function Shell({
   }
 
   return (
-    <div className="relative min-h-screen bg-[#080a0f] text-slate-100">
+    <div className="relative min-h-screen text-slate-100">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white">
         Skip to main content
       </a>
+      {/* Subtle background texture */}
+      <div className="pointer-events-none absolute inset-0 opacity-40">
+        <div className="grid-overlay h-full w-full" />
+      </div>
 
       <div className="relative flex min-h-screen">
         {/* ── Sidebar ─────────────────────────────────────────── */}
-        <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm">
+        <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-white/[0.08] bg-[#0e1018]/80 backdrop-blur-sm">
           {/* Brand */}
-          <Link href="/" className="flex items-center gap-3 px-4 py-4 border-b border-amber-500/[0.15] transition-ui hover:bg-amber-500/[0.03]">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500/60" style={{ boxShadow: "0 0 12px rgba(245,158,11,0.15), inset 0 0 8px rgba(245,158,11,0.1)" }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="3" fill="#f59e0b" />
-                <circle cx="7" cy="7" r="6" stroke="#f59e0b" strokeWidth="1" strokeDasharray="3 2" />
-              </svg>
+          <Link href="/" className="flex items-center gap-3 px-4 py-4 transition-ui hover:bg-white/[0.03]">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15">
+              <div className="h-2 w-2 rounded-full bg-emerald-400" />
             </div>
-            <span className="text-sm font-bold tracking-[2px] uppercase text-amber-500">containd</span>
+            <span className="text-base font-semibold tracking-tight text-white">containd</span>
           </Link>
 
           {/* Navigation */}
-          <nav aria-label="Main navigation" className="flex-1 overflow-y-auto px-2 py-3 pb-4 text-[13px]">
+          <nav aria-label="Main navigation" className="flex-1 overflow-y-auto px-2 pb-4 text-[13px]">
             {/* Dashboard link */}
             <div className="mb-1 px-1">
               <Link
                 href="/"
                 className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-ui ${
                   pathname === "/"
-                    ? "bg-amber-500/[0.12] text-amber-400 font-medium border-l-2 border-amber-500"
-                    : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border-l-2 border-transparent"
+                    ? "bg-white/[0.08] text-white font-medium"
+                    : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"
                 }`}
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
@@ -368,7 +369,7 @@ export function Shell({
                     aria-expanded={!collapsed[group.label]}
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium uppercase tracking-wider transition-ui ${
                       isGroupActive && collapsed[group.label]
-                        ? "text-amber-400/80 hover:text-amber-300"
+                        ? "text-blue-400 hover:text-blue-300"
                         : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"
                     }`}
                   >
@@ -393,10 +394,10 @@ export function Shell({
                           <Link
                             key={item.href}
                             href={item.href}
-                            className={`block rounded-lg px-2.5 py-1.5 transition-ui border-l-2 ${
+                            className={`block rounded-lg px-2.5 py-1.5 transition-ui ${
                               active
-                                ? "bg-amber-500/[0.08] text-amber-400 font-medium border-amber-500"
-                                : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border-transparent"
+                                ? "bg-blue-500/10 text-blue-400 font-medium"
+                                : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"
                             }`}
                           >
                             {item.label}
@@ -412,7 +413,7 @@ export function Shell({
 
           {/* User section */}
           {authChecked && me && (
-            <div className="shrink-0 border-t border-amber-500/[0.15] bg-black/20 p-2">
+            <div className="shrink-0 border-t border-white/[0.08] bg-black/20 p-2">
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
@@ -420,7 +421,7 @@ export function Shell({
                 aria-label="User menu"
                 className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-ui hover:bg-white/[0.05]"
               >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-xs font-medium text-amber-400">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-500/15 text-xs font-medium text-blue-400">
                   {(me.username?.[0] ?? "U").toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1 text-left">
@@ -462,7 +463,7 @@ export function Shell({
         </aside>
 
         {/* ── Main content ────────────────────────────────────── */}
-        <main id="main-content" aria-label={title} className="flex-1 overflow-y-auto bg-[#080a0f] px-6 py-6">
+        <main id="main-content" aria-label={title} className="flex-1 overflow-y-auto px-6 py-6">
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
               <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-slate-300">
@@ -498,7 +499,7 @@ export function Shell({
                 <ConfigStatusBar />
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>
-                    <h1 className="text-lg font-semibold tracking-wide text-white">{title}</h1>
+                    <h1 className="text-xl font-semibold text-white">{title}</h1>
                   </div>
                   <div className="flex items-center gap-2">
                     {actions}
@@ -671,7 +672,7 @@ function ProfileModal({
             </div>
             <div className="mt-2 text-xs text-slate-500">Role: {me.role} (managed by admins)</div>
             <div className="mt-4 flex items-center gap-3">
-              <button type="button" onClick={saveProfile} disabled={state === "saving"} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50">
+              <button type="button" onClick={saveProfile} disabled={state === "saving"} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50">
                 {state === "saving" ? "Saving..." : "Save profile"}
               </button>
             </div>
@@ -688,7 +689,7 @@ function ProfileModal({
               <label htmlFor="profile-new-pw" className="mb-1 block text-xs font-medium text-slate-400">New password</label>
               <input id="profile-new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password (min 8 chars)" autoComplete="new-password" ref={passwordRef} className={inputClass} />
             </div>
-            <button type="button" onClick={changePassword} disabled={state === "saving"} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50">
+            <button type="button" onClick={changePassword} disabled={state === "saving"} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50">
               {state === "saving" ? "Updating..." : "Update password"}
             </button>
           </div>

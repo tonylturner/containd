@@ -70,34 +70,34 @@ export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: 
   }
 
   return (
-    <div className={`card-industrial rounded-sm border border-[var(--cyan)]/15 bg-[rgba(6,182,212,0.06)] px-4 py-2.5 text-sm ${className}`}>
+    <div className={`rounded-xl border border-blue-500/15 bg-blue-500/[0.06] px-4 py-2.5 text-sm ${className}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-start gap-2.5">
-          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-[var(--cyan)]" fill="none" stroke="currentColor" strokeWidth={2}>
+          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" fill="none" stroke="currentColor" strokeWidth={2}>
             <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
           </svg>
           <div className="min-w-0">
-            <div className="text-sm font-medium text-[var(--cyan)]">{tip.title}</div>
-            <div className="text-[13px] text-[var(--text-muted)]">{tip.body}</div>
+            <div className="text-sm font-medium text-blue-300">{tip.title}</div>
+            <div className="text-[13px] text-slate-400">{tip.body}</div>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 font-mono text-[10px]">
+        <div className="flex items-center gap-1.5 text-xs">
           {count > 1 && (
             <>
-              <button onClick={prev} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+              <button onClick={prev} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
                 Prev
               </button>
-              <span className="tabular-nums text-[var(--text-dim)]">{index + 1}/{count}</span>
-              <button onClick={next} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+              <span className="tabular-nums text-slate-500">{index + 1}/{count}</span>
+              <button onClick={next} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
                 Next
               </button>
-              <span className="mx-1 text-[var(--text-dim)]">|</span>
+              <span className="mx-1 text-slate-600">|</span>
             </>
           )}
-          <button onClick={dismiss} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+          <button onClick={dismiss} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
             Dismiss
           </button>
-          <button onClick={clearAll} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text-muted)]" title="Show all previously dismissed tips">
+          <button onClick={clearAll} className="rounded-md px-2 py-1 text-slate-500 transition-ui hover:bg-white/[0.06] hover:text-slate-300" title="Show all previously dismissed tips">
             Show all
           </button>
         </div>
