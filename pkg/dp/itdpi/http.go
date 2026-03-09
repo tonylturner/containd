@@ -21,6 +21,11 @@ type HTTPDecoder struct{}
 
 func NewHTTPDecoder() *HTTPDecoder { return &HTTPDecoder{} }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *HTTPDecoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{80, 8080, 8000, 3128}, nil
+}
+
 func (d *HTTPDecoder) Supports(state *flow.State) bool {
 	if state == nil || state.Key.Proto != 6 {
 		return false

@@ -20,6 +20,11 @@ type TLSDecoder struct{}
 
 func NewTLSDecoder() *TLSDecoder { return &TLSDecoder{} }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *TLSDecoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{443, 8443, 9443, 993, 995, 465}, nil
+}
+
 func (d *TLSDecoder) Supports(state *flow.State) bool {
 	if state == nil {
 		return false

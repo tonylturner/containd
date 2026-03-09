@@ -17,6 +17,11 @@ type DNSDecoder struct{}
 
 func NewDNSDecoder() *DNSDecoder { return &DNSDecoder{} }
 
+// Ports implements dpi.PortHinter for port-based dispatch.
+func (d *DNSDecoder) Ports() (tcpPorts, udpPorts []uint16) {
+	return []uint16{53}, []uint16{53}
+}
+
 func (d *DNSDecoder) Supports(state *flow.State) bool {
 	if state == nil {
 		return false

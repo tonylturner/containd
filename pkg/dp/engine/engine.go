@@ -110,6 +110,9 @@ func New(cfg Config) (*Engine, error) {
 		itdpi.NewHTTPDecoder(),
 		itdpi.NewSSHDecoder(),
 		itdpi.NewSMBDecoder(),
+		itdpi.NewNTPDecoder(),
+		itdpi.NewSNMPDecoder(),
+		itdpi.NewRDPDecoder(),
 		itdpi.NewICSMarker(),
 		itdpi.NewPortDetector(),
 	)
