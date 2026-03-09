@@ -98,7 +98,3 @@ Notes:
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
 
-## Roadmap
-
-- SSH banners and host key rotation tooling.
-- Richer neighbor and routing views in operational commands.

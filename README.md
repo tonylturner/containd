@@ -7,9 +7,21 @@ containd is a single-image appliance that combines zone-based firewalling, ICS p
 ## Key Features
 
 - **Zone-based firewall** with nftables enforcement, NAT (SNAT + DNAT), and default-deny posture
-- **ICS/OT protocol inspection** — Modbus/TCP deep packet inspection with function code and register-level visibility
-- **IT protocol DPI** — DNS, TLS (SNI/JA3), HTTP/2, SSH, RDP, SMB, SNMP, NTP
-- **Native IDS** with Sigma-compatible rule evaluation across DPI events
+- **ICS/OT deep packet inspection** — Modbus/TCP, DNP3, CIP/EtherNet/IP (with EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA; function code, register, and service-level visibility
+- **IT protocol DPI** — DNS (with compression pointer support), TLS (SNI/JA3), HTTP/2, SSH, RDP, SMB, SNMP, NTP
+- **ICS asset auto-discovery** — passive traffic analysis builds a live OT asset inventory
+- **Learn mode** — passive traffic learning generates allowlist firewall rules from observed behavior
+- **Protocol anomaly detection** — malformed frames, protocol violations, and rate anomalies
+- **Signature-based IDS** — 16 built-in ICS malware signatures plus Sigma-compatible rule evaluation across DPI events
+- **PCAP offline analysis** — upload capture files for DPI processing and automatic policy generation
+- **Event export** — CEF, JSON, and Syslog output formats to file, UDP, or TCP destinations
+- **Protocol statistics** — per-protocol traffic counters and top talkers
+- **Policy templates** — 7 ICS protocol templates (Purdue baseline, maintenance windows) for rapid deployment
+- **Schedule and identity predicates** on firewall rules for time-based and user-based access control
+- **Prometheus /metrics endpoint** for monitoring integration
+- **TCP reassembly** with out-of-order handling and per-flow verdict caching
+- **NFQUEUE selective DPI steering** — only inspect flows that match DPI criteria; fast path for allowed traffic
+- **Optional eBPF (XDP/TC) acceleration** for early drops and hardware counters
 - **Embedded services** — DNS resolver (Unbound), NTP (OpenNTPD), DHCP server, forward proxy (Envoy), reverse proxy (Nginx)
 - **VPN** — WireGuard and OpenVPN with managed config, PKI, and client profiles
 - **Antivirus** — ICAP pipeline with optional embedded ClamAV
@@ -140,11 +152,15 @@ An [OpenAPI 3.0 specification](docs/openapi.yaml) is also available for the REST
 
 - Default-deny firewall posture out of the box.
 - Distroless container image running as nonroot.
-- JWT-based auth with session invalidation; admin and view-only roles.
+- JWT-based auth with session invalidation; admin and view-only roles; MustChangePassword enforcement on first login.
 - JWT secret validation — a strong secret is required when lab mode is disabled (`CONTAIND_LAB_MODE=0`).
 - HTTPS with auto-generated self-signed certificate; custom cert install supported.
 - TLS 1.2+ with a hardened cipher suite list.
-- Rate limiting on authentication and API endpoints.
+- HSTS enabled by default.
+- CORS with wildcard origin rejection.
+- SameSite=Strict session cookies with path traversal protection.
+- Rate limiting on authentication and sensitive API endpoints.
+- nftables injection prevention on all firewall rule inputs.
 - Trusted-proxy awareness for deployments behind a reverse proxy (`CONTAIND_TRUSTED_PROXIES`).
 - SSH key auth supported; password auth for lab use.
 

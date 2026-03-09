@@ -1,6 +1,7 @@
 # Enforcement Strategy
 
-- Baseline: nftables for zone firewall/NAT, conntrack for state, dynamic sets/maps for performance.
-- Userspace: compile/install nftables rules, selective DPI/IDS via NFQUEUE/AF_PACKET mirrors, dynamic set updates on IPS verdicts.
-- Verdicts: allow/deny/reset, alert-only, temp block (flow/host), rate-limit, tag.
-- Optional: eBPF (XDP/TC) for early drops/counters and kernel-event streaming; must remain optional.
+- **nftables**: zone firewall, NAT (SNAT masquerade + DNAT port forwarding), conntrack for state tracking, dynamic sets/maps for performance. This is the primary enforcement path.
+- **NFQUEUE selective DPI steering**: flows matching DPI criteria are diverted to userspace via NFQUEUE; all other traffic stays on the kernel fast path. Per-flow verdict caching (TOCTOU-safe) avoids redundant inspection.
+- **Userspace enforcement**: compile/install nftables rules, dynamic set updates on IPS/AV/signature verdicts, host and flow blocking via `POST /api/v1/dataplane/blocks/host` and `POST /api/v1/dataplane/blocks/flow`.
+- **Verdicts**: allow/deny/reset, alert-only, temp block (flow/host), rate-limit, tag.
+- **eBPF (XDP/TC)**: optional acceleration for early packet drops, hardware counters, and kernel-to-userspace event streaming. Enabled when kernel support is available; does not replace nftables.

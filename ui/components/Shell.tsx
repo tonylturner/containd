@@ -34,57 +34,60 @@ function appendRedirectTrace(entry: {
 function buildNavGroups(isAdmin: boolean): NavGroup[] {
   const groups: NavGroup[] = [
     {
-      label: "Favorites",
-      items: [{ href: "/", label: "Dashboard" }],
-      defaultCollapsed: false,
-    },
-    {
-      label: "Config",
+      label: "Policy",
       items: [
-        { href: "/zones/", label: "Zones" },
-        { href: "/interfaces/", label: "Interfaces" },
-        { href: "/routing/", label: "Routing" },
         { href: "/firewall/", label: "Firewall Rules" },
         { href: "/ics/", label: "ICS Filters" },
         { href: "/templates/", label: "ICS Templates" },
         { href: "/ids/", label: "IDS Rules" },
-        { href: "/assets/", label: "Assets" },
+      ],
+      defaultCollapsed: false,
+    },
+    {
+      label: "Network",
+      items: [
+        { href: "/zones/", label: "Zones" },
+        { href: "/interfaces/", label: "Interfaces" },
+        { href: "/routing/", label: "Routing" },
+        { href: "/nat/", label: "NAT" },
         { href: "/dhcp/", label: "DHCP" },
-        { href: "/proxies/", label: "Proxies" },
         { href: "/vpn/", label: "VPN" },
-        { href: "/config/", label: "Configuration" },
+        { href: "/proxies/", label: "Proxies" },
+      ],
+      defaultCollapsed: true,
+    },
+    {
+      label: "Monitoring",
+      items: [
+        { href: "/monitoring/", label: "Overview" },
+        { href: "/topology/", label: "Topology" },
+        { href: "/flows/", label: "Flows" },
+        { href: "/events/", label: "Events" },
+        { href: "/alerts/", label: "IDS Alerts" },
+        { href: "/assets/", label: "Assets" },
       ],
       defaultCollapsed: true,
     },
     {
       label: "Operations",
       items: [
-        { href: "/dataplane/", label: "PCAP" },
+        { href: "/system/services/", label: "Services" },
+        { href: "/dataplane/", label: "PCAP Capture" },
         { href: "/pcap/", label: "PCAP Analysis" },
         { href: "/diagnostics/", label: "Diagnostics" },
-      ],
-      defaultCollapsed: true,
-    },
-    {
-      label: "Operations Center",
-      items: [
-        { href: "/monitoring/", label: "Overview" },
-        { href: "/topology/", label: "Topology" },
-        { href: "/system/services/", label: "Services" },
-        { href: "/alerts/", label: "IDS Alerts" },
-        { href: "/flows/", label: "Flows" },
-        { href: "/events/", label: "Events" },
         { href: "/audit/", label: "Audit Log" },
+        { href: "/sessions/", label: "Sessions" },
       ],
       defaultCollapsed: true,
     },
   ];
   if (isAdmin) {
-    groups.splice(1, 0, {
+    groups.push({
       label: "System",
       items: [
-        { href: "/system/settings/", label: "System Settings" },
-        { href: "/system/users/", label: "User Management" },
+        { href: "/system/settings/", label: "Settings" },
+        { href: "/system/users/", label: "Users" },
+        { href: "/config/", label: "Configuration" },
       ],
       defaultCollapsed: true,
     });
@@ -243,6 +246,18 @@ export function Shell({
             <span className="text-lg font-semibold text-white">containd</span>
           </div>
           <nav aria-label="Main navigation" className="flex-1 overflow-y-auto px-2 pb-6 text-sm text-slate-200">
+            <div className="mb-3">
+              <Link
+                href="/"
+                className={
+                  pathname === "/"
+                    ? "block rounded-md bg-white/10 px-3 py-2 text-white"
+                    : "block rounded-md px-3 py-2 hover:bg-white/5"
+                }
+              >
+                Dashboard
+              </Link>
+            </div>
             {navGroups.map((group) => (
               <div key={group.label} className="mb-3">
                 <button

@@ -91,3 +91,17 @@ export function validatePort(input: string): string | null {
   }
   return null;
 }
+
+/** Validates a port number or port range like "1000-2000". Returns null if valid or empty. */
+export function validatePortOrRange(input: string): string | null {
+  const s = input.trim();
+  if (!s) return null;
+  const dash = s.indexOf("-");
+  if (dash < 0) return validatePort(s);
+  const lo = Number(s.slice(0, dash));
+  const hi = Number(s.slice(dash + 1));
+  if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi > 65535 || lo > hi) {
+    return `"${s}" is not a valid port or range (e.g. 80 or 1000-2000)`;
+  }
+  return null;
+}

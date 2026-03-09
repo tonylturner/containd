@@ -26,8 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenVPN client and server with managed config, profile upload, local PKI, and downloadable client profiles.
 - DHCPv4 server with per-interface scopes, persistent leases, and MAC-based reservations.
 - ICS/OT asset model with criticality, tags, and policy references.
-- Modbus/TCP deep packet inspection (function codes, register ranges, read/write classification).
-- IT protocol DPI: DNS, TLS (SNI/JA3/versions/ciphers), HTTP/HTTP2, SSH, RDP, SMB, SNMP, NTP.
+- Full ICS protocol DPI: Modbus/TCP, DNP3, CIP/EtherNet/IP (with EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA.
+- IT protocol DPI: DNS (with compression pointer support), TLS (SNI/JA3/versions/ciphers), HTTP/HTTP2, SSH, RDP, SMB, SNMP, NTP.
+- ICS asset auto-discovery from observed traffic (`pkg/dp/inventory`).
+- Learn mode: passive traffic learning with automatic allowlist rule generation (`pkg/dp/learn`).
+- Protocol anomaly detection: malformed frames, protocol violations, rate anomalies (`pkg/dp/anomaly`).
+- Signature-based IDS with 16 built-in ICS malware signatures (`pkg/dp/signatures`).
+- PCAP offline analysis: upload capture files for DPI processing and policy generation (`pkg/dp/pcap`).
+- Event export in CEF, JSON, and Syslog formats to file/UDP/TCP destinations (`pkg/dp/export`).
+- Protocol statistics and top talkers (`pkg/dp/stats`).
+- 7 ICS policy templates (Purdue baseline, maintenance windows, per-protocol defaults) (`pkg/cp/templates`).
+- Schedule predicates and identity predicates on firewall rules.
+- Prometheus /metrics endpoint for monitoring integration (`pkg/common/metrics`).
+- TCP reassembly with out-of-order segment handling and pre-allocated buffers.
+- NFQUEUE selective DPI steering with per-flow verdict caching.
+- Optional eBPF XDP/TC fast path for early drops and hardware counters.
+- Event spill-to-disk for high-volume event handling.
 - Native IDS with Sigma-compatible rule evaluation over DPI events.
 - Antivirus pipeline: ICAP client, async scanning queue, optional embedded ClamAV with freshclam.
 - Syslog forwarding (UDP/TCP, RFC 5424/JSON, retry/backoff).
@@ -46,3 +60,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Distroless container image (nonroot) for minimal attack surface.
 - Auth required by default on all management endpoints.
 - Session denylist for immediate logout invalidation.
+- JWT validation with strong secret enforcement when lab mode is disabled.
+- MustChangePassword enforcement on first login.
+- nftables injection prevention on firewall rule inputs.
+- TLS 1.2+ with hardened cipher suite list.
+- HSTS enabled by default.
+- CORS with wildcard origin rejection.
+- SameSite=Strict session cookies.
+- Path traversal protection on all file-serving endpoints.
+- Rate limiting on authentication and sensitive API endpoints.
+
+### Performance
+- Flow hash uses strings.Builder for reduced allocations.
+- Verdict cache with TOCTOU fix for concurrent access safety.
+- Flow sweep runs outside mutex to reduce lock contention.
+- Event store uses in-place shift to avoid allocations.
+- Regex caching in IDS rule evaluation.
+- Schedule predicate evaluation is allocation-free.
+- TCP reassembler uses pre-allocated segment buffers.

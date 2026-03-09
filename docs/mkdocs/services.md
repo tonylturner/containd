@@ -5,7 +5,7 @@ Tracks syslog, DNS, NTP, DHCP, VPN, proxy, and AV service configuration plus run
 ## Syslog
 
 - Config model: `services.syslog.forwarders[]` with `address`, `port`, `proto` (udp|tcp).
-- API (initial):
+- API:
   - `GET /api/v1/config` (includes services.syslog)
   - `POST /api/v1/config` to update full config
   - `/api/v1/services/syslog` get/set endpoints.

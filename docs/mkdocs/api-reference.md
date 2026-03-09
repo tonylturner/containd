@@ -6,11 +6,11 @@ containd exposes a REST API under `/api/v1`. All authenticated endpoints require
 
 A machine-readable OpenAPI 3.0 specification is maintained at [`docs/openapi.yaml`](https://github.com/tonylturner/containd/blob/main/docs/openapi.yaml). You can load this file into any OpenAPI-compatible viewer (Swagger UI, Redocly, Stoplight, etc.) for interactive exploration.
 
-The spec covers authentication, configuration lifecycle, CRUD endpoints for zones/interfaces/firewall rules/assets, embedded services, monitoring, and diagnostics.
+The spec covers authentication, configuration lifecycle, CRUD endpoints for zones/interfaces/firewall rules/assets, embedded services, DPI/ICS operations, PCAP analysis, learn mode, inventory, signatures, anomalies, templates, monitoring, and diagnostics.
 
 ## Quick Endpoint Overview
 
-See [Config Format — API Endpoints](config-format.md#api-endpoints-initial) for a concise listing of all REST endpoints.
+See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
 
 ## Environment Variables
 

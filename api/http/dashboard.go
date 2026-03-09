@@ -41,6 +41,7 @@ type dashboardCounts struct {
 	Zones      int `json:"zones"`
 	Interfaces int `json:"interfaces"`
 	Rules      int `json:"rules"`
+	ICSRules   int `json:"icsRules"`
 }
 
 type dashboardEventStats struct {
@@ -71,11 +72,18 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 		// Config counts
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err == nil {
+			var icsCount int
+			for _, r := range cfg.Firewall.Rules {
+				if hasICSPredicate(r) {
+					icsCount++
+				}
+			}
 			resp.Counts = dashboardCounts{
 				Assets:     len(cfg.Assets),
 				Zones:      len(cfg.Zones),
 				Interfaces: len(cfg.Interfaces),
 				Rules:      len(cfg.Firewall.Rules),
+				ICSRules:   icsCount,
 			}
 		}
 

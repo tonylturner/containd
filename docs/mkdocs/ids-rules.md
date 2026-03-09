@@ -37,7 +37,7 @@ Leaf `op` values: `equals`, `contains`, `in`, `regex`, `gt`, `lt`.
 
 Fields refer to normalized event fields:
 - Core: `proto`, `kind`, `flowId`, `srcIp`, `dstIp`, `srcPort`, `dstPort`
-- Attributes: prefix with `attr.` (e.g., `attr.function_code`, `attr.sni`, `attr.qname`)
+- Attributes: prefix with `attr.` (e.g., `attr.function_code`, `attr.sni`, `attr.qname`, `attr.service_code`, `attr.unit_id`, `attr.pdu_type`)
 
 ## Sigma import
 

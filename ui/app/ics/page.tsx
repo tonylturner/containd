@@ -192,9 +192,9 @@ export default function ICSPolicyPage() {
 
   async function onSave(id: string, ics: ICSPredicate | undefined) {
     setError(null);
-    const updated = await api.updateFirewallRule(id, { ics });
-    if (!updated) {
-      setError("Failed to update ICS filter.");
+    const result = await api.updateFirewallRule(id, { ics });
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     setEditing(null);

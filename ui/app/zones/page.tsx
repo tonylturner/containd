@@ -15,7 +15,10 @@ export default function ZonesPage() {
   const [alias, setAlias] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const ZONE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
   async function refresh() {
     const list = await api.listZones();
@@ -26,21 +29,26 @@ export default function ZonesPage() {
     refresh();
   }, []);
 
+  function validateName(v: string): string | null {
+    if (!v.trim()) return "Zone name is required.";
+    if (!ZONE_NAME_RE.test(v.trim())) return "Only letters, numbers, dash, and underscore allowed (no spaces).";
+    return null;
+  }
+
   async function onCreate() {
     setError(null);
-    if (!name.trim()) {
-      setError("Zone name is required.");
-      return;
-    }
+    const nameErr = validateName(name);
+    setNameError(nameErr);
+    if (nameErr) return;
     setSaving(true);
-    const created = await api.createZone({
+    const result = await api.createZone({
       name: name.trim(),
       alias: alias.trim() || undefined,
       description: description.trim() || undefined,
     });
     setSaving(false);
-    if (!created) {
-      setError("Failed to create zone.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     setName("");
@@ -52,9 +60,9 @@ export default function ZonesPage() {
   async function onDelete(zoneName: string) {
     if (!confirm("Delete this zone? This cannot be undone.")) return;
     setError(null);
-    const ok = await api.deleteZone(zoneName);
-    if (!ok) {
-      setError("Failed to delete zone (may be in use).");
+    const result = await api.deleteZone(zoneName);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     refresh();
@@ -62,9 +70,9 @@ export default function ZonesPage() {
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
     setError(null);
-    const updated = await api.updateZone(zoneName, patch);
-    if (!updated) {
-      setError("Failed to update zone.");
+    const result = await api.updateZone(zoneName, patch);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     refresh();
@@ -124,11 +132,12 @@ export default function ZonesPage() {
             <input
               id="zone-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); setNameError(validateName(e.target.value)); }}
               placeholder="name (e.g. ot)"
               disabled={!isAdmin()}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className={"w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 " + (nameError ? "border-amber/50" : "border-white/10")}
             />
+            {nameError && <p className="mt-1 text-xs text-amber">{nameError}</p>}
           </div>
           <div>
             <label htmlFor="zone-alias" className="sr-only">Zone alias</label>

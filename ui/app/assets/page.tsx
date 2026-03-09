@@ -42,7 +42,7 @@ export default function AssetsPage() {
       const ipErr = validateIPOrCIDRList(ips);
       if (ipErr) { setError(ipErr); return; }
     }
-    const created = await api.createAsset({
+    const result = await api.createAsset({
       id: id.trim(),
       name: name.trim(),
       alias: alias.trim() || undefined,
@@ -54,8 +54,8 @@ export default function AssetsPage() {
         .filter(Boolean),
       criticality,
     });
-    if (!created) {
-      setError("Failed to create asset.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     setId("");
@@ -67,9 +67,9 @@ export default function AssetsPage() {
 
   async function onDelete(assetID: string) {
     setError(null);
-    const ok = await api.deleteAsset(assetID);
-    if (!ok) {
-      setError("Failed to delete asset.");
+    const result = await api.deleteAsset(assetID);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     refresh();
@@ -77,9 +77,9 @@ export default function AssetsPage() {
 
   async function onUpdate(assetID: string, patch: Partial<Asset>) {
     setError(null);
-    const updated = await api.updateAsset(assetID, patch);
-    if (!updated) {
-      setError("Failed to update asset.");
+    const result = await api.updateAsset(assetID, patch);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     setEditing(null);

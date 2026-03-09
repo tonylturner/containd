@@ -28,7 +28,7 @@ The preferred path is to configure OpenVPN as a **managed client** from the UI:
 
 - Configure `services.vpn.openvpn.managed` (remote/port/proto + CA/cert/key PEM blocks).
 - `containd mgmt` renders a safe foreground config under `/data/openvpn/managed/` and supervises `openvpn --config /data/openvpn/managed/openvpn.conf`.
-- Exported configs are redacted (cert/key/password removed). Encryption-at-rest is phased.
+- Exported configs are redacted (cert/key/password removed).
 
 ### OpenVPN profiles (advanced import)
 

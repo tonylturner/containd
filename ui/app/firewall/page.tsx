@@ -20,7 +20,6 @@ import {
   type Zone,
   type ICSPredicate,
   type NATConfig,
-  type PortForward,
   type RulesetPreview,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -144,7 +143,15 @@ export default function FirewallPage() {
     {
       id: "firewall:nat",
       title: "Enable NAT for outbound access",
-      body: "Turn on SNAT to allow LAN hosts to reach the Internet.",
+      body: (
+        <>
+          Turn on SNAT in{" "}
+          <Link href="/nat/" className="font-semibold text-mint hover:text-mint/80">
+            NAT
+          </Link>{" "}
+          to allow LAN hosts to reach the Internet.
+        </>
+      ),
       when: () => zones.length > 0 && rules.length > 0 && !nat.enabled,
     },
     {
@@ -268,15 +275,14 @@ export default function FirewallPage() {
     if (
       typeof window !== "undefined" &&
       !window.confirm(
-        "This will attempt to enable outbound Internet for LAN/MGMT → WAN by:\n\n• creating/updating a WAN gateway + default route (best-effort)\n• enabling SNAT (masquerade) for LAN+MGMT out WAN\n• creating an ALLOW firewall rule for LAN+MGMT → WAN\n\nContinue?",
+        "This will attempt to enable outbound Internet for LAN/MGMT \u2192 WAN by:\n\n\u2022 creating/updating a WAN gateway + default route (best-effort)\n\u2022 enabling SNAT (masquerade) for LAN+MGMT out WAN\n\u2022 creating an ALLOW firewall rule for LAN+MGMT \u2192 WAN\n\nNote: NAT settings will also be configured (see the NAT page).\n\nContinue?",
       )
     ) {
       return;
     }
     setQuickStarting(true);
     try {
-      // 1) Routing: best-effort WAN gateway + default route.
-      const [ifs, states, routing] = await Promise.all([
+      const [ifs, states, curRouting] = await Promise.all([
         api.listInterfaces(),
         api.listInterfaceState(),
         api.getRouting(),
@@ -302,9 +308,9 @@ export default function FirewallPage() {
       };
 
       const nextRouting: RoutingConfig = {
-        gateways: routing?.gateways ?? [],
-        routes: routing?.routes ?? [],
-        rules: routing?.rules ?? [],
+        gateways: curRouting?.gateways ?? [],
+        routes: curRouting?.routes ?? [],
+        rules: curRouting?.rules ?? [],
       };
 
       const existingGwIdx = (nextRouting.gateways ?? []).findIndex((g) => g.name === gwName);
@@ -326,7 +332,6 @@ export default function FirewallPage() {
       const routingUpdated = await api.setRouting(nextRouting);
       if (!routingUpdated) throw new Error("Failed to update routing configuration.");
 
-      // 2) NAT: enable SNAT masquerade for LAN+MGMT out WAN.
       const sourceZones = new Set([...(nat.sourceZones ?? []), "lan", "mgmt"]);
       const natNext: NATConfig = {
         ...nat,
@@ -337,7 +342,6 @@ export default function FirewallPage() {
       const natUpdated = await api.setNAT(natNext);
       if (!natUpdated) throw new Error("Failed to update NAT configuration.");
 
-      // 3) Firewall rule: allow LAN+MGMT to WAN.
       const allowID = "allow-lan-wan";
       const existing = rules.find((r) => r.id === allowID) ?? null;
       const allowRule: FirewallRule = {
@@ -349,13 +353,13 @@ export default function FirewallPage() {
       };
       if (!existing) {
         const created = await api.createFirewallRule(allowRule);
-        if (!created) throw new Error("Failed to create the LAN→WAN allow rule.");
+        if (!created) throw new Error("Failed to create the LAN\u2192WAN allow rule.");
       } else {
         const updated = await api.updateFirewallRule(allowID, allowRule);
-        if (!updated) throw new Error("Failed to update the LAN→WAN allow rule.");
+        if (!updated) throw new Error("Failed to update the LAN\u2192WAN allow rule.");
       }
 
-      setNotice(`Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT → WAN), and firewall allow rule '${allowID}'.`);
+      setNotice(`Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -374,9 +378,9 @@ export default function FirewallPage() {
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting}
               className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15 disabled:opacity-50"
-              title="Best-effort: default route + SNAT + allow rule for LAN/MGMT → WAN"
+              title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
-              {quickStarting ? "Enabling..." : "Quick start (LAN→WAN)"}
+              {quickStarting ? "Enabling..." : "Quick start (LAN\u2192WAN)"}
             </button>
           )}
           <button
@@ -398,57 +402,30 @@ export default function FirewallPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-white">Outbound readiness</div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span
-              className={
-                outboundStatus.hasDefaultRoute
-                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
-                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
-              }
-            >
+            <span className={outboundStatus.hasDefaultRoute ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
               default route
             </span>
-            <span
-              className={
-                outboundStatus.natEnabled
-                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
-                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
-              }
-            >
-              snat enabled
+            <span className={outboundStatus.natEnabled ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+              <Link href="/nat/" className="hover:underline">snat enabled</Link>
             </span>
-            <span
-              className={
-                outboundStatus.natEgress
-                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
-                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
-              }
-            >
+            <span className={outboundStatus.natEgress ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
               egress=wan
             </span>
-            <span
-              className={
-                outboundStatus.natHasLan
-                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
-                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
-              }
-            >
+            <span className={outboundStatus.natHasLan ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
               src includes lan/mgmt
             </span>
-            <span
-              className={
-                outboundStatus.hasAllowLanWan
-                  ? "rounded-md bg-mint/15 px-2 py-1 text-mint"
-                  : "rounded-md bg-amber/15 px-2 py-1 text-amber"
-              }
-            >
-              allow lan→wan
+            <span className={outboundStatus.hasAllowLanWan ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+              {"allow lan\u2192wan"}
             </span>
           </div>
         </div>
         {!outboundStatus.ok && (
           <div className="mt-2 text-xs text-slate-400">
-            To reach the Internet from LAN, you typically need a default route, a LAN→WAN allow rule, and SNAT out WAN. Use{" "}
-            <span className="font-semibold text-slate-200">Quick start (LAN→WAN)</span> to auto-configure these.
+            {"To reach the Internet from LAN, you typically need a default route, a LAN\u2192WAN allow rule, and "}
+            <Link href="/nat/" className="font-semibold text-slate-200 hover:text-white">SNAT</Link>
+            {" out WAN. Use "}
+            <span className="font-semibold text-slate-200">{"Quick start (LAN\u2192WAN)"}</span>
+            {" to auto-configure these (including NAT)."}
           </div>
         )}
       </div>
@@ -462,34 +439,6 @@ export default function FirewallPage() {
           {notice}
         </div>
       )}
-
-      <NATCard
-        zones={zones}
-        nat={nat}
-        onSave={async (cfg) => {
-          setError(null);
-          const ok = await api.setNAT(cfg);
-          if (!ok) {
-            setError("Failed to update NAT (check zones).");
-            return;
-          }
-          refresh();
-        }}
-      />
-
-      <PortForwardsCard
-        zones={zones}
-        nat={nat}
-        onSave={async (cfg) => {
-          setError(null);
-          const ok = await api.setNAT(cfg);
-          if (!ok) {
-            setError("Failed to update port forwards (check zones/ports).");
-            return;
-          }
-          refresh();
-        }}
-      />
 
       <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
         <div className="flex items-center justify-between">
@@ -611,20 +560,14 @@ export default function FirewallPage() {
             )}
             {rules.map((r) => (
               <tr key={r.id} className="border-t border-white/5">
-                <td className="px-4 py-3 font-mono text-xs text-white">
-                  {r.id}
-                </td>
+                <td className="px-4 py-3 font-mono text-xs text-white">{r.id}</td>
+                <td className="px-4 py-3 text-slate-200">{r.description || "\u2014"}</td>
                 <td className="px-4 py-3 text-slate-200">
-                  {r.description || "—"}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"} →{" "}
+                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
                   {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  {(r.protocols ?? [])
-                    .map((p) => `${p.name}${p.port ? ":" + p.port : ""}`)
-                    .join(", ") || "any"}
+                  {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
                   {r.ics?.protocol ? (
@@ -636,36 +579,18 @@ export default function FirewallPage() {
                         {r.ics.protocol} fc={(r.ics.functionCode ?? []).join(",") || "*"}
                       </span>
                     </div>
-                  ) : (
-                    "—"
-                  )}
+                  ) : "\u2014"}
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={
-                      r.action === "ALLOW"
-                        ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-                        : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
-                    }
-                  >
+                  <span className={r.action === "ALLOW" ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint" : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"}>
                     {r.action}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin() && (
                     <>
-                      <button
-                        onClick={() => setEditing(r)}
-                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => onDelete(r.id)}
-                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                      >
-                        Delete
-                      </button>
+                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10">Edit</button>
+                      <button onClick={() => onDelete(r.id)} className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30">Delete</button>
                     </>
                   )}
                 </td>
@@ -687,169 +612,6 @@ export default function FirewallPage() {
   );
 }
 
-function NATCard({
-  zones,
-  nat,
-  onSave,
-}: {
-  zones: Zone[];
-  nat: NATConfig;
-  onSave: (cfg: NATConfig) => void;
-}) {
-  const [enabled, setEnabled] = useState(!!nat.enabled);
-  const [egressZone, setEgressZone] = useState(nat.egressZone ?? "");
-  const [sourceZones, setSourceZones] = useState<string[]>(
-    nat.sourceZones ?? [],
-  );
-
-  useEffect(() => {
-    setEnabled(!!nat.enabled);
-    setEgressZone(nat.egressZone ?? "");
-    setSourceZones(nat.sourceZones ?? []);
-  }, [nat.enabled, nat.egressZone, nat.sourceZones]);
-
-  const zoneOptions = (zones ?? [])
-    .map((z) => ({ value: z.name, label: zoneLabel(z) }))
-    .filter((z) => z.value);
-  zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
-
-  const dirty =
-    enabled !== !!nat.enabled ||
-    egressZone !== (nat.egressZone ?? "") ||
-    JSON.stringify((sourceZones ?? []).slice().sort()) !==
-      JSON.stringify(((nat.sourceZones ?? []) as string[]).slice().sort());
-
-  return (
-    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <div>
-          <div className="text-sm font-semibold text-white">NAT</div>
-          <div className="text-xs text-slate-400">
-            Source NAT (masquerade) for forwarded traffic. Changes apply on{" "}
-            <span className="font-mono">commit</span>.
-          </div>
-        </div>
-        <span
-          className={
-            enabled
-              ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-              : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
-          }
-        >
-          {enabled ? "ENABLED" : "DISABLED"}
-        </span>
-      </div>
-
-      <div className="grid gap-4 p-4 md:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-            Enable
-          </div>
-          <div className="mt-2 flex items-center gap-3">
-            <button
-              disabled={!isAdmin()}
-              onClick={() => setEnabled((v) => !v)}
-              className={
-                "rounded-lg border px-3 py-1.5 text-sm " +
-                (enabled
-                  ? "border-mint/30 bg-mint/10 text-mint"
-                  : "border-white/10 bg-white/5 text-slate-200") +
-                (!isAdmin() ? " opacity-50" : "")
-              }
-            >
-              {enabled ? "On" : "Off"}
-            </button>
-            <div className="text-xs text-slate-400">
-              When enabled, defaults to <span className="font-mono">wan</span>{" "}
-              egress and <span className="font-mono">lan, dmz</span> sources if
-              empty.
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-            Egress Zone
-          </div>
-          <select
-            disabled={!isAdmin()}
-            value={egressZone}
-            onChange={(e) => setEgressZone(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200"
-          >
-            <option value="">(default: wan)</option>
-            {zoneOptions.map((z) => (
-              <option key={z.value} value={z.value}>
-                {z.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-            Source Zones
-          </div>
-          <div className="mt-2 grid max-h-32 gap-1 overflow-auto pr-1 text-sm">
-            {zoneOptions.length === 0 && (
-              <div className="text-xs text-slate-400">No zones defined.</div>
-            )}
-            {zoneOptions.map((z) => {
-              const checked = sourceZones.includes(z.value);
-              return (
-                <label key={z.value} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    disabled={!isAdmin()}
-                    checked={checked}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setSourceZones((prev) => {
-                        const p = prev ?? [];
-                        if (next) return Array.from(new Set([...p, z.value]));
-                        return p.filter((x) => x !== z.value);
-                      });
-                    }}
-                  />
-                  <span className="text-slate-200">{z.label}</span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-2 text-xs text-slate-400">
-            Leave empty to use default sources.
-          </div>
-        </div>
-      </div>
-
-      {isAdmin() && (
-        <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
-          <button
-            disabled={!dirty}
-            onClick={() =>
-              onSave({
-                enabled,
-                egressZone: egressZone.trim() || undefined,
-                sourceZones:
-                  (sourceZones ?? []).map((z) => z.trim()).filter(Boolean) ||
-                  undefined,
-              })
-            }
-            className={
-              "rounded-lg px-3 py-1.5 text-sm " +
-              (dirty
-                ? "bg-mint/20 text-mint hover:bg-mint/30"
-                : "bg-white/5 text-slate-500")
-            }
-          >
-            Save NAT
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function EditRuleModal({
   zones,
   rule,
@@ -866,23 +628,15 @@ function EditRuleModal({
   const [srcZone, setSrcZone] = useState((rule.sourceZones ?? [])[0] ?? "");
   const [dstZone, setDstZone] = useState((rule.destZones ?? [])[0] ?? "");
   const [sources, setSources] = useState((rule.sources ?? []).join(", "));
-  const [destinations, setDestinations] = useState(
-    (rule.destinations ?? []).join(", "),
-  );
+  const [destinations, setDestinations] = useState((rule.destinations ?? []).join(", "));
   const [proto, setProto] = useState((rule.protocols ?? [])[0]?.name ?? "tcp");
   const [port, setPort] = useState((rule.protocols ?? [])[0]?.port ?? "");
   const [icsEnabled, setIcsEnabled] = useState(!!rule.ics?.protocol);
   const [icsProtocol, setIcsProtocol] = useState(rule.ics?.protocol ?? "modbus");
-  const [functionCodes, setFunctionCodes] = useState(
-    (rule.ics?.functionCode ?? []).join(", ") || "3,16",
-  );
-  const [addresses, setAddresses] = useState(
-    (rule.ics?.addresses ?? []).join(", ") || "0-100",
-  );
+  const [functionCodes, setFunctionCodes] = useState((rule.ics?.functionCode ?? []).join(", ") || "3,16");
+  const [addresses, setAddresses] = useState((rule.ics?.addresses ?? []).join(", ") || "0-100");
   const [icsUnitId, setIcsUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
-  const [objectClasses, setObjectClasses] = useState(
-    (rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
-  );
+  const [objectClasses, setObjectClasses] = useState((rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "));
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
   const [mode, setMode] = useState<"enforce" | "learn">(rule.ics?.mode ?? "learn");
@@ -890,22 +644,13 @@ function EditRuleModal({
   const icsMeta = icsProtoMeta(icsProtocol);
 
   function save() {
-    const protocols: Protocol[] = proto
-      ? [{ name: proto, port: port.trim() || undefined }]
-      : [];
+    const protocols: Protocol[] = proto ? [{ name: proto, port: port.trim() || undefined }] : [];
     let ics: ICSPredicate | undefined;
     if (icsEnabled) {
       ics = {
         protocol: icsProtocol,
-        functionCode: functionCodes
-          .split(",")
-          .map((v) => Number(v.trim()))
-          .filter((n) => Number.isFinite(n))
-          .map((n) => Math.max(0, Math.min(255, n))),
-        addresses: addresses
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        functionCode: functionCodes.split(",").map((v) => Number(v.trim())).filter((n) => Number.isFinite(n)).map((n) => Math.max(0, Math.min(255, n))),
+        addresses: addresses.split(",").map((s) => s.trim()).filter(Boolean),
         readOnly,
         writeOnly,
         mode,
@@ -915,12 +660,7 @@ function EditRuleModal({
         if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
       }
       if (icsMeta.showObjectClasses && objectClasses.trim()) {
-        ics.objectClasses = objectClasses
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
-          .filter((n) => Number.isFinite(n) && n >= 0);
+        ics.objectClasses = objectClasses.split(",").map((s) => s.trim()).filter(Boolean).map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10)).filter((n) => Number.isFinite(n) && n >= 0);
       }
       if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
       if ((ics.addresses?.length ?? 0) === 0) delete ics.addresses;
@@ -942,174 +682,70 @@ function EditRuleModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
       <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-ink p-5 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">
-            Edit rule {rule.id}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-          >
-            Close
-          </button>
+          <h2 className="text-lg font-semibold text-white">Edit rule {rule.id}</h2>
+          <button onClick={onClose} className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10">Close</button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="description"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-3"
-          />
-          <select
-            value={srcZone}
-            onChange={(e) => setSrcZone(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-3" />
+          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
             <option value="">Source zone (any)</option>
-            {zones.map((z) => (
-              <option key={z.name} value={z.name}>
-                {zoneLabel(z)}
-              </option>
-            ))}
+            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           {zones.length === 0 && (
             <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
-              No zones yet.{" "}
-              <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
-                Create a zone
-              </Link>{" "}
-              to target policies.
+              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">Create a zone</Link> to target policies.
             </div>
           )}
-          <select
-            value={dstZone}
-            onChange={(e) => setDstZone(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
+          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
             <option value="">Dest zone (any)</option>
-            {zones.map((z) => (
-              <option key={z.name} value={z.name}>
-                {zoneLabel(z)}
-              </option>
-            ))}
+            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          <select
-            value={action}
-            onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
+          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
             <option value="ALLOW">ALLOW</option>
             <option value="DENY">DENY</option>
           </select>
-          <input
-            value={sources}
-            onChange={(e) => setSources(e.target.value)}
-            placeholder="sources CIDR (csv)"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2"
-          />
-          <input
-            value={destinations}
-            onChange={(e) => setDestinations(e.target.value)}
-            placeholder="destinations CIDR (csv)"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2"
-          />
-          <select
-            value={proto}
-            onChange={(e) => setProto(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
+          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
+          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
+          <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>
             <option value="icmp">icmp</option>
           </select>
-          <input
-            value={port}
-            onChange={(e) => setPort(e.target.value)}
-            placeholder="port/range"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          />
+          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
           <label className="flex items-center gap-2 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              checked={icsEnabled}
-              onChange={(e) => setIcsEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
-            />
+            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
             ICS Protocol Filter
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
-          <span className="text-xs text-slate-400 md:col-span-4">
-            ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.
-          </span>
-        <span className="text-xs text-slate-400 md:col-span-4">
-          Requires DPI capture to see ICS traffic (configure above).
-        </span>
+          <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure above).</span>
         </div>
 
         {icsEnabled && (
           <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
-            <select
-              value={icsProtocol}
-              onChange={(e) => setIcsProtocol(e.target.value)}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            >
-              {ICS_PROTOCOL_KEYS.map((k) => (
-                <option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>
-              ))}
+            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+              {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
             </select>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1"
-            >
+            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1">
               <option value="learn">safe learning</option>
               <option value="enforce">enforce</option>
             </select>
-            <input
-              value={functionCodes}
-              onChange={(e) => setFunctionCodes(e.target.value)}
-              placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
-            <input
-              value={addresses}
-              onChange={(e) => setAddresses(e.target.value)}
-              placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            />
+            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
+            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
             {icsMeta.showUnitId && (
-              <input
-                value={icsUnitId}
-                onChange={(e) => setIcsUnitId(e.target.value)}
-                placeholder="Unit ID (0-255)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-              />
+              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
             )}
             {icsMeta.showObjectClasses && (
-              <input
-                value={objectClasses}
-                onChange={(e) => setObjectClasses(e.target.value)}
-                placeholder="Object classes (hex csv, e.g. 0x02, 0x04)"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2"
-              />
+              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
             )}
             <div className="flex items-center gap-4 text-sm text-slate-200">
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={readOnly}
-                  onChange={(e) => setReadOnly(e.target.checked)}
-                  className="h-4 w-4 rounded border-white/20 bg-black/30"
-                />
+                <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
                 Read-only
               </label>
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={writeOnly}
-                  onChange={(e) => setWriteOnly(e.target.checked)}
-                  className="h-4 w-4 rounded border-white/20 bg-black/30"
-                />
+                <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
                 Write-only
               </label>
             </div>
@@ -1117,297 +753,15 @@ function EditRuleModal({
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
-          >
-            Save changes
-          </button>
+          <button onClick={onClose} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10">Cancel</button>
+          <button onClick={save} className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30">Save changes</button>
         </div>
       </div>
     </div>
   );
 }
 
-function PortForwardsCard({
-  zones,
-  nat,
-  onSave,
-}: {
-  zones: Zone[];
-  nat: NATConfig;
-  onSave: (cfg: NATConfig) => void;
-}) {
-  const [items, setItems] = useState<PortForward[]>(nat.portForwards ?? []);
-  const [newIngress, setNewIngress] = useState("wan");
-  const [newProto, setNewProto] = useState<"tcp" | "udp">("tcp");
-  const [newListen, setNewListen] = useState("");
-  const [newDestIp, setNewDestIp] = useState("");
-  const [newDestPort, setNewDestPort] = useState("");
-  const [newSources, setNewSources] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setItems(nat.portForwards ?? []);
-  }, [nat.portForwards]);
-
-  const zoneOptions = (zones ?? [])
-    .map((z) => ({ value: z.name, label: zoneLabel(z) }))
-    .filter((z) => z.value);
-  zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
-
-  const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
-
-  function normalize(pf: PortForward): PortForward {
-    return {
-      ...pf,
-      id: pf.id.trim(),
-      ingressZone: pf.ingressZone.trim(),
-      destIp: pf.destIp.trim(),
-      allowedSources: (pf.allowedSources ?? []).map((s) => s.trim()).filter(Boolean),
-      description: pf.description?.trim() || undefined,
-    };
-  }
-
-  function validatePort(v: string): number | null {
-    const n = Number(v);
-    if (!Number.isFinite(n) || n <= 0 || n > 65535) return null;
-    return Math.trunc(n);
-  }
-
-  async function add() {
-    setError(null);
-    const lp = validatePort(newListen);
-    if (!lp) {
-      setError("Listen port must be 1-65535.");
-      return;
-    }
-    if (!newDestIp.trim()) {
-      setError("Destination IP is required.");
-      return;
-    }
-    const dp = newDestPort.trim() ? validatePort(newDestPort) ?? undefined : undefined;
-    if (newDestPort.trim() && !dp) {
-      setError("Destination port must be 1-65535.");
-      return;
-    }
-    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `pf-${Date.now()}`;
-    const pf: PortForward = normalize({
-      id,
-      enabled: true,
-      ingressZone: newIngress,
-      proto: newProto,
-      listenPort: lp,
-      destIp: newDestIp,
-      destPort: dp,
-      allowedSources: newSources
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      description: newDesc.trim() || undefined,
-    });
-    setItems((prev) => [...prev, pf]);
-    setNewListen("");
-    setNewDestIp("");
-    setNewDestPort("");
-    setNewSources("");
-    setNewDesc("");
-  }
-
-  async function save() {
-    setError(null);
-    onSave({ ...nat, portForwards: items });
-  }
-
-  function toggle(id: string, enabled: boolean) {
-    setItems((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
-  }
-
-  function remove(id: string) {
-    setItems((prev) => prev.filter((p) => p.id !== id));
-  }
-
-  return (
-    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <div>
-          <div className="text-sm font-semibold text-white">Port forwarding</div>
-          <div className="text-xs text-slate-400">
-            DNAT (prerouting). You still need a matching firewall allow rule.
-          </div>
-        </div>
-        {isAdmin() && (
-          <button
-            onClick={save}
-            disabled={!dirty}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-          >
-            Save
-          </button>
-        )}
-      </div>
-
-      <div className="p-4">
-        {!isAdmin() && (
-          <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-            View-only mode: port forwarding changes are disabled.
-          </div>
-        )}
-        {error && (
-          <div className="mb-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
-            {error}
-          </div>
-        )}
-
-        {isAdmin() && (
-          <div className="grid gap-2 md:grid-cols-6">
-            <select
-              value={newIngress}
-              onChange={(e) => setNewIngress(e.target.value)}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            >
-              {zoneOptions.map((z) => (
-                <option key={z.value} value={z.value}>
-                  ingress:{z.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={newProto}
-              onChange={(e) => setNewProto(e.target.value as "tcp" | "udp")}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            >
-              <option value="tcp">tcp</option>
-              <option value="udp">udp</option>
-            </select>
-            <input
-              value={newListen}
-              onChange={(e) => setNewListen(e.target.value)}
-              placeholder="listen port"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
-            <input
-              value={newDestIp}
-              onChange={(e) => setNewDestIp(e.target.value)}
-              placeholder="dest ip"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
-            <input
-              value={newDestPort}
-              onChange={(e) => setNewDestPort(e.target.value)}
-              placeholder="dest port (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
-            <button
-              onClick={add}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
-            >
-              Add
-            </button>
-
-            <input
-              value={newSources}
-              onChange={(e) => setNewSources(e.target.value)}
-              placeholder="sources CIDR (comma) (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
-            />
-            <input
-              value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="description (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
-            />
-          </div>
-        )}
-
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
-          <table className="w-full text-sm">
-            <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
-              <tr>
-                <th className="px-4 py-3">Ingress</th>
-                <th className="px-4 py-3">Proto</th>
-                <th className="px-4 py-3">Listen</th>
-                <th className="px-4 py-3">Destination</th>
-                <th className="px-4 py-3">Sources</th>
-                <th className="px-4 py-3">Enabled</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 && (
-                <tr>
-                  <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                    No port forwards configured. Port forwards (DNAT) expose internal services to external zones.
-                  </td>
-                </tr>
-              )}
-              {items.map((pf) => (
-                <tr key={pf.id} className="border-t border-white/5">
-                  <td className="px-4 py-3 text-slate-200">{zoneName(zones, pf.ingressZone)}</td>
-                  <td className="px-4 py-3 text-slate-200">{pf.proto}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-white">
-                    {pf.listenPort}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-white">
-                    {pf.destIp}
-                    {pf.destPort ? `:${pf.destPort}` : ""}
-                  </td>
-                  <td className="px-4 py-3 text-slate-200">
-                    {(pf.allowedSources ?? []).join(", ") || "any"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        pf.enabled
-                          ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-                          : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
-                      }
-                    >
-                      {pf.enabled ? "on" : "off"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {isAdmin() && (
-                      <>
-                        <button
-                          onClick={() => toggle(pf.id, !pf.enabled)}
-                          className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                        >
-                          {pf.enabled ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          onClick={() => remove(pf.id)}
-                          className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CreateRuleForm({
-  zones,
-  onCreate,
-}: {
-  zones: Zone[];
-  onCreate: (rule: FirewallRule) => void;
-}) {
+function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: FirewallRule) => void }) {
   const [id, setId] = useState("");
   const [description, setDescription] = useState("");
   const [action, setAction] = useState<"ALLOW" | "DENY">("ALLOW");
@@ -1433,10 +787,7 @@ function CreateRuleForm({
 
   async function submit() {
     setError(null);
-    if (!id.trim()) {
-      setError("Rule ID is required.");
-      return;
-    }
+    if (!id.trim()) { setError("Rule ID is required."); return; }
     if (sources.trim()) {
       const srcErr = validateIPOrCIDRList(sources);
       if (srcErr) { setError("Source: " + srcErr); return; }
@@ -1445,22 +796,13 @@ function CreateRuleForm({
       const dstErr = validateIPOrCIDRList(destinations);
       if (dstErr) { setError("Destination: " + dstErr); return; }
     }
-    const protocols: Protocol[] = proto
-      ? [{ name: proto, port: port.trim() || undefined }]
-      : [];
+    const protocols: Protocol[] = proto ? [{ name: proto, port: port.trim() || undefined }] : [];
     let ics: ICSPredicate | undefined;
     if (icsEnabled) {
       ics = {
         protocol: icsProtocol,
-        functionCode: functionCodes
-          .split(",")
-          .map((v) => Number(v.trim()))
-          .filter((n) => Number.isFinite(n))
-          .map((n) => Math.max(0, Math.min(255, n))),
-        addresses: addresses
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        functionCode: functionCodes.split(",").map((v) => Number(v.trim())).filter((n) => Number.isFinite(n)).map((n) => Math.max(0, Math.min(255, n))),
+        addresses: addresses.split(",").map((s) => s.trim()).filter(Boolean),
         readOnly,
         writeOnly,
         mode,
@@ -1470,12 +812,7 @@ function CreateRuleForm({
         if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
       }
       if (icsMeta.showObjectClasses && objectClasses.trim()) {
-        ics.objectClasses = objectClasses
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
-          .filter((n) => Number.isFinite(n) && n >= 0);
+        ics.objectClasses = objectClasses.split(",").map((s) => s.trim()).filter(Boolean).map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10)).filter((n) => Number.isFinite(n) && n >= 0);
       }
       if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
       if ((ics.addresses?.length ?? 0) === 0) delete ics.addresses;
@@ -1505,174 +842,72 @@ function CreateRuleForm({
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
       <h2 className="text-sm font-semibold text-white">Create rule</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <input
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-          placeholder="id (e.g. mb-allow)"
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-        />
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="description"
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
-        />
+        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-          <select
-            value={srcZone}
-            onChange={(e) => setSrcZone(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
-            <option value="">Source zone (any)</option>
-            {zones.map((z) => (
-              <option key={z.name} value={z.name}>
-                {zoneLabel(z)}
-              </option>
-            ))}
-          </select>
-          {zones.length === 0 && (
-            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
-              No zones yet.{" "}
-              <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
-                Create a zone
-              </Link>{" "}
-              to target policies.
-            </div>
-          )}
-          <select
-            value={dstZone}
-            onChange={(e) => setDstZone(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
-          <option value="">Dest zone (any)</option>
-          {zones.map((z) => (
-            <option key={z.name} value={z.name}>
-              {zoneLabel(z)}
-            </option>
-          ))}
+        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <option value="">Source zone (any)</option>
+          {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
-        <input
-          value={sources}
-          onChange={(e) => setSources(e.target.value)}
-          placeholder="sources CIDR (csv)"
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-        />
-        <input
-          value={destinations}
-          onChange={(e) => setDestinations(e.target.value)}
-          placeholder="destinations CIDR (csv)"
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-        />
+        {zones.length === 0 && (
+          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
+            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">Create a zone</Link> to target policies.
+          </div>
+        )}
+        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <option value="">Dest zone (any)</option>
+          {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
+        </select>
+        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select
-          value={proto}
-          onChange={(e) => setProto(e.target.value)}
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-        >
+        <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
           <option value="icmp">icmp</option>
         </select>
-        <input
-          value={port}
-          onChange={(e) => setPort(e.target.value)}
-          placeholder="port/range"
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-        />
-        <select
-          value={action}
-          onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")}
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-        >
+        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
         </select>
         <label className="flex items-center gap-2 text-sm text-slate-200">
-          <input
-            type="checkbox"
-            checked={icsEnabled}
-            onChange={(e) => setIcsEnabled(e.target.checked)}
-            className="h-4 w-4 rounded border-white/20 bg-black/30"
-          />
+          <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
           ICS Protocol Filter
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
-        <span className="text-xs text-slate-400 md:col-span-4">
-          ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.
-        </span>
-        <span className="text-xs text-slate-400 md:col-span-4">
-          Requires DPI capture to see ICS traffic (configure above).
-        </span>
+        <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure above).</span>
       </div>
 
       {icsEnabled && (
         <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
-          <select
-            value={icsProtocol}
-            onChange={(e) => setIcsProtocol(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-          >
-            {ICS_PROTOCOL_KEYS.map((k) => (
-              <option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>
-            ))}
+          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
           </select>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1"
-          >
+          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1">
             <option value="learn">safe learning</option>
             <option value="enforce">enforce</option>
           </select>
-          <input
-            value={functionCodes}
-            onChange={(e) => setFunctionCodes(e.target.value)}
-            placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-          />
-          <input
-            value={addresses}
-            onChange={(e) => setAddresses(e.target.value)}
-            placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-          />
+          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
           {icsMeta.showUnitId && (
-            <input
-              value={icsUnitId}
-              onChange={(e) => setIcsUnitId(e.target.value)}
-              placeholder="Unit ID (0-255)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
-            />
+            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
           )}
           {icsMeta.showObjectClasses && (
-            <input
-              value={objectClasses}
-              onChange={(e) => setObjectClasses(e.target.value)}
-              placeholder="Object classes (hex csv, e.g. 0x02, 0x04)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
-            />
+            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2" />
           )}
           <div className="flex items-center gap-4 text-sm text-slate-200">
             <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={readOnly}
-                onChange={(e) => setReadOnly(e.target.checked)}
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
-              />
+              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
               Read-only
             </label>
             <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={writeOnly}
-                onChange={(e) => setWriteOnly(e.target.checked)}
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
-              />
+              <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
               Write-only
             </label>
           </div>
@@ -1681,11 +916,7 @@ function CreateRuleForm({
 
       <div className="mt-3 flex items-center justify-between">
         {error && <p className="text-sm text-amber">{error}</p>}
-        <button
-          onClick={submit}
-          disabled={saving}
-          className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
-        >
+        <button onClick={submit} disabled={saving} className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50">
           {saving ? "Creating..." : "Create rule"}
         </button>
       </div>
@@ -1694,9 +925,6 @@ function CreateRuleForm({
 }
 
 function splitCSV(v: string): string[] | undefined {
-  const out = v
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const out = v.split(",").map((s) => s.trim()).filter(Boolean);
   return out.length > 0 ? out : undefined;
 }

@@ -19,6 +19,7 @@ export default function Home() {
   const zoneCount = data?.counts?.zones ?? null;
   const ifaceCount = data?.counts?.interfaces ?? null;
   const ruleCount = data?.counts?.rules ?? null;
+  const icsRuleCount = data?.counts?.icsRules ?? null;
   const eventStats = data ? {
     idsAlerts: data.eventStats.idsAlerts,
     modbusWrites: data.eventStats.modbusWrites,
@@ -114,7 +115,7 @@ export default function Home() {
             <Stat label="Zones" value={zoneCount} href="/zones/" />
             <Stat label="Interfaces" value={ifaceCount} href="/interfaces/" />
             <Stat label="FW rules" value={ruleCount} href="/firewall/" />
-            <Stat label="ICS rules" value={0} href="/firewall/" />
+            <Stat label="ICS rules" value={icsRuleCount} href="/ics/" />
           </div>
         </DashboardCard>
       </div>

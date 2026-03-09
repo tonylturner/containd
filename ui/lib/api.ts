@@ -5,6 +5,9 @@ export type HealthResponse = {
   time?: string;
 };
 
+/** Discriminated result type for mutation API calls that surfaces backend error messages. */
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
 // In the browser we always use same-origin relative URLs so cookies/localStorage
 // are scoped consistently (localhost vs 127.0.0.1 vs 0.0.0.0 can otherwise break auth).
 const API_BASE = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
@@ -385,7 +388,7 @@ export type Asset = {
 
 export type DashboardData = {
   health: HealthResponse & { commit?: string; hostname?: string };
-  counts: { assets: number; zones: number; interfaces: number; rules: number };
+  counts: { assets: number; zones: number; interfaces: number; rules: number; icsRules: number };
   eventStats: { total: number; idsAlerts: number; modbusWrites: number; avDetections: number; avBlocks: number };
   services: Record<string, unknown> | null;
   user: User | null;
@@ -941,6 +944,59 @@ async function deleteJSON(path: string): Promise<boolean> {
   }
 }
 
+async function parseErrorBody(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    return body.error || body.message || res.statusText;
+  } catch {
+    return res.statusText;
+  }
+}
+
+async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+  try {
+    const res = await fetchWithSession(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: (await res.json()) as T };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+  try {
+    const res = await fetchWithSession(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: (await res.json()) as T };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
+async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
+  try {
+    const res = await fetchWithSession(path, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
 export const api = {
   // Auth
   login: async (username: string, password: string) => {
@@ -1005,11 +1061,11 @@ export const api = {
     deleteJSON(`/api/v1/users/${encodeURIComponent(id)}`),
 
   listZones: () => getJSON<Zone[]>("/api/v1/zones"),
-  createZone: (z: Zone) => postJSON<Zone>("/api/v1/zones", z),
+  createZone: (z: Zone) => postJSONResult<Zone>("/api/v1/zones", z),
   updateZone: (name: string, z: Partial<Zone>) =>
-    patchJSON<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
+    patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
   deleteZone: (name: string) =>
-    deleteJSON(`/api/v1/zones/${encodeURIComponent(name)}`),
+    deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`),
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
   listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
@@ -1035,13 +1091,13 @@ export const api = {
 
   listFirewallRules: () => getJSON<FirewallRule[]>("/api/v1/firewall/rules"),
   createFirewallRule: (r: FirewallRule) =>
-    postJSON<FirewallRule>("/api/v1/firewall/rules", r),
+    postJSONResult<FirewallRule>("/api/v1/firewall/rules", r),
   updateFirewallRule: (id: string, r: Partial<FirewallRule>) =>
-    patchJSON<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
+    patchJSONResult<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
   deleteFirewallRule: (id: string) =>
-    deleteJSON(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+    deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
-  setNAT: (cfg: NATConfig) => postJSON<NATConfig>("/api/v1/firewall/nat", cfg),
+  setNAT: (cfg: NATConfig) => postJSONResult<NATConfig>("/api/v1/firewall/nat", cfg),
   blockHostTemp: (ip: string, ttlSeconds?: number) =>
     postJSON<{ status: string }>("/api/v1/dataplane/blocks/host", {
       ip,
@@ -1057,11 +1113,11 @@ export const api = {
     postJSON<{ status: string }>("/api/v1/dataplane/blocks/flow", req),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
-  createAsset: (a: Asset) => postJSON<Asset>("/api/v1/assets", a),
+  createAsset: (a: Asset) => postJSONResult<Asset>("/api/v1/assets", a),
   updateAsset: (id: string, a: Partial<Asset>) =>
-    patchJSON<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
+    patchJSONResult<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
   deleteAsset: (id: string) =>
-    deleteJSON(`/api/v1/assets/${encodeURIComponent(id)}`),
+    deleteJSONResult(`/api/v1/assets/${encodeURIComponent(id)}`),
 
   // IDS / Sigma
   getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
