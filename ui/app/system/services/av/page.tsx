@@ -80,7 +80,15 @@ export default function AVPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
-    const result = await api.setAV(cfg);
+    // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
+    const payload: AVConfig = {
+      ...cfg,
+      clamav: {
+        ...(cfg.clamav ?? {}),
+        freshclamEnabled: cfg.clamav?.freshclamEnabled ?? true,
+      },
+    };
+    const result = await api.setAV(payload);
     if (result.ok) {
       setSaveState("saved");
       setCfg(result.data);
@@ -206,6 +214,11 @@ export default function AVPage() {
         </div>
       )}
 
+      {status && cfg.enabled !== (status?.enabled ?? false) && (
+        <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+          Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status?.enabled ? "enabled" : "disabled"}. Click Save to apply your changes.
+        </div>
+      )}
       <Card className="mb-4">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading || !status ? (
@@ -280,9 +293,13 @@ export default function AVPage() {
                 const mode = e.target.value as AVConfig["mode"];
                 setCfg((c) => {
                   const next = { ...c, mode };
-                  // Auto-populate required ClamAV socket path if switching to clamav mode
-                  if (mode === "clamav" && !c.clamav?.socketPath) {
-                    next.clamav = { ...(c.clamav ?? {}), socketPath: "/var/run/clamav/clamd.sock" };
+                  // Auto-populate required ClamAV defaults if switching to clamav mode
+                  if (mode === "clamav") {
+                    next.clamav = {
+                      ...(c.clamav ?? {}),
+                      socketPath: c.clamav?.socketPath || "/var/run/clamav/clamd.sock",
+                      freshclamEnabled: c.clamav?.freshclamEnabled ?? true,
+                    };
                   }
                   return next;
                 });
