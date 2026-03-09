@@ -8,44 +8,70 @@ import {
   uploadPcap,
   listPcaps,
   type PcapItem,
-  type FirewallRule,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
-/* ── Types for PCAP analysis responses ─────────────────────────── */
+/* ── Types matching backend PolicyAnalysis / AnalysisResult ──── */
 
-type PcapAnalysisStats = {
+type AnalysisStats = {
+  events: unknown[];
+  flows: FlowSummary[];
+  protocols: Record<string, number>;
+  duration: number; // nanoseconds
   packetCount: number;
-  flowCount: number;
-  durationSeconds: number;
-  protocols: string[];
+  byteCount: number;
 };
 
-type PcapEventSummary = {
+type FlowSummary = {
+  key: string;
   protocol: string;
-  count: number;
+  packets: number;
+  bytes: number;
+  events: number;
+  firstSeen: string;
+  lastSeen: string;
 };
 
-type PcapGeneratedRule = {
+type PolicyRule = {
   id: string;
-  description: string;
-  protocol: string;
-  functionCodes?: number[];
-  addresses?: string[];
-  action: string;
+  description?: string;
   sourceZones?: string[];
   destZones?: string[];
+  sources?: string[];
+  destinations?: string[];
+  protocols?: { name: string; port?: string }[];
+  ics?: {
+    protocol?: string;
+    functionCodes?: number[];
+    unitIDs?: number[];
+    addresses?: string[];
+    direction?: string;
+  };
+  action: string;
 };
 
-type PcapAnalysisResult = {
-  stats: PcapAnalysisStats;
-  events: PcapEventSummary[];
-  rules: PcapGeneratedRule[];
+type LearnedProfile = {
+  protocol: string;
+  sourceIP: string;
+  destIP: string;
+  unitIDs?: Record<string, boolean>;
+  functionCodes?: Record<string, boolean>;
+  addresses?: Record<string, boolean>;
+  readSeen: boolean;
+  writeSeen: boolean;
+  packetCount: number;
+};
+
+type PolicyAnalysis = {
+  rules: PolicyRule[];
+  profiles: LearnedProfile[];
+  stats: AnalysisStats;
+  eventSummary: Record<string, number>;
 };
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
-async function analyzePcapUpload(file: File): Promise<PcapAnalysisResult | null> {
+async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
   try {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -55,28 +81,28 @@ async function analyzePcapUpload(file: File): Promise<PcapAnalysisResult | null>
       body: form,
     });
     if (!res.ok) return null;
-    return (await res.json()) as PcapAnalysisResult;
+    return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;
   }
 }
 
-async function analyzePcapByName(name: string): Promise<PcapAnalysisResult | null> {
+async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
   try {
     const res = await fetch(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`, {
       method: "POST",
       credentials: "include",
     });
     if (!res.ok) return null;
-    return (await res.json()) as PcapAnalysisResult;
+    return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;
   }
 }
 
-async function applyGeneratedRules(rules: PcapGeneratedRule[]): Promise<boolean> {
+async function applyGeneratedRules(rules: PolicyRule[]): Promise<boolean> {
   try {
-    const res = await fetch("/api/v1/firewall/ics-rules", {
+    const res = await fetch("/api/v1/firewall/rules", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -90,7 +116,8 @@ async function applyGeneratedRules(rules: PcapGeneratedRule[]): Promise<boolean>
 
 /* ── Format helpers ────────────────────────────────────────────── */
 
-function fmtDuration(secs: number): string {
+function fmtDuration(nanos: number): string {
+  const secs = nanos / 1e9;
   if (secs < 60) return `${secs.toFixed(1)}s`;
   if (secs < 3600) return `${(secs / 60).toFixed(1)}m`;
   return `${(secs / 3600).toFixed(1)}h`;
@@ -112,7 +139,7 @@ export default function PcapAnalysisPage() {
   // Upload section
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<PcapAnalysisResult | null>(null);
+  const [result, setResult] = useState<PolicyAnalysis | null>(null);
   const [selectedRules, setSelectedRules] = useState<Set<string>>(new Set());
 
   // Existing PCAPs
@@ -120,7 +147,7 @@ export default function PcapAnalysisPage() {
   const [existingAnalyzing, setExistingAnalyzing] = useState<string | null>(null);
   const [existingResult, setExistingResult] = useState<{
     name: string;
-    result: PcapAnalysisResult;
+    result: PolicyAnalysis;
   } | null>(null);
   const [existingSelectedRules, setExistingSelectedRules] = useState<Set<string>>(new Set());
 
@@ -166,7 +193,7 @@ export default function PcapAnalysisPage() {
   }
 
   async function handleApplyRules(
-    rules: PcapGeneratedRule[],
+    rules: PolicyRule[],
     selected: Set<string>,
   ) {
     setError(null);
@@ -381,39 +408,50 @@ function AnalysisResults({
   onApply,
   canEdit,
 }: {
-  result: PcapAnalysisResult;
+  result: PolicyAnalysis;
   selectedRules: Set<string>;
   onToggleRule: (id: string) => void;
   onToggleAll: () => void;
   onApply: () => void;
   canEdit: boolean;
 }) {
+  const { stats, eventSummary, rules, profiles } = result;
+  const protocolList = Object.keys(stats.protocols ?? {});
+  const eventEntries = Object.entries(eventSummary ?? {}).sort(
+    ([, a], [, b]) => b - a,
+  );
+  const flowCount = stats.flows?.length ?? 0;
+
   return (
     <div className="mt-4 space-y-4">
       {/* Stats summary */}
       <div className="grid gap-3 md:grid-cols-4">
-        <StatCard label="Packets" value={result.stats.packetCount.toLocaleString()} />
-        <StatCard label="Flows" value={result.stats.flowCount.toLocaleString()} />
-        <StatCard label="Duration" value={fmtDuration(result.stats.durationSeconds)} />
+        <StatCard label="Packets" value={stats.packetCount.toLocaleString()} />
+        <StatCard label="Flows" value={flowCount.toLocaleString()} />
+        <StatCard label="Duration" value={fmtDuration(stats.duration)} />
         <div className="rounded-xl border border-white/10 bg-black/30 p-3">
           <div className="text-xs uppercase tracking-wide text-slate-400">
             Protocols
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
-            {result.stats.protocols.map((p) => (
-              <span
-                key={p}
-                className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
-              >
-                {p}
-              </span>
-            ))}
+            {protocolList.length > 0 ? (
+              protocolList.map((p) => (
+                <span
+                  key={p}
+                  className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
+                >
+                  {p} ({stats.protocols[p]})
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-slate-400">none detected</span>
+            )}
           </div>
         </div>
       </div>
 
       {/* Event summary table */}
-      {result.events.length > 0 && (
+      {eventEntries.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-sm">
             <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
@@ -423,11 +461,11 @@ function AnalysisResults({
               </tr>
             </thead>
             <tbody>
-              {result.events.map((e) => (
-                <tr key={e.protocol} className="border-t border-white/5">
-                  <td className="px-4 py-2 text-slate-200">{e.protocol}</td>
+              {eventEntries.map(([proto, count]) => (
+                <tr key={proto} className="border-t border-white/5">
+                  <td className="px-4 py-2 text-slate-200">{proto}</td>
                   <td className="px-4 py-2 font-mono text-xs text-slate-200">
-                    {e.count.toLocaleString()}
+                    {count.toLocaleString()}
                   </td>
                 </tr>
               ))}
@@ -436,19 +474,73 @@ function AnalysisResults({
         </div>
       )}
 
+      {/* Learned profiles */}
+      {profiles && profiles.length > 0 && (
+        <>
+          <h3 className="text-sm font-semibold text-white">
+            Learned Profiles ({profiles.length})
+          </h3>
+          <div className="overflow-hidden rounded-xl border border-white/10">
+            <table className="w-full text-sm">
+              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+                <tr>
+                  <th className="px-4 py-2">Protocol</th>
+                  <th className="px-4 py-2">Source</th>
+                  <th className="px-4 py-2">Destination</th>
+                  <th className="px-4 py-2">Packets</th>
+                  <th className="px-4 py-2">Read/Write</th>
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map((p, i) => (
+                  <tr key={i} className="border-t border-white/5">
+                    <td className="px-4 py-2">
+                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200">
+                        {p.protocol}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                      {p.sourceIP}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                      {p.destIP}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                      {p.packetCount}
+                    </td>
+                    <td className="px-4 py-2 text-xs">
+                      {p.readSeen && (
+                        <span className="mr-1 rounded-full bg-mint/20 px-2 py-0.5 text-mint">
+                          Read
+                        </span>
+                      )}
+                      {p.writeSeen && (
+                        <span className="rounded-full bg-amber/20 px-2 py-0.5 text-amber">
+                          Write
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       {/* Generated rules */}
-      {result.rules.length > 0 && (
+      {rules.length > 0 && (
         <>
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white">
-              Generated Rules ({result.rules.length})
+              Generated Rules ({rules.length})
             </h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={onToggleAll}
                 className="rounded-md bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
               >
-                {selectedRules.size === result.rules.length
+                {selectedRules.size === rules.length
                   ? "Deselect All"
                   : "Select All"}
               </button>
@@ -467,17 +559,16 @@ function AnalysisResults({
             <table className="w-full text-sm">
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
-                  <th className="px-4 py-2 w-8"></th>
-                  <th className="px-4 py-2">ID</th>
+                  <th className="w-8 px-4 py-2"></th>
                   <th className="px-4 py-2">Description</th>
-                  <th className="px-4 py-2">Protocol</th>
-                  <th className="px-4 py-2">Function Codes</th>
-                  <th className="px-4 py-2">Addresses</th>
+                  <th className="px-4 py-2">Sources</th>
+                  <th className="px-4 py-2">Destinations</th>
+                  <th className="px-4 py-2">ICS Protocol</th>
                   <th className="px-4 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {result.rules.map((r) => (
+                {rules.map((r) => (
                   <tr key={r.id} className="border-t border-white/5">
                     <td className="px-4 py-2">
                       <input
@@ -487,22 +578,26 @@ function AnalysisResults({
                         className="h-4 w-4 rounded border-white/20 bg-black/30"
                       />
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-white">
-                      {r.id}
-                    </td>
                     <td className="px-4 py-2 text-slate-200">
-                      {r.description || "-"}
+                      {r.description || r.id}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                      {(r.sources ?? []).join(", ") || "*"}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                      {(r.destinations ?? []).join(", ") || "*"}
                     </td>
                     <td className="px-4 py-2">
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200">
-                        {r.protocol}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
-                      {(r.functionCodes ?? []).join(", ") || "*"}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
-                      {(r.addresses ?? []).join(", ") || "*"}
+                      {r.ics?.protocol ? (
+                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200">
+                          {r.ics.protocol}
+                          {r.ics.functionCodes &&
+                            r.ics.functionCodes.length > 0 &&
+                            ` FC:${r.ics.functionCodes.join(",")}`}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       <span
@@ -523,7 +618,7 @@ function AnalysisResults({
         </>
       )}
 
-      {result.rules.length === 0 && (
+      {rules.length === 0 && (
         <div className="text-sm text-slate-400">
           No rules generated from this PCAP. The capture may not contain
           recognizable ICS protocol traffic.

@@ -3427,7 +3427,7 @@ func analyzePCAPUploadHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusInternalServerError, "failed to rewind file")
 			return
 		}
-		result, err := pcap.AnalyzeForPolicy(file)
+		result, err := pcap.AnalyzeForPolicy(file, dpengine.DefaultDecoders()...)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
 			return
@@ -3454,7 +3454,7 @@ func analyzePCAPNameHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		defer resp.Body.Close()
-		result, err := pcap.AnalyzeForPolicy(resp.Body)
+		result, err := pcap.AnalyzeForPolicy(resp.Body, dpengine.DefaultDecoders()...)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
 			return

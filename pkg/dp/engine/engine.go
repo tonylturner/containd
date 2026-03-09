@@ -79,6 +79,30 @@ type Config struct {
 	InspectAll bool
 }
 
+// DefaultDecoders returns the standard set of DPI decoders for both ICS and
+// IT protocols. Used by the engine and by offline analysis (PCAP-to-policy).
+func DefaultDecoders() []dpi.Decoder {
+	return []dpi.Decoder{
+		modbus.NewDecoder(),
+		dnp3.NewDecoder(),
+		cip.NewDecoder(),
+		iec61850.NewMMSDecoder(), // MMS before S7comm: both use port 102
+		s7comm.NewDecoder(),
+		bacnet.NewDecoder(),
+		opcua.NewDecoder(),
+		itdpi.NewDNSDecoder(),
+		itdpi.NewTLSDecoder(),
+		itdpi.NewHTTPDecoder(),
+		itdpi.NewSSHDecoder(),
+		itdpi.NewSMBDecoder(),
+		itdpi.NewNTPDecoder(),
+		itdpi.NewSNMPDecoder(),
+		itdpi.NewRDPDecoder(),
+		itdpi.NewICSMarker(),
+		itdpi.NewPortDetector(),
+	}
+}
+
 func New(cfg Config) (*Engine, error) {
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
@@ -96,25 +120,7 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.eventStore = events.NewStore(4096)
-	e.dpiMgr = dpi.NewManager(
-		modbus.NewDecoder(),
-		dnp3.NewDecoder(),
-		cip.NewDecoder(),
-		iec61850.NewMMSDecoder(),   // MMS before S7comm: both use port 102, MMS returns nil for S7comm traffic
-		s7comm.NewDecoder(),
-		bacnet.NewDecoder(),
-		opcua.NewDecoder(),
-		itdpi.NewDNSDecoder(),
-		itdpi.NewTLSDecoder(),
-		itdpi.NewHTTPDecoder(),
-		itdpi.NewSSHDecoder(),
-		itdpi.NewSMBDecoder(),
-		itdpi.NewNTPDecoder(),
-		itdpi.NewSNMPDecoder(),
-		itdpi.NewRDPDecoder(),
-		itdpi.NewICSMarker(),
-		itdpi.NewPortDetector(),
-	)
+	e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
