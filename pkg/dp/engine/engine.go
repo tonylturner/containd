@@ -104,7 +104,6 @@ func New(cfg Config) (*Engine, error) {
 		s7comm.NewDecoder(),
 		bacnet.NewDecoder(),
 		opcua.NewDecoder(),
-		iec61850.NewGOOSEDecoder(), // GOOSE: Layer 2 placeholder, Supports returns false until raw Ethernet capture
 		itdpi.NewDNSDecoder(),
 		itdpi.NewTLSDecoder(),
 		itdpi.NewHTTPDecoder(),
@@ -637,7 +636,7 @@ func (e *Engine) hasLearnMode() bool {
 
 func isICSEvent(proto, kind string) bool {
 	switch strings.ToLower(proto) {
-	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "goose", "ics":
+	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "ics":
 		return true
 	}
 	_ = kind

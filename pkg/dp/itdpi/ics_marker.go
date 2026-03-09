@@ -28,7 +28,7 @@ func (d *ICSMarker) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
 // MarkICS returns a cloned event with ICS flag set when applicable.
 func MarkICS(ev dpi.Event) dpi.Event {
 	switch ev.Proto {
-	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "goose", "ics":
+	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "ics":
 		attrs := ev.Attributes
 		if attrs == nil {
 			attrs = map[string]any{}

@@ -609,7 +609,7 @@ func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anoma
 
 func isKnownICS(proto string) bool {
 	switch proto {
-	case "modbus", "dnp3", "cip", "s7", "s7comm", "bacnet", "opcua", "mms", "goose", "iec104":
+	case "modbus", "dnp3", "cip", "s7", "s7comm", "bacnet", "opcua", "mms", "iec104":
 		return true
 	}
 	return false
