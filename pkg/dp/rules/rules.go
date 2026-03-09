@@ -82,13 +82,15 @@ type Protocol struct {
 	Port string // single or range
 }
 
-// ICSPredicate captures ICS-specific fields; Modbus is supported today.
+// ICSPredicate captures ICS-specific fields for all supported protocols.
 type ICSPredicate struct {
-	Protocol     string   // modbus, dnp3, etc.
-	FunctionCode []uint8  // e.g., modbus function codes
-	UnitID       *uint8   // optional Modbus unit id
-	Addresses    []string // address/register ranges as strings
-	ReadOnly     bool     // Modbus read-only class
-	WriteOnly    bool     // Modbus write-only class
-	Mode         string   // "learn" or "enforce"
+	Protocol      string   // modbus, dnp3, cip, s7comm, mms, bacnet, opcua
+	FunctionCode  []uint8  // function/service codes (all protocols)
+	UnitID        *uint8   // optional Modbus unit id
+	Addresses     []string // address/register ranges as strings
+	ObjectClasses []uint16 // CIP object classes
+	ReadOnly      bool     // read-only class
+	WriteOnly     bool     // write-only class
+	Direction     string   // "request", "response", or "" (both)
+	Mode          string   // "learn" or "enforce"
 }

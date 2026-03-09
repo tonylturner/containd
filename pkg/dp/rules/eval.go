@@ -33,8 +33,10 @@ type ICSContext struct {
 	FunctionCode uint8
 	UnitID       *uint8
 	Address      string
+	ObjectClass  uint16
 	ReadOnly     bool
 	WriteOnly    bool
+	Direction    string // "request" or "response"
 }
 
 // compiledAddr holds a pre-parsed ICS address or address range.
@@ -300,6 +302,21 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 			return false
 		}
 	}
+	if len(ce.ICS.ObjectClasses) > 0 {
+		match := false
+		for _, oc := range ce.ICS.ObjectClasses {
+			if oc == ctx.ICS.ObjectClass {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	if ce.ICS.Direction != "" && ce.ICS.Direction != ctx.ICS.Direction {
+		return false
+	}
 	if ce.ICS.ReadOnly && !ctx.ICS.ReadOnly {
 		return false
 	}
@@ -323,6 +340,8 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		len(p.FunctionCode) == 0 &&
 		p.UnitID == nil &&
 		len(p.Addresses) == 0 &&
+		len(p.ObjectClasses) == 0 &&
+		p.Direction == "" &&
 		!p.ReadOnly &&
 		!p.WriteOnly
 }

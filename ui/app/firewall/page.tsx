@@ -28,6 +28,24 @@ import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { InfoTip } from "../../components/InfoTip";
 import { validateIPOrCIDRList } from "../../lib/validate";
 
+/* ── ICS protocol metadata for firewall rule modals ───────────── */
+
+const ICS_PROTOCOLS: Record<string, { label: string; fcLabel: string; fcPlaceholder: string; addrLabel: string; addrPlaceholder: string; showUnitId?: boolean; showObjectClasses?: boolean }> = {
+  modbus: { label: "Modbus/TCP", fcLabel: "Function codes", fcPlaceholder: "3, 16", addrLabel: "Register addresses", addrPlaceholder: "0-100", showUnitId: true },
+  dnp3: { label: "DNP3", fcLabel: "Function codes", fcPlaceholder: "1, 2, 3", addrLabel: "Addresses", addrPlaceholder: "1-10" },
+  cip: { label: "CIP / EtherNet/IP", fcLabel: "Service codes", fcPlaceholder: "76, 77", addrLabel: "CIP path addresses", addrPlaceholder: "", showObjectClasses: true },
+  s7comm: { label: "S7comm (Siemens)", fcLabel: "Function codes", fcPlaceholder: "4, 5", addrLabel: "DB / variable addresses", addrPlaceholder: "" },
+  mms: { label: "IEC 61850 MMS", fcLabel: "Service codes", fcPlaceholder: "", addrLabel: "Variable names", addrPlaceholder: "" },
+  bacnet: { label: "BACnet/IP", fcLabel: "Service choices", fcPlaceholder: "12, 15", addrLabel: "Object instance", addrPlaceholder: "" },
+  opcua: { label: "OPC UA", fcLabel: "Service node IDs", fcPlaceholder: "", addrLabel: "Node IDs", addrPlaceholder: "" },
+};
+
+const ICS_PROTOCOL_KEYS = Object.keys(ICS_PROTOCOLS);
+
+function icsProtoMeta(name: string) {
+  return ICS_PROTOCOLS[name] ?? { label: name, fcLabel: "Function codes", fcPlaceholder: "", addrLabel: "Addresses", addrPlaceholder: "" };
+}
+
 function zoneLabel(zone: Zone): string {
   return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
 }
@@ -854,15 +872,22 @@ function EditRuleModal({
   const [proto, setProto] = useState((rule.protocols ?? [])[0]?.name ?? "tcp");
   const [port, setPort] = useState((rule.protocols ?? [])[0]?.port ?? "");
   const [icsEnabled, setIcsEnabled] = useState(!!rule.ics?.protocol);
+  const [icsProtocol, setIcsProtocol] = useState(rule.ics?.protocol ?? "modbus");
   const [functionCodes, setFunctionCodes] = useState(
     (rule.ics?.functionCode ?? []).join(", ") || "3,16",
   );
   const [addresses, setAddresses] = useState(
     (rule.ics?.addresses ?? []).join(", ") || "0-100",
   );
+  const [icsUnitId, setIcsUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
+  const [objectClasses, setObjectClasses] = useState(
+    (rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
+  );
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
   const [mode, setMode] = useState<"enforce" | "learn">(rule.ics?.mode ?? "learn");
+
+  const icsMeta = icsProtoMeta(icsProtocol);
 
   function save() {
     const protocols: Protocol[] = proto
@@ -871,7 +896,7 @@ function EditRuleModal({
     let ics: ICSPredicate | undefined;
     if (icsEnabled) {
       ics = {
-        protocol: "modbus",
+        protocol: icsProtocol,
         functionCode: functionCodes
           .split(",")
           .map((v) => Number(v.trim()))
@@ -885,6 +910,21 @@ function EditRuleModal({
         writeOnly,
         mode,
       };
+      if (icsMeta.showUnitId && icsUnitId.trim()) {
+        const uid = Number(icsUnitId.trim());
+        if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
+      }
+      if (icsMeta.showObjectClasses && objectClasses.trim()) {
+        ics.objectClasses = objectClasses
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
+          .filter((n) => Number.isFinite(n) && n >= 0);
+      }
+      if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
+      if ((ics.addresses?.length ?? 0) === 0) delete ics.addresses;
+      if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
     }
     onSave({
       description: description.trim() || undefined,
@@ -995,19 +1035,28 @@ function EditRuleModal({
               onChange={(e) => setIcsEnabled(e.target.checked)}
               className="h-4 w-4 rounded border-white/20 bg-black/30"
             />
-            ICS filter (Modbus)
+            ICS Protocol Filter
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
           <span className="text-xs text-slate-400 md:col-span-4">
-            ICS filters let you allow or block specific Modbus actions beyond basic L3/L4 rules.
+            ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.
           </span>
         <span className="text-xs text-slate-400 md:col-span-4">
-          Requires DPI capture to see Modbus traffic (configure above).
+          Requires DPI capture to see ICS traffic (configure above).
         </span>
         </div>
 
         {icsEnabled && (
           <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
+            <select
+              value={icsProtocol}
+              onChange={(e) => setIcsProtocol(e.target.value)}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            >
+              {ICS_PROTOCOL_KEYS.map((k) => (
+                <option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>
+              ))}
+            </select>
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
@@ -1019,15 +1068,31 @@ function EditRuleModal({
             <input
               value={functionCodes}
               onChange={(e) => setFunctionCodes(e.target.value)}
-              placeholder="function codes (csv)"
+              placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`}
               className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
             <input
               value={addresses}
               onChange={(e) => setAddresses(e.target.value)}
-              placeholder="addresses/ranges (csv)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2"
+              placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`}
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
             />
+            {icsMeta.showUnitId && (
+              <input
+                value={icsUnitId}
+                onChange={(e) => setIcsUnitId(e.target.value)}
+                placeholder="Unit ID (0-255)"
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              />
+            )}
+            {icsMeta.showObjectClasses && (
+              <input
+                value={objectClasses}
+                onChange={(e) => setObjectClasses(e.target.value)}
+                placeholder="Object classes (hex csv, e.g. 0x02, 0x04)"
+                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2"
+              />
+            )}
             <div className="flex items-center gap-4 text-sm text-slate-200">
               <label className="flex items-center gap-2">
                 <input
@@ -1353,13 +1418,18 @@ function CreateRuleForm({
   const [proto, setProto] = useState("tcp");
   const [port, setPort] = useState("502");
   const [icsEnabled, setIcsEnabled] = useState(false);
+  const [icsProtocol, setIcsProtocol] = useState("modbus");
   const [functionCodes, setFunctionCodes] = useState("3,16");
   const [addresses, setAddresses] = useState("0-100");
+  const [icsUnitId, setIcsUnitId] = useState("");
+  const [objectClasses, setObjectClasses] = useState("");
   const [readOnly, setReadOnly] = useState(false);
   const [writeOnly, setWriteOnly] = useState(false);
   const [mode, setMode] = useState<"enforce" | "learn">("learn");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const icsMeta = icsProtoMeta(icsProtocol);
 
   async function submit() {
     setError(null);
@@ -1381,7 +1451,7 @@ function CreateRuleForm({
     let ics: ICSPredicate | undefined;
     if (icsEnabled) {
       ics = {
-        protocol: "modbus",
+        protocol: icsProtocol,
         functionCode: functionCodes
           .split(",")
           .map((v) => Number(v.trim()))
@@ -1395,6 +1465,21 @@ function CreateRuleForm({
         writeOnly,
         mode,
       };
+      if (icsMeta.showUnitId && icsUnitId.trim()) {
+        const uid = Number(icsUnitId.trim());
+        if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
+      }
+      if (icsMeta.showObjectClasses && objectClasses.trim()) {
+        ics.objectClasses = objectClasses
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
+          .filter((n) => Number.isFinite(n) && n >= 0);
+      }
+      if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
+      if ((ics.addresses?.length ?? 0) === 0) delete ics.addresses;
+      if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
     }
     const rule: FirewallRule = {
       id: id.trim(),
@@ -1513,19 +1598,28 @@ function CreateRuleForm({
             onChange={(e) => setIcsEnabled(e.target.checked)}
             className="h-4 w-4 rounded border-white/20 bg-black/30"
           />
-          ICS filter (Modbus)
+          ICS Protocol Filter
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
         <span className="text-xs text-slate-400 md:col-span-4">
-          ICS filters let you allow or block specific Modbus actions beyond basic L3/L4 rules.
+          ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.
         </span>
         <span className="text-xs text-slate-400 md:col-span-4">
-          Requires DPI capture to see Modbus traffic (configure above).
+          Requires DPI capture to see ICS traffic (configure above).
         </span>
       </div>
 
       {icsEnabled && (
         <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
+          <select
+            value={icsProtocol}
+            onChange={(e) => setIcsProtocol(e.target.value)}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          >
+            {ICS_PROTOCOL_KEYS.map((k) => (
+              <option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>
+            ))}
+          </select>
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
@@ -1537,15 +1631,31 @@ function CreateRuleForm({
           <input
             value={functionCodes}
             onChange={(e) => setFunctionCodes(e.target.value)}
-            placeholder="function codes (csv)"
+            placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`}
             className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
           <input
             value={addresses}
             onChange={(e) => setAddresses(e.target.value)}
-            placeholder="addresses/ranges (csv)"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
+            placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`}
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
           />
+          {icsMeta.showUnitId && (
+            <input
+              value={icsUnitId}
+              onChange={(e) => setIcsUnitId(e.target.value)}
+              placeholder="Unit ID (0-255)"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+            />
+          )}
+          {icsMeta.showObjectClasses && (
+            <input
+              value={objectClasses}
+              onChange={(e) => setObjectClasses(e.target.value)}
+              placeholder="Object classes (hex csv, e.g. 0x02, 0x04)"
+              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2"
+            />
+          )}
           <div className="flex items-center gap-4 text-sm text-slate-200">
             <label className="flex items-center gap-2">
               <input

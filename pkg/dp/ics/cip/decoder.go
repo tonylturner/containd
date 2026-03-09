@@ -64,15 +64,19 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		if cipErr == nil && cipMsg != nil {
 			attrs["service_code"] = cipMsg.ServiceCode
 			attrs["service_name"] = cipMsg.ServiceName
+			attrs["function_code"] = cipMsg.ServiceCode
 			attrs["is_write"] = IsWriteService(cipMsg.ServiceCode)
 			attrs["is_control"] = IsControlService(cipMsg.ServiceCode)
 			if len(cipMsg.Path) > 0 {
 				attrs["cip_path"] = hex.EncodeToString(cipMsg.Path)
-				// Extract object class from path if present (segment type 0x20 = class).
-				if classID, ok := ExtractClassFromPath(cipMsg.Path); ok {
-					attrs["object_class"] = classID
-					attrs["object_class_name"] = ObjectClassName(classID)
+				ep := ParseEPath(cipMsg.Path)
+				if ep.ClassID != 0 {
+					attrs["object_class"] = ep.ClassID
+					attrs["object_class_name"] = ObjectClassName(ep.ClassID)
 				}
+				attrs["instance_id"] = ep.InstanceID
+				attrs["attribute_id"] = ep.AttributeID
+				attrs["address"] = FormatAddress(ep)
 			}
 
 			kind := "request"
@@ -104,21 +108,26 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 				flowID := state.Key.Hash()
 				for _, sub := range subs {
 					subAttrs := map[string]any{
-						"command":      attrs["command"],
-						"command_code": attrs["command_code"],
+						"command":        attrs["command"],
+						"command_code":   attrs["command_code"],
 						"session_handle": attrs["session_handle"],
-						"service_code": sub.ServiceCode,
-						"service_name": sub.ServiceName,
-						"is_write":     sub.IsWrite,
-						"is_control":   sub.IsControl,
-						"msp":          "true",
+						"service_code":   sub.ServiceCode,
+						"service_name":   sub.ServiceName,
+						"function_code":  sub.ServiceCode,
+						"is_write":       sub.IsWrite,
+						"is_control":     sub.IsControl,
+						"msp":            "true",
 					}
 					if len(sub.Path) > 0 {
 						subAttrs["cip_path"] = hex.EncodeToString(sub.Path)
-						if classID, ok := ExtractClassFromPath(sub.Path); ok {
-							subAttrs["object_class"] = classID
-							subAttrs["object_class_name"] = ObjectClassName(classID)
+						ep := ParseEPath(sub.Path)
+						if ep.ClassID != 0 {
+							subAttrs["object_class"] = ep.ClassID
+							subAttrs["object_class_name"] = ObjectClassName(ep.ClassID)
 						}
+						subAttrs["instance_id"] = ep.InstanceID
+						subAttrs["attribute_id"] = ep.AttributeID
+						subAttrs["address"] = FormatAddress(ep)
 					}
 					subKind := kind
 					results = append(results, dpi.Event{

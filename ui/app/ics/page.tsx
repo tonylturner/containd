@@ -498,6 +498,10 @@ function EditICSModal({
   const [addresses, setAddresses] = useState(
     (rule.ics?.addresses ?? []).join(", "),
   );
+  const [unitId, setUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
+  const [objectClasses, setObjectClasses] = useState(
+    (rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
+  );
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
   const [mode, setMode] = useState<"enforce" | "learn">(
@@ -526,9 +530,24 @@ function EditICSModal({
       writeOnly,
       mode,
     };
+    // Modbus-specific: unit ID
+    if (protocol === "modbus" && unitId.trim()) {
+      const uid = Number(unitId.trim());
+      if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
+    }
+    // CIP-specific: object classes
+    if (protocol === "cip" && objectClasses.trim()) {
+      ics.objectClasses = objectClasses
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
+        .filter((n) => Number.isFinite(n) && n >= 0);
+    }
     // Strip empty arrays
     if (ics.functionCode?.length === 0) delete ics.functionCode;
     if (ics.addresses?.length === 0) delete ics.addresses;
+    if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
     onSave(ics);
   }
 
@@ -626,6 +645,40 @@ function EditICSModal({
               placeholder={meta.addrPlaceholder || "Leave empty for all"}
             />
           </div>
+
+          {/* Modbus-specific: Unit ID */}
+          {protocol === "modbus" && (
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-300">
+                Unit ID
+                <InfoTip label="Modbus unit identifier (slave address). 0-255. Leave empty for all." />
+              </label>
+              <input
+                value={unitId}
+                onChange={(e) => setUnitId(e.target.value)}
+                disabled={!enabled}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                placeholder="0-255 (leave empty for all)"
+              />
+            </div>
+          )}
+
+          {/* CIP-specific: Object Classes */}
+          {protocol === "cip" && (
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-300">
+                Object Classes
+                <InfoTip label="CIP object class IDs (comma-separated, hex with 0x prefix or decimal). Leave empty for all." />
+              </label>
+              <input
+                value={objectClasses}
+                onChange={(e) => setObjectClasses(e.target.value)}
+                disabled={!enabled}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                placeholder="0x02, 0x04 (leave empty for all)"
+              />
+            </div>
+          )}
 
           {/* Read/Write classification */}
           <div className="grid gap-3 md:grid-cols-2">

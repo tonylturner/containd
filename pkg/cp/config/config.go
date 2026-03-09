@@ -646,15 +646,17 @@ type Protocol struct {
 }
 
 // ICSPredicate captures ICS-specific primitives for rules.
-// Modbus fields are supported; additional protocols are phased.
+// All seven supported ICS protocols are covered: modbus, dnp3, cip, s7comm, mms, bacnet, opcua.
 type ICSPredicate struct {
-	Protocol     string   `json:"protocol,omitempty"`     // modbus, dnp3, iec104, etc.
-	FunctionCode []uint8  `json:"functionCode,omitempty"` // e.g., Modbus function codes
-	UnitID       *uint8   `json:"unitId,omitempty"`       // optional Modbus unit id
-	Addresses    []string `json:"addresses,omitempty"`    // register/address ranges as strings
-	ReadOnly     bool     `json:"readOnly,omitempty"`     // Modbus read-only class
-	WriteOnly    bool     `json:"writeOnly,omitempty"`    // Modbus write-only class
-	Mode         string   `json:"mode,omitempty"`         // "learn" or "enforce"
+	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, s7comm, mms, bacnet, opcua
+	FunctionCode  []uint8  `json:"functionCode,omitempty"`  // function/service codes (all protocols)
+	UnitID        *uint8   `json:"unitId,omitempty"`        // optional Modbus unit id
+	Addresses     []string `json:"addresses,omitempty"`     // register/address ranges as strings
+	ObjectClasses []uint16 `json:"objectClasses,omitempty"` // CIP object classes
+	ReadOnly      bool     `json:"readOnly,omitempty"`      // read-only class
+	WriteOnly     bool     `json:"writeOnly,omitempty"`     // write-only class
+	Direction     string   `json:"direction,omitempty"`     // "request", "response", or "" (both)
+	Mode          string   `json:"mode,omitempty"`          // "learn" or "enforce"
 }
 
 // Validate performs basic consistency checks on the config.
@@ -1228,9 +1230,17 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.ReadOnly && p.WriteOnly {
 		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)
 	}
+	// Validate direction if set.
+	if p.Direction != "" && p.Direction != "request" && p.Direction != "response" {
+		return fmt.Errorf("rule %s ics direction invalid %q", ruleID, p.Direction)
+	}
 	// If function codes are set, ensure protocol supports them.
 	if len(p.FunctionCode) > 0 && p.Protocol != "modbus" && p.Protocol != "dnp3" && p.Protocol != "cip" && p.Protocol != "s7comm" && p.Protocol != "bacnet" && p.Protocol != "opcua" && p.Protocol != "mms" {
 		return fmt.Errorf("rule %s ics functionCode only supported for modbus, dnp3, cip, s7comm, bacnet, opcua, and mms currently", ruleID)
+	}
+	// ObjectClasses only make sense for CIP.
+	if len(p.ObjectClasses) > 0 && p.Protocol != "cip" {
+		return fmt.Errorf("rule %s ics objectClasses only supported for cip protocol", ruleID)
 	}
 	return nil
 }

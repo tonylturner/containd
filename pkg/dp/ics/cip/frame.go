@@ -157,34 +157,90 @@ func IsControlService(code uint8) bool {
 	}
 }
 
-// ExtractClassFromPath scans a CIP EPATH for an 8-bit or 16-bit class segment
-// and returns the class ID. Segment type 0x20 = 8-bit class, 0x21 = 16-bit class.
-func ExtractClassFromPath(path []byte) (uint16, bool) {
+// EPathResult holds the fully parsed contents of a CIP EPATH.
+type EPathResult struct {
+	ClassID     uint16
+	InstanceID  uint16
+	AttributeID uint16
+	MemberID    uint16
+	Raw         []byte
+}
+
+// ParseEPath walks EPATH segments and extracts class, instance, attribute,
+// and member IDs from all recognised segment types.
+func ParseEPath(data []byte) EPathResult {
+	r := EPathResult{Raw: data}
 	i := 0
-	for i < len(path) {
-		seg := path[i]
+	for i < len(data) {
+		seg := data[i]
 		switch seg {
-		case 0x20: // 8-bit class segment
-			if i+1 < len(path) {
-				return uint16(path[i+1]), true
+		case 0x20: // 8-bit class
+			if i+1 < len(data) {
+				r.ClassID = uint16(data[i+1])
 			}
-			return 0, false
-		case 0x21: // 16-bit class segment
-			// Padded: segment(1) + pad(1) + value(2)
-			if i+3 < len(path) {
-				return binary.LittleEndian.Uint16(path[i+2 : i+4]), true
-			}
-			return 0, false
-		case 0x24, 0x28, 0x2C: // 8-bit instance/member/attribute
 			i += 2
-		case 0x25, 0x29, 0x2D: // 16-bit instance/member/attribute
+		case 0x21: // 16-bit class (padded)
+			if i+3 < len(data) {
+				r.ClassID = binary.LittleEndian.Uint16(data[i+2 : i+4])
+			}
+			i += 4
+		case 0x24: // 8-bit instance
+			if i+1 < len(data) {
+				r.InstanceID = uint16(data[i+1])
+			}
+			i += 2
+		case 0x25: // 16-bit instance (padded)
+			if i+3 < len(data) {
+				r.InstanceID = binary.LittleEndian.Uint16(data[i+2 : i+4])
+			}
+			i += 4
+		case 0x28: // 8-bit member (sometimes used as attribute in older CIP)
+			if i+1 < len(data) {
+				r.MemberID = uint16(data[i+1])
+			}
+			i += 2
+		case 0x29: // 16-bit member (padded)
+			if i+3 < len(data) {
+				r.MemberID = binary.LittleEndian.Uint16(data[i+2 : i+4])
+			}
+			i += 4
+		case 0x2C, 0x30: // 8-bit attribute (standard and alternate encoding)
+			if i+1 < len(data) {
+				r.AttributeID = uint16(data[i+1])
+			}
+			i += 2
+		case 0x2D, 0x31: // 16-bit attribute (standard and alternate encoding, padded)
+			if i+3 < len(data) {
+				r.AttributeID = binary.LittleEndian.Uint16(data[i+2 : i+4])
+			}
 			i += 4
 		default:
-			// Unknown segment; skip 2 bytes as a safe default.
-			i += 2
+			// Unknown segment; 8-bit variants use 2 bytes, 16-bit (odd) use 4.
+			if seg&0x01 != 0 {
+				i += 4
+			} else {
+				i += 2
+			}
 		}
 	}
+	return r
+}
+
+// ExtractClassFromPath scans a CIP EPATH for an 8-bit or 16-bit class segment
+// and returns the class ID. Delegates to ParseEPath internally.
+func ExtractClassFromPath(path []byte) (uint16, bool) {
+	r := ParseEPath(path)
+	if r.ClassID != 0 {
+		return r.ClassID, true
+	}
 	return 0, false
+}
+
+// FormatAddress returns a formatted "class/instance/attribute" address string
+// from an EPathResult, e.g. "0x04/10/3". Fields that are zero are still included
+// so that the learner always sees a consistent three-part address.
+func FormatAddress(r EPathResult) string {
+	return fmt.Sprintf("0x%02X/%d/%d", r.ClassID, r.InstanceID, r.AttributeID)
 }
 
 // maxMSPServices caps the number of sub-services parsed from a Multiple_Service_Packet

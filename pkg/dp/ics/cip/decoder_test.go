@@ -617,6 +617,177 @@ func TestDecoderMSPCapsAt32(t *testing.T) {
 	}
 }
 
+func TestCIPEPathParsing(t *testing.T) {
+	t.Run("8-bit class+instance+attribute", func(t *testing.T) {
+		// class=0x04, instance=10, attribute=3
+		path := []byte{0x20, 0x04, 0x24, 0x0A, 0x30, 0x03}
+		r := ParseEPath(path)
+		if r.ClassID != 0x04 {
+			t.Fatalf("expected ClassID 0x04, got 0x%04X", r.ClassID)
+		}
+		if r.InstanceID != 10 {
+			t.Fatalf("expected InstanceID 10, got %d", r.InstanceID)
+		}
+		if r.AttributeID != 3 {
+			t.Fatalf("expected AttributeID 3, got %d", r.AttributeID)
+		}
+	})
+
+	t.Run("16-bit class+instance", func(t *testing.T) {
+		// 0x21 pad classLo classHi 0x25 pad instLo instHi
+		path := []byte{0x21, 0x00, 0x66, 0x00, 0x25, 0x00, 0x01, 0x00}
+		r := ParseEPath(path)
+		if r.ClassID != 0x66 {
+			t.Fatalf("expected ClassID 0x66, got 0x%04X", r.ClassID)
+		}
+		if r.InstanceID != 1 {
+			t.Fatalf("expected InstanceID 1, got %d", r.InstanceID)
+		}
+	})
+
+	t.Run("member segment 0x28", func(t *testing.T) {
+		path := []byte{0x20, 0x04, 0x24, 0x01, 0x28, 0x07}
+		r := ParseEPath(path)
+		if r.MemberID != 7 {
+			t.Fatalf("expected MemberID 7, got %d", r.MemberID)
+		}
+	})
+
+	t.Run("16-bit attribute 0x2D", func(t *testing.T) {
+		// class=0x01, attribute=0x0100 (16-bit)
+		path := []byte{0x20, 0x01, 0x2D, 0x00, 0x00, 0x01}
+		r := ParseEPath(path)
+		if r.ClassID != 0x01 {
+			t.Fatalf("expected ClassID 0x01, got 0x%04X", r.ClassID)
+		}
+		if r.AttributeID != 0x0100 {
+			t.Fatalf("expected AttributeID 0x0100, got 0x%04X", r.AttributeID)
+		}
+	})
+
+	t.Run("alternate 8-bit attribute 0x30", func(t *testing.T) {
+		path := []byte{0x20, 0x02, 0x24, 0x01, 0x30, 0x05}
+		r := ParseEPath(path)
+		if r.AttributeID != 5 {
+			t.Fatalf("expected AttributeID 5, got %d", r.AttributeID)
+		}
+	})
+
+	t.Run("16-bit member 0x29", func(t *testing.T) {
+		path := []byte{0x20, 0x04, 0x29, 0x00, 0x0A, 0x00}
+		r := ParseEPath(path)
+		if r.MemberID != 10 {
+			t.Fatalf("expected MemberID 10, got %d", r.MemberID)
+		}
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		r := ParseEPath(nil)
+		if r.ClassID != 0 || r.InstanceID != 0 || r.AttributeID != 0 || r.MemberID != 0 {
+			t.Fatal("expected all zeros for nil path")
+		}
+	})
+
+	t.Run("ExtractClassFromPath delegates", func(t *testing.T) {
+		path := []byte{0x20, 0x04, 0x24, 0x01}
+		classID, ok := ExtractClassFromPath(path)
+		if !ok || classID != 0x04 {
+			t.Fatalf("expected class 0x04, got 0x%04X (ok=%v)", classID, ok)
+		}
+	})
+
+	t.Run("FormatAddress", func(t *testing.T) {
+		path := []byte{0x20, 0x04, 0x24, 0x0A, 0x30, 0x03}
+		r := ParseEPath(path)
+		addr := FormatAddress(r)
+		if addr != "0x04/10/3" {
+			t.Fatalf("expected 0x04/10/3, got %s", addr)
+		}
+	})
+}
+
+func TestCIPEventAttributes(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	// Build a SendRRData with Get_Attribute_Single (0x0E) to class=0x04, instance=10, attribute=3
+	path := []byte{0x20, 0x04, 0x24, 0x0A, 0x30, 0x03}
+	cipPayload := buildSendRRDataPayload(0x0E, 3, path)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+
+	// function_code should match service_code
+	if ev.Attributes["function_code"] != uint8(0x0E) {
+		t.Fatalf("expected function_code 0x0E, got %v", ev.Attributes["function_code"])
+	}
+	if ev.Attributes["instance_id"] != uint16(10) {
+		t.Fatalf("expected instance_id 10, got %v", ev.Attributes["instance_id"])
+	}
+	if ev.Attributes["attribute_id"] != uint16(3) {
+		t.Fatalf("expected attribute_id 3, got %v", ev.Attributes["attribute_id"])
+	}
+	if ev.Attributes["address"] != "0x04/10/3" {
+		t.Fatalf("expected address 0x04/10/3, got %v", ev.Attributes["address"])
+	}
+	// Existing fields should still be present
+	if ev.Attributes["service_code"] != uint8(0x0E) {
+		t.Fatalf("expected service_code 0x0E, got %v", ev.Attributes["service_code"])
+	}
+	if ev.Attributes["object_class"] != uint16(0x04) {
+		t.Fatalf("expected object_class 0x04, got %v", ev.Attributes["object_class"])
+	}
+}
+
+func TestCIPMSPEventAttributes(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	// MSP with sub-service that has class=0x04, instance=1, attribute=5
+	mspData := buildMSPData([]struct {
+		code     uint8
+		pathSize uint8
+		path     []byte
+	}{
+		{code: 0x0D, pathSize: 3, path: []byte{0x20, 0x04, 0x24, 0x01, 0x30, 0x05}},
+	})
+
+	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	evts, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	if len(evts) < 2 {
+		t.Fatalf("expected at least 2 events, got %d", len(evts))
+	}
+
+	sub := evts[1]
+	if sub.Attributes["function_code"] != uint8(0x0D) {
+		t.Fatalf("expected function_code 0x0D, got %v", sub.Attributes["function_code"])
+	}
+	if sub.Attributes["instance_id"] != uint16(1) {
+		t.Fatalf("expected instance_id 1, got %v", sub.Attributes["instance_id"])
+	}
+	if sub.Attributes["attribute_id"] != uint16(5) {
+		t.Fatalf("expected attribute_id 5, got %v", sub.Attributes["attribute_id"])
+	}
+	if sub.Attributes["address"] != "0x04/1/5" {
+		t.Fatalf("expected address 0x04/1/5, got %v", sub.Attributes["address"])
+	}
+	if sub.Attributes["object_class"] != uint16(0x04) {
+		t.Fatalf("expected object_class 0x04, got %v", sub.Attributes["object_class"])
+	}
+}
+
 func TestDecoderOnFlowEnd(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())

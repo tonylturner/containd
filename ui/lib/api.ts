@@ -332,8 +332,10 @@ export type ICSPredicate = {
   functionCode?: number[];
   unitId?: number;
   addresses?: string[];
+  objectClasses?: number[];
   readOnly?: boolean;
   writeOnly?: boolean;
+  direction?: "request" | "response";
   mode?: "enforce" | "learn";
 };
 
