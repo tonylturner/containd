@@ -293,6 +293,18 @@ export function Shell({
     };
   }, [pathname, redirectToLogin]);
 
+  // Session keepalive: periodically touch the session so the JWT and cookie
+  // stay fresh while the user is actively viewing any page.
+  React.useEffect(() => {
+    if (pathname.startsWith("/login")) return;
+    const interval = setInterval(() => {
+      api.meStatus().then(({ status }) => {
+        if (status === 401) redirectToLogin("expired");
+      });
+    }, 4 * 60 * 1000); // every 4 minutes
+    return () => clearInterval(interval);
+  }, [pathname, redirectToLogin]);
+
   function toggle(label: string) {
     setCollapsed((prev) => {
       const next = { ...prev, [label]: !prev[label] };

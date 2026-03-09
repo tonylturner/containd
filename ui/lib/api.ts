@@ -894,8 +894,10 @@ async function getJSON<T>(path: string): Promise<T | null> {
       cache: "no-store",
       headers: authHeaders(),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    // Any non-401 response means auth middleware passed — session is valid.
     clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -909,8 +911,8 @@ async function getJSONWithStatus<T>(path: string): Promise<{ status: number; dat
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return { status: 401, data: null };
-    if (!res.ok) return { status: res.status, data: null };
     clearAuthExpired();
+    if (!res.ok) return { status: res.status, data: null };
     return { status: res.status, data: (await res.json()) as T };
   } catch {
     return { status: 0, data: null };
@@ -1217,7 +1219,7 @@ export const api = {
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
   getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
   setAV: (cfg: AVConfig) => postJSONResult<AVConfig>("/api/v1/services/av", cfg),
-  runAVUpdate: () => postJSON<{ status: string }>("/api/v1/services/av/update", {}),
+  runAVUpdate: () => postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
   listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
   uploadAVDef: async (file: File) => {
     const form = new FormData();
