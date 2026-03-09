@@ -108,6 +108,27 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		attrs["function_name"] = FunctionCodeName(fc)
 		attrs["is_write"] = IsWriteFunctionCode(fc)
 		attrs["is_control"] = IsControlFunctionCode(fc)
+
+		// Parse variable items for Read/Write Variable requests.
+		if fc == FuncReadVar || fc == FuncWriteVar {
+			items, itemCount := ParseS7VarItems(cotpPayload, s7hdr)
+			if itemCount > 0 {
+				attrs["item_count"] = itemCount
+			}
+			if len(items) > 0 {
+				// Emit first item's details as primary attributes.
+				first := items[0]
+				attrs["area"] = AreaName(first.Area)
+				attrs["address"] = FormatAddress(first.Address)
+				if first.Area == AreaDataBlocks {
+					attrs["db_number"] = first.DBNumber
+				}
+				// Flag writes to data blocks as safety-critical.
+				if fc == FuncWriteVar && first.Area == AreaDataBlocks {
+					attrs["safety_critical"] = true
+				}
+			}
+		}
 	}
 
 	// Include error fields for Ack-Data messages.

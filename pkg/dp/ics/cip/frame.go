@@ -53,13 +53,55 @@ var commandNames = map[uint16]string{
 // serviceNames maps CIP service codes to names.
 var serviceNames = map[uint8]string{
 	0x01: "Get_Attributes_All",
-	0x0E: "Get_Attribute_Single",
+	0x02: "Set_Attributes_All",
+	0x03: "Get_Attribute_List",
+	0x04: "Set_Attribute_List",
+	0x05: "Reset",
+	0x06: "Start",
+	0x07: "Stop",
+	0x08: "Create",
+	0x09: "Delete",
+	0x0A: "Multiple_Service_Packet",
+	0x0B: "Apply_Attributes",
+	0x0D: "Get_Attribute_Single",
+	0x0E: "Get_Attribute_Single", // alias kept for backward compat
 	0x10: "Set_Attribute_Single",
-	0x4C: "Read_Tag_Service",
-	0x4D: "Write_Tag_Service",
-	0x4E: "Read_Modify_Write_Tag/Forward_Close",
-	0x52: "Unconnected_Send",
+	0x14: "Find_Next_Object",
+	0x15: "Error_Response",
+	0x16: "Save",
+	0x17: "Restore",
+	0x18: "No_Operation",
+	0x19: "Get_Member",
+	0x1A: "Set_Member",
+	0x4B: "Execute_PCCC",
+	0x4C: "Read_Tag",
+	0x4D: "Write_Tag",
+	0x4E: "Read_Tag_Fragmented",
+	0x4F: "Write_Tag_Fragmented",
+	0x52: "Read_Modify_Write_Tag",
+	0x53: "Forward_Close",
 	0x54: "Forward_Open",
+	0x5B: "Get_Instance_Attribute_List",
+}
+
+// objectClassNames maps CIP object class IDs to names.
+var objectClassNames = map[uint16]string{
+	0x01: "Identity",
+	0x02: "Message_Router",
+	0x04: "Assembly",
+	0x06: "Connection_Manager",
+	0x66: "EtherNet_Link",
+	0x67: "QoS",
+	0x68: "TCP_IP_Interface",
+	0xAC: "Program",
+}
+
+// ObjectClassName returns a human-readable name for a CIP object class ID.
+func ObjectClassName(classID uint16) string {
+	if name, ok := objectClassNames[classID]; ok {
+		return name
+	}
+	return fmt.Sprintf("Class(0x%04X)", classID)
 }
 
 // CommandName returns the human-readable name for an EIP command code.
@@ -84,7 +126,7 @@ func ServiceName(code uint8) string {
 func IsReadService(code uint8) bool {
 	base := code & 0x7F
 	switch base {
-	case 0x01, 0x0E, 0x4C:
+	case 0x01, 0x03, 0x0D, 0x0E, 0x14, 0x19, 0x4C, 0x4E, 0x5B:
 		return true
 	default:
 		return false
@@ -95,22 +137,147 @@ func IsReadService(code uint8) bool {
 func IsWriteService(code uint8) bool {
 	base := code & 0x7F
 	switch base {
-	case 0x10, 0x4D, 0x4E:
+	case 0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B,
+		0x10, 0x16, 0x1A,
+		0x4B, 0x4D, 0x4F, 0x52, 0x54:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsControlService returns true for CIP connection management service codes.
+// IsControlService returns true for CIP connection management and critical service codes.
 func IsControlService(code uint8) bool {
 	base := code & 0x7F
 	switch base {
-	case 0x54:
+	case 0x05, 0x06, 0x07, 0x08, 0x09, 0x54:
 		return true
 	default:
 		return false
 	}
+}
+
+// ExtractClassFromPath scans a CIP EPATH for an 8-bit or 16-bit class segment
+// and returns the class ID. Segment type 0x20 = 8-bit class, 0x21 = 16-bit class.
+func ExtractClassFromPath(path []byte) (uint16, bool) {
+	i := 0
+	for i < len(path) {
+		seg := path[i]
+		switch seg {
+		case 0x20: // 8-bit class segment
+			if i+1 < len(path) {
+				return uint16(path[i+1]), true
+			}
+			return 0, false
+		case 0x21: // 16-bit class segment
+			// Padded: segment(1) + pad(1) + value(2)
+			if i+3 < len(path) {
+				return binary.LittleEndian.Uint16(path[i+2 : i+4]), true
+			}
+			return 0, false
+		case 0x24, 0x28, 0x2C: // 8-bit instance/member/attribute
+			i += 2
+		case 0x25, 0x29, 0x2D: // 16-bit instance/member/attribute
+			i += 4
+		default:
+			// Unknown segment; skip 2 bytes as a safe default.
+			i += 2
+		}
+	}
+	return 0, false
+}
+
+// maxMSPServices caps the number of sub-services parsed from a Multiple_Service_Packet
+// to bound CPU in the NFQUEUE hot path.
+const maxMSPServices = 32
+
+// SubService represents a single CIP service extracted from a Multiple_Service_Packet.
+type SubService struct {
+	ServiceCode uint8
+	ServiceName string
+	IsWrite     bool
+	IsControl   bool
+	Path        []byte
+}
+
+// ParseMSPServices parses individual sub-services from MSP data (the Data
+// field of a CIP message with service code 0x0A). The data layout is:
+//
+//	uint16  service_count
+//	uint16  offset[service_count]   (each relative to start of data)
+//	...     service payloads
+//
+// Returns nil if the data is malformed or too short.
+func ParseMSPServices(data []byte) []SubService {
+	if len(data) < 2 {
+		return nil
+	}
+	count := int(binary.LittleEndian.Uint16(data[0:2]))
+	if count == 0 {
+		return nil
+	}
+	if count > maxMSPServices {
+		count = maxMSPServices
+	}
+
+	// Validate that the offset table fits.
+	offsetTableEnd := 2 + count*2
+	if offsetTableEnd > len(data) {
+		return nil
+	}
+
+	// Read offsets.
+	offsets := make([]uint16, count)
+	for i := 0; i < count; i++ {
+		offsets[i] = binary.LittleEndian.Uint16(data[2+i*2 : 2+i*2+2])
+	}
+
+	subs := make([]SubService, 0, count)
+	for i := 0; i < count; i++ {
+		off := int(offsets[i])
+		if off >= len(data) || off+2 > len(data) {
+			continue // skip malformed entry
+		}
+
+		// Determine the end of this sub-service payload.
+		var end int
+		if i+1 < count {
+			end = int(offsets[i+1])
+		} else {
+			end = len(data)
+		}
+		if end > len(data) || end <= off {
+			end = len(data)
+		}
+
+		subData := data[off:end]
+		if len(subData) < 2 {
+			continue
+		}
+
+		serviceCode := subData[0] & 0x7F
+		pathSize := subData[1]
+		pathBytes := int(pathSize) * 2
+
+		sub := SubService{
+			ServiceCode: serviceCode,
+			ServiceName: ServiceName(serviceCode),
+			IsWrite:     IsWriteService(serviceCode),
+			IsControl:   IsControlService(serviceCode),
+		}
+
+		cursor := 2
+		if pathBytes > 0 && cursor+pathBytes <= len(subData) {
+			sub.Path = subData[cursor : cursor+pathBytes]
+		}
+
+		subs = append(subs, sub)
+	}
+
+	if len(subs) == 0 {
+		return nil
+	}
+	return subs
 }
 
 // ParseEIPHeader parses an EtherNet/IP encapsulation header from raw bytes.

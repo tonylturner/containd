@@ -21,6 +21,7 @@ type ParsedPacket struct {
 	Proto   string // "tcp", "udp"
 	SrcPort uint16
 	DstPort uint16
+	TCPSeq  uint32 // TCP sequence number (0 for UDP)
 }
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
@@ -148,7 +149,7 @@ func (m *Manager) OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error
 	flowKey := state.Key.Hash()
 	dpiPkt := pkt
 	if pkt.Proto == "tcp" && len(pkt.Payload) > 0 && m.reassembler != nil {
-		reassembled := m.reassembler.Feed(flowKey, pkt.Payload, time.Now())
+		reassembled := m.reassembler.Feed(flowKey, pkt.Payload, time.Now(), pkt.TCPSeq)
 		dpiPkt = &ParsedPacket{
 			Payload: reassembled,
 			Proto:   pkt.Proto,

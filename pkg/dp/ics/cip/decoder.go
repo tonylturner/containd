@@ -4,6 +4,7 @@
 package cip
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"net"
 	"time"
@@ -67,11 +68,68 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 			attrs["is_control"] = IsControlService(cipMsg.ServiceCode)
 			if len(cipMsg.Path) > 0 {
 				attrs["cip_path"] = hex.EncodeToString(cipMsg.Path)
+				// Extract object class from path if present (segment type 0x20 = class).
+				if classID, ok := ExtractClassFromPath(cipMsg.Path); ok {
+					attrs["object_class"] = classID
+					attrs["object_class_name"] = ObjectClassName(classID)
+				}
 			}
 
 			kind := "request"
 			if cipMsg.IsResponse {
 				kind = "response"
+			}
+
+			// Multiple_Service_Packet: extract service count and emit per-sub-service events.
+			if cipMsg.ServiceCode == 0x0A && len(cipMsg.Data) >= 2 {
+				svcCount := binary.LittleEndian.Uint16(cipMsg.Data[0:2])
+				attrs["multi_service_count"] = svcCount
+
+				parentEv := dpi.Event{
+					FlowID:     state.Key.Hash(),
+					Proto:      "cip",
+					Kind:       kind,
+					Attributes: attrs,
+					Timestamp:  time.Now().UTC(),
+				}
+
+				subs := ParseMSPServices(cipMsg.Data)
+				if len(subs) == 0 {
+					return []dpi.Event{parentEv}, nil
+				}
+
+				results := make([]dpi.Event, 0, 1+len(subs))
+				results = append(results, parentEv)
+				now := time.Now().UTC()
+				flowID := state.Key.Hash()
+				for _, sub := range subs {
+					subAttrs := map[string]any{
+						"command":      attrs["command"],
+						"command_code": attrs["command_code"],
+						"session_handle": attrs["session_handle"],
+						"service_code": sub.ServiceCode,
+						"service_name": sub.ServiceName,
+						"is_write":     sub.IsWrite,
+						"is_control":   sub.IsControl,
+						"msp":          "true",
+					}
+					if len(sub.Path) > 0 {
+						subAttrs["cip_path"] = hex.EncodeToString(sub.Path)
+						if classID, ok := ExtractClassFromPath(sub.Path); ok {
+							subAttrs["object_class"] = classID
+							subAttrs["object_class_name"] = ObjectClassName(classID)
+						}
+					}
+					subKind := kind
+					results = append(results, dpi.Event{
+						FlowID:     flowID,
+						Proto:      "cip",
+						Kind:       subKind,
+						Attributes: subAttrs,
+						Timestamp:  now,
+					})
+				}
+				return results, nil
 			}
 
 			ev := dpi.Event{

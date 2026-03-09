@@ -51,7 +51,7 @@ func detectProto(pkt *dpi.ParsedPacket) string {
 	}
 	// Port heuristics.
 	switch pkt.SrcPort {
-	case 22:
+	case 22, 2222, 8022:
 		return "ssh"
 	case 3389:
 		return "rdp"
@@ -63,7 +63,7 @@ func detectProto(pkt *dpi.ParsedPacket) string {
 		return "ntp"
 	}
 	switch pkt.DstPort {
-	case 22:
+	case 22, 2222, 8022:
 		return "ssh"
 	case 3389:
 		return "rdp"

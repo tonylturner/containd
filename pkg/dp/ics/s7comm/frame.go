@@ -215,3 +215,108 @@ func S7ParamFunctionCode(data []byte, hdr *S7Header) (uint8, bool) {
 	}
 	return data[offset], true
 }
+
+// S7 memory area codes.
+const (
+	AreaInputs     = 0x81
+	AreaOutputs    = 0x82
+	AreaFlags      = 0x83
+	AreaDataBlocks = 0x84
+	AreaCounter    = 0x85
+	AreaTimer      = 0x86
+)
+
+// SyntaxS7ANY is the S7ANY addressing syntax ID.
+const SyntaxS7ANY = 0x10
+
+// S7VarItem represents a single variable item in a Read/Write Variable request.
+type S7VarItem struct {
+	TransportSize uint8
+	Length        uint16
+	DBNumber      uint16
+	Area          uint8
+	Address       uint32 // 3-byte bit-level address (byte*8 + bit)
+}
+
+// AreaName returns a human-readable name for an S7 memory area code.
+func AreaName(area uint8) string {
+	switch area {
+	case AreaInputs:
+		return "inputs"
+	case AreaOutputs:
+		return "outputs"
+	case AreaFlags:
+		return "flags"
+	case AreaDataBlocks:
+		return "data_blocks"
+	case AreaCounter:
+		return "counter"
+	case AreaTimer:
+		return "timer"
+	default:
+		return fmt.Sprintf("unknown_0x%02x", area)
+	}
+}
+
+// FormatAddress formats a 3-byte bit-level address as "byte.bit".
+func FormatAddress(addr uint32) string {
+	byteAddr := addr / 8
+	bitAddr := addr % 8
+	return fmt.Sprintf("%d.%d", byteAddr, bitAddr)
+}
+
+// ParseS7VarItems parses variable items from the parameter block of a
+// Read/Write Variable request. data is the full COTP payload, hdr is the
+// parsed S7 header. Returns the items and the item count byte.
+func ParseS7VarItems(data []byte, hdr *S7Header) ([]S7VarItem, uint8) {
+	// Parameter block offset past S7 header.
+	offset := 10
+	if hdr.MessageType == MsgTypeAckData {
+		offset = 12
+	}
+	// Minimum: FC(1) + ItemCount(1) = 2 bytes in parameter block.
+	if int(hdr.ParamLength) < 2 || len(data) < offset+2 {
+		return nil, 0
+	}
+	// data[offset] = function code (already parsed).
+	itemCount := data[offset+1]
+	if itemCount == 0 {
+		return nil, 0
+	}
+
+	pos := offset + 2
+	items := make([]S7VarItem, 0, itemCount)
+
+	for i := uint8(0); i < itemCount; i++ {
+		// Each item starts with: VarSpec(1) + AddrLen(1) + SyntaxID(1) = 3 bytes minimum.
+		if pos+3 > len(data) {
+			break
+		}
+		// varSpec := data[pos]
+		addrLen := data[pos+1]
+		syntaxID := data[pos+2]
+
+		if syntaxID != SyntaxS7ANY {
+			// Skip non-S7ANY items by their declared length.
+			pos += int(addrLen) + 2 // addrLen + varSpec + addrLen byte itself
+			continue
+		}
+
+		// S7ANY: TransportSize(1) + Length(2) + DBNumber(2) + Area(1) + Address(3) = 10 bytes after syntaxID.
+		// Total from varSpec: 3 (header) + 9 (payload) = 12.
+		if pos+12 > len(data) {
+			break
+		}
+		item := S7VarItem{
+			TransportSize: data[pos+3],
+			Length:        binary.BigEndian.Uint16(data[pos+4 : pos+6]),
+			DBNumber:      binary.BigEndian.Uint16(data[pos+6 : pos+8]),
+			Area:          data[pos+8],
+		}
+		// 3-byte address (big-endian, bit-level).
+		item.Address = uint32(data[pos+9])<<16 | uint32(data[pos+10])<<8 | uint32(data[pos+11])
+		items = append(items, item)
+		pos += 12
+	}
+	return items, itemCount
+}

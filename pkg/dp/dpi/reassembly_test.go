@@ -15,12 +15,12 @@ func TestFeedAccumulatesData(t *testing.T) {
 	r := NewReassembler(0, time.Minute)
 	now := time.Now()
 
-	buf1 := r.Feed("flow1", []byte{0x01, 0x02}, now)
+	buf1 := r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
 	if !bytes.Equal(buf1, []byte{0x01, 0x02}) {
 		t.Fatalf("first feed: got %x, want 0102", buf1)
 	}
 
-	buf2 := r.Feed("flow1", []byte{0x03, 0x04}, now)
+	buf2 := r.Feed("flow1", []byte{0x03, 0x04}, now, 102)
 	if !bytes.Equal(buf2, []byte{0x01, 0x02, 0x03, 0x04}) {
 		t.Fatalf("second feed: got %x, want 01020304", buf2)
 	}
@@ -38,10 +38,10 @@ func TestFeedSlidingWindow(t *testing.T) {
 	r := NewReassembler(4, time.Minute)
 	now := time.Now()
 
-	r.Feed("flow1", []byte{0x01, 0x02, 0x03}, now)
-	buf := r.Feed("flow1", []byte{0x04, 0x05, 0x06}, now)
+	r.Feed("flow1", []byte{0x01, 0x02, 0x03}, now, 100)
+	buf := r.Feed("flow1", []byte{0x04, 0x05, 0x06}, now, 103)
 
-	// 6 bytes total, max 4 → oldest 2 bytes discarded
+	// 6 bytes total, max 4 -> oldest 2 bytes discarded
 	want := []byte{0x03, 0x04, 0x05, 0x06}
 	if !bytes.Equal(buf, want) {
 		t.Fatalf("sliding window: got %x, want %x", buf, want)
@@ -52,8 +52,8 @@ func TestCompleteRemovesStream(t *testing.T) {
 	r := NewReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.Feed("flow1", []byte{0x01}, now)
-	r.Feed("flow2", []byte{0x02}, now)
+	r.Feed("flow1", []byte{0x01}, now, 100)
+	r.Feed("flow2", []byte{0x02}, now, 200)
 
 	if r.ActiveStreams != 2 {
 		t.Fatalf("before complete: active=%d, want 2", r.ActiveStreams)
@@ -65,7 +65,7 @@ func TestCompleteRemovesStream(t *testing.T) {
 	}
 
 	// Feed to flow1 again should start fresh.
-	buf := r.Feed("flow1", []byte{0xAA}, now)
+	buf := r.Feed("flow1", []byte{0xAA}, now, 300)
 	if !bytes.Equal(buf, []byte{0xAA}) {
 		t.Fatalf("after complete+feed: got %x, want aa", buf)
 	}
@@ -75,8 +75,8 @@ func TestSweepRemovesIdleStreams(t *testing.T) {
 	r := NewReassembler(0, 5*time.Second)
 	t0 := time.Now()
 
-	r.Feed("flow1", []byte{0x01}, t0)
-	r.Feed("flow2", []byte{0x02}, t0.Add(4*time.Second))
+	r.Feed("flow1", []byte{0x01}, t0, 100)
+	r.Feed("flow2", []byte{0x02}, t0.Add(4*time.Second), 200)
 
 	// At t0+6s, flow1 is 6s idle (>5s), flow2 is 2s idle (<5s).
 	r.Sweep(t0.Add(6 * time.Second))
@@ -86,7 +86,7 @@ func TestSweepRemovesIdleStreams(t *testing.T) {
 	}
 
 	// Verify flow2 still works.
-	buf := r.Feed("flow2", []byte{0x03}, t0.Add(6*time.Second))
+	buf := r.Feed("flow2", []byte{0x03}, t0.Add(6*time.Second), 201)
 	if !bytes.Equal(buf, []byte{0x02, 0x03}) {
 		t.Fatalf("flow2 after sweep: got %x, want 0203", buf)
 	}
@@ -96,13 +96,90 @@ func TestTrimConsumedBytes(t *testing.T) {
 	r := NewReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.Feed("flow1", []byte{0x01, 0x02, 0x03, 0x04, 0x05}, now)
+	r.Feed("flow1", []byte{0x01, 0x02, 0x03, 0x04, 0x05}, now, 100)
 	r.Trim("flow1", 3)
 
-	buf := r.Feed("flow1", []byte{0x06}, now)
+	buf := r.Feed("flow1", []byte{0x06}, now, 105)
 	want := []byte{0x04, 0x05, 0x06}
 	if !bytes.Equal(buf, want) {
 		t.Fatalf("after trim+feed: got %x, want %x", buf, want)
+	}
+}
+
+func TestFeedOutOfOrder(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+
+	// Send segment 1 (seq=100, 2 bytes).
+	r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
+
+	// Send segment 3 (seq=105, 2 bytes) — skipping segment 2.
+	buf := r.Feed("flow1", []byte{0x05, 0x06}, now, 105)
+	// Should only have segment 1 data; segment 3 is buffered OOO.
+	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
+		t.Fatalf("after OOO: got %x, want 0102", buf)
+	}
+
+	// Send segment 2 (seq=102, 3 bytes) — fills the gap.
+	buf = r.Feed("flow1", []byte{0x03, 0x04, 0x77}, now, 102)
+	// Now all three segments should be flushed in order.
+	want := []byte{0x01, 0x02, 0x03, 0x04, 0x77, 0x05, 0x06}
+	if !bytes.Equal(buf, want) {
+		t.Fatalf("after gap fill: got %x, want %x", buf, want)
+	}
+}
+
+func TestFeedRetransmission(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+
+	// Send segment 1.
+	r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
+	// Retransmit segment 1.
+	buf := r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
+	// Should still have only 2 bytes.
+	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
+		t.Fatalf("after retransmit: got %x, want 0102", buf)
+	}
+
+	retrans := r.Retransmissions("flow1")
+	if retrans != 1 {
+		t.Fatalf("retransmissions: got %d, want 1", retrans)
+	}
+}
+
+func TestFeedOOOBufferBounded(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+
+	// First in-order segment.
+	r.Feed("flow1", []byte{0x01}, now, 100)
+
+	// Send 5 OOO segments (only 4 should be buffered).
+	for i := uint32(0); i < 5; i++ {
+		r.Feed("flow1", []byte{byte(0x10 + i)}, now, 200+i*10)
+	}
+
+	r.mu.Lock()
+	oooLen := len(r.streams["flow1"].ooo)
+	r.mu.Unlock()
+	if oooLen != 4 {
+		t.Fatalf("OOO buffer: got %d segments, want 4 (bounded)", oooLen)
+	}
+}
+
+func TestFeedPartialRetransmission(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+
+	// Send 3 bytes at seq 100.
+	r.Feed("flow1", []byte{0x01, 0x02, 0x03}, now, 100)
+
+	// Send overlapping segment: seq 101, 4 bytes — 2 bytes overlap, 2 new.
+	buf := r.Feed("flow1", []byte{0x02, 0x03, 0x04, 0x05}, now, 101)
+	want := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	if !bytes.Equal(buf, want) {
+		t.Fatalf("partial retransmit: got %x, want %x", buf, want)
 	}
 }
 
@@ -144,9 +221,9 @@ func TestIntegrationReassemblyWithStreamDecoder(t *testing.T) {
 	st := flow.NewState(flow.Key{}, time.Now())
 
 	// Send a framed message split across two TCP segments.
-	// Frame: length=3, payload=0xAA 0xBB 0xCC → total 4 bytes.
+	// Frame: length=3, payload=0xAA 0xBB 0xCC -> total 4 bytes.
 	// Segment 1: first 2 bytes.
-	pkt1 := &ParsedPacket{Proto: "tcp", Payload: []byte{0x03, 0xAA}}
+	pkt1 := &ParsedPacket{Proto: "tcp", Payload: []byte{0x03, 0xAA}, TCPSeq: 1000}
 	events, err := mgr.OnPacket(st, pkt1)
 	if err != nil {
 		t.Fatalf("segment 1: %v", err)
@@ -156,7 +233,7 @@ func TestIntegrationReassemblyWithStreamDecoder(t *testing.T) {
 	}
 
 	// Segment 2: remaining 2 bytes.
-	pkt2 := &ParsedPacket{Proto: "tcp", Payload: []byte{0xBB, 0xCC}}
+	pkt2 := &ParsedPacket{Proto: "tcp", Payload: []byte{0xBB, 0xCC}, TCPSeq: 1002}
 	events, err = mgr.OnPacket(st, pkt2)
 	if err != nil {
 		t.Fatalf("segment 2: %v", err)
@@ -171,7 +248,7 @@ func TestIntegrationReassemblyWithStreamDecoder(t *testing.T) {
 	// After consuming, the reassembler buffer should be trimmed.
 	// Feeding an empty payload should return only residual data (none).
 	// We verify by sending the start of a new frame.
-	pkt3 := &ParsedPacket{Proto: "tcp", Payload: []byte{0x01, 0xFF}}
+	pkt3 := &ParsedPacket{Proto: "tcp", Payload: []byte{0x01, 0xFF}, TCPSeq: 1004}
 	events, err = mgr.OnPacket(st, pkt3)
 	if err != nil {
 		t.Fatalf("segment 3: %v", err)
@@ -193,8 +270,8 @@ func TestIntegrationModbusStyleReassembly(t *testing.T) {
 	// Frame: length byte = 7, then 7 bytes of "Modbus" payload.
 	// Split across two segments.
 	frame := []byte{0x07, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01}
-	seg1 := &ParsedPacket{Proto: "tcp", Payload: frame[:3]}
-	seg2 := &ParsedPacket{Proto: "tcp", Payload: frame[3:]}
+	seg1 := &ParsedPacket{Proto: "tcp", Payload: frame[:3], TCPSeq: 500}
+	seg2 := &ParsedPacket{Proto: "tcp", Payload: frame[3:], TCPSeq: 503}
 
 	events1, _ := mgr.OnPacket(st, seg1)
 	if len(events1) != 0 {

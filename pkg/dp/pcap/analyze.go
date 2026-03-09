@@ -10,8 +10,10 @@ import (
 	"net"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
 const maxPCAPRecordSize = 16 << 20 // 16 MiB
@@ -37,10 +39,15 @@ type FlowSummary struct {
 	LastSeen  time.Time `json:"lastSeen"`
 }
 
-// Analyze reads a PCAP file from r, runs each packet through the supplied DPI
-// decoders, and returns structured analysis results. It works entirely offline
-// and does not require a network interface or Linux-specific APIs.
-func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
+// eventCallback is called for each DPI event with the source and destination
+// IPs of the packet that produced it. Used by AnalyzeForPolicy to feed events
+// to the learner without re-parsing the PCAP.
+type eventCallback func(srcIP, dstIP string, ev dpi.Event)
+
+// analyzeCore is the shared PCAP analysis loop used by both Analyze and
+// AnalyzeForPolicy. If onEvent is non-nil it is called for each DPI event
+// with the packet-level source and destination IPs.
+func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	snaplen, err := readPCAPHeader(r)
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
@@ -112,9 +119,14 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 		if err != nil {
 			continue
 		}
+		srcStr := pkt.srcIP.String()
+		dstStr := pkt.dstIP.String()
 		for i := range events {
 			if events[i].Timestamp.IsZero() {
 				events[i].Timestamp = ts
+			}
+			if onEvent != nil {
+				onEvent(srcStr, dstStr, events[i])
 			}
 		}
 		result.Events = append(result.Events, events...)
@@ -129,6 +141,13 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 		events, err := mgr.OnFlowEnd(state)
 		if err != nil {
 			continue
+		}
+		if onEvent != nil {
+			srcStr := state.Key.SrcIP.String()
+			dstStr := state.Key.DstIP.String()
+			for _, ev := range events {
+				onEvent(srcStr, dstStr, ev)
+			}
 		}
 		result.Events = append(result.Events, events...)
 		flowEvents[hash] += len(events)
@@ -166,6 +185,47 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	}
 
 	return result, nil
+}
+
+// Analyze reads a PCAP file from r, runs each packet through the supplied DPI
+// decoders, and returns structured analysis results. It works entirely offline
+// and does not require a network interface or Linux-specific APIs.
+func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
+	return analyzeCore(r, nil, decoders...)
+}
+
+// PolicyAnalysis holds the outcome of PCAP-to-policy analysis, combining
+// the standard analysis stats with auto-generated firewall rules.
+type PolicyAnalysis struct {
+	Rules        []config.Rule          `json:"rules"`
+	Profiles     []learn.LearnedProfile `json:"profiles"`
+	Stats        AnalysisResult         `json:"stats"`
+	EventSummary map[string]int         `json:"eventSummary"`
+}
+
+// AnalyzeForPolicy reads a PCAP file, runs DPI analysis, and generates
+// allowlist firewall rules from the observed traffic. Rules are returned
+// for review and are not auto-applied.
+func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, error) {
+	learner := learn.New()
+	eventSummary := make(map[string]int)
+
+	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
+		eventSummary[ev.Proto]++
+		learner.RecordEvent(srcIP, dstIP, ev)
+	}
+
+	result, err := analyzeCore(r, onEvent, decoders...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PolicyAnalysis{
+		Rules:        learner.GenerateRules(),
+		Profiles:     learner.Profiles(),
+		Stats:        *result,
+		EventSummary: eventSummary,
+	}, nil
 }
 
 // pcapMagicLE is the PCAP magic number in little-endian byte order.

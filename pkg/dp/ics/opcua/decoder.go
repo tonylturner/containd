@@ -65,12 +65,10 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		if frame.HasService {
 			attrs["service"] = ServiceName(frame.ServiceNodeID)
 			attrs["is_write"] = IsWriteService(frame.ServiceNodeID)
-			// Determine kind from service node ID — responses have even-ish IDs.
-			switch frame.ServiceNodeID {
-			case ServiceReadResponse, ServiceWriteResponse, ServiceBrowseResponse,
-				ServiceCreateSubscriptionResponse, ServicePublishResponse, ServiceCallResponse:
+			// Determine kind from service node ID — responses use known response IDs.
+			if IsResponseService(frame.ServiceNodeID) {
 				kind = "response"
-			default:
+			} else {
 				kind = "request"
 			}
 		} else {

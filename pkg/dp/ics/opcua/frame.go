@@ -26,20 +26,65 @@ const (
 	ChunkAbort        = 'A'
 )
 
-// Known service node IDs for MSG requests.
+// Known service node IDs for MSG requests and responses.
 const (
-	ServiceReadRequest               = 631
-	ServiceReadResponse              = 634
-	ServiceWriteRequest              = 673
-	ServiceWriteResponse             = 676
-	ServiceBrowseRequest             = 527
-	ServiceBrowseResponse            = 530
-	ServiceCreateSubscriptionRequest = 787
-	ServiceCreateSubscriptionResponse = 790
-	ServicePublishRequest            = 826
-	ServicePublishResponse           = 829
-	ServiceCallRequest               = 712
-	ServiceCallResponse              = 715
+	// Attribute services
+	ServiceReadRequest    = 629
+	ServiceReadResponse   = 632
+	ServiceWriteRequest   = 671
+	ServiceWriteResponse  = 674
+	ServiceHistoryReadRequest  = 673
+	ServiceHistoryReadResponse = 676
+	ServiceHistoryUpdateRequest  = 700
+	ServiceHistoryUpdateResponse = 703
+
+	// View services
+	ServiceBrowseRequest     = 525
+	ServiceBrowseResponse    = 528
+	ServiceBrowseNextRequest  = 531
+	ServiceBrowseNextResponse = 534
+	ServiceTranslateBrowsePathsRequest  = 554 // TranslateBrowsePathsToNodeIds is typically 554
+	ServiceTranslateBrowsePathsResponse = 557
+
+	// Session services
+	ServiceCreateSessionRequest   = 459
+	ServiceCreateSessionResponse  = 462
+	ServiceActivateSessionRequest  = 465 // ActivateSession request
+	ServiceActivateSessionResponse = 468
+	ServiceCloseSessionRequest    = 471
+	ServiceCloseSessionResponse   = 474
+
+	// Node management
+	ServiceAddNodesRequest       = 486
+	ServiceAddNodesResponse      = 489
+	ServiceDeleteNodesRequest    = 498
+	ServiceDeleteNodesResponse   = 501
+	ServiceAddReferencesRequest  = 502
+	ServiceAddReferencesResponse = 505
+	ServiceDeleteReferencesRequest  = 506
+	ServiceDeleteReferencesResponse = 509
+
+	// Method
+	ServiceCallRequest  = 710
+	ServiceCallResponse = 713
+
+	// Subscription services
+	ServiceCreateSubscriptionRequest  = 785
+	ServiceCreateSubscriptionResponse = 788
+	ServiceModifySubscriptionRequest  = 793
+	ServiceModifySubscriptionResponse = 796
+	ServiceDeleteSubscriptionsRequest  = 799
+	ServiceDeleteSubscriptionsResponse = 802
+	ServicePublishRequest  = 826
+	ServicePublishResponse = 829
+
+	// MonitoredItem services
+	ServiceCreateMonitoredItemsRequest  = 749
+	ServiceCreateMonitoredItemsResponse = 752
+	ServiceModifyMonitoredItemsRequest  = 761
+	ServiceModifyMonitoredItemsResponse = 764
+	ServiceDeleteMonitoredItemsRequest  = 779
+	ServiceDeleteMonitoredItemsResponse = 782
 )
 
 var (
@@ -138,43 +183,95 @@ func isValidMsgType(s string) bool {
 	}
 }
 
+// serviceNameMap maps OPC UA service node IDs to human-readable names.
+// Using a map avoids a long switch in the hot path while keeping O(1) lookup.
+var serviceNameMap = map[uint16]string{
+	ServiceReadRequest:    "read-request",
+	ServiceReadResponse:   "read-response",
+	ServiceWriteRequest:   "write-request",
+	ServiceWriteResponse:  "write-response",
+	ServiceHistoryReadRequest:  "history-read-request",
+	ServiceHistoryReadResponse: "history-read-response",
+	ServiceHistoryUpdateRequest:  "history-update-request",
+	ServiceHistoryUpdateResponse: "history-update-response",
+	ServiceBrowseRequest:     "browse-request",
+	ServiceBrowseResponse:    "browse-response",
+	ServiceBrowseNextRequest:  "browse-next-request",
+	ServiceBrowseNextResponse: "browse-next-response",
+	ServiceTranslateBrowsePathsRequest:  "translate-browse-paths-request",
+	ServiceTranslateBrowsePathsResponse: "translate-browse-paths-response",
+	ServiceCreateSessionRequest:   "create-session-request",
+	ServiceCreateSessionResponse:  "create-session-response",
+	ServiceActivateSessionRequest:  "activate-session-request",
+	ServiceActivateSessionResponse: "activate-session-response",
+	ServiceCloseSessionRequest:    "close-session-request",
+	ServiceCloseSessionResponse:   "close-session-response",
+	ServiceAddNodesRequest:       "add-nodes-request",
+	ServiceAddNodesResponse:      "add-nodes-response",
+	ServiceDeleteNodesRequest:    "delete-nodes-request",
+	ServiceDeleteNodesResponse:   "delete-nodes-response",
+	ServiceAddReferencesRequest:  "add-references-request",
+	ServiceAddReferencesResponse: "add-references-response",
+	ServiceDeleteReferencesRequest:  "delete-references-request",
+	ServiceDeleteReferencesResponse: "delete-references-response",
+	ServiceCallRequest:  "call-request",
+	ServiceCallResponse: "call-response",
+	ServiceCreateSubscriptionRequest:  "create-subscription-request",
+	ServiceCreateSubscriptionResponse: "create-subscription-response",
+	ServiceModifySubscriptionRequest:  "modify-subscription-request",
+	ServiceModifySubscriptionResponse: "modify-subscription-response",
+	ServiceDeleteSubscriptionsRequest:  "delete-subscriptions-request",
+	ServiceDeleteSubscriptionsResponse: "delete-subscriptions-response",
+	ServicePublishRequest:  "publish-request",
+	ServicePublishResponse: "publish-response",
+	ServiceCreateMonitoredItemsRequest:  "create-monitored-items-request",
+	ServiceCreateMonitoredItemsResponse: "create-monitored-items-response",
+	ServiceModifyMonitoredItemsRequest:  "modify-monitored-items-request",
+	ServiceModifyMonitoredItemsResponse: "modify-monitored-items-response",
+	ServiceDeleteMonitoredItemsRequest:  "delete-monitored-items-request",
+	ServiceDeleteMonitoredItemsResponse: "delete-monitored-items-response",
+}
+
 // ServiceName returns a human-readable name for a known OPC UA service node ID.
 func ServiceName(nodeID uint16) string {
-	switch nodeID {
-	case ServiceReadRequest:
-		return "read-request"
-	case ServiceReadResponse:
-		return "read-response"
-	case ServiceWriteRequest:
-		return "write-request"
-	case ServiceWriteResponse:
-		return "write-response"
-	case ServiceBrowseRequest:
-		return "browse-request"
-	case ServiceBrowseResponse:
-		return "browse-response"
-	case ServiceCreateSubscriptionRequest:
-		return "create-subscription-request"
-	case ServiceCreateSubscriptionResponse:
-		return "create-subscription-response"
-	case ServicePublishRequest:
-		return "publish-request"
-	case ServicePublishResponse:
-		return "publish-response"
-	case ServiceCallRequest:
-		return "call-request"
-	case ServiceCallResponse:
-		return "call-response"
-	default:
-		return fmt.Sprintf("service-%d", nodeID)
+	if name, ok := serviceNameMap[nodeID]; ok {
+		return name
 	}
+	return fmt.Sprintf("service-%d", nodeID)
 }
 
 // IsWriteService returns true for OPC UA services that mutate state.
 func IsWriteService(nodeID uint16) bool {
 	switch nodeID {
 	case ServiceWriteRequest, ServiceWriteResponse,
+		ServiceHistoryUpdateRequest, ServiceHistoryUpdateResponse,
+		ServiceAddNodesRequest, ServiceAddNodesResponse,
+		ServiceDeleteNodesRequest, ServiceDeleteNodesResponse,
+		ServiceDeleteSubscriptionsRequest, ServiceDeleteSubscriptionsResponse,
+		ServiceDeleteMonitoredItemsRequest, ServiceDeleteMonitoredItemsResponse,
 		ServiceCallRequest, ServiceCallResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsResponseService returns true for OPC UA response service node IDs.
+func IsResponseService(nodeID uint16) bool {
+	switch nodeID {
+	case ServiceReadResponse, ServiceWriteResponse,
+		ServiceHistoryReadResponse, ServiceHistoryUpdateResponse,
+		ServiceBrowseResponse, ServiceBrowseNextResponse,
+		ServiceTranslateBrowsePathsResponse,
+		ServiceCreateSessionResponse, ServiceActivateSessionResponse,
+		ServiceCloseSessionResponse,
+		ServiceAddNodesResponse, ServiceDeleteNodesResponse,
+		ServiceAddReferencesResponse, ServiceDeleteReferencesResponse,
+		ServiceCallResponse,
+		ServiceCreateSubscriptionResponse, ServiceModifySubscriptionResponse,
+		ServiceDeleteSubscriptionsResponse, ServicePublishResponse,
+		ServiceCreateMonitoredItemsResponse, ServiceModifyMonitoredItemsResponse,
+		ServiceDeleteMonitoredItemsResponse:
 		return true
 	default:
 		return false

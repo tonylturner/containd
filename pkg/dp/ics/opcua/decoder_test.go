@@ -37,16 +37,16 @@ func TestParseFrameHEL(t *testing.T) {
 }
 
 func TestParseFrameMSGWithService(t *testing.T) {
-	// Build a MSG with a four-byte node ID encoding for ReadRequest (631).
+	// Build a MSG with a four-byte node ID encoding for ReadRequest.
 	raw := make([]byte, 28)
 	copy(raw[0:3], "MSG")
 	raw[3] = 'F'
 	binary.LittleEndian.PutUint32(raw[4:8], 28)
 	// SecureChannelId(4) + SecurityTokenId(4) + SeqNum(4) + RequestId(4) = 16 bytes at offset 8
-	// Node ID at offset 24: four-byte encoding (0x01), namespace=0, id=631
+	// Node ID at offset 24: four-byte encoding (0x01), namespace=0, id=ServiceReadRequest
 	raw[24] = 0x01 // four-byte node ID encoding
 	raw[25] = 0x00 // namespace
-	binary.LittleEndian.PutUint16(raw[26:28], 631)
+	binary.LittleEndian.PutUint16(raw[26:28], ServiceReadRequest)
 
 	f, err := ParseFrame(raw)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestParseFrameMSGWithService(t *testing.T) {
 	if !f.HasService {
 		t.Fatal("expected HasService=true")
 	}
-	if f.ServiceNodeID != 631 {
+	if f.ServiceNodeID != ServiceReadRequest {
 		t.Fatalf("unexpected service node ID: %d", f.ServiceNodeID)
 	}
 	if ServiceName(f.ServiceNodeID) != "read-request" {
@@ -134,12 +134,36 @@ func TestServiceNameCoverage(t *testing.T) {
 		{ServiceReadResponse, "read-response"},
 		{ServiceWriteRequest, "write-request"},
 		{ServiceWriteResponse, "write-response"},
+		{ServiceHistoryReadRequest, "history-read-request"},
+		{ServiceHistoryReadResponse, "history-read-response"},
+		{ServiceHistoryUpdateRequest, "history-update-request"},
+		{ServiceHistoryUpdateResponse, "history-update-response"},
 		{ServiceBrowseRequest, "browse-request"},
 		{ServiceBrowseResponse, "browse-response"},
+		{ServiceBrowseNextRequest, "browse-next-request"},
+		{ServiceBrowseNextResponse, "browse-next-response"},
+		{ServiceCreateSessionRequest, "create-session-request"},
+		{ServiceCreateSessionResponse, "create-session-response"},
+		{ServiceActivateSessionRequest, "activate-session-request"},
+		{ServiceActivateSessionResponse, "activate-session-response"},
+		{ServiceCloseSessionRequest, "close-session-request"},
+		{ServiceCloseSessionResponse, "close-session-response"},
+		{ServiceAddNodesRequest, "add-nodes-request"},
+		{ServiceAddNodesResponse, "add-nodes-response"},
+		{ServiceDeleteNodesRequest, "delete-nodes-request"},
+		{ServiceDeleteNodesResponse, "delete-nodes-response"},
 		{ServiceCreateSubscriptionRequest, "create-subscription-request"},
 		{ServiceCreateSubscriptionResponse, "create-subscription-response"},
+		{ServiceModifySubscriptionRequest, "modify-subscription-request"},
+		{ServiceModifySubscriptionResponse, "modify-subscription-response"},
+		{ServiceDeleteSubscriptionsRequest, "delete-subscriptions-request"},
+		{ServiceDeleteSubscriptionsResponse, "delete-subscriptions-response"},
 		{ServicePublishRequest, "publish-request"},
 		{ServicePublishResponse, "publish-response"},
+		{ServiceCreateMonitoredItemsRequest, "create-monitored-items-request"},
+		{ServiceCreateMonitoredItemsResponse, "create-monitored-items-response"},
+		{ServiceDeleteMonitoredItemsRequest, "delete-monitored-items-request"},
+		{ServiceDeleteMonitoredItemsResponse, "delete-monitored-items-response"},
 		{ServiceCallRequest, "call-request"},
 		{ServiceCallResponse, "call-response"},
 		{9999, "service-9999"},
@@ -246,6 +270,7 @@ func TestDecoderEmitsMSGResponseEvent(t *testing.T) {
 	raw[24] = 0x01
 	raw[25] = 0x00
 	binary.LittleEndian.PutUint16(raw[26:28], ServiceWriteResponse)
+
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {

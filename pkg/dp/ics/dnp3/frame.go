@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // DNP3 data-link start bytes.
@@ -118,9 +119,188 @@ func IsControlFunctionCode(fc uint8) bool {
 	}
 }
 
+// IsRestartFunctionCode returns true for restart function codes.
+func IsRestartFunctionCode(fc uint8) bool {
+	return fc == FuncColdRestart || fc == FuncWarmRestart
+}
+
 // IsResponse returns true if the function code indicates a response message.
 func IsResponse(fc uint8) bool {
 	return fc >= 0x80
+}
+
+// IIN bit definitions for DNP3 Internal Indications.
+// IIN1 bits (first byte).
+const (
+	IINAllStations   = 0x01 // IIN1.0
+	IINClass1        = 0x02 // IIN1.1
+	IINClass2        = 0x04 // IIN1.2
+	IINClass3        = 0x08 // IIN1.3
+	IINNeedTime      = 0x10 // IIN1.4
+	IINLocalControl  = 0x20 // IIN1.5
+	IINDeviceTrouble = 0x40 // IIN1.6
+	IINDeviceRestart = 0x80 // IIN1.7
+)
+
+// IIN2 bits (second byte).
+const (
+	IINNoFuncSupport   = 0x01 // IIN2.0
+	IINObjectUnknown   = 0x02 // IIN2.1
+	IINParameterError  = 0x04 // IIN2.2
+	IINEventOverflow   = 0x08 // IIN2.3
+	IINAlreadyExecuting = 0x10 // IIN2.4
+	IINConfigCorrupt   = 0x20 // IIN2.5
+)
+
+// iinFlagName pairs for IIN1 byte.
+var iin1Flags = [8]struct {
+	mask uint8
+	name string
+}{
+	{IINAllStations, "all_stations"},
+	{IINClass1, "class_1"},
+	{IINClass2, "class_2"},
+	{IINClass3, "class_3"},
+	{IINNeedTime, "need_time"},
+	{IINLocalControl, "local_control"},
+	{IINDeviceTrouble, "device_trouble"},
+	{IINDeviceRestart, "device_restart"},
+}
+
+// iinFlagName pairs for IIN2 byte.
+var iin2Flags = [6]struct {
+	mask uint8
+	name string
+}{
+	{IINNoFuncSupport, "no_func_support"},
+	{IINObjectUnknown, "object_unknown"},
+	{IINParameterError, "parameter_error"},
+	{IINEventOverflow, "event_overflow"},
+	{IINAlreadyExecuting, "already_executing"},
+	{IINConfigCorrupt, "config_corrupt"},
+}
+
+// FormatIINFlags returns a comma-separated string of set IIN flags.
+// Returns "" if no flags are set.
+func FormatIINFlags(iin1, iin2 uint8) string {
+	var b strings.Builder
+	for i := range iin1Flags {
+		if iin1&iin1Flags[i].mask != 0 {
+			if b.Len() > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(iin1Flags[i].name)
+		}
+	}
+	for i := range iin2Flags {
+		if iin2&iin2Flags[i].mask != 0 {
+			if b.Len() > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(iin2Flags[i].name)
+		}
+	}
+	return b.String()
+}
+
+// ObjectHeader represents a parsed DNP3 object group header.
+type ObjectHeader struct {
+	Group     uint8
+	Variation uint8
+	Qualifier uint8
+	Count     uint16 // object count (interpretation depends on qualifier)
+	Size      int    // total bytes consumed by this header
+}
+
+// ParseObjectHeaders parses all object group headers from the application data.
+// offset is the byte position in Data where object headers begin.
+func ParseObjectHeaders(data []byte, offset int) []ObjectHeader {
+	if offset >= len(data) {
+		return nil
+	}
+	// Pre-size to avoid repeated growth; 4 is typical max.
+	headers := make([]ObjectHeader, 0, 4)
+	pos := offset
+	for pos+3 <= len(data) {
+		oh := ObjectHeader{
+			Group:     data[pos],
+			Variation: data[pos+1],
+			Qualifier: data[pos+2],
+		}
+		pos += 3
+		consumed := 3
+
+		// Parse count/range based on qualifier code.
+		// Qualifier low nibble determines index/range prefix size.
+		switch oh.Qualifier {
+		case 0x00, 0x01, 0x02:
+			// 1-byte start + 1-byte stop range
+			if pos+2 > len(data) {
+				return headers
+			}
+			oh.Count = uint16(data[pos+1]-data[pos]) + 1
+			pos += 2
+			consumed += 2
+		case 0x03, 0x04, 0x05:
+			// 2-byte start + 2-byte stop range
+			if pos+4 > len(data) {
+				return headers
+			}
+			start := binary.LittleEndian.Uint16(data[pos : pos+2])
+			stop := binary.LittleEndian.Uint16(data[pos+2 : pos+4])
+			oh.Count = stop - start + 1
+			pos += 4
+			consumed += 4
+		case 0x06:
+			// All objects, no range field
+			oh.Count = 0
+		case 0x07, 0x08:
+			// 1-byte count
+			if pos+1 > len(data) {
+				return headers
+			}
+			oh.Count = uint16(data[pos])
+			pos += 1
+			consumed += 1
+		case 0x09:
+			// 2-byte count
+			if pos+2 > len(data) {
+				return headers
+			}
+			oh.Count = binary.LittleEndian.Uint16(data[pos : pos+2])
+			pos += 2
+			consumed += 2
+		case 0x0B:
+			// 1-byte count of variable-size objects
+			if pos+1 > len(data) {
+				return headers
+			}
+			oh.Count = uint16(data[pos])
+			pos += 1
+			consumed += 1
+		default:
+			// Unknown qualifier — stop parsing to avoid misinterpreting data.
+			oh.Size = consumed
+			headers = append(headers, oh)
+			return headers
+		}
+		oh.Size = consumed
+		headers = append(headers, oh)
+	}
+	return headers
+}
+
+// IIN extracts Internal Indication bytes from response data.
+// Returns (iin1, iin2, ok).
+func (f *DNP3Frame) IIN() (uint8, uint8, bool) {
+	if !IsResponse(f.FunctionCode) {
+		return 0, 0, false
+	}
+	// Transport(1) + AppControl(1) + FuncCode(1) + IIN1(1) + IIN2(1) = need 5 bytes
+	if len(f.Data) < 5 {
+		return 0, 0, false
+	}
+	return f.Data[3], f.Data[4], true
 }
 
 // ParseFrame parses a DNP3 data-link layer frame from raw bytes.

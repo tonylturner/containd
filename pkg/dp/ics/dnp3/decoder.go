@@ -6,6 +6,8 @@ package dnp3
 import (
 	"encoding/hex"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -50,6 +52,12 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if IsResponse(fc) {
 		kind = "response"
 	}
+	// Classify dangerous function codes.
+	if IsRestartFunctionCode(fc) {
+		kind = "restart"
+	} else if fc == FuncStopApplication || fc == FuncSaveConfiguration {
+		kind = "control"
+	}
 
 	attrs := map[string]any{
 		"function_code":       fc,
@@ -60,9 +68,34 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		"destination_address": frame.Destination,
 	}
 
-	// Include object group if parseable.
-	if og := frame.ObjectGroup(); og != 0 {
-		attrs["object_group"] = og
+	// Extract IIN flags from response messages.
+	if iin1, iin2, ok := frame.IIN(); ok {
+		flags := FormatIINFlags(iin1, iin2)
+		if flags != "" {
+			attrs["iin_flags"] = flags
+		}
+	}
+
+	// Parse all object group headers.
+	objOffset := 3 // Transport + AppControl + FuncCode
+	if IsResponse(fc) {
+		objOffset = 5 // +2 IIN bytes
+	}
+	objHeaders := ParseObjectHeaders(frame.Data, objOffset)
+	if len(objHeaders) > 0 {
+		// Emit comma-separated object groups.
+		var b strings.Builder
+		for i, oh := range objHeaders {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(strconv.FormatUint(uint64(oh.Group), 10))
+		}
+		attrs["object_groups"] = b.String()
+
+		// Emit first header's qualifier and count for primary inspection.
+		attrs["qualifier"] = objHeaders[0].Qualifier
+		attrs["object_count"] = objHeaders[0].Count
 	}
 
 	// Include raw hex for operator visibility (cap to avoid huge payloads).

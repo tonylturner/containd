@@ -221,6 +221,14 @@ func (d *MMSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 	if serviceTag != 0 {
 		attrs["service_tag"] = fmt.Sprintf("0x%02X", serviceTag)
 	}
+
+	// Extract variable name for read/write services.
+	if serviceTag == mmsTagRead || serviceTag == mmsTagWrite {
+		if varName := extractVariableName(pduTag, inner); varName != "" {
+			attrs["variable_name"] = varName
+		}
+	}
+
 	addRawHex(attrs, pkt.Payload)
 
 	ev := dpi.Event{
@@ -395,6 +403,152 @@ func asn1ElementSize(data []byte) int {
 		pos++
 	}
 	return pos + l
+}
+
+// extractVariableName tries to extract the first domain-specific variable
+// name from a Read or Write request.  MMS variable access specifications
+// use domain-specific naming with domainId + itemId, both ASN.1
+// VisibleString.  Returns "domain/item" or "" if not found.
+//
+// The structure inside a Read/Write request is:
+//   service-choice [context tag] -> variableAccessSpecification ->
+//     listOfVariable -> SEQUENCE OF { variableSpecification }
+//       -> name -> domain-specific [context 1] -> SEQUENCE { domainId, itemId }
+//
+// We do a bounded depth-first scan through the ASN.1 structure looking
+// for the domain-specific pattern.
+func extractVariableName(pduTag byte, inner []byte) string {
+	// Find the service choice element first.
+	serviceData := findServiceContent(pduTag, inner)
+	if len(serviceData) == 0 {
+		return ""
+	}
+	return scanForDomainSpecific(serviceData, 0)
+}
+
+// findServiceContent locates the content bytes of the service choice
+// (Read/Write) element inside the confirmed-request inner data.
+func findServiceContent(pduTag byte, inner []byte) []byte {
+	if pduTag != mmsPDUConfirmedRequest && pduTag != mmsPDUConfirmedResponse {
+		return nil
+	}
+	pos := 0
+	for pos < len(inner) {
+		tag := inner[pos]
+		if tag >= 0xA0 && tag <= 0xBF {
+			content, ok := skipASN1TagLength(inner[pos:])
+			if ok {
+				return content
+			}
+			return nil
+		}
+		totalLen := asn1ElementSize(inner[pos:])
+		if totalLen <= 0 {
+			break
+		}
+		pos += totalLen
+	}
+	return nil
+}
+
+// mmsTagDomainSpecific is the context tag [1] constructed, used for
+// domain-specific variable names in MMS ObjectName.
+const mmsTagDomainSpecific = 0xA1
+
+// scanForDomainSpecific recursively scans ASN.1 data for a domain-specific
+// name (context tag [1] constructed = 0xA1 containing two VisibleStrings).
+// depth is bounded to prevent runaway parsing on malformed data.
+func scanForDomainSpecific(data []byte, depth int) string {
+	if depth > 10 || len(data) < 2 {
+		return ""
+	}
+	pos := 0
+	for pos < len(data) {
+		if pos >= len(data) {
+			break
+		}
+		tag := data[pos]
+		elemSize := asn1ElementSize(data[pos:])
+		if elemSize <= 0 || pos+elemSize > len(data) {
+			break
+		}
+
+		content, ok := skipASN1TagLength(data[pos:])
+		if !ok {
+			pos += elemSize
+			continue
+		}
+
+		// Check if this is a domain-specific name: context [1]
+		// constructed (0xA1) containing a SEQUENCE with two strings.
+		if tag == mmsTagDomainSpecific && len(content) >= 4 {
+			domain, item := parseDomainSpecificName(content)
+			if domain != "" && item != "" {
+				return domain + "/" + item
+			}
+		}
+
+		// If this is a constructed element, recurse into it.
+		if tag&0x20 != 0 {
+			if result := scanForDomainSpecific(content, depth+1); result != "" {
+				return result
+			}
+		}
+
+		pos += elemSize
+	}
+	return ""
+}
+
+// parseDomainSpecificName extracts domainId and itemId from the content
+// of a domain-specific ObjectName.  The structure is:
+//   SEQUENCE { domainId VisibleString, itemId VisibleString }
+// or directly two VisibleString elements (context-tagged or universal).
+func parseDomainSpecificName(data []byte) (domain, item string) {
+	// If wrapped in a SEQUENCE (0x30), unwrap it first.
+	if len(data) >= 2 && data[0] == 0x30 {
+		inner, ok := skipASN1TagLength(data)
+		if ok && len(inner) > 0 {
+			data = inner
+		}
+	}
+
+	// Parse first element as domainId.
+	if len(data) < 2 {
+		return "", ""
+	}
+	elem1Size := asn1ElementSize(data)
+	if elem1Size <= 0 || elem1Size > len(data) {
+		return "", ""
+	}
+	val1, ok := skipASN1TagLength(data)
+	if !ok {
+		return "", ""
+	}
+	domain = visibleString(val1)
+
+	// Parse second element as itemId.
+	rest := data[elem1Size:]
+	if len(rest) < 2 {
+		return "", ""
+	}
+	val2, ok := skipASN1TagLength(rest)
+	if !ok {
+		return "", ""
+	}
+	item = visibleString(val2)
+	return domain, item
+}
+
+// visibleString interprets bytes as an ASN.1 VisibleString (printable ASCII).
+// Returns empty string if any byte is outside printable range.
+func visibleString(data []byte) string {
+	for _, b := range data {
+		if b < 0x20 || b > 0x7E {
+			return ""
+		}
+	}
+	return string(data)
 }
 
 // addRawHex appends a capped hex representation of the payload.

@@ -285,6 +285,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/pcap/:name", requireAdmin(), deletePCAPHandler(engine))
 		protected.POST("/pcap/tag", requireAdmin(), tagPCAPHandler(engine))
 		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
+		protected.POST("/pcap/analyze", requireAdmin(), analyzePCAPUploadHandler(engine))
+		protected.POST("/pcap/analyze/:name", requireAdmin(), analyzePCAPNameHandler(engine))
 		protected.GET("/inventory", listInventoryHandler(engine))
 		protected.GET("/inventory/:ip", getInventoryAssetHandler(engine))
 		protected.DELETE("/inventory", requireAdmin(), clearInventoryHandler(engine))
@@ -321,6 +323,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
 		protected.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
+		protected.POST("/firewall/rules/preview", requireAdmin(), previewFirewallRuleHandler(engine))
 		protected.GET("/firewall/ics-rules", listICSRulesHandler(store))
 		protected.POST("/firewall/ics-rules", requireAdmin(), createICSRuleHandler(store))
 		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), updateICSRuleHandler(store))
@@ -348,6 +351,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		// Policy templates.
 		protected.GET("/templates", listTemplatesHandler())
 		protected.POST("/templates/apply", requireAdmin(), applyTemplateHandler(store))
+		// ICS protocol templates.
+		protected.GET("/templates/ics", listICSTemplatesHandler())
+		protected.POST("/templates/ics/apply", requireAdmin(), applyICSTemplateHandler())
 		// Identity resolver routes (optional).
 		for _, o := range opts {
 			if resolver, ok := o.(*identity.Resolver); ok && resolver != nil {
@@ -3391,6 +3397,73 @@ func replayPCAPHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
+func analyzePCAPUploadHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := c.Request.ParseMultipartForm(64 << 20); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid multipart form")
+			return
+		}
+		file, _, err := c.Request.FormFile("file")
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "file required")
+			return
+		}
+		defer file.Close()
+		// Validate PCAP magic bytes.
+		var magic [4]byte
+		if _, err := io.ReadFull(file, magic[:]); err != nil {
+			apiError(c, http.StatusBadRequest, "file too small or unreadable")
+			return
+		}
+		switch {
+		case magic == [4]byte{0xd4, 0xc3, 0xb2, 0xa1}: // pcap LE
+		case magic == [4]byte{0xa1, 0xb2, 0xc3, 0xd4}: // pcap BE
+		case magic == [4]byte{0x0a, 0x0d, 0x0d, 0x0a}: // pcapng
+		default:
+			apiError(c, http.StatusBadRequest, "not a valid pcap/pcapng file")
+			return
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			apiError(c, http.StatusInternalServerError, "failed to rewind file")
+			return
+		}
+		result, err := pcap.AnalyzeForPolicy(file)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.analyze", Target: "upload"})
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+func analyzePCAPNameHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := strings.TrimSpace(c.Param("name"))
+		if name == "" {
+			apiError(c, http.StatusBadRequest, "name required")
+			return
+		}
+		if engine == nil {
+			apiError(c, http.StatusBadRequest, "engine unavailable")
+			return
+		}
+		resp, err := engine.DownloadPcap(c.Request.Context(), name)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		result, err := pcap.AnalyzeForPolicy(resp.Body)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "pcap.analyze", Target: name})
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func listAssetsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -4426,6 +4499,124 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// previewRuleResponse is the JSON response for rule impact preview.
+type previewRuleResponse struct {
+	MatchCount    int               `json:"match_count"`
+	SampleMatches []dpevents.Event  `json:"sample_matches"`
+	TimeRange     *previewTimeRange `json:"time_range"`
+	TotalEvents   int               `json:"total_events"`
+}
+
+type previewTimeRange struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req config.Rule
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid rule payload")
+			return
+		}
+
+		// Convert config.Rule to rules.Entry for matching.
+		entry := rules.Entry{
+			ID:           req.ID,
+			SourceZones:  req.SourceZones,
+			DestZones:    req.DestZones,
+			Sources:      req.Sources,
+			Destinations: req.Destinations,
+			Action:       rules.Action(req.Action),
+			Identities:   req.Identities,
+			ICS: rules.ICSPredicate{
+				Protocol:     req.ICS.Protocol,
+				FunctionCode: req.ICS.FunctionCode,
+				UnitID:       req.ICS.UnitID,
+				Addresses:    req.ICS.Addresses,
+				ReadOnly:     req.ICS.ReadOnly,
+				WriteOnly:    req.ICS.WriteOnly,
+				Mode:         req.ICS.Mode,
+			},
+		}
+		if req.Schedule != nil {
+			entry.Schedule = rules.SchedulePredicate{
+				DaysOfWeek: req.Schedule.DaysOfWeek,
+				StartTime:  req.Schedule.StartTime,
+				EndTime:    req.Schedule.EndTime,
+				Timezone:   req.Schedule.Timezone,
+			}
+		}
+		for _, p := range req.Protocols {
+			entry.Protocols = append(entry.Protocols, rules.Protocol{Name: p.Name, Port: p.Port})
+		}
+
+		// Get events from the telemetry client.
+		tc, ok := engine.(TelemetryClient)
+		if !ok || tc == nil {
+			c.JSON(http.StatusOK, previewRuleResponse{
+				SampleMatches: []dpevents.Event{},
+			})
+			return
+		}
+
+		evs, err := tc.ListEvents(c.Request.Context(), 5000)
+		if err != nil {
+			apiError(c, http.StatusBadGateway, "failed to fetch events: "+err.Error())
+			return
+		}
+
+		totalEvents := len(evs)
+
+		// Determine time range.
+		var tr *previewTimeRange
+		if totalEvents > 0 {
+			oldest := evs[0].Timestamp
+			newest := evs[0].Timestamp
+			for _, ev := range evs[1:] {
+				if ev.Timestamp.Before(oldest) {
+					oldest = ev.Timestamp
+				}
+				if ev.Timestamp.After(newest) {
+					newest = ev.Timestamp
+				}
+			}
+			tr = &previewTimeRange{Start: oldest, End: newest}
+		}
+
+		// Match events against the proposed rule.
+		const maxSamples = 50
+		var matchCount int
+		var samples []dpevents.Event
+		for _, ev := range evs {
+			ctx := rules.EvalContext{
+				SrcIP: net.ParseIP(ev.SrcIP),
+				DstIP: net.ParseIP(ev.DstIP),
+				Proto: ev.Transport,
+				Port:  strconv.Itoa(int(ev.DstPort)),
+				Now:   ev.Timestamp,
+			}
+			if rules.PreviewMatch(entry, ctx) {
+				matchCount++
+				if len(samples) < maxSamples {
+					samples = append(samples, ev)
+				}
+			}
+		}
+
+		if samples == nil {
+			samples = []dpevents.Event{}
+		}
+
+		c.JSON(http.StatusOK, previewRuleResponse{
+			MatchCount:    matchCount,
+			SampleMatches: samples,
+			TimeRange:     tr,
+			TotalEvents:   totalEvents,
+		})
+	}
+}
+
 // hasICSPredicate returns true if the rule has a non-empty ICS predicate.
 func hasICSPredicate(r config.Rule) bool {
 	return strings.TrimSpace(r.ICS.Protocol) != "" ||
@@ -4760,6 +4951,86 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules)})
+	}
+}
+
+// icsTemplateInfo describes an available ICS protocol template for the API.
+type icsTemplateInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Protocol    string `json:"protocol"`
+}
+
+func listICSTemplatesHandler() gin.HandlerFunc {
+	infos := []icsTemplateInfo{
+		{Name: "modbus_read_only", Description: "Allow Modbus read operations only (FC 1-4), deny all writes", Protocol: "modbus"},
+		{Name: "modbus_register_guard", Description: "Allow Modbus access to specific register address ranges only (requires params.ranges)", Protocol: "modbus"},
+		{Name: "dnp3_secure_operations", Description: "Allow normal DNP3 reads, deny dangerous function codes (restart, stop)", Protocol: "dnp3"},
+		{Name: "s7comm_read_only", Description: "Allow S7comm read variable, deny write and PLC control", Protocol: "s7comm"},
+		{Name: "cip_monitor_only", Description: "Allow CIP read services, deny writes and control commands", Protocol: "cip"},
+		{Name: "bacnet_read_only", Description: "Allow BACnet read properties, deny writes and device control", Protocol: "bacnet"},
+		{Name: "opcua_monitor_only", Description: "Allow OPC UA browse/read/subscribe, deny writes and node management", Protocol: "opcua"},
+	}
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, infos)
+	}
+}
+
+func applyICSTemplateHandler() gin.HandlerFunc {
+	type icsParams struct {
+		Ranges []string `json:"ranges,omitempty"`
+	}
+	type icsReq struct {
+		Template    string    `json:"template"`
+		SourceZones []string  `json:"source_zones,omitempty"`
+		DestZones   []string  `json:"dest_zones,omitempty"`
+		Params      icsParams `json:"params,omitempty"`
+	}
+	return func(c *gin.Context) {
+		var r icsReq
+		if err := c.ShouldBindJSON(&r); err != nil || r.Template == "" {
+			apiError(c, http.StatusBadRequest, "template name is required")
+			return
+		}
+
+		var rules []config.Rule
+		switch r.Template {
+		case "modbus_read_only":
+			rules = templates.ModbusReadOnly()
+		case "modbus_register_guard":
+			if len(r.Params.Ranges) == 0 {
+				apiError(c, http.StatusBadRequest, "params.ranges is required for modbus_register_guard")
+				return
+			}
+			rules = templates.ModbusRegisterGuard(r.Params.Ranges)
+		case "dnp3_secure_operations":
+			rules = templates.DNP3SecureOperations()
+		case "s7comm_read_only":
+			rules = templates.S7commReadOnly()
+		case "cip_monitor_only":
+			rules = templates.CIPMonitorOnly()
+		case "bacnet_read_only":
+			rules = templates.BACnetReadOnly()
+		case "opcua_monitor_only":
+			rules = templates.OPCUAMonitorOnly()
+		default:
+			apiError(c, http.StatusBadRequest, fmt.Sprintf("unknown ICS template %q", r.Template))
+			return
+		}
+
+		// Apply source/dest zones if provided.
+		if len(r.SourceZones) > 0 || len(r.DestZones) > 0 {
+			for i := range rules {
+				if len(r.SourceZones) > 0 {
+					rules[i].SourceZones = r.SourceZones
+				}
+				if len(r.DestZones) > 0 {
+					rules[i].DestZones = r.DestZones
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"template": r.Template, "rules": rules})
 	}
 }
 

@@ -59,6 +59,15 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		attrs["service_code"] = frame.ServiceChoice
 		attrs["service"] = ServiceName(frame.PDUType, frame.ServiceChoice)
 		attrs["is_write"] = IsWriteService(frame.ServiceChoice)
+		attrs["is_critical"] = frame.IsCritical
+
+		if frame.HasObjectInfo {
+			attrs["object_type"] = ObjectTypeName(frame.ObjectType)
+			attrs["object_instance"] = frame.ObjectInstance
+		}
+		if frame.HasPropertyID {
+			attrs["property_id"] = PropertyName(frame.PropertyID)
+		}
 
 		if IsDiscoveryService(frame.PDUType, frame.ServiceChoice) {
 			kind = "discovery"

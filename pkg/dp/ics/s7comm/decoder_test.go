@@ -462,3 +462,211 @@ func TestS7ParamFunctionCodeNoParams(t *testing.T) {
 		t.Error("expected no function code when param length is 0")
 	}
 }
+
+// buildS7ReadVarParam builds an S7 parameter block for ReadVar with S7ANY items.
+func buildS7ReadVarParam(items []S7VarItem) []byte {
+	// FC(1) + ItemCount(1) + items
+	param := []byte{FuncReadVar, byte(len(items))}
+	for _, item := range items {
+		// VarSpec(0x12) + AddrLen(10) + SyntaxID(0x10) + TransportSize + Length(2) + DBNumber(2) + Area + Address(3)
+		itemBytes := make([]byte, 12)
+		itemBytes[0] = 0x12 // variable specification
+		itemBytes[1] = 0x0A // address length = 10
+		itemBytes[2] = SyntaxS7ANY
+		itemBytes[3] = item.TransportSize
+		binary.BigEndian.PutUint16(itemBytes[4:6], item.Length)
+		binary.BigEndian.PutUint16(itemBytes[6:8], item.DBNumber)
+		itemBytes[8] = item.Area
+		itemBytes[9] = byte(item.Address >> 16)
+		itemBytes[10] = byte(item.Address >> 8)
+		itemBytes[11] = byte(item.Address)
+		param = append(param, itemBytes...)
+	}
+	return param
+}
+
+// buildS7WriteVarParam builds an S7 parameter block for WriteVar with S7ANY items.
+func buildS7WriteVarParam(items []S7VarItem) []byte {
+	param := buildS7ReadVarParam(items)
+	param[0] = FuncWriteVar
+	return param
+}
+
+func TestParseS7VarItemsReadDB(t *testing.T) {
+	items := []S7VarItem{
+		{TransportSize: 0x02, Length: 1, DBNumber: 100, Area: AreaDataBlocks, Address: 0x000018}, // byte 3, bit 0
+	}
+	param := buildS7ReadVarParam(items)
+	s7 := buildS7Header(MsgTypeJob, 0x0001, param, nil)
+	hdr, err := ParseS7Header(s7)
+	if err != nil {
+		t.Fatalf("ParseS7Header: %v", err)
+	}
+	parsed, count := ParseS7VarItems(s7, hdr)
+	if count != 1 {
+		t.Fatalf("item_count = %d, want 1", count)
+	}
+	if len(parsed) != 1 {
+		t.Fatalf("parsed %d items, want 1", len(parsed))
+	}
+	if parsed[0].Area != AreaDataBlocks {
+		t.Errorf("area = 0x%02X, want 0x84", parsed[0].Area)
+	}
+	if parsed[0].DBNumber != 100 {
+		t.Errorf("db_number = %d, want 100", parsed[0].DBNumber)
+	}
+	if parsed[0].Address != 0x18 {
+		t.Errorf("address = 0x%06X, want 0x000018", parsed[0].Address)
+	}
+}
+
+func TestParseS7VarItemsMultiple(t *testing.T) {
+	items := []S7VarItem{
+		{TransportSize: 0x02, Length: 1, DBNumber: 0, Area: AreaInputs, Address: 0x000008},
+		{TransportSize: 0x02, Length: 1, DBNumber: 50, Area: AreaDataBlocks, Address: 0x000020},
+	}
+	param := buildS7ReadVarParam(items)
+	s7 := buildS7Header(MsgTypeJob, 0x0001, param, nil)
+	hdr, err := ParseS7Header(s7)
+	if err != nil {
+		t.Fatalf("ParseS7Header: %v", err)
+	}
+	parsed, count := ParseS7VarItems(s7, hdr)
+	if count != 2 {
+		t.Fatalf("item_count = %d, want 2", count)
+	}
+	if len(parsed) != 2 {
+		t.Fatalf("parsed %d items, want 2", len(parsed))
+	}
+	if parsed[0].Area != AreaInputs {
+		t.Errorf("item[0].area = 0x%02X, want 0x81", parsed[0].Area)
+	}
+	if parsed[1].Area != AreaDataBlocks {
+		t.Errorf("item[1].area = 0x%02X, want 0x84", parsed[1].Area)
+	}
+}
+
+func TestAreaName(t *testing.T) {
+	tests := []struct {
+		area uint8
+		want string
+	}{
+		{AreaInputs, "inputs"},
+		{AreaOutputs, "outputs"},
+		{AreaFlags, "flags"},
+		{AreaDataBlocks, "data_blocks"},
+		{AreaCounter, "counter"},
+		{AreaTimer, "timer"},
+		{0x99, "unknown_0x99"},
+	}
+	for _, tc := range tests {
+		got := AreaName(tc.area)
+		if got != tc.want {
+			t.Errorf("AreaName(0x%02X) = %q, want %q", tc.area, got, tc.want)
+		}
+	}
+}
+
+func TestFormatAddress(t *testing.T) {
+	tests := []struct {
+		addr uint32
+		want string
+	}{
+		{0x000018, "3.0"},  // 24 / 8 = 3, 24 % 8 = 0
+		{0x000019, "3.1"},  // 25 / 8 = 3, 25 % 8 = 1
+		{0x000000, "0.0"},
+		{0x000008, "1.0"},  // 8 / 8 = 1, 8 % 8 = 0
+	}
+	for _, tc := range tests {
+		got := FormatAddress(tc.addr)
+		if got != tc.want {
+			t.Errorf("FormatAddress(0x%06X) = %q, want %q", tc.addr, got, tc.want)
+		}
+	}
+}
+
+func TestDecoderOnPacketReadVarWithItems(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 102), time.Now())
+
+	items := []S7VarItem{
+		{TransportSize: 0x02, Length: 1, DBNumber: 100, Area: AreaDataBlocks, Address: 0x000018},
+	}
+	param := buildS7ReadVarParam(items)
+	pkt := buildFullPacket(MsgTypeJob, 0x0001, param, nil)
+
+	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: pkt})
+	if err != nil {
+		t.Fatalf("OnPacket: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Attributes["item_count"] != uint8(1) {
+		t.Errorf("item_count = %v, want 1", ev.Attributes["item_count"])
+	}
+	if ev.Attributes["area"] != "data_blocks" {
+		t.Errorf("area = %v, want 'data_blocks'", ev.Attributes["area"])
+	}
+	if ev.Attributes["db_number"] != uint16(100) {
+		t.Errorf("db_number = %v, want 100", ev.Attributes["db_number"])
+	}
+	if ev.Attributes["address"] != "3.0" {
+		t.Errorf("address = %v, want '3.0'", ev.Attributes["address"])
+	}
+	// Read should NOT have safety_critical flag.
+	if _, ok := ev.Attributes["safety_critical"]; ok {
+		t.Error("read_var should not have safety_critical flag")
+	}
+}
+
+func TestDecoderOnPacketWriteVarDBSafetyCritical(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 102), time.Now())
+
+	items := []S7VarItem{
+		{TransportSize: 0x02, Length: 1, DBNumber: 1, Area: AreaDataBlocks, Address: 0x000000},
+	}
+	param := buildS7WriteVarParam(items)
+	pkt := buildFullPacket(MsgTypeJob, 0x0002, param, nil)
+
+	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: pkt})
+	if err != nil {
+		t.Fatalf("OnPacket: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Attributes["safety_critical"] != true {
+		t.Error("write to data_blocks should have safety_critical=true")
+	}
+	if ev.Attributes["is_write"] != true {
+		t.Error("is_write should be true for write_var")
+	}
+}
+
+func TestDecoderOnPacketReadVarInputsNoDBNumber(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 102), time.Now())
+
+	items := []S7VarItem{
+		{TransportSize: 0x02, Length: 1, DBNumber: 0, Area: AreaInputs, Address: 0x000008},
+	}
+	param := buildS7ReadVarParam(items)
+	pkt := buildFullPacket(MsgTypeJob, 0x0001, param, nil)
+
+	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: pkt})
+	if err != nil {
+		t.Fatalf("OnPacket: %v", err)
+	}
+	ev := events[0]
+	if ev.Attributes["area"] != "inputs" {
+		t.Errorf("area = %v, want 'inputs'", ev.Attributes["area"])
+	}
+	// db_number should NOT be set for non-DB areas.
+	if _, ok := ev.Attributes["db_number"]; ok {
+		t.Error("db_number should not be set for inputs area")
+	}
+}

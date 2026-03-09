@@ -88,7 +88,7 @@ func TestParseEIPHeaderTooShort(t *testing.T) {
 }
 
 func TestParseCIPMessageFromSendRRData(t *testing.T) {
-	// Build a SendRRData payload with Read_Tag_Service (0x4C), path = [0x20, 0x02]
+	// Build a SendRRData payload with Read_Tag (0x4C), path = [0x20, 0x02]
 	path := []byte{0x20, 0x02}
 	payload := buildSendRRDataPayload(0x4C, 1, path)
 
@@ -99,8 +99,8 @@ func TestParseCIPMessageFromSendRRData(t *testing.T) {
 	if cipMsg.ServiceCode != 0x4C {
 		t.Fatalf("expected service 0x4C, got 0x%02X", cipMsg.ServiceCode)
 	}
-	if cipMsg.ServiceName != "Read_Tag_Service" {
-		t.Fatalf("expected Read_Tag_Service, got %s", cipMsg.ServiceName)
+	if cipMsg.ServiceName != "Read_Tag" {
+		t.Fatalf("expected Read_Tag, got %s", cipMsg.ServiceName)
 	}
 	if cipMsg.IsResponse {
 		t.Fatal("expected request, got response")
@@ -129,28 +129,25 @@ func TestParseCIPMessageResponse(t *testing.T) {
 
 func TestServiceCodeClassification(t *testing.T) {
 	// Read services
-	for _, code := range []uint8{0x01, 0x0E, 0x4C} {
+	for _, code := range []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E, 0x5B} {
 		if !IsReadService(code) {
 			t.Fatalf("expected 0x%02X to be read", code)
-		}
-		if IsWriteService(code) {
-			t.Fatalf("0x%02X should not be write", code)
 		}
 	}
 
 	// Write services
-	for _, code := range []uint8{0x10, 0x4D, 0x4E} {
+	for _, code := range []uint8{0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B,
+		0x10, 0x16, 0x1A, 0x4B, 0x4D, 0x4F, 0x52, 0x54} {
 		if !IsWriteService(code) {
 			t.Fatalf("expected 0x%02X to be write", code)
-		}
-		if IsReadService(code) {
-			t.Fatalf("0x%02X should not be read", code)
 		}
 	}
 
 	// Control services
-	if !IsControlService(0x54) {
-		t.Fatal("expected 0x54 to be control")
+	for _, code := range []uint8{0x05, 0x06, 0x07, 0x08, 0x09, 0x54} {
+		if !IsControlService(code) {
+			t.Fatalf("expected 0x%02X to be control", code)
+		}
 	}
 	if IsControlService(0x4C) {
 		t.Fatal("0x4C should not be control")
@@ -176,12 +173,12 @@ func TestCommandName(t *testing.T) {
 }
 
 func TestServiceName(t *testing.T) {
-	if ServiceName(0x4C) != "Read_Tag_Service" {
-		t.Fatalf("expected Read_Tag_Service, got %s", ServiceName(0x4C))
+	if ServiceName(0x4C) != "Read_Tag" {
+		t.Fatalf("expected Read_Tag, got %s", ServiceName(0x4C))
 	}
 	// Response bit masked
-	if ServiceName(0xCC) != "Read_Tag_Service" {
-		t.Fatalf("expected Read_Tag_Service for response, got %s", ServiceName(0xCC))
+	if ServiceName(0xCC) != "Read_Tag" {
+		t.Fatalf("expected Read_Tag for response, got %s", ServiceName(0xCC))
 	}
 }
 
@@ -220,7 +217,7 @@ func TestDecoderOnPacketSendRRData(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
 
-	// Build a full SendRRData packet with Read_Tag_Service
+	// Build a full SendRRData packet with Read_Tag
 	path := []byte{0x20, 0x02}
 	cipPayload := buildSendRRDataPayload(0x4C, 1, path)
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
@@ -246,7 +243,7 @@ func TestDecoderOnPacketSendRRData(t *testing.T) {
 		t.Fatalf("expected service_code 0x4C, got %v", ev.Attributes["service_code"])
 	}
 	if ev.Attributes["is_write"] != false {
-		t.Fatal("Read_Tag_Service should not be is_write")
+		t.Fatal("Read_Tag should not be is_write")
 	}
 	if ev.Attributes["cip_path"] != "2002" {
 		t.Fatalf("expected cip_path 2002, got %v", ev.Attributes["cip_path"])
@@ -284,7 +281,7 @@ func TestDecoderOnPacketResponse(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 44818, 12345, 6), time.Now())
 
-	// Build a SendRRData response with Write_Tag_Service response (0x4D | 0x80 = 0xCD)
+	// Build a SendRRData response with Write_Tag response (0x4D | 0x80 = 0xCD)
 	cipPayload := buildSendRRDataPayload(0xCD, 0, nil)
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
 
@@ -300,7 +297,7 @@ func TestDecoderOnPacketResponse(t *testing.T) {
 		t.Fatalf("expected kind response, got %s", ev.Kind)
 	}
 	if ev.Attributes["is_write"] != true {
-		t.Fatal("Write_Tag_Service response should be is_write")
+		t.Fatal("Write_Tag response should be is_write")
 	}
 }
 
@@ -314,6 +311,309 @@ func TestDecoderOnPacketNilPayload(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events for empty payload, got %d", len(events))
+	}
+}
+
+// buildMSPData creates the CIP data payload for a Multiple_Service_Packet.
+// Each sub-service is encoded as: service code (1) + path size (1) + path.
+func buildMSPData(services []struct {
+	code     uint8
+	pathSize uint8
+	path     []byte
+}) []byte {
+	count := len(services)
+	// Header: 2 bytes count + 2 bytes per offset
+	headerSize := 2 + count*2
+	// Build each sub-service payload first to calculate offsets.
+	var payloads [][]byte
+	for _, s := range services {
+		p := make([]byte, 2+int(s.pathSize)*2)
+		p[0] = s.code
+		p[1] = s.pathSize
+		if len(s.path) > 0 {
+			copy(p[2:], s.path)
+		}
+		payloads = append(payloads, p)
+	}
+
+	data := make([]byte, headerSize)
+	binary.LittleEndian.PutUint16(data[0:2], uint16(count))
+
+	// Offsets are relative to start of MSP data.
+	off := headerSize
+	for i, p := range payloads {
+		binary.LittleEndian.PutUint16(data[2+i*2:2+i*2+2], uint16(off))
+		_ = p
+		off += len(payloads[i])
+	}
+
+	for _, p := range payloads {
+		data = append(data, p...)
+	}
+	return data
+}
+
+// buildSendRRDataPayloadWithData creates a SendRRData payload with a CIP service
+// that has explicit data appended after the path.
+func buildSendRRDataPayloadWithData(serviceCode uint8, pathSize uint8, path []byte, cipData []byte) []byte {
+	cipLen := 2 + int(pathSize)*2 + len(cipData)
+	cipMsg := make([]byte, cipLen)
+	cipMsg[0] = serviceCode
+	cipMsg[1] = pathSize
+	if len(path) > 0 {
+		copy(cipMsg[2:], path)
+	}
+	if len(cipData) > 0 {
+		copy(cipMsg[2+int(pathSize)*2:], cipData)
+	}
+
+	payloadLen := 8 + 4 + 4 + cipLen
+	payload := make([]byte, payloadLen)
+	binary.LittleEndian.PutUint16(payload[6:8], 2)
+
+	offset := 8
+	binary.LittleEndian.PutUint16(payload[offset:offset+2], 0x0000)
+	binary.LittleEndian.PutUint16(payload[offset+2:offset+4], 0)
+	offset += 4
+
+	binary.LittleEndian.PutUint16(payload[offset:offset+2], 0x00B2)
+	binary.LittleEndian.PutUint16(payload[offset+2:offset+4], uint16(cipLen))
+	offset += 4
+	copy(payload[offset:], cipMsg)
+
+	return payload
+}
+
+func TestParseMSPServices(t *testing.T) {
+	type subSvc struct {
+		code     uint8
+		pathSize uint8
+		path     []byte
+	}
+
+	t.Run("two sub-services Read_Tag+Write_Tag", func(t *testing.T) {
+		mspData := buildMSPData([]struct {
+			code     uint8
+			pathSize uint8
+			path     []byte
+		}{
+			{code: 0x4C, pathSize: 1, path: []byte{0x20, 0x04}}, // Read_Tag
+			{code: 0x4D, pathSize: 1, path: []byte{0x20, 0x04}}, // Write_Tag
+		})
+		subs := ParseMSPServices(mspData)
+		if len(subs) != 2 {
+			t.Fatalf("expected 2 sub-services, got %d", len(subs))
+		}
+		if subs[0].ServiceCode != 0x4C {
+			t.Fatalf("expected 0x4C, got 0x%02X", subs[0].ServiceCode)
+		}
+		if subs[0].ServiceName != "Read_Tag" {
+			t.Fatalf("expected Read_Tag, got %s", subs[0].ServiceName)
+		}
+		if subs[0].IsWrite {
+			t.Fatal("Read_Tag should not be IsWrite")
+		}
+		if subs[1].ServiceCode != 0x4D {
+			t.Fatalf("expected 0x4D, got 0x%02X", subs[1].ServiceCode)
+		}
+		if !subs[1].IsWrite {
+			t.Fatal("Write_Tag should be IsWrite")
+		}
+	})
+
+	t.Run("empty data", func(t *testing.T) {
+		subs := ParseMSPServices(nil)
+		if subs != nil {
+			t.Fatalf("expected nil, got %v", subs)
+		}
+		subs = ParseMSPServices([]byte{0x00})
+		if subs != nil {
+			t.Fatalf("expected nil for 1-byte data, got %v", subs)
+		}
+	})
+
+	t.Run("zero count", func(t *testing.T) {
+		subs := ParseMSPServices([]byte{0x00, 0x00})
+		if subs != nil {
+			t.Fatalf("expected nil for zero count, got %v", subs)
+		}
+	})
+
+	t.Run("truncated offsets", func(t *testing.T) {
+		// Count says 5, but only 2 bytes total (no room for offset table).
+		data := []byte{0x05, 0x00}
+		subs := ParseMSPServices(data)
+		if subs != nil {
+			t.Fatalf("expected nil for truncated offsets, got %v", subs)
+		}
+	})
+
+	t.Run("caps at 32", func(t *testing.T) {
+		// Build 40 sub-services.
+		svcs := make([]struct {
+			code     uint8
+			pathSize uint8
+			path     []byte
+		}, 40)
+		for i := range svcs {
+			svcs[i] = struct {
+				code     uint8
+				pathSize uint8
+				path     []byte
+			}{code: 0x4C, pathSize: 0, path: nil}
+		}
+		mspData := buildMSPData(svcs)
+		subs := ParseMSPServices(mspData)
+		if len(subs) > 32 {
+			t.Fatalf("expected at most 32, got %d", len(subs))
+		}
+	})
+}
+
+func TestDecoderMSPTwoSubServices(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	mspData := buildMSPData([]struct {
+		code     uint8
+		pathSize uint8
+		path     []byte
+	}{
+		{code: 0x4C, pathSize: 1, path: []byte{0x20, 0x04}}, // Read_Tag
+		{code: 0x4D, pathSize: 1, path: []byte{0x20, 0x04}}, // Write_Tag
+	})
+
+	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	evts, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	if len(evts) != 3 {
+		t.Fatalf("expected 3 events (1 parent + 2 sub), got %d", len(evts))
+	}
+
+	// First event: parent MSP
+	parent := evts[0]
+	if parent.Attributes["service_name"] != "Multiple_Service_Packet" {
+		t.Fatalf("expected parent service Multiple_Service_Packet, got %v", parent.Attributes["service_name"])
+	}
+	if parent.Attributes["multi_service_count"] != uint16(2) {
+		t.Fatalf("expected multi_service_count 2, got %v", parent.Attributes["multi_service_count"])
+	}
+
+	// Second event: Read_Tag sub-service
+	sub1 := evts[1]
+	if sub1.Attributes["service_code"] != uint8(0x4C) {
+		t.Fatalf("expected sub1 service_code 0x4C, got %v", sub1.Attributes["service_code"])
+	}
+	if sub1.Attributes["msp"] != "true" {
+		t.Fatal("sub1 should have msp=true")
+	}
+	if sub1.Attributes["is_write"] != false {
+		t.Fatal("Read_Tag sub should not be is_write")
+	}
+
+	// Third event: Write_Tag sub-service
+	sub2 := evts[2]
+	if sub2.Attributes["service_code"] != uint8(0x4D) {
+		t.Fatalf("expected sub2 service_code 0x4D, got %v", sub2.Attributes["service_code"])
+	}
+	if sub2.Attributes["is_write"] != true {
+		t.Fatal("Write_Tag sub should be is_write")
+	}
+	if sub2.Attributes["msp"] != "true" {
+		t.Fatal("sub2 should have msp=true")
+	}
+}
+
+func TestDecoderMSPReadOnly(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	mspData := buildMSPData([]struct {
+		code     uint8
+		pathSize uint8
+		path     []byte
+	}{
+		{code: 0x4C, pathSize: 0, path: nil}, // Read_Tag
+		{code: 0x4E, pathSize: 0, path: nil}, // Read_Tag_Fragmented
+	})
+
+	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	evts, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	// 1 parent + 2 subs = 3
+	if len(evts) < 3 {
+		t.Fatalf("expected at least 3 events, got %d", len(evts))
+	}
+	for i := 1; i < len(evts); i++ {
+		if evts[i].Attributes["is_write"] != false {
+			t.Fatalf("sub-event %d should have is_write=false", i)
+		}
+	}
+}
+
+func TestDecoderMSPMalformed(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	// Truncated MSP data: claims 5 services but only 2 bytes.
+	mspData := []byte{0x05, 0x00}
+
+	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	evts, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	// Should emit just the parent MSP event (graceful degradation).
+	if len(evts) != 1 {
+		t.Fatalf("expected 1 event (parent only) for malformed MSP, got %d", len(evts))
+	}
+	if evts[0].Attributes["multi_service_count"] != uint16(5) {
+		t.Fatalf("expected multi_service_count 5, got %v", evts[0].Attributes["multi_service_count"])
+	}
+}
+
+func TestDecoderMSPCapsAt32(t *testing.T) {
+	dec := NewDecoder()
+	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
+
+	svcs := make([]struct {
+		code     uint8
+		pathSize uint8
+		path     []byte
+	}, 40)
+	for i := range svcs {
+		svcs[i] = struct {
+			code     uint8
+			pathSize uint8
+			path     []byte
+		}{code: 0x4C, pathSize: 0, path: nil}
+	}
+	mspData := buildMSPData(svcs)
+
+	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
+	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
+
+	evts, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+	if err != nil {
+		t.Fatalf("onpacket: %v", err)
+	}
+	// 1 parent + at most 32 subs = 33
+	subCount := len(evts) - 1
+	if subCount > 32 {
+		t.Fatalf("expected at most 32 sub-events, got %d", subCount)
+	}
+	if subCount < 1 {
+		t.Fatal("expected at least 1 sub-event")
 	}
 }
 

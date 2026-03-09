@@ -120,6 +120,65 @@ func (e *Evaluator) compile() {
 	}
 }
 
+// CompileEntry pre-parses a single Entry for preview matching.
+// This avoids creating a full Evaluator/Snapshot for dry-run scenarios.
+func CompileEntry(entry Entry) compiledEntry {
+	ce := compiledEntry{Entry: entry}
+
+	// Pre-parse ICS addresses.
+	if len(entry.ICS.Addresses) > 0 {
+		ce.addresses = make([]compiledAddr, 0, len(entry.ICS.Addresses))
+		for _, spec := range entry.ICS.Addresses {
+			if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
+				low, okLow := parseAddr(parts[0])
+				high, okHigh := parseAddr(parts[1])
+				if okLow && okHigh {
+					ce.addresses = append(ce.addresses, compiledAddr{low: low, high: high})
+					continue
+				}
+			}
+			if val, ok := parseAddr(spec); ok {
+				ce.addresses = append(ce.addresses, compiledAddr{low: val, high: val})
+			}
+		}
+	}
+
+	// Pre-parse protocol port ranges.
+	ce.ports = make([]compiledPort, len(entry.Protocols))
+	for j, p := range entry.Protocols {
+		if p.Port == "" {
+			continue
+		}
+		if parts := strings.SplitN(p.Port, "-", 2); len(parts) == 2 {
+			lo, errLo := strconv.ParseUint(parts[0], 10, 16)
+			hi, errHi := strconv.ParseUint(parts[1], 10, 16)
+			if errLo == nil && errHi == nil {
+				ce.ports[j] = compiledPort{low: uint16(lo), high: uint16(hi)}
+				continue
+			}
+		}
+		v, err := strconv.ParseUint(p.Port, 10, 16)
+		if err == nil {
+			ce.ports[j] = compiledPort{low: uint16(v), high: uint16(v)}
+		}
+	}
+
+	return ce
+}
+
+// PreviewMatch tests a single rule against an EvalContext to determine if it
+// would match. This is used for dry-run/impact preview without affecting
+// enforcement. The entry is compiled on the fly for predicate evaluation.
+func PreviewMatch(entry Entry, ctx EvalContext) bool {
+	ce := CompileEntry(entry)
+	return matchZones(ce.Entry, ctx) &&
+		matchCIDRs(ce.Entry, ctx) &&
+		matchProtoCompiled(&ce, ctx) &&
+		matchIdentities(ce.Entry, ctx) &&
+		matchICSCompiled(&ce, ctx) &&
+		matchSchedule(ce.Entry, ctx)
+}
+
 func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 	if e.snapshot == nil {
 		return ActionDeny
