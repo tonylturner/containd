@@ -4,22 +4,29 @@
 
 :root {
   color-scheme: dark;
-  --bg: #121212;
-  --surface: #1e1e1e;
-  --border: #2e2e2e;
-  --text: #ffffff;
-  --text-muted: #a3a3a3;
-  --primary: #2563eb;
-  --primary-hover: #3b82f6;
-  --primary-active: #1e40af;
+  --bg: #0c0e14;
+  --surface: #151821;
+  --surface-raised: #1a1e2a;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #f0f2f5;
+  --text-muted: #8b92a5;
+  --text-dim: #5c6478;
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-muted: rgba(59, 130, 246, 0.15);
   --success: #10b981;
-  --warning: #fbbf24;
+  --success-muted: rgba(16, 185, 129, 0.12);
+  --warning: #f59e0b;
+  --warning-muted: rgba(245, 158, 11, 0.12);
   --error: #ef4444;
+  --error-muted: rgba(239, 68, 68, 0.12);
   --purple: #8b5cf6;
   --teal: #06b6d4;
   --pink: #ec4899;
   --orange: #f97316;
-  --card-shadow: rgba(0, 0, 0, 0.5);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --card-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
   background-color: var(--bg);
   color: var(--text);
 }
@@ -27,10 +34,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.06), transparent 30%),
-    radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.08), transparent 30%),
-    var(--bg);
+  font-family: "Inter", "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 a {
@@ -38,10 +45,58 @@ a {
   text-decoration: none;
 }
 
+/* Subtle background texture — reduced from original for less visual noise */
 .grid-overlay {
-  background-image: radial-gradient(circle at 1px 1px, rgba(6, 182, 212, 0.12) 1px, transparent 0);
-  background-size: 22px 22px;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
 }
+
+/* ── Utility classes ────────────────────────────────────────── */
+
+/* Transition defaults for interactive elements */
+.transition-ui {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+
+/* Focus ring */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--primary);
+}
+
+/* Table row hover */
+.table-row-hover {
+  transition: background-color 100ms ease;
+}
+.table-row-hover:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Accordion transition */
+.accordion-body {
+  overflow: hidden;
+  transition: max-height 200ms ease, opacity 200ms ease;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* ── ReactFlow overrides ──────────────────────────────────── */
 
 .reactflow-controls {
   background: rgba(0, 0, 0, 0.65);

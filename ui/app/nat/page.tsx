@@ -12,6 +12,8 @@ import {
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 /* ── helpers ───────────────────────────────────────────────────── */
 
@@ -39,7 +41,7 @@ export default function NATPage() {
       body: (
         <>
           Define zones in{" "}
-          <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+          <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
             Zones
           </Link>{" "}
           so you can assign egress and source zones.
@@ -77,25 +79,25 @@ export default function NATPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
         >
           Refresh
         </button>
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
@@ -170,8 +172,8 @@ function NATCard({
       JSON.stringify(((nat.sourceZones ?? []) as string[]).slice().sort());
 
   return (
-    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+    <div className="mb-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card backdrop-blur">
+      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-white">Source NAT (SNAT)</div>
           <div className="text-xs text-slate-400">
@@ -183,8 +185,8 @@ function NATCard({
         <span
           className={
             enabled
-              ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-              : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+              ? "rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-400"
+              : "rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-400"
           }
         >
           {enabled ? "ENABLED" : "DISABLED"}
@@ -192,7 +194,7 @@ function NATCard({
       </div>
 
       <div className="grid gap-4 p-4 md:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+        <Card padding="sm">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Enable
           </div>
@@ -201,10 +203,10 @@ function NATCard({
               disabled={!isAdmin()}
               onClick={() => setEnabled((v) => !v)}
               className={
-                "rounded-lg border px-3 py-1.5 text-sm " +
+                "rounded-lg border px-3 py-1.5 text-sm transition-ui " +
                 (enabled
-                  ? "border-mint/30 bg-mint/10 text-mint"
-                  : "border-white/10 bg-white/5 text-slate-200") +
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  : "border-white/[0.08] bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]") +
                 (!isAdmin() ? " opacity-50" : "")
               }
             >
@@ -216,9 +218,9 @@ function NATCard({
               empty.
             </div>
           </div>
-        </div>
+        </Card>
 
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+        <Card padding="sm">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Egress Zone
           </div>
@@ -226,7 +228,7 @@ function NATCard({
             disabled={!isAdmin()}
             value={egressZone}
             onChange={(e) => setEgressZone(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-200"
+            className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             <option value="">(default: wan)</option>
             {zoneOptions.map((z) => (
@@ -235,9 +237,9 @@ function NATCard({
               </option>
             ))}
           </select>
-        </div>
+        </Card>
 
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+        <Card padding="sm">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
             Source Zones
           </div>
@@ -270,11 +272,11 @@ function NATCard({
           <div className="mt-2 text-xs text-slate-400">
             Leave empty to use default sources.
           </div>
-        </div>
+        </Card>
       </div>
 
       {isAdmin() && (
-        <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-white/[0.08] px-4 py-3">
           <button
             disabled={!dirty}
             onClick={() =>
@@ -287,10 +289,10 @@ function NATCard({
               })
             }
             className={
-              "rounded-lg px-3 py-1.5 text-sm " +
+              "rounded-lg px-3 py-1.5 text-sm font-medium transition-ui " +
               (dirty
-                ? "bg-mint/20 text-mint hover:bg-mint/30"
-                : "bg-white/5 text-slate-500")
+                ? "bg-blue-600 text-white hover:bg-blue-500"
+                : "bg-white/[0.04] text-slate-500")
             }
           >
             Save NAT
@@ -321,6 +323,7 @@ function PortForwardsCard({
   const [newSources, setNewSources] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => {
     setItems(nat.portForwards ?? []);
@@ -402,13 +405,14 @@ function PortForwardsCard({
   }
 
   return (
-    <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+    <div className="mb-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card backdrop-blur">
+      <ConfirmDialog {...confirm.props} />
+      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-white">Port Forwarding (DNAT)</div>
           <div className="text-xs text-slate-400">
             Destination NAT (prerouting) to expose internal services. You still need a matching{" "}
-            <Link href="/firewall/" className="font-semibold text-mint hover:text-mint/80">
+            <Link href="/firewall/" className="font-semibold text-blue-400 hover:text-blue-300">
               firewall allow rule
             </Link>.
           </div>
@@ -417,7 +421,7 @@ function PortForwardsCard({
           <button
             onClick={save}
             disabled={!dirty}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
           >
             Save
           </button>
@@ -426,12 +430,12 @@ function PortForwardsCard({
 
       <div className="p-4">
         {!isAdmin() && (
-          <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          <div className="mb-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
             View-only mode: port forwarding changes are disabled.
           </div>
         )}
         {error && (
-          <div className="mb-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             {error}
           </div>
         )}
@@ -441,7 +445,7 @@ function PortForwardsCard({
             <select
               value={newIngress}
               onChange={(e) => setNewIngress(e.target.value)}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               {zoneOptions.map((z) => (
                 <option key={z.value} value={z.value}>
@@ -452,7 +456,7 @@ function PortForwardsCard({
             <select
               value={newProto}
               onChange={(e) => setNewProto(e.target.value as "tcp" | "udp")}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="tcp">tcp</option>
               <option value="udp">udp</option>
@@ -461,23 +465,23 @@ function PortForwardsCard({
               value={newListen}
               onChange={(e) => setNewListen(e.target.value)}
               placeholder="listen port"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <input
               value={newDestIp}
               onChange={(e) => setNewDestIp(e.target.value)}
               placeholder="dest ip"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <input
               value={newDestPort}
               onChange={(e) => setNewDestPort(e.target.value)}
               placeholder="dest port (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <button
               onClick={add}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               Add
             </button>
@@ -486,18 +490,18 @@ function PortForwardsCard({
               value={newSources}
               onChange={(e) => setNewSources(e.target.value)}
               placeholder="sources CIDR (comma) (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-3"
             />
             <input
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               placeholder="description (opt)"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-3"
+              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-3"
             />
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+        <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
           <table className="w-full text-sm">
             <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
               <tr>
@@ -519,7 +523,7 @@ function PortForwardsCard({
                 </tr>
               )}
               {items.map((pf) => (
-                <tr key={pf.id} className="border-t border-white/5">
+                <tr key={pf.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
                   <td className="px-4 py-3 text-slate-200">{zoneName(zones, pf.ingressZone)}</td>
                   <td className="px-4 py-3 text-slate-200">{pf.proto}</td>
                   <td className="px-4 py-3 font-mono text-xs text-white">
@@ -536,8 +540,8 @@ function PortForwardsCard({
                     <span
                       className={
                         pf.enabled
-                          ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-                          : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+                          ? "rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-400"
+                          : "rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-400"
                       }
                     >
                       {pf.enabled ? "on" : "off"}
@@ -548,20 +552,28 @@ function PortForwardsCard({
                       <div className="flex items-center justify-end gap-2">
                         <Link
                           href={firewallLink(pf)}
-                          className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                          className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
                           title="Create matching firewall rule"
                         >
                           + FW Rule
                         </Link>
                         <button
                           onClick={() => toggle(pf.id, !pf.enabled)}
-                          className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                          className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
                         >
                           {pf.enabled ? "Disable" : "Enable"}
                         </button>
                         <button
-                          onClick={() => remove(pf.id)}
-                          className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                          onClick={() =>
+                            confirm.open({
+                              title: "Delete port forward?",
+                              message: `Remove the ${pf.proto}/${pf.listenPort} forward to ${pf.destIp}${pf.destPort ? `:${pf.destPort}` : ""}? This change is not saved until you click Save.`,
+                              confirmLabel: "Delete",
+                              variant: "danger",
+                              onConfirm: () => remove(pf.id),
+                            })
+                          }
+                          className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
                           Delete
                         </button>

@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Shell } from "../../components/Shell";
 import { api, isAdmin, type IDSConfig, type IDSRule } from "../../lib/api";
+import { Card } from "../../components/Card";
+import { EmptyState } from "../../components/EmptyState";
+import { StatusBadge } from "../../components/StatusBadge";
+import {
+  ConfirmDialog,
+  useConfirm,
+} from "../../components/ConfirmDialog";
 
 export default function IDSPage() {
   const canEdit = isAdmin();
@@ -11,6 +18,7 @@ export default function IDSPage() {
   const [sigmaText, setSigmaText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
+  const confirm = useConfirm();
 
   async function refresh() {
     const cfg = await api.getIDS();
@@ -50,8 +58,16 @@ export default function IDSPage() {
 
   function onDelete(id: string) {
     if (!canEdit) return;
-    const existing = ids.rules ?? [];
-    setIds({ ...ids, rules: existing.filter((r) => r.id !== id) });
+    confirm.open({
+      title: "Remove IDS Rule",
+      message: `Are you sure you want to remove rule "${id}"? This change is not saved until you click Save.`,
+      confirmLabel: "Remove",
+      variant: "danger",
+      onConfirm: () => {
+        const existing = ids.rules ?? [];
+        setIds({ ...ids, rules: existing.filter((r) => r.id !== id) });
+      },
+    });
   }
 
   const rules = useMemo(() => ids.rules ?? [], [ids.rules]);
@@ -63,14 +79,14 @@ export default function IDSPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -79,12 +95,12 @@ export default function IDSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -96,7 +112,7 @@ export default function IDSPage() {
             checked={!!ids.enabled}
             disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-black/40"
+            className="h-4 w-4 rounded border-white/20 bg-black/30"
           />
           Enable native IDS
         </label>
@@ -110,7 +126,7 @@ export default function IDSPage() {
         />
       )}
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
@@ -125,52 +141,55 @@ export default function IDSPage() {
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                  No IDS rules configured. Upload Suricata rules or create custom rules to enable intrusion detection.
+                <td className="px-4 py-8" colSpan={6}>
+                  <EmptyState
+                    title="No IDS rules configured"
+                    description="Upload Suricata rules or create custom rules to enable intrusion detection."
+                  />
                 </td>
               </tr>
             )}
             {rules.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
                 <td className="px-4 py-3 font-mono text-xs text-white">
                   {r.id}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  {r.title || r.message || "—"}
+                  {r.title || r.message || "\u2014"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
                   {(r.proto || "*") + " / " + (r.kind || "*")}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
                   <span title={conditionSummary(r.when)}>
-                    {conditionSummary(r.when) || "—"}
+                    {conditionSummary(r.when) || "\u2014"}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  <span
-                    className={
+                  <StatusBadge
+                    variant={
                       r.severity === "critical" || r.severity === "high"
-                        ? "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
+                        ? "error"
                         : r.severity === "medium"
-                          ? "rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
-                          : "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
+                          ? "warning"
+                          : "success"
                     }
                   >
                     {r.severity || "low"}
-                  </span>
+                  </StatusBadge>
                 </td>
                 <td className="px-4 py-3 text-right">
                   {canEdit && (
                     <>
                       <button
                         onClick={() => setEditing(r)}
-                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                        className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => onDelete(r.id)}
-                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                       >
                         Remove
                       </button>
@@ -197,6 +216,8 @@ export default function IDSPage() {
           }}
         />
       )}
+
+      <ConfirmDialog {...confirm.props} />
     </Shell>
   );
 }
@@ -237,33 +258,31 @@ function SigmaImportCard({
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-white">Import Sigma Rule</h2>
-        <input
-          type="file"
-          accept=".yml,.yaml,text/yaml"
-          onChange={onFile}
-          className="text-xs text-slate-300"
-        />
-      </div>
+    <Card title="Import Sigma Rule" titleRight={
+      <input
+        type="file"
+        accept=".yml,.yaml,text/yaml"
+        onChange={onFile}
+        className="text-xs text-slate-300"
+      />
+    }>
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Paste Sigma YAML here"
         rows={8}
-        className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+        className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
       />
       <div className="mt-2 flex justify-end">
         <button
           onClick={onConvert}
           disabled={!value.trim()}
-          className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20 disabled:opacity-50"
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
         >
           Convert & Add
         </button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -294,21 +313,21 @@ function EditRuleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-ink p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-3xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
             Edit IDS rule {rule.id}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
           >
             Close
           </button>
         </div>
         {err && (
-          <div className="mb-3 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             {err}
           </div>
         )}
@@ -316,18 +335,18 @@ function EditRuleModal({
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={14}
-          className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+          className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
         />
         <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
           >
             Save rule
           </button>

@@ -4,10 +4,26 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { StatusBadge } from "../../components/StatusBadge";
+import { EmptyState } from "../../components/EmptyState";
+
+const severityVariant = (sev: string) => {
+  switch (sev) {
+    case "critical":
+      return "error" as const;
+    case "high":
+      return "warning" as const;
+    case "medium":
+      return "info" as const;
+    default:
+      return "neutral" as const;
+  }
+};
 
 export default function AlertsPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState(true);
 
   async function refresh() {
     setError(null);
@@ -21,9 +37,10 @@ export default function AlertsPage() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 3000);
+    if (!live) return;
+    const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
-  }, []);
+  }, [live]);
 
   const alerts = useMemo(
     () => events.filter((e) => e.proto === "ids" && e.kind === "alert"),
@@ -34,12 +51,30 @@ export default function AlertsPage() {
     <Shell
       title="IDS Alerts"
       actions={
-        <button
-          onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setLive((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              live
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10"
+            }`}
+          >
+            {live && (
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+            )}
+            {live ? "Live" : "Paused"}
+          </button>
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            Refresh
+          </button>
+        </div>
       }
     >
       {error && (
@@ -48,58 +83,59 @@ export default function AlertsPage() {
         </div>
       )}
 
-      {alerts.length === 0 && (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center text-sm text-slate-400">
-          No IDS alerts yet.
+      {alerts.length === 0 ? (
+        <EmptyState
+          title="No IDS alerts"
+          description="No intrusion detection alerts have been recorded yet. Alerts will appear here when the IDS engine detects suspicious activity."
+        />
+      ) : (
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="bg-white/[0.03] text-xs font-medium uppercase tracking-wider text-slate-500">
+                <th className="px-4 py-3 font-medium">Message</th>
+                <th className="px-4 py-3 font-medium">Severity</th>
+                <th className="px-4 py-3 font-medium">Source</th>
+                <th className="px-4 py-3 font-medium">Destination</th>
+                <th className="px-4 py-3 font-medium">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alerts.map((ev) => {
+                const sev =
+                  (ev.attributes?.["severity"] as string | undefined) ?? "low";
+                const msg =
+                  (ev.attributes?.["message"] as string | undefined) ??
+                  (ev.attributes?.["rule_id"] as string | undefined) ??
+                  "IDS alert";
+                return (
+                  <tr
+                    key={ev.id}
+                    className="table-row-hover transition-ui border-t border-white/[0.06]"
+                  >
+                    <td className="px-4 py-3 font-medium text-white">{msg}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge variant={severityVariant(sev)} dot>
+                        {sev}
+                      </StatusBadge>
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {ev.srcIp}:{ev.srcPort}
+                      {ev.transport ? ` (${ev.transport})` : ""}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {ev.dstIp}:{ev.dstPort}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">
+                      {new Date(ev.timestamp).toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-
-      <div className="space-y-2">
-        {alerts.map((ev) => {
-          const sev =
-            (ev.attributes?.["severity"] as string | undefined) ?? "low";
-          const msg =
-            (ev.attributes?.["message"] as string | undefined) ??
-            (ev.attributes?.["rule_id"] as string | undefined) ??
-            "IDS alert";
-          return (
-            <div
-              key={ev.id}
-              className="rounded-xl border border-white/10 bg-black/30 p-4"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-white">{msg}</span>
-                  <span
-                    className={
-                      sev === "critical" || sev === "high"
-                        ? "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"
-                        : sev === "medium"
-                          ? "rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
-                          : "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint"
-                    }
-                  >
-                    {sev}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-400">
-                  {new Date(ev.timestamp).toLocaleString()}
-                </div>
-              </div>
-              <div className="mt-1 text-xs text-slate-300">
-                {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}
-                {ev.transport ? `(${ev.transport})` : ""}
-              </div>
-              {ev.attributes && (
-                <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-slate-200">
-                  {JSON.stringify(ev.attributes, null, 2)}
-                </pre>
-              )}
-            </div>
-          );
-        })}
-      </div>
     </Shell>
   );
 }
-

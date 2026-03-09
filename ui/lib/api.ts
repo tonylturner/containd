@@ -71,7 +71,7 @@ export function clearLocalAuth() {
   }
   setSessionToken(null);
   setStoredRole(null);
-  authExpiredEmitted = false;
+  clearAuthExpired();
 }
 
 export function getStoredRole(): UserRole | null {
@@ -165,25 +165,37 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
   return res;
 }
 
+// Debounce 401 handling: only emit the expired event after a short delay so that
+// transient 401s (e.g. during token refresh) don't immediately log out the user.
+// The Shell listener re-verifies the session before actually redirecting.
+let authExpiredTimer: ReturnType<typeof setTimeout> | null = null;
+
 function handleUnauthorized(res: Response) {
   if (res.status !== 401) return false;
-  // 401 means the session is not valid anymore; clear local state and force re-auth.
   if (typeof window !== "undefined") {
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {}
-  }
-  setSessionToken(null);
-  setStoredRole(null);
-  if (typeof window !== "undefined") {
-    // Centralize redirects in the Shell to avoid multiple simultaneous navigation events
-    // (which causes visible flicker when many parallel API calls 401).
+    // Debounce: wait 1.5s before emitting the expired event.  If another request
+    // succeeds in the meantime (resetting authExpiredEmitted), the event won't fire.
     if (!authExpiredEmitted) {
       authExpiredEmitted = true;
-      window.dispatchEvent(new CustomEvent("containd:auth:expired"));
+      if (authExpiredTimer) clearTimeout(authExpiredTimer);
+      authExpiredTimer = setTimeout(() => {
+        // Only dispatch if still flagged (no successful request intervened).
+        if (authExpiredEmitted) {
+          window.dispatchEvent(new CustomEvent("containd:auth:expired"));
+        }
+      }, 1500);
     }
   }
   return true;
+}
+
+/** Call after any successful authenticated response to cancel pending logout. */
+function clearAuthExpired() {
+  authExpiredEmitted = false;
+  if (authExpiredTimer) {
+    clearTimeout(authExpiredTimer);
+    authExpiredTimer = null;
+  }
 }
 
 export type DataPlaneConfig = {
@@ -883,6 +895,7 @@ async function getJSON<T>(path: string): Promise<T | null> {
       headers: authHeaders(),
     });
     if (handleUnauthorized(res) || !res.ok) return null;
+    clearAuthExpired();
     return (await res.json()) as T;
   } catch {
     return null;
@@ -897,6 +910,7 @@ async function getJSONWithStatus<T>(path: string): Promise<{ status: number; dat
     });
     if (handleUnauthorized(res)) return { status: 401, data: null };
     if (!res.ok) return { status: res.status, data: null };
+    clearAuthExpired();
     return { status: res.status, data: (await res.json()) as T };
   } catch {
     return { status: 0, data: null };
@@ -910,7 +924,9 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -924,7 +940,9 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -938,6 +956,7 @@ async function deleteJSON(path: string): Promise<boolean> {
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return false;
+    clearAuthExpired();
     return res.ok;
   } catch {
     return false;
@@ -961,6 +980,7 @@ async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiRes
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: (await res.json()) as T };
   } catch (e) {
@@ -976,6 +996,7 @@ async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiRe
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: (await res.json()) as T };
   } catch (e) {
@@ -990,6 +1011,7 @@ async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: undefined };
   } catch (e) {
@@ -1009,7 +1031,7 @@ export const api = {
     if (res?.user?.role) setStoredRole(res.user.role);
     if (res) {
       // Allow future session-expired notifications after a successful login.
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return res;
@@ -1017,14 +1039,13 @@ export const api = {
   logout: async () => {
     const ok = await postJSON<{ status: string }>("/api/v1/auth/logout", {});
     clearLocalAuth();
-    // If we logged out, allow future session-expired notifications too.
     return ok;
   },
   me: async () => {
     const u = await getJSON<User>("/api/v1/auth/me");
     if (u?.role) setStoredRole(u.role);
     if (u) {
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return u;
@@ -1033,7 +1054,7 @@ export const api = {
     const res = await getJSONWithStatus<User>("/api/v1/auth/me");
     if (res.data?.role) setStoredRole(res.data.role);
     if (res.status === 200) {
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return res;
@@ -1195,7 +1216,7 @@ export const api = {
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
   getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
-  setAV: (cfg: AVConfig) => postJSON<AVConfig>("/api/v1/services/av", cfg),
+  setAV: (cfg: AVConfig) => postJSONResult<AVConfig>("/api/v1/services/av", cfg),
   runAVUpdate: () => postJSON<{ status: string }>("/api/v1/services/av/update", {}),
   listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
   uploadAVDef: async (file: File) => {

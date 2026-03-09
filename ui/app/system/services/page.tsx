@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, type ServicesStatus } from "../../../lib/api";
 import { Shell } from "../../../components/Shell";
+import { Card as BaseCard } from "../../../components/Card";
 import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
 import { Sparkline } from "../../../components/Sparkline";
@@ -89,7 +90,7 @@ export default function ServicesOverviewPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -106,14 +107,14 @@ export default function ServicesOverviewPage() {
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       <p className="mb-4 text-xs text-slate-400">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+      <BaseCard className="mb-4" padding="md">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-slate-300">LAN Services</div>
@@ -124,39 +125,39 @@ export default function ServicesOverviewPage() {
           </Link>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
             <span className="text-slate-200">DNS</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
               {dnsRunning ? "running" : "stopped"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
             <span className="text-slate-200">DHCP</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
               {dhcpEnabled ? "enabled" : "off"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
             <span className="text-slate-200">VPN</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
               {vpnActive ? "active" : "off"}
             </span>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-          <Link href="/system/services/dns/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+          <Link href="/system/services/dns/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
             Configure DNS
           </Link>
-          <Link href="/dhcp/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+          <Link href="/dhcp/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
             Configure DHCP
           </Link>
-          <Link href="/vpn/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+          <Link href="/vpn/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
             Configure VPN
           </Link>
         </div>
-      </div>
+      </BaseCard>
       <div className="grid gap-4 md:grid-cols-2">
-        <Card
+        <ServiceCard
           title="Syslog"
           loading={loading}
           spark={{
@@ -180,9 +181,9 @@ export default function ServicesOverviewPage() {
           <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="Proxies"
           loading={loading}
           spark={{
@@ -231,9 +232,9 @@ export default function ServicesOverviewPage() {
           <Link href="/proxies/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="DNS"
           loading={loading}
           spark={{
@@ -265,9 +266,9 @@ export default function ServicesOverviewPage() {
           <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="NTP"
           loading={loading}
           spark={{
@@ -299,9 +300,9 @@ export default function ServicesOverviewPage() {
           <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="DHCP"
           loading={loading}
           spark={{
@@ -331,9 +332,9 @@ export default function ServicesOverviewPage() {
           <Link href="/dhcp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="VPN"
           loading={loading}
           spark={{
@@ -368,9 +369,9 @@ export default function ServicesOverviewPage() {
           <Link href="/vpn/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
           spark={{
@@ -413,13 +414,13 @@ export default function ServicesOverviewPage() {
           <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
       </div>
     </Shell>
   );
 }
 
-function Card({
+function ServiceCard({
   title,
   children,
   loading = false,
@@ -439,7 +440,7 @@ function Card({
       ? spark.values[spark.values.length - 1] - spark.values[0]
       : 0;
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
         {title}
       </p>
@@ -464,7 +465,7 @@ function Card({
           />
           <div className="text-xs text-slate-400">
             Trend:{" "}
-            <span className={trend > 0 ? "text-mint" : trend < 0 ? "text-amber" : "text-slate-300"}>
+            <span className={trend > 0 ? "text-emerald-400" : trend < 0 ? "text-amber-400" : "text-slate-300"}>
               {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {trend}
             </span>
             {typeof rate === "number" ? (
@@ -473,7 +474,7 @@ function Card({
               </span>
             ) : null}
             {typeof errorsRate === "number" ? (
-              <span className="ml-2 text-amber-300">
+              <span className="ml-2 text-amber-400">
                 Errors: {errorsRate.toFixed(1)}/min
               </span>
             ) : null}

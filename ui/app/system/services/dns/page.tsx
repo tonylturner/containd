@@ -9,6 +9,7 @@ import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { InfoTip } from "../../../../components/InfoTip";
+import { Card } from "../../../../components/Card";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -89,14 +90,14 @@ export default function DNSPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -114,27 +115,27 @@ export default function DNSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       <p className="mb-4 text-xs text-slate-400">
-        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
 
-      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
         <span>Related LAN services</span>
-        <Link href="/dhcp/" className="text-mint hover:text-mint/80">
-          DHCP server →
+        <Link href="/dhcp/" className="text-emerald-400 hover:text-emerald-400/80">
+          DHCP server &rarr;
         </Link>
       </div>
 
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card className="mb-4">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
           <div className="mt-3">
@@ -166,7 +167,7 @@ export default function DNSPage() {
               </span>
             </div>
             {status?.last_error ? (
-              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
               </div>
             ) : null}
@@ -180,9 +181,9 @@ export default function DNSPage() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card>
         <h2 className="text-lg font-semibold text-white">Resolver</h2>
         <p className="mt-1 text-sm text-slate-300">
           Configure the embedded Unbound DNS resolver.
@@ -222,11 +223,11 @@ export default function DNSPage() {
                 }))
               }
               placeholder="1.1.1.1\n8.8.8.8"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
 
-          <details className="md:col-span-2 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+          <details className="md:col-span-2 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
             <summary className="cursor-pointer text-sm text-slate-200">Advanced options</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
@@ -241,7 +242,7 @@ export default function DNSPage() {
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
                   }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -257,7 +258,7 @@ export default function DNSPage() {
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
                   }
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
             </div>
@@ -267,14 +268,14 @@ export default function DNSPage() {
         <p className="mt-3 text-xs text-slate-400">
           State:{" "}
           {saveState === "saving"
-            ? "saving…"
+            ? "saving\u2026"
             : saveState === "saved"
               ? "saved"
               : saveState === "error"
                 ? "error"
                 : "idle"}
         </p>
-      </div>
+      </Card>
     </Shell>
   );
 }

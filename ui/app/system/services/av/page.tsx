@@ -7,6 +7,8 @@ import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { Card } from "../../../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../../../components/ConfirmDialog";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -15,6 +17,7 @@ const emptyICAPServer = { address: "", useTls: false, service: "" };
 export default function AVPage() {
   const canEdit = isAdmin();
   const toast = useToast();
+  const confirm = useConfirm();
   const [cfg, setCfg] = useState<AVConfig>({
     enabled: false,
     mode: "icap",
@@ -77,17 +80,18 @@ export default function AVPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
-    const saved = await api.setAV(cfg);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save AV settings.");
-      toast("Failed to save AV settings", "error");
+    const result = await api.setAV(cfg);
+    if (result.ok) {
+      setSaveState("saved");
+      setCfg(result.data);
+      toast("AV settings saved", "success");
+    } else {
+      setSaveState("error");
+      const msg = result.error || "Failed to save AV settings.";
+      setError(msg);
+      toast(msg, "error");
     }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) {
-      setCfg(saved);
-      toast("AV settings saved", "success");
-    }
   }
 
   async function onRunUpdate() {
@@ -129,7 +133,7 @@ export default function AVPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -137,15 +141,15 @@ export default function AVPage() {
             <button
               onClick={onRunUpdate}
               disabled={updating}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
             >
-              {updating ? "Updating…" : "Run definition update"}
+              {updating ? "Updating\u2026" : "Run definition update"}
             </button>
           )}
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               Save
             </button>
@@ -162,40 +166,41 @@ export default function AVPage() {
         </div>
       }
     >
+      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {refreshError && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {refreshError}
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       <p className="mb-4 text-xs text-slate-400">
-        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {(updateMsg || notice) && (
         <div className="mb-4 space-y-2">
           {updateMsg && (
-            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
               {updateMsg}
             </div>
           )}
           {notice && (
-            <div className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-2 text-sm text-mint">
+            <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-400">
               {notice}
             </div>
           )}
         </div>
       )}
 
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card className="mb-4">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading || !status ? (
           <div className="mt-3 space-y-2">
@@ -245,9 +250,9 @@ export default function AVPage() {
             <div className="md:col-span-3 text-xs text-amber-300">{status?.freshclam_error}</div>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card>
         <h2 className="text-lg font-semibold text-white">Settings</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -266,7 +271,7 @@ export default function AVPage() {
               value={cfg.mode ?? "icap"}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, mode: e.target.value as AVConfig["mode"] }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="icap">ICAP (external)</option>
               <option value="clamav">ClamAV (embedded)</option>
@@ -278,7 +283,7 @@ export default function AVPage() {
               value={cfg.failPolicy ?? "open"}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, failPolicy: e.target.value as AVConfig["failPolicy"] }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="open">Fail open</option>
               <option value="closed">Fail closed</option>
@@ -301,7 +306,7 @@ export default function AVPage() {
               value={cfg.maxSizeBytes ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
           <div>
@@ -311,7 +316,7 @@ export default function AVPage() {
               value={cfg.blockTtlSeconds ?? 600}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, blockTtlSeconds: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
           <div>
@@ -321,12 +326,12 @@ export default function AVPage() {
               value={cfg.timeoutSec ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, timeoutSec: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
         </div>
         {notice && (
-          <div className="mt-2 rounded-lg border border-mint/30 bg-mint/10 px-3 py-2 text-xs text-mint">
+          <div className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
             {notice}
           </div>
         )}
@@ -336,20 +341,20 @@ export default function AVPage() {
           <p className="text-xs text-slate-400">Use when mode is ICAP; leave empty to disable.</p>
           <div className="mt-3 space-y-2">
             {icapServers.map((srv, idx) => (
-              <div key={idx} className="grid gap-2 rounded-lg border border-white/10 bg-black/30 p-3 md:grid-cols-4">
+              <div key={idx} className="grid gap-2 rounded-lg border border-white/[0.08] bg-black/30 p-3 md:grid-cols-4">
                 <input
                   value={srv.address}
                   onChange={(e) => updateICAPServer(idx, "address", e.target.value)}
                   disabled={!canEdit}
                   placeholder="host:port"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   value={srv.service ?? ""}
                   onChange={(e) => updateICAPServer(idx, "service", e.target.value)}
                   disabled={!canEdit}
                   placeholder="service (optional)"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <label className="flex items-center gap-2 text-sm text-slate-200">
                   <input
@@ -364,7 +369,7 @@ export default function AVPage() {
                 {canEdit && (
                   <button
                     onClick={() => deleteICAPServer(idx)}
-                    className="rounded-lg border border-white/10 bg-[color:var(--error)]/10 px-3 py-2 text-xs text-[color:var(--error)] hover:bg-[color:var(--error)]/20"
+                    className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                   >
                     Delete
                   </button>
@@ -374,7 +379,7 @@ export default function AVPage() {
             {canEdit && (
               <button
                 onClick={addICAPServer}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
               >
                 Add server
               </button>
@@ -395,7 +400,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), socketPath: e.target.value } }))
                 }
                 placeholder="/var/run/clamav/clamd.sock"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <div>
@@ -407,7 +412,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), customDefsPath: e.target.value } }))
                 }
                 placeholder="/data/clamav/custom.d"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <div>
@@ -419,7 +424,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), updateSchedule: e.target.value } }))
                 }
                 placeholder="e.g. 4h or cron expr"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -461,24 +466,31 @@ export default function AVPage() {
                 />
               </label>
             </div>
-            <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-slate-200">
+            <div className="rounded-lg border border-white/[0.08] bg-black/30 p-3 text-xs text-slate-200">
               <div className="mb-2 font-semibold text-white">Existing defs</div>
               {defsPath && <div className="mb-2 text-[10px] text-slate-400">Path: {defsPath}</div>}
               {defs.length === 0 && <div className="text-slate-400">None uploaded.</div>}
               {defs.length > 0 && (
                 <ul className="space-y-1">
                   {defs.map((d) => (
-                    <li key={d} className="flex items-center justify-between rounded border border-white/10 bg-black/20 px-2 py-1">
+                    <li key={d} className="flex items-center justify-between rounded border border-white/[0.08] bg-black/20 px-2 py-1">
                       <span>{d}</span>
                       {canEdit && (
                         <button
-                          className="text-xs text-[color:var(--error)] hover:text-[color:var(--error)]/80"
-                          onClick={async () => {
-                            if (!window.confirm(`Delete ${d}?`)) return;
-                            const ok = await api.deleteAVDef(d);
-                            setUpdateMsg(ok ? `Deleted ${d}` : `Failed to delete ${d}`);
-                            toast(ok ? `Deleted ${d}` : `Failed to delete ${d}`, ok ? "success" : "error");
-                            refresh();
+                          className="text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                          onClick={() => {
+                            confirm.open({
+                              title: "Delete definition",
+                              message: `Delete ${d}?`,
+                              variant: "danger",
+                              confirmLabel: "Delete",
+                              onConfirm: async () => {
+                                const ok = await api.deleteAVDef(d);
+                                setUpdateMsg(ok ? `Deleted ${d}` : `Failed to delete ${d}`);
+                                toast(ok ? `Deleted ${d}` : `Failed to delete ${d}`, ok ? "success" : "error");
+                                refresh();
+                              },
+                            });
                           }}
                         >
                           Delete
@@ -491,12 +503,12 @@ export default function AVPage() {
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
       <p className="mt-3 text-xs text-slate-400">
         State:{" "}
         {saveState === "saving"
-          ? "saving…"
+          ? "saving\u2026"
           : saveState === "saved"
             ? "saved"
             : saveState === "error"

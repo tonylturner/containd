@@ -16,6 +16,8 @@ import {
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { InfoTip } from "../../components/InfoTip";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 function normCIDR(s: string) {
   return s.trim();
@@ -87,6 +89,8 @@ export default function RoutingPage() {
   const [reconciling, setReconciling] = useState(false);
   const [detecting, setDetecting] = useState(false);
 
+  const confirm = useConfirm();
+
   const [gwName, setGwName] = useState("");
   const [gwAlias, setGwAlias] = useState("");
   const [gwAddr, setGwAddr] = useState("");
@@ -105,7 +109,7 @@ export default function RoutingPage() {
   const [rulePrio, setRulePrio] = useState("");
 
   const gatewayLabel = (value?: string): string => {
-    if (!value) return "—";
+    if (!value) return "\u2014";
     const match = (cfg.gateways ?? []).find((g) => g.name === value);
     if (!match) return value;
     return match.alias ? `${match.alias} (${match.name})` : match.name;
@@ -179,25 +183,26 @@ export default function RoutingPage() {
     await save(next);
   }
 
-  async function reconcileReplace() {
+  function reconcileReplace() {
     if (!isAdmin()) return;
     setError(null);
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
+    confirm.open({
+      title: "Reconcile Routing",
+      message:
         "Reconcile will REPLACE containd-managed routes/rules in the OS routing tables (best-effort). Continue?",
-      )
-    ) {
-      return;
-    }
-    setReconciling(true);
-    const res = await api.reconcileRoutingReplace();
-    setReconciling(false);
-    if (!res) {
-      setError("Failed to reconcile routing.");
-      return;
-    }
-    await refresh();
+      variant: "warning",
+      confirmLabel: "Reconcile",
+      onConfirm: async () => {
+        setReconciling(true);
+        const res = await api.reconcileRoutingReplace();
+        setReconciling(false);
+        if (!res) {
+          setError("Failed to reconcile routing.");
+          return;
+        }
+        await refresh();
+      },
+    });
   }
 
   async function addRoute() {
@@ -332,7 +337,7 @@ export default function RoutingPage() {
 
       await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
       setNotice(
-        `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN→WAN and SNAT is enabled.`,
+        `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
       );
     } catch (e) {
       setError(`Failed to auto-configure WAN default route: ${e instanceof Error ? e.message : String(e)}`);
@@ -349,53 +354,58 @@ export default function RoutingPage() {
     }
   }
 
-  async function adoptOSDefaultRoute() {
+  function adoptOSDefaultRoute() {
     if (!isAdmin()) return;
     setError(null);
     setNotice(null);
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm("Adopt the current OS default route into containd config (creates/updates a gateway + default route)?")
-    ) {
-      return;
-    }
-    const def: OSRoute | undefined = osRouting?.defaultRoute;
-    if (!def || !def.gateway) {
-      setError("No OS default route with a gateway was detected.");
-      return;
-    }
-    const gwIP = def.gateway.trim();
-    const dev = (def.iface || "").trim();
-    if (!gwIP || !dev) {
-      setError("Detected default route is missing a gateway or interface.");
-      return;
-    }
+    confirm.open({
+      title: "Adopt OS Default Route",
+      message:
+        "Adopt the current OS default route into containd config (creates/updates a gateway + default route)?",
+      confirmLabel: "Adopt",
+      onConfirm: async () => {
+        const def: OSRoute | undefined = osRouting?.defaultRoute;
+        if (!def || !def.gateway) {
+          setError("No OS default route with a gateway was detected.");
+          return;
+        }
+        const gwIP = def.gateway.trim();
+        const dev = (def.iface || "").trim();
+        if (!gwIP || !dev) {
+          setError("Detected default route is missing a gateway or interface.");
+          return;
+        }
 
-    const gwName = "os-default-gw";
-    const nextGateway: Gateway = {
-      name: gwName,
-      address: gwIP,
-      iface: dev,
-      description: "Adopted from OS default route",
-    };
-    const gateways = cfg.gateways ?? [];
-    const existingGwIdx = gateways.findIndex((g) => g.name === gwName);
-    const nextGateways =
-      existingGwIdx >= 0 ? gateways.map((g, i) => (i === existingGwIdx ? nextGateway : g)) : [...gateways, nextGateway];
+        const gwName = "os-default-gw";
+        const nextGateway: Gateway = {
+          name: gwName,
+          address: gwIP,
+          iface: dev,
+          description: "Adopted from OS default route",
+        };
+        const gateways = cfg.gateways ?? [];
+        const existingGwIdx = gateways.findIndex((g) => g.name === gwName);
+        const nextGateways =
+          existingGwIdx >= 0 ? gateways.map((g, i) => (i === existingGwIdx ? nextGateway : g)) : [...gateways, nextGateway];
 
-    const routes = cfg.routes ?? [];
-    const isDefaultDst = (dst: string) => {
-      const d = dst.trim().toLowerCase();
-      return d === "default" || d === "0.0.0.0/0";
-    };
-    const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
-    const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: dev, table: 0 };
-    const nextRoutes =
-      existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
+        const routes = cfg.routes ?? [];
+        const isDefaultDst = (dst: string) => {
+          const d = dst.trim().toLowerCase();
+          return d === "default" || d === "0.0.0.0/0";
+        };
+        const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
+        const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: dev, table: 0 };
+        const nextRoutes =
+          existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
 
-    await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
-    setNotice(`Adopted OS default route via ${dev} → ${gwIP} into routing config.`);
+        await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+        setNotice(`Adopted OS default route via ${dev} \u2192 ${gwIP} into routing config.`);
+      },
+    });
   }
+
+  const inputClass =
+    "mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none";
 
   return (
     <Shell
@@ -404,7 +414,7 @@ export default function RoutingPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refreshOSRouting}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             title="Reload OS routing table snapshot"
           >
             {detecting ? "Detecting..." : "Detect from OS"}
@@ -412,7 +422,7 @@ export default function RoutingPage() {
           {isAdmin() && (
             <button
               onClick={autoWanDefaultRoute}
-              className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
               title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
             >
               Auto WAN default
@@ -422,7 +432,7 @@ export default function RoutingPage() {
             <button
               onClick={reconcileReplace}
               disabled={reconciling}
-              className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-1.5 text-sm text-amber hover:bg-amber/15 disabled:opacity-50"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
               title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
             >
               {reconciling ? "Reconciling..." : "Reconcile"}
@@ -430,7 +440,7 @@ export default function RoutingPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -438,19 +448,19 @@ export default function RoutingPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
 
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-400">
           {notice}
         </div>
       )}
@@ -461,7 +471,7 @@ export default function RoutingPage() {
         const hasOSDefault = !!(osRouting?.defaultRoute?.gateway && osRouting?.defaultRoute?.iface);
         if (hasConfig || !hasOSDefault) return null;
         return (
-          <div className="mb-6 rounded-2xl border border-mint/20 bg-mint/10 p-5 shadow-lg backdrop-blur">
+          <div className="mb-6 rounded-xl border border-blue-500/20 bg-blue-500/10 p-5 shadow-card backdrop-blur">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-white">Routing not configured yet</div>
@@ -475,7 +485,7 @@ export default function RoutingPage() {
               {isAdmin() ? (
                 <button
                   onClick={adoptOSDefaultRoute}
-                  className="rounded-lg border border-mint/30 bg-mint/15 px-3 py-1.5 text-sm text-mint hover:bg-mint/20"
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
                 >
                   Adopt OS default route
                 </button>
@@ -487,7 +497,7 @@ export default function RoutingPage() {
         );
       })()}
 
-      <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card padding="lg" className="mb-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-white">Detect from OS</h2>
@@ -500,7 +510,7 @@ export default function RoutingPage() {
             <button
               onClick={adoptOSDefaultRoute}
               disabled={!osRouting?.defaultRoute?.gateway || !osRouting?.defaultRoute?.iface}
-              className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15 disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
               title="Create a gateway + default route in config from the detected OS default route"
             >
               Adopt default route
@@ -521,11 +531,11 @@ export default function RoutingPage() {
               </thead>
               <tbody>
                 {osRouting.routes.map((r, idx) => (
-                  <tr key={idx} className="border-t border-white/5">
-                    <td className="px-3 py-2 font-medium text-white">{r.dst || "—"}</td>
-                    <td className="px-3 py-2">{r.gateway || "—"}</td>
-                    <td className="px-3 py-2">{r.iface || "—"}</td>
-                    <td className="px-3 py-2">{typeof r.metric === "number" ? String(r.metric) : "—"}</td>
+                  <tr key={idx} className="table-row-hover transition-ui border-t border-white/[0.06]">
+                    <td className="px-3 py-2 font-medium text-white">{r.dst || "\u2014"}</td>
+                    <td className="px-3 py-2">{r.gateway || "\u2014"}</td>
+                    <td className="px-3 py-2">{r.iface || "\u2014"}</td>
+                    <td className="px-3 py-2">{typeof r.metric === "number" ? String(r.metric) : "\u2014"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -543,10 +553,10 @@ export default function RoutingPage() {
             to refresh.
           </div>
         )}
-      </div>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur lg:col-span-2">
+        <Card padding="lg" className="lg:col-span-2">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold text-white">Gateways</h2>
@@ -554,11 +564,11 @@ export default function RoutingPage() {
                 Named next-hops you can reference from routes (use the gateway name in the route gateway field).
               </div>
             </div>
-            {saving && <span className="text-xs text-slate-400">saving…</span>}
+            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
               <summary className="cursor-pointer text-sm text-slate-200">
                 Add gateway (advanced)
               </summary>
@@ -570,7 +580,7 @@ export default function RoutingPage() {
                     value={gwName}
                     onChange={(e) => setGwName(e.target.value)}
                     placeholder="isp1"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -580,7 +590,7 @@ export default function RoutingPage() {
                     value={gwAlias}
                     onChange={(e) => setGwAlias(e.target.value)}
                     placeholder="primary ISP"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -590,7 +600,7 @@ export default function RoutingPage() {
                     value={gwAddr}
                     onChange={(e) => setGwAddr(e.target.value)}
                     placeholder="192.168.240.1"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -600,7 +610,7 @@ export default function RoutingPage() {
                     value={gwIface}
                     onChange={(e) => setGwIface(e.target.value)}
                     placeholder="wan"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <div className="flex gap-2 md:col-span-1">
@@ -610,12 +620,12 @@ export default function RoutingPage() {
                       value={gwDesc}
                       onChange={(e) => setGwDesc(e.target.value)}
                       placeholder="primary ISP"
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                      className={inputClass}
                     />
                   </label>
                   <button
                     onClick={addGateway}
-                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
                   >
                     Add
                   </button>
@@ -624,7 +634,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
             <table className="w-full text-sm">
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
@@ -645,22 +655,22 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.gateways ?? []).map((g, idx) => (
-                  <tr key={`${g.name}-${idx}`} className="border-t border-white/5">
+                  <tr key={`${g.name}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
                     <td className="px-4 py-3 font-medium text-white">{g.name}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.alias || "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{g.alias || "\u2014"}</td>
                     <td className="px-4 py-3 text-slate-200">{g.address}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.iface || "—"}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.description || "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{g.iface || "\u2014"}</td>
+                    <td className="px-4 py-3 text-slate-200">{g.description || "\u2014"}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
                           onClick={() => deleteGateway(idx)}
-                          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+                          className="rounded-md px-3 py-1.5 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-slate-500">\u2014</span>
                       )}
                     </td>
                   </tr>
@@ -668,16 +678,16 @@ export default function RoutingPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <Card padding="lg">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Static routes</h2>
-            {saving && <span className="text-xs text-slate-400">saving…</span>}
+            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
               <summary className="cursor-pointer text-sm text-slate-200">
                 Add static route (advanced)
               </summary>
@@ -689,7 +699,7 @@ export default function RoutingPage() {
                     value={routeDst}
                     onChange={(e) => setRouteDst(e.target.value)}
                     placeholder="dst (CIDR or default)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <div className="space-y-2">
@@ -700,7 +710,7 @@ export default function RoutingPage() {
                       value={routeGw}
                       onChange={(e) => setRouteGw(e.target.value)}
                       placeholder="gateway (IP or gateway name, optional)"
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                      className={inputClass}
                     />
                   </label>
                   {(cfg.gateways ?? []).length > 0 && (
@@ -710,9 +720,9 @@ export default function RoutingPage() {
                         const v = e.target.value;
                         if (v) setRouteGw(v);
                       }}
-                      className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                      className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                     >
-                      <option value="">Pick gateway…</option>
+                      <option value="">Pick gateway\u2026</option>
                       {(cfg.gateways ?? []).map((g) => (
                         <option key={g.name} value={g.name}>
                           {g.alias ? `${g.alias} (${g.name})` : g.name} ({g.address})
@@ -728,7 +738,7 @@ export default function RoutingPage() {
                     value={routeIface}
                     onChange={(e) => setRouteIface(e.target.value)}
                     placeholder="iface (logical or OS dev, optional)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -739,7 +749,7 @@ export default function RoutingPage() {
                       value={routeTable}
                       onChange={(e) => setRouteTable(e.target.value)}
                       placeholder="table (0=main)"
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                      className={inputClass}
                     />
                   </label>
                   <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -749,14 +759,14 @@ export default function RoutingPage() {
                       value={routeMetric}
                       onChange={(e) => setRouteMetric(e.target.value)}
                       placeholder="metric (optional)"
-                      className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                      className={inputClass}
                     />
                   </label>
                 </div>
                 <div className="md:col-span-2 flex justify-end">
                   <button
                     onClick={addRoute}
-                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
                   >
                     Add route
                   </button>
@@ -765,7 +775,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
             <table className="w-full text-sm">
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
@@ -786,22 +796,22 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.routes ?? []).map((r, idx) => (
-                  <tr key={`${r.dst}-${idx}`} className="border-t border-white/5">
+                  <tr key={`${r.dst}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
                     <td className="px-4 py-3 font-medium text-white">{r.dst}</td>
                     <td className="px-4 py-3 text-slate-200">{gatewayLabel(r.gateway)}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.iface ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{r.iface ?? "\u2014"}</td>
                     <td className="px-4 py-3 text-slate-200">{r.table ?? 0}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.metric ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{r.metric ?? "\u2014"}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
                           onClick={() => deleteRoute(idx)}
-                          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+                          className="rounded-md px-3 py-1.5 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-slate-500">\u2014</span>
                       )}
                     </td>
                   </tr>
@@ -809,16 +819,16 @@ export default function RoutingPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <Card padding="lg">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Policy-based routing (ip rules)</h2>
-            {saving && <span className="text-xs text-slate-400">saving…</span>}
+            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
               <summary className="cursor-pointer text-sm text-slate-200">
                 Add policy rule (advanced)
               </summary>
@@ -830,7 +840,7 @@ export default function RoutingPage() {
                     value={ruleSrc}
                     onChange={(e) => setRuleSrc(e.target.value)}
                     placeholder="src CIDR (optional)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -840,7 +850,7 @@ export default function RoutingPage() {
                     value={ruleDst}
                     onChange={(e) => setRuleDst(e.target.value)}
                     placeholder="dst CIDR (optional)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -850,7 +860,7 @@ export default function RoutingPage() {
                     value={ruleTable}
                     onChange={(e) => setRuleTable(e.target.value)}
                     placeholder="table (required)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -860,13 +870,13 @@ export default function RoutingPage() {
                     value={rulePrio}
                     onChange={(e) => setRulePrio(e.target.value)}
                     placeholder="priority (optional)"
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className={inputClass}
                   />
                 </label>
                 <div className="md:col-span-2 flex justify-end">
                   <button
                     onClick={addRule}
-                    className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30"
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
                   >
                     Add rule
                   </button>
@@ -875,7 +885,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
             <table className="w-full text-sm">
               <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                 <tr>
@@ -895,21 +905,21 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.rules ?? []).map((r, idx) => (
-                  <tr key={`${r.table}-${idx}`} className="border-t border-white/5">
+                  <tr key={`${r.table}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
                     <td className="px-4 py-3 text-slate-200">{r.priority ?? "auto"}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.src ?? "—"}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.dst ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-200">{r.src ?? "\u2014"}</td>
+                    <td className="px-4 py-3 text-slate-200">{r.dst ?? "\u2014"}</td>
                     <td className="px-4 py-3 font-medium text-white">{r.table}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
                           onClick={() => deleteRule(idx)}
-                          className="rounded-md bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+                          className="rounded-md px-3 py-1.5 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-slate-500">\u2014</span>
                       )}
                     </td>
                   </tr>
@@ -917,8 +927,10 @@ export default function RoutingPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
       </div>
+
+      <ConfirmDialog {...confirm.props} />
     </Shell>
   );
 }

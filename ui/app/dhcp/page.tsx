@@ -9,6 +9,8 @@ import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -61,6 +63,7 @@ function textToReservations(text: string): DHCPReservation[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
+  const confirm = useConfirm();
   const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
   const [status, setStatus] = useState<any>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -154,12 +157,12 @@ export default function DHCPPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30">
+            <button onClick={onSave} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500">
               Save
             </button>
           )}
@@ -168,33 +171,34 @@ export default function DHCPPage() {
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
+              className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
             />
             Auto
           </label>
         </div>
       }
     >
+      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       <p className="mb-4 text-xs text-slate-400">
-        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
         <span>Related LAN services</span>
-        <Link href="/system/services/dns/" className="text-mint hover:text-mint/80">
-          DNS resolver →
+        <Link href="/system/services/dns/" className="text-blue-400 hover:text-blue-300">
+          DNS resolver &rarr;
         </Link>
       </div>
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card className="mb-4">
         <h2 className="text-sm font-semibold text-white">Runtime status</h2>
         {loading ? (
           <div className="mt-3 space-y-2">
@@ -222,7 +226,7 @@ export default function DHCPPage() {
               Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             {status?.last_error ? (
-              <div className="md:col-span-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
               </div>
             ) : null}
@@ -239,9 +243,9 @@ export default function DHCPPage() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card>
         <h2 className="text-lg font-semibold text-white">DHCPv4 Server</h2>
         <p className="mt-1 text-sm text-slate-300">
           Configure LAN-side DHCP. The engine runs a minimal DHCPv4 server (IPv4 only) when enabled and committed.
@@ -272,7 +276,7 @@ export default function DHCPPage() {
             <InfoTip label="When enabled, this DHCP server takes full authority for the subnet (recommended in lab deployments)." />
           </label>
 
-          <details className="md:col-span-2 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+          <details className="md:col-span-2 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
             <summary className="cursor-pointer text-sm text-slate-200">
               Advanced options
             </summary>
@@ -295,7 +299,7 @@ export default function DHCPPage() {
                     }))
                   }
                   placeholder="lan2, lan3"
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -309,7 +313,7 @@ export default function DHCPPage() {
                   value={cfg.leaseSeconds ?? 3600}
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -323,7 +327,7 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
                   placeholder="192.168.1.1"
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -345,7 +349,7 @@ export default function DHCPPage() {
                     }))
                   }
                   placeholder="192.168.1.1, 1.1.1.1"
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -359,7 +363,7 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
                   placeholder="lab.local"
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -374,7 +378,7 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, pools: textToPools(e.target.value) }))}
                   placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
@@ -389,7 +393,7 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
                   placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs text-white"
+                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
             </div>
@@ -399,16 +403,16 @@ export default function DHCPPage() {
         <p className="mt-3 text-xs text-slate-400">
           State:{" "}
           {saveState === "saving"
-            ? "saving…"
+            ? "saving\u2026"
             : saveState === "saved"
               ? "saved"
               : saveState === "error"
                 ? "error"
                 : "idle"}
         </p>
-      </div>
+      </Card>
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card className="mt-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-white">Active Leases</h2>
@@ -417,13 +421,13 @@ export default function DHCPPage() {
           <div className="flex items-center gap-2">
             <a
               href="/events?filter=service&kind=service.dhcp.reservation"
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               Reservation events
             </a>
             <button
               onClick={() => refreshLeases()}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               Refresh
             </button>
@@ -431,12 +435,12 @@ export default function DHCPPage() {
         </div>
 
         {leaseError && (
-          <div className="mt-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {leaseError}
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+        <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
           {leasesLoading ? (
             <div className="space-y-2 p-3">
               <Skeleton className="h-10 w-full" />
@@ -456,18 +460,18 @@ export default function DHCPPage() {
               </thead>
               <tbody>
                 {leases.length === 0 ? (
-                  <tr className="border-t border-white/10">
+                  <tr className="border-t border-white/[0.06]">
                     <td colSpan={5} className="px-3 py-3 text-sm text-slate-400">
                       No leases.
                     </td>
                   </tr>
                 ) : (
                   leases.map((l) => (
-                    <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-white/10">
+                    <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-white/[0.06] table-row-hover transition-ui">
                       <td className="px-3 py-2 font-mono text-xs">{l.iface}</td>
                       <td className="px-3 py-2 font-mono text-xs">{l.ip}</td>
                       <td className="px-3 py-2 font-mono text-xs">{l.mac}</td>
-                      <td className="px-3 py-2">{l.hostname || "—"}</td>
+                      <td className="px-3 py-2">{l.hostname || "\u2014"}</td>
                       <td className="px-3 py-2 font-mono text-xs">{l.expiresAt}</td>
                     </tr>
                   ))
@@ -476,7 +480,7 @@ export default function DHCPPage() {
             </table>
           )}
         </div>
-      </div>
+      </Card>
     </Shell>
   );
 }

@@ -25,6 +25,10 @@ import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { InfoTip } from "../../components/InfoTip";
 import { validateIPOrCIDRList } from "../../lib/validate";
+import { Card } from "../../components/Card";
+import { EmptyState } from "../../components/EmptyState";
+import { StatusBadge } from "../../components/StatusBadge";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 /* ── ICS protocol metadata for firewall rule modals ───────────── */
 
@@ -117,6 +121,7 @@ export default function FirewallPage() {
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
+  const confirm = useConfirm();
   const tips: Tip[] = [
     {
       id: "firewall:zones",
@@ -124,7 +129,7 @@ export default function FirewallPage() {
       body: (
         <>
           Define zones in{" "}
-          <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+          <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
             Zones
           </Link>{" "}
           so you can target them in rules.
@@ -144,7 +149,7 @@ export default function FirewallPage() {
       body: (
         <>
           Turn on SNAT in{" "}
-          <Link href="/nat/" className="font-semibold text-mint hover:text-mint/80">
+          <Link href="/nat/" className="font-semibold text-blue-400 hover:text-blue-300">
             NAT
           </Link>{" "}
           to allow LAN hosts to reach the Internet.
@@ -259,14 +264,16 @@ export default function FirewallPage() {
     if (!isAdmin()) return;
     setError(null);
     setNotice(null);
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        "This will attempt to enable outbound Internet for LAN/MGMT \u2192 WAN by:\n\n\u2022 creating/updating a WAN gateway + default route (best-effort)\n\u2022 enabling SNAT (masquerade) for LAN+MGMT out WAN\n\u2022 creating an ALLOW firewall rule for LAN+MGMT \u2192 WAN\n\nNote: NAT settings will also be configured (see the NAT page).\n\nContinue?",
-      )
-    ) {
-      return;
-    }
+    confirm.open({
+      title: "Enable outbound Internet?",
+      message: "This will attempt to enable outbound Internet for LAN/MGMT \u2192 WAN by:\n\n\u2022 creating/updating a WAN gateway + default route (best-effort)\n\u2022 enabling SNAT (masquerade) for LAN+MGMT out WAN\n\u2022 creating an ALLOW firewall rule for LAN+MGMT \u2192 WAN\n\nNote: NAT settings will also be configured (see the NAT page).",
+      confirmLabel: "Continue",
+      variant: "warning",
+      onConfirm: () => doQuickStart(),
+    });
+  }
+
+  async function doQuickStart() {
     setQuickStarting(true);
     try {
       const [ifs, states, curRouting] = await Promise.all([
@@ -364,7 +371,7 @@ export default function FirewallPage() {
             <button
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting}
-              className="rounded-lg border border-mint/30 bg-mint/10 px-3 py-1.5 text-sm text-mint hover:bg-mint/15 disabled:opacity-50"
+              className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-sm text-blue-400 transition-ui hover:bg-blue-500/15 disabled:opacity-50"
               title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
               {quickStarting ? "Enabling..." : "Quick start (LAN\u2192WAN)"}
@@ -372,7 +379,7 @@ export default function FirewallPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -380,30 +387,30 @@ export default function FirewallPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+      <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-white">Outbound readiness</div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className={outboundStatus.hasDefaultRoute ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+            <StatusBadge variant={outboundStatus.hasDefaultRoute ? "success" : "warning"} dot>
               default route
-            </span>
-            <span className={outboundStatus.natEnabled ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+            </StatusBadge>
+            <StatusBadge variant={outboundStatus.natEnabled ? "success" : "warning"} dot>
               <Link href="/nat/" className="hover:underline">snat enabled</Link>
-            </span>
-            <span className={outboundStatus.natEgress ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+            </StatusBadge>
+            <StatusBadge variant={outboundStatus.natEgress ? "success" : "warning"} dot>
               egress=wan
-            </span>
-            <span className={outboundStatus.natHasLan ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+            </StatusBadge>
+            <StatusBadge variant={outboundStatus.natHasLan ? "success" : "warning"} dot>
               src includes lan/mgmt
-            </span>
-            <span className={outboundStatus.hasAllowLanWan ? "rounded-md bg-mint/15 px-2 py-1 text-mint" : "rounded-md bg-amber/15 px-2 py-1 text-amber"}>
+            </StatusBadge>
+            <StatusBadge variant={outboundStatus.hasAllowLanWan ? "success" : "warning"} dot>
               {"allow lan\u2192wan"}
-            </span>
+            </StatusBadge>
           </div>
         </div>
         {!outboundStatus.ok && (
@@ -415,19 +422,19 @@ export default function FirewallPage() {
             {" to auto-configure these (including NAT)."}
           </div>
         )}
-      </div>
+      </Card>
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card padding="lg" className="mt-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-white">nftables ruleset preview</h2>
@@ -438,35 +445,35 @@ export default function FirewallPage() {
           {isAdmin() && (
             <button
               onClick={loadRulesetPreview}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               {rulesetState === "loading" ? "Loading..." : "Preview"}
             </button>
           )}
         </div>
         {!isAdmin() && (
-          <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+          <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
             View-only mode: ruleset preview requires admin access.
           </div>
         )}
         {rulesetState === "error" && (
-          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Failed to load ruleset preview.
           </div>
         )}
         {rulesetPreview?.engineStatusError && (
-          <div className="mt-3 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Engine status unavailable: {rulesetPreview.engineStatusError}
           </div>
         )}
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xl border border-white/10 bg-black/60 p-4 text-xs text-slate-200">
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xl border border-white/[0.08] bg-black/60 p-4 text-xs text-slate-200">
             {rulesetPreview.ruleset}
           </pre>
         )}
-      </div>
+      </Card>
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+      <Card padding="md" className="mt-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-white">DPI Status</h2>
@@ -474,23 +481,23 @@ export default function FirewallPage() {
               Deep packet inspection for ICS protocol filtering.
             </p>
           </div>
-          <span className={`rounded-full px-2 py-0.5 text-xs ${(dpiConfig.captureInterfaces ?? []).length > 0 ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-400"}`}>
+          <StatusBadge variant={(dpiConfig.captureInterfaces ?? []).length > 0 ? "success" : "neutral"} dot>
             {(dpiConfig.captureInterfaces ?? []).length > 0 ? "Enabled" : "Disabled"}
-          </span>
+          </StatusBadge>
         </div>
         <div className="mt-2 text-xs text-slate-300">
           Monitored interfaces: {(dpiConfig.captureInterfaces ?? []).length > 0 ? (dpiConfig.captureInterfaces ?? []).join(", ") : "none"}
         </div>
         <div className="mt-2">
-          <Link href="/dataplane/" className="text-xs font-semibold text-mint hover:text-mint/80">
+          <Link href="/dataplane/" className="text-xs font-semibold text-blue-400 hover:text-blue-300">
             Configure DPI settings &rarr;
           </Link>
         </div>
-      </div>
+      </Card>
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
@@ -506,13 +513,16 @@ export default function FirewallPage() {
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={7}>
-                  No firewall rules configured. Create rules below to control traffic between zones.
+                <td className="px-4 py-4" colSpan={7}>
+                  <EmptyState
+                    title="No firewall rules configured"
+                    description="Create rules below to control traffic between zones."
+                  />
                 </td>
               </tr>
             )}
             {rules.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
                 <td className="px-4 py-3 font-mono text-xs text-white">{r.id}</td>
                 <td className="px-4 py-3 text-slate-200">{r.description || "\u2014"}</td>
                 <td className="px-4 py-3 text-slate-200">
@@ -525,9 +535,9 @@ export default function FirewallPage() {
                 <td className="px-4 py-3 text-slate-200">
                   {r.ics?.protocol ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">
+                      <StatusBadge variant="neutral">
                         {r.ics.mode === "learn" ? "safe learning" : "enforce"}
-                      </span>
+                      </StatusBadge>
                       <span className="text-xs text-slate-300">
                         {r.ics.protocol} fc={(r.ics.functionCode ?? []).join(",") || "*"}
                       </span>
@@ -535,15 +545,28 @@ export default function FirewallPage() {
                   ) : "\u2014"}
                 </td>
                 <td className="px-4 py-3">
-                  <span className={r.action === "ALLOW" ? "rounded-full bg-mint/20 px-2 py-0.5 text-xs text-mint" : "rounded-full bg-amber/20 px-2 py-0.5 text-xs text-amber"}>
+                  <StatusBadge variant={r.action === "ALLOW" ? "success" : "error"}>
                     {r.action}
-                  </span>
+                  </StatusBadge>
                 </td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin() && (
                     <>
-                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10">Edit</button>
-                      <button onClick={() => onDelete(r.id)} className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30">Delete</button>
+                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]">Edit</button>
+                      <button
+                        onClick={() => {
+                          confirm.open({
+                            title: "Delete rule?",
+                            message: `Are you sure you want to delete rule "${r.id}"? This action cannot be undone.`,
+                            confirmLabel: "Delete",
+                            variant: "danger",
+                            onConfirm: () => onDelete(r.id),
+                          });
+                        }}
+                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                      >
+                        Delete
+                      </button>
                     </>
                   )}
                 </td>
@@ -561,6 +584,7 @@ export default function FirewallPage() {
           onSave={(patch) => onUpdate(editing.id, patch)}
         />
       )}
+      <ConfirmDialog {...confirm.props} />
     </Shell>
   );
 }
@@ -632,65 +656,65 @@ function EditRuleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-ink p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-2xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Edit rule {rule.id}</h2>
-          <button onClick={onClose} className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10">Close</button>
+          <button onClick={onClose} className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]">Close</button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-3" />
-          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-3" />
+          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="">Source zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           {zones.length === 0 && (
-            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
-              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">Create a zone</Link> to target policies.
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300 md:col-span-2">
+              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">Create a zone</Link> to target policies.
             </div>
           )}
-          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="">Dest zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="ALLOW">ALLOW</option>
             <option value="DENY">DENY</option>
           </select>
-          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
-          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
-          <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
+          <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>
             <option value="icmp">icmp</option>
           </select>
-          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
+          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
           <label className="flex items-center gap-2 text-sm text-slate-200">
             <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-black/30" />
             ICS Protocol Filter
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
           <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-mint hover:text-mint/80">PCAP Capture</a>).</span>
+          <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-blue-400 hover:text-blue-300">PCAP Capture</a>).</span>
         </div>
 
         {icsEnabled && (
-          <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
-            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+          <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.08] bg-black/30 p-4 md:grid-cols-4">
+            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
               {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
             </select>
-            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1">
+            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1">
               <option value="learn">safe learning</option>
               <option value="enforce">enforce</option>
             </select>
-            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
-            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
+            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
             {icsMeta.showUnitId && (
-              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white" />
+              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
             )}
             {icsMeta.showObjectClasses && (
-              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-2" />
+              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
             )}
             <div className="flex items-center gap-4 text-sm text-slate-200">
               <label className="flex items-center gap-2">
@@ -706,8 +730,8 @@ function EditRuleModal({
         )}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10">Cancel</button>
-          <button onClick={save} className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30">Save changes</button>
+          <button onClick={onClose} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]">Cancel</button>
+          <button onClick={save} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500">Save changes</button>
         </div>
       </div>
     </div>
@@ -792,39 +816,39 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
   }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+    <Card padding="lg" className="mt-6">
       <h2 className="text-sm font-semibold text-white">Create rule</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2" />
+        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="">Source zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
         {zones.length === 0 && (
-          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 md:col-span-2">
-            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">Create a zone</Link> to target policies.
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300 md:col-span-2">
+            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">Create a zone</Link> to target policies.
           </div>
         )}
-        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="">Dest zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
-        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+        <select value={proto} onChange={(e) => setProto(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
           <option value="icmp">icmp</option>
         </select>
-        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
         </select>
@@ -834,25 +858,25 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
         <span className="text-xs text-slate-400 md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-mint hover:text-mint/80">PCAP Capture</a>).</span>
+        <span className="text-xs text-slate-400 md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-blue-400 hover:text-blue-300">PCAP Capture</a>).</span>
       </div>
 
       {icsEnabled && (
-        <div className="mt-3 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 md:grid-cols-4">
-          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white">
+        <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.08] bg-black/30 p-4 md:grid-cols-4">
+          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none">
             {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
           </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white md:col-span-1">
+          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1">
             <option value="learn">safe learning</option>
             <option value="enforce">enforce</option>
           </select>
-          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
+          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
           {icsMeta.showUnitId && (
-            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none" />
           )}
           {icsMeta.showObjectClasses && (
-            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2" />
+            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2" />
           )}
           <div className="flex items-center gap-4 text-sm text-slate-200">
             <label className="flex items-center gap-2">
@@ -868,12 +892,12 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
       )}
 
       <div className="mt-3 flex items-center justify-between">
-        {error && <p className="text-sm text-amber">{error}</p>}
-        <button onClick={submit} disabled={saving} className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50">
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <button onClick={submit} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50">
           {saving ? "Creating..." : "Create rule"}
         </button>
       </div>
-    </div>
+    </Card>
   );
 }
 

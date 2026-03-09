@@ -8,6 +8,9 @@ import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { useTableControls } from "../../hooks/useTableControls";
 import { SearchBar, SortableHeader, Pagination } from "../../components/TableControls";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
 
 export default function ZonesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
@@ -17,6 +20,7 @@ export default function ZonesPage() {
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const confirm = useConfirm();
 
   const ZONE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
@@ -58,14 +62,21 @@ export default function ZonesPage() {
   }
 
   async function onDelete(zoneName: string) {
-    if (!confirm("Delete this zone? This cannot be undone.")) return;
-    setError(null);
-    const result = await api.deleteZone(zoneName);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    refresh();
+    confirm.open({
+      title: "Delete zone",
+      message: `Delete zone "${zoneName}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        setError(null);
+        const result = await api.deleteZone(zoneName);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        refresh();
+      },
+    });
   }
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
@@ -112,19 +123,19 @@ export default function ZonesPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08] hover:text-white"
         >
           Refresh
         </button>
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+      <Card padding="lg">
         <h2 className="text-sm font-semibold text-white">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div>
@@ -135,9 +146,9 @@ export default function ZonesPage() {
               onChange={(e) => { setName(e.target.value); setNameError(validateName(e.target.value)); }}
               placeholder="name (e.g. ot)"
               disabled={!isAdmin()}
-              className={"w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 " + (nameError ? "border-amber/50" : "border-white/10")}
+              className={"w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none " + (nameError ? "border-red-500/30" : "border-white/[0.08]")}
             />
-            {nameError && <p className="mt-1 text-xs text-amber">{nameError}</p>}
+            {nameError && <p className="mt-1 text-xs text-red-400">{nameError}</p>}
           </div>
           <div>
             <label htmlFor="zone-alias" className="sr-only">Zone alias</label>
@@ -147,7 +158,7 @@ export default function ZonesPage() {
               onChange={(e) => setAlias(e.target.value)}
               placeholder="alias (optional)"
               disabled={!isAdmin()}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
           <div>
@@ -158,61 +169,70 @@ export default function ZonesPage() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="description"
               disabled={!isAdmin()}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-1"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1"
             />
           </div>
         </div>
         <div className="mt-3 flex items-center justify-between">
-          {error && <p className="text-sm text-amber">{error}</p>}
+          {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
           {isAdmin() && (
             <button
               onClick={onCreate}
               disabled={saving}
-              className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
             </button>
           )}
         </div>
-      </div>
+      </Card>
 
-      <div className="mt-6 flex items-center gap-3">
-        <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search zones..." />
-      </div>
+      {zones.length === 0 ? (
+        <EmptyState
+          className="mt-6"
+          title="No zones configured"
+          description="Create zones (e.g. WAN, DMZ, OT) to segment network traffic."
+        />
+      ) : (
+        <>
+          <div className="mt-6 flex items-center gap-3">
+            <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search zones..." />
+          </div>
 
-      <div className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-        <table className="w-full text-sm">
-          <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
-            <tr>
-              <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
-              <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
-              <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {table.data.length === 0 && (
-              <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={4}>
-                  {zones.length === 0
-                    ? "No zones configured. Create zones (e.g. WAN, DMZ, OT) to segment network traffic."
-                    : "No zones match your search."}
-                </td>
-              </tr>
-            )}
-            {table.data.map((z) => (
-              <ZoneRow
-                key={z.name}
-                zone={z}
-                onDelete={onDelete}
-                onUpdate={onUpdate}
-                canEdit={isAdmin()}
-              />
-            ))}
-          </tbody>
-        </table>
-        <Pagination page={table.page} totalPages={table.totalPages} totalItems={table.totalItems} onPage={table.setPage} />
-      </div>
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
+            <table className="w-full text-sm">
+              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+                <tr>
+                  <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+                  <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+                  <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {table.data.length === 0 && (
+                  <tr>
+                    <td className="px-4 py-4 text-slate-400" colSpan={4}>
+                      No zones match your search.
+                    </td>
+                  </tr>
+                )}
+                {table.data.map((z) => (
+                  <ZoneRow
+                    key={z.name}
+                    zone={z}
+                    onDelete={onDelete}
+                    onUpdate={onUpdate}
+                    canEdit={isAdmin()}
+                  />
+                ))}
+              </tbody>
+            </table>
+            <Pagination page={table.page} totalPages={table.totalPages} totalItems={table.totalItems} onPage={table.setPage} />
+          </div>
+        </>
+      )}
+      <ConfirmDialog {...confirm.props} />
     </Shell>
   );
 }
@@ -233,7 +253,7 @@ function ZoneRow({
   const [editing, setEditing] = useState(false);
 
   return (
-    <tr className="border-t border-white/5">
+    <tr className="table-row-hover border-t border-white/5 transition-ui">
       <td className="px-4 py-3 font-medium text-white">{zone.name}</td>
       <td className="px-4 py-3">
         {editing ? (
@@ -241,10 +261,10 @@ function ZoneRow({
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+            className="w-full rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           />
         ) : (
-          <span className="text-slate-200">{zone.alias || "—"}</span>
+          <span className="text-slate-200">{zone.alias || "\u2014"}</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -253,10 +273,10 @@ function ZoneRow({
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+            className="w-full rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
           />
         ) : (
-          <span className="text-slate-200">{zone.description || "—"}</span>
+          <span className="text-slate-200">{zone.description || "\u2014"}</span>
         )}
       </td>
       <td className="px-4 py-3 text-right">
@@ -267,7 +287,7 @@ function ZoneRow({
                 onUpdate(zone.name, { alias: alias.trim() || undefined, description: desc.trim() || undefined });
                 setEditing(false);
               }}
-              className="rounded-md bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
             >
               Save
             </button>
@@ -277,7 +297,7 @@ function ZoneRow({
                 setAlias(zone.alias ?? "");
                 setEditing(false);
               }}
-              className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
             >
               Cancel
             </button>
@@ -288,13 +308,13 @@ function ZoneRow({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                  className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => onDelete(zone.name)}
-                  className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                  className="text-red-400 transition-ui hover:bg-red-500/10 hover:text-red-300 rounded-lg px-3 py-1.5 text-sm"
                 >
                   Delete
                 </button>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { Card } from "../../components/Card";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -107,7 +108,7 @@ const PROTO_COLORS: Record<string, string> = {
 };
 
 function protoBadgeClass(proto: string): string {
-  return PROTO_COLORS[proto.toLowerCase()] ?? "bg-white/10 text-slate-200";
+  return PROTO_COLORS[proto.toLowerCase()] ?? "bg-white/[0.08] text-slate-200";
 }
 
 /* ── Page ─────────────────────────────────────────────────────── */
@@ -136,25 +137,25 @@ export default function TemplatesPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {success && (
-        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {success}
         </div>
       )}
 
       {/* Description */}
-      <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+      <Card className="mb-6">
         <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
           About Templates
         </div>
@@ -164,20 +165,22 @@ export default function TemplatesPage() {
           tailored to your environment, including Purdue model baselines and
           maintenance window policies.
         </p>
-      </div>
+      </Card>
 
       {/* Template cards */}
       {templates.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-slate-400 shadow-lg backdrop-blur">
-          No templates available. Check that the backend has ICS templates
-          configured.
-        </div>
+        <Card>
+          <p className="text-sm text-slate-400">
+            No templates available. Check that the backend has ICS templates
+            configured.
+          </p>
+        </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {templates.map((t) => (
             <div
               key={t.name}
-              className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur"
+              className="flex flex-col rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card transition-ui hover:bg-white/[0.06] hover:border-white/[0.12] cursor-pointer"
             >
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white">{t.name}</h3>
@@ -198,7 +201,7 @@ export default function TemplatesPage() {
               )}
               <button
                 onClick={() => setActiveTemplate(t)}
-                className="mt-auto rounded-lg bg-mint/20 px-3 py-2 text-sm text-mint hover:bg-mint/30"
+                className="mt-auto rounded-lg bg-blue-600 px-3 py-2 text-sm text-white font-medium transition-ui hover:bg-blue-500"
               >
                 Generate Rules
               </button>
@@ -296,7 +299,7 @@ function TemplateModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-ink p-5 shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">
@@ -306,7 +309,7 @@ function TemplateModal({
           </div>
           <button
             onClick={onClose}
-            className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
           >
             Close
           </button>
@@ -328,8 +331,8 @@ function TemplateModal({
                     }
                     className={`rounded-full px-2 py-0.5 text-xs ${
                       sourceZones.includes(z.name)
-                        ? "bg-mint/20 text-mint"
-                        : "bg-white/10 text-slate-200 hover:bg-white/20"
+                        ? "bg-blue-500/20 text-blue-300"
+                        : "bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]"
                     }`}
                   >
                     {z.name}
@@ -353,8 +356,8 @@ function TemplateModal({
                     onClick={() => toggleZone(z.name, destZones, setDestZones)}
                     className={`rounded-full px-2 py-0.5 text-xs ${
                       destZones.includes(z.name)
-                        ? "bg-mint/20 text-mint"
-                        : "bg-white/10 text-slate-200 hover:bg-white/20"
+                        ? "bg-blue-500/20 text-blue-300"
+                        : "bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]"
                     }`}
                   >
                     {z.name}
@@ -387,7 +390,7 @@ function TemplateModal({
                   setParams((prev) => ({ ...prev, [p.name]: e.target.value }))
                 }
                 placeholder={p.placeholder ?? ""}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
           ))}
@@ -397,7 +400,7 @@ function TemplateModal({
             <button
               onClick={handlePreview}
               disabled={loading}
-              className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20 disabled:opacity-40"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-white transition-ui hover:bg-white/[0.08] disabled:opacity-40"
             >
               {loading ? "Loading..." : "Preview"}
             </button>
@@ -405,7 +408,7 @@ function TemplateModal({
               <button
                 onClick={handleApply}
                 disabled={loading}
-                className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30 disabled:opacity-40"
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white font-medium transition-ui hover:bg-blue-500 disabled:opacity-40"
               >
                 Apply
               </button>
@@ -423,7 +426,7 @@ function TemplateModal({
                   No rules generated with the current parameters.
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-xl border border-white/10">
+                <div className="overflow-hidden rounded-xl border border-white/[0.08]">
                   <table className="w-full text-sm">
                     <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
                       <tr>
@@ -436,7 +439,7 @@ function TemplateModal({
                     </thead>
                     <tbody>
                       {preview.map((r) => (
-                        <tr key={r.id} className="border-t border-white/5">
+                        <tr key={r.id} className="border-t border-white/[0.05]">
                           <td className="px-4 py-2 font-mono text-xs text-white">
                             {r.id}
                           </td>
@@ -457,7 +460,7 @@ function TemplateModal({
                             <span
                               className={`rounded-full px-2 py-0.5 text-xs ${
                                 r.action === "ALLOW"
-                                  ? "bg-mint/20 text-mint"
+                                  ? "bg-emerald-500/20 text-emerald-400"
                                   : "bg-red-500/20 text-red-400"
                               }`}
                             >

@@ -15,8 +15,11 @@ import {
 import { Shell } from "../../components/Shell";
 import { InfoTip } from "../../components/InfoTip";
 import { RulePreviewButton } from "../../components/RulePreview";
+import { Card } from "../../components/Card";
+import { EmptyState } from "../../components/EmptyState";
+import { StatusBadge } from "../../components/StatusBadge";
 
-/* ── Protocol metadata for the UI ────────────────────────────────── */
+/* -- Protocol metadata for the UI ---------------------------------------- */
 
 type ProtocolMeta = {
   label: string;
@@ -128,7 +131,7 @@ function protoMeta(name: string): ProtocolMeta {
   );
 }
 
-/* ── Page ─────────────────────────────────────────────────────────── */
+/* -- Page ----------------------------------------------------------------- */
 
 export default function ICSPolicyPage() {
   const canEdit = isAdmin();
@@ -218,40 +221,38 @@ export default function ICSPolicyPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      {/* ── DPI capture config ────────────────────────────────── */}
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
-              DPI Capture (Required)
-            </div>
-            <div className="mt-1 text-sm text-slate-200">
-              ICS filters require DPI capture to be enabled on at least one
-              interface.
-            </div>
-          </div>
-          {canEdit && (
+      {/* -- DPI capture config ------------------------------------------ */}
+      <Card
+        title="DPI Capture (Required)"
+        titleRight={
+          canEdit ? (
             <button
               onClick={saveDpiConfig}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
             >
               {dpiSaveState === "saving" ? "Saving..." : "Save"}
             </button>
-          )}
+          ) : undefined
+        }
+        className="mb-4"
+      >
+        <div className="mb-3 text-sm text-slate-200">
+          ICS filters require DPI capture to be enabled on at least one
+          interface.
         </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <div>
             <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
               Capture interfaces
@@ -270,7 +271,7 @@ export default function ICSPolicyPage() {
                 }))
               }
               placeholder="lan2, lan3"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -294,76 +295,62 @@ export default function ICSPolicyPage() {
         )}
         <div className="mt-2 text-xs text-slate-400">
           PCAP management lives in{" "}
-          <Link href="/dataplane/" className="text-mint hover:text-mint/80">
+          <Link href="/dataplane/" className="text-blue-400 hover:text-blue-300">
             PCAP &rarr;
           </Link>
         </div>
-      </div>
+      </Card>
 
-      {/* ── Protocol summary cards ────────────────────────────── */}
+      {/* -- Protocol summary cards -------------------------------------- */}
       <div className="mb-4 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-          <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
-            Supported Protocols
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+        <Card title="Supported Protocols">
+          <div className="flex flex-wrap gap-2">
             {PROTOCOL_KEYS.map((k) => (
-              <span
-                key={k}
-                className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
-              >
+              <StatusBadge key={k} variant="neutral">
                 {PROTOCOLS[k].label}
-              </span>
+              </StatusBadge>
             ))}
           </div>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-          <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
-            Quick Start
-          </div>
-          <ol className="mt-2 space-y-1 text-xs text-slate-400">
+        </Card>
+        <Card title="Quick Start">
+          <ol className="space-y-1 text-xs text-slate-400">
             <li>1. Create a firewall rule matching your PLC/RTU zone.</li>
             <li>2. Select the protocol and define criteria here.</li>
             <li>3. Start with Safe Learning, then switch to Enforce.</li>
           </ol>
           <Link
             href="/firewall/"
-            className="mt-3 inline-block text-xs text-mint hover:text-mint/80"
+            className="mt-3 inline-block text-xs text-blue-400 hover:text-blue-300"
           >
             Go to Firewall Rules &rarr;
           </Link>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-          <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
-            Active Filters
-          </div>
+        </Card>
+        <Card title="Active Filters">
           {Object.keys(protoCounts).length === 0 ? (
-            <div className="mt-3 text-xs text-slate-400">
+            <div className="text-xs text-slate-400">
               No ICS filters configured yet.
             </div>
           ) : (
-            <div className="mt-3 space-y-1">
+            <div className="space-y-1">
               {Object.entries(protoCounts).map(([p, n]) => (
                 <div
                   key={p}
                   className="flex items-center justify-between text-sm text-slate-200"
                 >
                   <span>{protoMeta(p).label}</span>
-                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">
-                    {n}
-                  </span>
+                  <StatusBadge variant="neutral">{n}</StatusBadge>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
-      {/* ── Protocol filter tabs ──────────────────────────────── */}
+      {/* -- Protocol filter tabs ---------------------------------------- */}
       <div className="mb-3 flex gap-2 overflow-x-auto">
         <button
           onClick={() => setFilterProto("all")}
-          className={`rounded-lg px-3 py-1.5 text-xs ${filterProto === "all" ? "bg-mint/20 text-mint" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}
+          className={`rounded-lg px-3 py-1.5 text-xs transition-ui ${filterProto === "all" ? "bg-blue-600 text-white font-medium" : "bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"}`}
         >
           All
         </button>
@@ -371,7 +358,7 @@ export default function ICSPolicyPage() {
           <button
             key={k}
             onClick={() => setFilterProto(k)}
-            className={`rounded-lg px-3 py-1.5 text-xs ${filterProto === k ? "bg-mint/20 text-mint" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}
+            className={`rounded-lg px-3 py-1.5 text-xs transition-ui ${filterProto === k ? "bg-blue-600 text-white font-medium" : "bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"}`}
           >
             {PROTOCOLS[k].label}
             {protoCounts[k] ? ` (${protoCounts[k]})` : ""}
@@ -379,8 +366,8 @@ export default function ICSPolicyPage() {
         ))}
       </div>
 
-      {/* ── Rules table ───────────────────────────────────────── */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      {/* -- Rules table ------------------------------------------------- */}
+      <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
             <tr>
@@ -405,23 +392,24 @@ export default function ICSPolicyPage() {
           <tbody>
             {icsRules.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={8}>
-                  No ICS filters
-                  {filterProto !== "all"
-                    ? ` for ${protoMeta(filterProto).label}`
-                    : ""}{" "}
-                  configured.
-                  <Link
-                    href="/firewall/"
-                    className="ml-2 text-mint hover:text-mint/80"
-                  >
-                    Open Firewall Rules &rarr;
-                  </Link>
+                <td className="px-4 py-8" colSpan={8}>
+                  <EmptyState
+                    title={`No ICS filters${filterProto !== "all" ? ` for ${protoMeta(filterProto).label}` : ""} configured`}
+                    description="Create firewall rules with ICS protocol filters to monitor and control industrial traffic."
+                    action={
+                      <Link
+                        href="/firewall/"
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                      >
+                        Open Firewall Rules
+                      </Link>
+                    }
+                  />
                 </td>
               </tr>
             )}
             {icsRules.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
                 <td className="px-4 py-3 font-mono text-xs text-white">
                   {r.id}
                 </td>
@@ -430,9 +418,9 @@ export default function ICSPolicyPage() {
                   {(r.destZones ?? []).join(", ") || "any"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">
+                  <StatusBadge variant="neutral">
                     {protoMeta(r.ics?.protocol ?? "").label}
-                  </span>
+                  </StatusBadge>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-slate-200">
                   {(r.ics?.functionCode ?? []).join(", ") || "*"}
@@ -448,16 +436,17 @@ export default function ICSPolicyPage() {
                       : "R/W"}
                 </td>
                 <td className="px-4 py-3 text-slate-200">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs ${r.ics?.mode === "learn" ? "bg-amber/20 text-amber" : "bg-mint/20 text-mint"}`}
+                  <StatusBadge
+                    variant={r.ics?.mode === "learn" ? "warning" : "success"}
+                    dot
                   >
                     {r.ics?.mode === "learn" ? "learning" : "enforce"}
-                  </span>
+                  </StatusBadge>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => setEditing(r)}
-                    className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                    className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
                   >
                     Edit
                   </button>
@@ -479,7 +468,7 @@ export default function ICSPolicyPage() {
   );
 }
 
-/* ── Edit modal with protocol-specific fields ─────────────────── */
+/* -- Edit modal with protocol-specific fields ----------------------------- */
 
 function EditICSModal({
   rule,
@@ -552,16 +541,16 @@ function EditICSModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-ink p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
             ICS filter &mdash; rule{" "}
-            <span className="font-mono text-mint">{rule.id}</span>
+            <span className="font-mono text-blue-400">{rule.id}</span>
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
           >
             Close
           </button>
@@ -590,7 +579,7 @@ function EditICSModal({
                 value={protocol}
                 onChange={(e) => setProtocol(e.target.value)}
                 disabled={!enabled}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
               >
                 {PROTOCOL_KEYS.map((k) => (
                   <option key={k} value={k}>
@@ -608,7 +597,7 @@ function EditICSModal({
                 value={mode}
                 onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
                 disabled={!enabled}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
               >
                 <option value="learn">Safe learning (alert-only)</option>
                 <option value="enforce">Enforce (block)</option>
@@ -626,7 +615,7 @@ function EditICSModal({
               value={functionCodes}
               onChange={(e) => setFunctionCodes(e.target.value)}
               disabled={!enabled}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
               placeholder={meta.fcPlaceholder || "Leave empty for all"}
             />
           </div>
@@ -641,7 +630,7 @@ function EditICSModal({
               value={addresses}
               onChange={(e) => setAddresses(e.target.value)}
               disabled={!enabled}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
               placeholder={meta.addrPlaceholder || "Leave empty for all"}
             />
           </div>
@@ -657,7 +646,7 @@ function EditICSModal({
                 value={unitId}
                 onChange={(e) => setUnitId(e.target.value)}
                 disabled={!enabled}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
                 placeholder="0-255 (leave empty for all)"
               />
             </div>
@@ -674,7 +663,7 @@ function EditICSModal({
                 value={objectClasses}
                 onChange={(e) => setObjectClasses(e.target.value)}
                 disabled={!enabled}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white disabled:opacity-60"
+                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
                 placeholder="0x02, 0x04 (leave empty for all)"
               />
             </div>
@@ -713,7 +702,7 @@ function EditICSModal({
           </div>
 
           {/* Protocol hint */}
-          <div className="rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-slate-400">
+          <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
             <strong className="text-slate-300">{meta.label}</strong> &mdash;
             port {meta.port}.{" "}
             {protocol === "modbus" &&
@@ -757,13 +746,13 @@ function EditICSModal({
           />
           <button
             onClick={onClose}
-            className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
           >
             Save filter
           </button>

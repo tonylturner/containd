@@ -7,6 +7,8 @@ import { Suspense } from "react";
 import { api, type FlowSummary } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { SkeletonList } from "../../components/Skeleton";
+import { StatusBadge } from "../../components/StatusBadge";
+import { EmptyState } from "../../components/EmptyState";
 
 function FlowsInner() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -48,14 +50,14 @@ function FlowsInner() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="transition-ui rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06]"
           >
             Refresh
           </button>
           <label className="flex items-center gap-2 text-xs text-slate-200">
             <input
               type="checkbox"
-              className="h-4 w-4"
+              className="transition-ui h-4 w-4"
               checked={showAVOnly}
               onChange={(e) => setShowAVOnly(e.target.checked)}
             />
@@ -70,72 +72,74 @@ function FlowsInner() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-white/5 text-xs uppercase tracking-wide text-slate-300">
-            <tr>
-              <th className="px-4 py-3">Flow</th>
-              <th className="px-4 py-3">App/Proto</th>
-              <th className="px-4 py-3">Endpoints</th>
-              <th className="px-4 py-3">First Seen</th>
-              <th className="px-4 py-3">Last Seen</th>
-              <th className="px-4 py-3 text-right">Events</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
+      {!loading && flows.length === 0 ? (
+        <EmptyState
+          title="No flows yet"
+          description="Enable DPI capture or learning mode to generate events."
+        />
+      ) : (
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-white/[0.03] text-xs font-medium uppercase tracking-wider text-slate-500">
               <tr>
-                <td colSpan={6} className="px-4 py-6">
-                  <SkeletonList rows={4} />
-                </td>
+                <th className="px-4 py-3">Flow</th>
+                <th className="px-4 py-3">App/Proto</th>
+                <th className="px-4 py-3">Endpoints</th>
+                <th className="px-4 py-3">First Seen</th>
+                <th className="px-4 py-3">Last Seen</th>
+                <th className="px-4 py-3 text-right">Events</th>
               </tr>
-            )}
-            {!loading && flows.length === 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-6 text-center text-slate-400"
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6">
+                    <SkeletonList rows={4} />
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredFlows
+                .map((f) => (
+                <tr
+                  key={f.flowId}
+                  className={`table-row-hover transition-ui border-t border-white/[0.06] ${
+                    f.avBlocked ? "bg-[color:var(--error)]/10" : f.avDetected ? "bg-amber/10" : ""
+                  }`}
                 >
-                  No flows yet. Enable DPI capture or learning mode to generate events.
-                </td>
-              </tr>
-            )}
-            {!loading && filteredFlows
-              .map((f) => (
-              <tr
-                key={f.flowId}
-                className={`border-t border-white/10 hover:bg-white/5 ${
-                  f.avBlocked ? "bg-[color:var(--error)]/10" : f.avDetected ? "bg-amber/10" : ""
-                }`}
-              >
-                <td className="px-4 py-3 font-mono text-xs text-slate-200">
-                  {f.flowId.slice(0, 10)}…
-                </td>
-                <td className="px-4 py-3 text-slate-100">
-                  {f.application || f.transport || "-"}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}
-                </td>
-                <td className="px-4 py-3 text-slate-400">
-                  {new Date(f.firstSeen).toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-slate-400">
-                  {new Date(f.lastSeen).toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-right text-slate-100">
-                  {f.eventCount}
-                  {(f.avDetected || f.avBlocked) && (
-                    <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--error)]/20 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--error)]">
-                      {f.avBlocked ? "AV blocked" : "AV detected"}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-200">
+                    {f.flowId.slice(0, 10)}…
+                  </td>
+                  <td className="px-4 py-3 text-slate-100">
+                    {f.application || f.transport || "-"}
+                  </td>
+                  <td className="px-4 py-3 text-slate-200">
+                    {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {new Date(f.firstSeen).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {new Date(f.lastSeen).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right text-slate-100">
+                    {f.eventCount}
+                    {f.avBlocked && (
+                      <StatusBadge variant="error" dot className="ml-2">
+                        AV blocked
+                      </StatusBadge>
+                    )}
+                    {f.avDetected && !f.avBlocked && (
+                      <StatusBadge variant="warning" dot className="ml-2">
+                        AV detected
+                      </StatusBadge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Shell>
   );
 }

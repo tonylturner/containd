@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
@@ -8,9 +8,12 @@ import { type AuditRecord, type DashboardData, type HealthResponse, type User, a
 import { Shell } from "../components/Shell";
 import { Console } from "../components/Console";
 import { Skeleton } from "../components/Skeleton";
+import { Card } from "../components/Card";
+import { StatusBadge, StatusIndicator } from "../components/StatusBadge";
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [consoleOpen, setConsoleOpen] = useState(false);
 
   const health = data?.health ?? null;
   const me = data?.user ?? null;
@@ -37,59 +40,111 @@ export default function Home() {
     return () => { alive = false; };
   }, []);
 
+  // Derive overall system health
+  const systemHealth = health ? "healthy" : "unknown";
+  const hasAlerts = eventStats && (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
+
   return (
     <Shell title="Dashboard">
+      {/* ── Health summary row ──────────────────────────────── */}
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        {health ? (
+          <StatusIndicator
+            status={hasAlerts ? "degraded" : systemHealth as any}
+            label={health.hostname ?? "containd"}
+            sublabel={hasAlerts ? "Alerts require attention" : "All systems operational"}
+          />
+        ) : (
+          <Skeleton className="h-5 w-48" />
+        )}
+        {health && (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>Build {health.build ?? "dev"}</span>
+            <span>&middot;</span>
+            <span>{health.time ? new Date(health.time).toLocaleString() : ""}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Needs attention ────────────────────────────────── */}
+      {hasAlerts && (
+        <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 animate-fade-in">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-400">Needs Attention</h2>
+          <div className="flex flex-wrap gap-3">
+            {eventStats!.idsAlerts > 0 && (
+              <Link href="/alerts/" className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300 transition-ui hover:bg-amber-500/15">
+                <StatusBadge variant="warning" dot>{eventStats!.idsAlerts} IDS alerts</StatusBadge>
+              </Link>
+            )}
+            {eventStats!.avDetections > 0 && (
+              <Link href="/events/?av=1" className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300 transition-ui hover:bg-red-500/15">
+                <StatusBadge variant="error" dot>{eventStats!.avDetections} AV detections</StatusBadge>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Stats row ──────────────────────────────────────── */}
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+        <StatCard label="Zones" value={zoneCount} href="/zones/" />
+        <StatCard label="Interfaces" value={ifaceCount} href="/interfaces/" />
+        <StatCard label="FW Rules" value={ruleCount} href="/firewall/" />
+        <StatCard label="ICS Rules" value={icsRuleCount} href="/ics/" />
+        <StatCard label="Assets" value={assetCount} href="/assets/" />
+      </div>
+
+      {/* ── Main grid ──────────────────────────────────────── */}
       <div className="grid gap-4 md:grid-cols-3">
-        <DashboardCard title="System information">
-          {health ? (
-            <div className="space-y-1 text-sm">
-              <KeyValue label="Hostname" value={health?.hostname ?? "containd"} />
-              <KeyValue label="Build" value={health?.build ?? "dev"} />
-              <KeyValue label="Component" value={health?.component ?? "mgmt"} />
-              <KeyValue
-                label="Updated"
-                value={
-                  health?.time
-                    ? new Date(health.time).toLocaleString()
-                    : "—"
-                }
-              />
-              <KeyValue label="User" value={me?.username ?? "—"} />
-              <KeyValue label="Role" value={me?.role ?? "—"} />
-              <KeyValue
-                label="Last admin change"
-                value={
-                  lastAdminChange
-                    ? `${new Date(lastAdminChange.timestamp).toLocaleString()} · ${lastAdminChange.action}`
-                    : "—"
-                }
-              />
-            </div>
-          ) : (
-            <Skeleton className="h-20 w-full" />
-          )}
-        </DashboardCard>
+        {/* Services */}
+        <Card title="Services">
+          {servicesStatus ? <ServicesWidget status={servicesStatus} /> : <Skeleton className="h-32 w-full" />}
+        </Card>
 
-        <DashboardCard title="Services">
-          {servicesStatus ? <ServicesWidget status={servicesStatus} /> : <Skeleton className="h-20 w-full" />}
-        </DashboardCard>
-
-        <DashboardCard title="Traffic Mix">
+        {/* Traffic */}
+        <Card title="Traffic">
           {eventStats ? (
-            <div className="space-y-2 text-xs text-slate-300">
+            <div className="space-y-3">
               <TrafficMeter label="Total events" value={eventStats.totalEvents} color="var(--primary)" />
               <TrafficMeter label="IDS alerts" value={eventStats.idsAlerts} color="var(--warning)" />
               <TrafficMeter label="AV detections" value={eventStats.avDetections} color="var(--error)" />
+              {eventStats.modbusWrites > 0 && (
+                <TrafficMeter label="Modbus writes" value={eventStats.modbusWrites} color="var(--orange)" />
+              )}
             </div>
           ) : (
-            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-32 w-full" />
           )}
-        </DashboardCard>
+        </Card>
+
+        {/* System info */}
+        <Card title="System">
+          {health ? (
+            <div className="space-y-2 text-sm">
+              <KV label="User" value={me?.username ?? "—"} />
+              <KV label="Role" value={me?.role ?? "—"} />
+              <KV
+                label="Last change"
+                value={
+                  lastAdminChange
+                    ? `${new Date(lastAdminChange.timestamp).toLocaleString()}`
+                    : "—"
+                }
+              />
+              {lastAdminChange && (
+                <div className="text-xs text-slate-500 pl-0">{lastAdminChange.action}</div>
+              )}
+            </div>
+          ) : (
+            <Skeleton className="h-32 w-full" />
+          )}
+        </Card>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <DashboardCard title="Quick Start">
-          <div className="grid gap-2 text-xs text-slate-300">
+      {/* ── Quick start ────────────────────────────────────── */}
+      <div className="mt-5">
+        <Card title="Quick Start">
+          <div className="grid gap-2 sm:grid-cols-3">
             <QuickStartRow
               href="/interfaces/"
               icon="/icons/docker.svg"
@@ -106,175 +161,124 @@ export default function Home() {
               href="/system/services/"
               icon="/icons/nginx.svg"
               title="Services"
-              desc="Enable DNS/VPN/Proxy"
+              desc="Enable DNS, VPN, Proxy"
             />
           </div>
-        </DashboardCard>
-        <DashboardCard title="Policy summary">
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Stat label="Zones" value={zoneCount} href="/zones/" />
-            <Stat label="Interfaces" value={ifaceCount} href="/interfaces/" />
-            <Stat label="FW rules" value={ruleCount} href="/firewall/" />
-            <Stat label="ICS rules" value={icsRuleCount} href="/ics/" />
-          </div>
-        </DashboardCard>
+        </Card>
       </div>
 
-      <div className="mt-6">
-        <Console />
+      {/* ── Console (collapsible) ──────────────────────────── */}
+      <div className="mt-5">
+        <button
+          type="button"
+          onClick={() => setConsoleOpen((v) => !v)}
+          className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-slate-500 transition-ui hover:text-slate-300"
+        >
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+            <polyline points="4,17 10,11 4,5" /><line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          CLI Console
+          <svg viewBox="0 0 24 24" className={`h-3 w-3 transition-transform duration-200 ${consoleOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2}>
+            <polyline points="6,9 12,15 18,9" />
+          </svg>
+        </button>
+        {consoleOpen && (
+          <div className="animate-fade-in">
+            <Console />
+          </div>
+        )}
       </div>
     </Shell>
   );
 }
 
-function DashboardCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function KV({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
-        {title}
-      </p>
-      <div className="mt-3">{children}</div>
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-slate-200">{value}</span>
     </div>
   );
 }
 
-function KeyValue({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-slate-300">{label}</span>
-      <span className="text-slate-100">{value}</span>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  href,
-}: {
-  label: string;
-  value: number | null;
-  href: string;
-}) {
+function StatCard({ label, value, href }: { label: string; value: number | null; href: string }) {
   return (
     <Link
       href={href}
-      className="rounded-lg border border-white/10 bg-black/30 p-3 hover:bg-black/40"
+      className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-card transition-ui hover:bg-white/[0.06] hover:border-white/[0.12]"
     >
-      <div className="text-2xl font-bold text-white">{value ?? "—"}</div>
-      <div className="text-xs uppercase tracking-wide text-slate-300">
-        {label}
-      </div>
+      <div className="text-2xl font-semibold tabular-nums text-white">{value ?? "—"}</div>
+      <div className="mt-0.5 text-xs text-slate-500">{label}</div>
     </Link>
   );
 }
 
 function ServicesWidget({ status }: { status: Record<string, unknown> | null }) {
-  const syslogConfigured =
-    (status?.["syslog"] as any)?.configured_forwarders > 0;
+  const syslogConfigured = (status?.["syslog"] as any)?.configured_forwarders > 0;
   const proxy = status?.["proxy"] as any;
   const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
   const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
-  const envoyRate =
-    typeof (status?.["envoy"] as any)?.rate_per_min === "number"
-      ? (status?.["envoy"] as any).rate_per_min
-      : null;
-  const nginxRate =
-    typeof (status?.["nginx"] as any)?.rate_per_min === "number"
-      ? (status?.["nginx"] as any).rate_per_min
-      : null;
   const avEnabled = (status?.["av"] as any)?.enabled;
-  const chips: Array<{ label: string; ok: boolean; hint?: string; icon?: string }> = [
-    { label: "IPS", ok: true, hint: "native IDS/IPS" },
-    { label: "Web Filter", ok: false },
-    { label: "AV", ok: !!avEnabled },
-    { label: "VPN", ok: (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running, icon: "/icons/wireguard.svg" },
-    { label: "Updates", ok: true },
-    { label: "Proxy", ok: envoyActive || nginxActive, icon: "/icons/envoyproxy.svg" },
-    { label: "Syslog", ok: !!syslogConfigured },
+  const vpnActive = (status?.["vpn"] as any)?.wireguard_enabled || (status?.["vpn"] as any)?.openvpn_running;
+
+  const chips: Array<{ label: string; ok: boolean; icon?: string; href: string }> = [
+    { label: "IPS", ok: true, href: "/ids/" },
+    { label: "AV", ok: !!avEnabled, href: "/system/services/av/" },
+    { label: "VPN", ok: !!vpnActive, icon: "/icons/wireguard.svg", href: "/vpn/" },
+    { label: "Proxy", ok: envoyActive || nginxActive, icon: "/icons/envoyproxy.svg", href: "/proxies/" },
+    { label: "Syslog", ok: !!syslogConfigured, href: "/system/services/syslog/" },
   ];
+
   return (
-    <div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        {chips.map((c) => (
-          <div
-            key={c.label}
-            className={
-              c.ok
-                ? "flex min-h-[64px] flex-col items-center justify-center rounded-lg bg-mint/15 px-2 py-2 text-center text-mint"
-                : "flex min-h-[64px] flex-col items-center justify-center rounded-lg bg-amber/15 px-2 py-2 text-center text-amber"
-            }
-            title={c.hint}
-          >
-            {c.icon && (
-              <Image src={c.icon} alt="" width={16} height={16} className="mx-auto mb-1 h-4 w-4" />
-            )}
-            {c.label}
-          </div>
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-slate-400">
-        Green = configured/active, amber = off/unconfigured.
-      </p>
-      {(envoyRate !== null || nginxRate !== null) && (
-        <p className="mt-2 text-xs text-slate-400">
-          Proxy rates: Envoy {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min, Nginx{" "}
-          {nginxRate !== null ? nginxRate.toFixed(1) : "0.0"} /min.
-        </p>
-      )}
+    <div className="grid grid-cols-3 gap-2 text-xs">
+      {chips.map((c) => (
+        <Link
+          key={c.label}
+          href={c.href}
+          className={`flex min-h-[52px] flex-col items-center justify-center rounded-lg px-2 py-2 text-center transition-ui ${
+            c.ok
+              ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15"
+              : "bg-white/[0.04] text-slate-500 hover:bg-white/[0.06]"
+          }`}
+        >
+          {c.icon && (
+            <Image src={c.icon} alt="" width={14} height={14} className="mx-auto mb-1 h-3.5 w-3.5 opacity-60" />
+          )}
+          <span className="font-medium">{c.label}</span>
+          <span className={`mt-0.5 text-2xs ${c.ok ? "text-emerald-500" : "text-slate-600"}`}>
+            {c.ok ? "Active" : "Off"}
+          </span>
+        </Link>
+      ))}
     </div>
   );
 }
 
-function QuickStartRow({
-  href,
-  icon,
-  title,
-  desc,
-}: {
-  href: string;
-  icon: string;
-  title: string;
-  desc: string;
-}) {
+function QuickStartRow({ href, icon, title, desc }: { href: string; icon: string; title: string; desc: string }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2 hover:bg-black/40"
+      className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 transition-ui hover:bg-white/[0.05] hover:border-white/[0.1]"
     >
-      <Image src={icon} alt="" width={16} height={16} className="h-4 w-4" />
+      <Image src={icon} alt="" width={16} height={16} className="h-4 w-4 opacity-50" />
       <div>
-        <div className="text-xs uppercase tracking-wide text-slate-300">{title}</div>
-        <div className="text-xs text-slate-400">{desc}</div>
+        <div className="text-sm font-medium text-slate-200">{title}</div>
+        <div className="text-xs text-slate-500">{desc}</div>
       </div>
     </Link>
   );
 }
 
-function TrafficMeter({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
-  const width = Math.min(100, Math.max(6, Math.round((value / 200) * 100)));
+function TrafficMeter({ label, value, color }: { label: string; value: number; color: string }) {
+  const width = Math.min(100, Math.max(4, Math.round((value / 200) * 100)));
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <span className="uppercase text-slate-400">{label}</span>
-        <span>{value}</span>
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-slate-500">{label}</span>
+        <span className="tabular-nums text-slate-300">{value}</span>
       </div>
-      <div className="h-2 w-full rounded-full bg-white/5">
-        <div className="h-2 rounded-full" style={{ width: `${width}%`, background: color }} />
+      <div className="h-1.5 w-full rounded-full bg-white/[0.06]">
+        <div className="h-1.5 rounded-full transition-all duration-500" style={{ width: `${width}%`, background: color }} />
       </div>
     </div>
   );

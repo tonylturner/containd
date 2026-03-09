@@ -70,47 +70,36 @@ export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: 
   }
 
   return (
-    <div
-      className={[
-        "rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200",
-        className,
-      ].join(" ")}
-    >
+    <div className={`rounded-xl border border-blue-500/15 bg-blue-500/[0.06] px-4 py-2.5 text-sm ${className}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate font-semibold text-white">{tip.title}</div>
-          <div className="truncate text-slate-300">{tip.body}</div>
+        <div className="flex min-w-0 items-start gap-2.5">
+          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
+          </svg>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-blue-300">{tip.title}</div>
+            <div className="text-[13px] text-slate-400">{tip.body}</div>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="flex items-center gap-1.5 text-xs">
           {count > 1 && (
             <>
-              <button
-                onClick={prev}
-                className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200 hover:bg-white/10"
-              >
+              <button onClick={prev} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
                 Prev
               </button>
-              <button
-                onClick={next}
-                className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200 hover:bg-white/10"
-              >
+              <span className="tabular-nums text-slate-500">{index + 1}/{count}</span>
+              <button onClick={next} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
                 Next
               </button>
+              <span className="mx-1 text-slate-600">|</span>
             </>
           )}
-          <button
-            onClick={dismiss}
-            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200 hover:bg-white/10"
-          >
+          <button onClick={dismiss} className="rounded-md px-2 py-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-slate-200">
             Dismiss
           </button>
-          <button
-            onClick={clearAll}
-            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-400 hover:bg-white/10"
-          >
-            Reset
+          <button onClick={clearAll} className="rounded-md px-2 py-1 text-slate-500 transition-ui hover:bg-white/[0.06] hover:text-slate-300" title="Show all previously dismissed tips">
+            Show all
           </button>
-          {count > 1 && <span>{index + 1}/{count}</span>}
         </div>
       </div>
     </div>

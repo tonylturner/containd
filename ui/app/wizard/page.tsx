@@ -13,6 +13,7 @@ import {
   type Protocol,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { Card } from "../../components/Card";
 
 /* ── ICS protocol metadata ────────────────────────────────────── */
 
@@ -53,7 +54,7 @@ const CARDS: CardDef[] = [
     id: "lan-internet",
     title: "Allow LAN Internet Access",
     description: "Enable internal hosts to reach the Internet via SNAT masquerade.",
-    color: "bg-mint",
+    color: "bg-blue-500",
     steps: ["Select LAN zone", "Select WAN zone", "Review & Apply"],
   },
   {
@@ -393,7 +394,7 @@ export default function WizardPage() {
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+          className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
         >
           <option value="">-- select zone --</option>
           {filtered.map((z) => (
@@ -416,8 +417,8 @@ export default function WizardPage() {
       return (
         <div className="space-y-3 text-sm text-slate-200">
           <h3 className="text-base font-semibold text-white">Summary</h3>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-            <p>Firewall rule: <span className="text-mint">ALLOW</span> from <strong>{lanZone}</strong> to <strong>{wanZone}</strong></p>
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-2">
+            <p>Firewall rule: <span className="text-emerald-400">ALLOW</span> from <strong>{lanZone}</strong> to <strong>{wanZone}</strong></p>
             <p>NAT: Enable SNAT masquerade on <strong>{wanZone}</strong> for source zone <strong>{lanZone}</strong></p>
           </div>
         </div>
@@ -435,7 +436,7 @@ export default function WizardPage() {
                 value={serverIp}
                 onChange={(e) => setServerIp(e.target.value)}
                 placeholder="e.g. 192.168.1.10"
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <div>
@@ -447,7 +448,7 @@ export default function WizardPage() {
                 type="number"
                 min={1}
                 max={65535}
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
           </div>
@@ -462,10 +463,10 @@ export default function WizardPage() {
                   key={p}
                   type="button"
                   onClick={() => setPubProto(p)}
-                  className={`rounded-lg border px-4 py-2 text-sm ${
+                  className={`rounded-lg border px-4 py-2 text-sm transition-ui ${
                     pubProto === p
-                      ? "border-mint bg-mint/20 text-mint"
-                      : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                      ? "border-blue-500/40 bg-blue-500/20 text-blue-300"
+                      : "border-white/[0.08] bg-white/[0.03] text-slate-200 hover:bg-white/[0.08]"
                   }`}
                 >
                   {p.toUpperCase()}
@@ -478,9 +479,9 @@ export default function WizardPage() {
       return (
         <div className="space-y-3 text-sm text-slate-200">
           <h3 className="text-base font-semibold text-white">Summary</h3>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-2">
             <p>Port forward (DNAT): <strong>{ingressZone}</strong> {pubProto.toUpperCase()}/{serverPort} &#8594; <strong>{serverIp}:{serverPort}</strong></p>
-            <p>Firewall rule: <span className="text-mint">ALLOW</span> inbound from <strong>{ingressZone}</strong> to <strong>{serverIp}</strong> on {pubProto.toUpperCase()}/{serverPort}</p>
+            <p>Firewall rule: <span className="text-emerald-400">ALLOW</span> inbound from <strong>{ingressZone}</strong> to <strong>{serverIp}</strong> on {pubProto.toUpperCase()}/{serverPort}</p>
           </div>
         </div>
       );
@@ -495,7 +496,7 @@ export default function WizardPage() {
             <select
               value={icsProto}
               onChange={(e) => setIcsProto(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               {Object.entries(ICS_PROTOCOLS).map(([key, meta]) => (
                 <option key={key} value={key}>
@@ -526,13 +527,13 @@ export default function WizardPage() {
                   key={opt.key}
                   type="button"
                   onClick={() => setIcsAccess(opt.key)}
-                  className={`rounded-xl border p-3 text-left ${
+                  className={`rounded-xl border p-3 text-left transition-ui ${
                     icsAccess === opt.key
-                      ? "border-mint bg-mint/10"
-                      : "border-white/10 bg-white/5 hover:bg-white/10"
+                      ? "border-blue-500/40 bg-blue-500/10"
+                      : "border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.12] cursor-pointer"
                   }`}
                 >
-                  <div className={`text-sm font-medium ${icsAccess === opt.key ? "text-mint" : "text-white"}`}>{opt.label}</div>
+                  <div className={`text-sm font-medium ${icsAccess === opt.key ? "text-blue-300" : "text-white"}`}>{opt.label}</div>
                   <div className="text-xs text-slate-400">{opt.desc}</div>
                 </button>
               ))}
@@ -543,11 +544,11 @@ export default function WizardPage() {
       return (
         <div className="space-y-3 text-sm text-slate-200">
           <h3 className="text-base font-semibold text-white">Summary</h3>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-2">
             <p>Protocol: <strong>{protoMeta?.label ?? icsProto}</strong> (port {protoMeta?.port})</p>
             <p>Direction: <strong>{icsSrcZone}</strong> &#8594; <strong>{icsDstZone}</strong></p>
             <p>Access: <strong>{icsAccess === "readonly" ? "Read-only" : icsAccess === "readwrite" ? "Read/Write" : "Monitor-only (learn)"}</strong></p>
-            <p>Firewall rule: <span className="text-mint">ALLOW</span> with ICS predicate</p>
+            <p>Firewall rule: <span className="text-emerald-400">ALLOW</span> with ICS predicate</p>
           </div>
         </div>
       );
@@ -586,10 +587,10 @@ export default function WizardPage() {
                           return next;
                         });
                       }}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                      className={`rounded-lg border px-3 py-2 text-left text-sm transition-ui ${
                         selected
-                          ? "border-mint bg-mint/20 text-mint"
-                          : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                          ? "border-blue-500/40 bg-blue-500/20 text-blue-300"
+                          : "border-white/[0.08] bg-white/[0.03] text-slate-200 hover:bg-white/[0.08]"
                       }`}
                     >
                       {p.label}
@@ -603,13 +604,13 @@ export default function WizardPage() {
       return (
         <div className="space-y-3 text-sm text-slate-200">
           <h3 className="text-base font-semibold text-white">Summary</h3>
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-2">
             <p>Direction: <strong>{izSrcZone}</strong> &#8594; <strong>{izDstZone}</strong></p>
             <p>Protocols: {izAny ? <strong>Any</strong> : <strong>{Array.from(izSelected).map((k) => {
               const p = COMMON_PROTOCOLS.find((cp) => `${cp.name}:${cp.port}` === k);
               return p?.label ?? k;
             }).join(", ")}</strong>}</p>
-            <p>Firewall rule: <span className="text-mint">ALLOW</span></p>
+            <p>Firewall rule: <span className="text-emerald-400">ALLOW</span></p>
           </div>
         </div>
       );
@@ -627,15 +628,15 @@ export default function WizardPage() {
       </p>
 
       {loading && (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-          Loading configuration...
-        </div>
+        <Card>
+          <p className="text-sm text-slate-300">Loading configuration...</p>
+        </Card>
       )}
 
       {!loading && zones.length === 0 && (
-        <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           No zones configured. Please{" "}
-          <Link href="/zones/" className="font-semibold text-mint hover:text-mint/80">
+          <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
             create zones
           </Link>{" "}
           before using the wizard.
@@ -653,12 +654,12 @@ export default function WizardPage() {
                 type="button"
                 onClick={() => (isActive ? reset() : openWizard(c.id))}
                 disabled={zones.length === 0}
-                className={`rounded-2xl border p-5 text-left transition ${
+                className={`rounded-xl border p-5 text-left transition-ui ${
                   isActive
-                    ? "border-mint/50 bg-mint/10"
+                    ? "border-blue-500/40 bg-blue-500/10"
                     : zones.length === 0
-                      ? "cursor-not-allowed border-white/5 bg-white/[0.02] opacity-50"
-                      : "border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10"
+                      ? "cursor-not-allowed border-white/[0.05] bg-white/[0.02] opacity-50"
+                      : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.12] hover:bg-white/[0.06] cursor-pointer"
                 }`}
               >
                 <div className="mb-3 flex items-center gap-3">
@@ -674,7 +675,7 @@ export default function WizardPage() {
 
       {/* ── inline wizard flow ──────────────────────────────────── */}
       {active && card && !success && (
-        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 shadow-card">
           {/* step pills */}
           <div className="mb-6 flex flex-wrap gap-2">
             {card.steps.map((s, i) => (
@@ -682,12 +683,12 @@ export default function WizardPage() {
                 key={i}
                 type="button"
                 onClick={() => i < step && setStep(i)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-ui ${
                   i === step
-                    ? "bg-mint/20 text-mint"
+                    ? "bg-blue-500/20 text-blue-300"
                     : i < step
-                      ? "bg-white/10 text-white cursor-pointer hover:bg-white/15"
-                      : "bg-white/5 text-slate-500"
+                      ? "bg-white/[0.08] text-white cursor-pointer hover:bg-white/[0.12]"
+                      : "bg-white/[0.03] text-slate-500"
                 }`}
               >
                 {i + 1}. {s}
@@ -700,17 +701,17 @@ export default function WizardPage() {
 
           {/* error */}
           {error && (
-            <div className="mt-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {error}
             </div>
           )}
 
           {/* navigation */}
-          <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+          <div className="mt-6 flex items-center justify-between border-t border-white/[0.08] pt-4">
             <button
               type="button"
               onClick={() => (step === 0 ? reset() : setStep(step - 1))}
-              className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 hover:bg-white/10"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               {step === 0 ? "Cancel" : "Back"}
             </button>
@@ -720,7 +721,7 @@ export default function WizardPage() {
                 type="button"
                 onClick={() => setStep(step + 1)}
                 disabled={!canAdvance()}
-                className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-medium text-mint hover:bg-mint/30 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Next
               </button>
@@ -729,7 +730,7 @@ export default function WizardPage() {
                 type="button"
                 onClick={handleApply}
                 disabled={applying}
-                className="rounded-lg bg-mint px-4 py-2 text-sm font-medium text-black hover:bg-mint/90 disabled:opacity-50"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
               >
                 {applying ? "Applying..." : "Apply"}
               </button>
@@ -740,26 +741,26 @@ export default function WizardPage() {
 
       {/* ── success message ─────────────────────────────────────── */}
       {success && (
-        <div className="mt-6 rounded-2xl border border-mint/30 bg-mint/10 p-6">
-          <h3 className="mb-2 text-sm font-semibold text-mint">Success</h3>
+        <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6">
+          <h3 className="mb-2 text-sm font-semibold text-emerald-400">Success</h3>
           <p className="mb-4 text-sm text-slate-200">{success}</p>
           <div className="flex flex-wrap gap-3 text-sm">
             <Link
               href="/firewall/"
-              className="rounded-lg bg-white/10 px-3 py-2 text-slate-200 hover:bg-white/20"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               View firewall rules
             </Link>
             <Link
               href="/nat/"
-              className="rounded-lg bg-white/10 px-3 py-2 text-slate-200 hover:bg-white/20"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-slate-200 transition-ui hover:bg-white/[0.08]"
             >
               View NAT config
             </Link>
             <button
               type="button"
               onClick={reset}
-              className="rounded-lg bg-mint/20 px-3 py-2 text-mint hover:bg-mint/30"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-white font-medium transition-ui hover:bg-blue-500"
             >
               Run another wizard
             </button>

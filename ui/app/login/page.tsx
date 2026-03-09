@@ -84,30 +84,30 @@ function LoginInner() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-black text-slate-100">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 shadow-lg backdrop-blur">
+      <div className="w-full max-w-md rounded-xl border border-white/[0.08] bg-surface-raised p-8 shadow-card-lg">
         <div className="mb-6 flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full bg-mint" />
+          <div className="h-2 w-2 rounded-full bg-blue-500" />
           <h1 className="text-xl font-semibold text-white">containd login</h1>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {error}
           </div>
         )}
         {info && (
-          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200">
+          <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
             {info}
           </div>
         )}
         {detail && (
-          <div className="mb-4 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+          <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
             Last auth error: <span className="font-mono">{detail}</span>
           </div>
         )}
 
         {alreadyLoggedIn && (
-          <div className="mb-4 rounded-lg border border-mint/30 bg-mint/10 px-3 py-2 text-sm text-slate-100">
+          <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-slate-100">
             You are already logged in.
             <div className="mt-2">
               <button
@@ -115,7 +115,7 @@ function LoginInner() {
                 onClick={() => {
                   if (typeof window !== "undefined") window.location.href = "/";
                 }}
-                className="rounded-lg bg-mint/20 px-3 py-2 text-sm text-mint hover:bg-mint/30"
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
               >
                 Continue
               </button>
@@ -123,34 +123,38 @@ function LoginInner() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="grid gap-3">
-          <label htmlFor="login-username" className="text-xs uppercase tracking-wide text-slate-400">
-            Username
-          </label>
-          <input
-            id="login-username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            autoComplete="username"
-          />
-          <label htmlFor="login-password" className="mt-2 text-xs uppercase tracking-wide text-slate-400">
-            Password
-          </label>
-          <input
-            id="login-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
-            autoComplete="current-password"
-          />
+        <form onSubmit={onSubmit} className="grid gap-4">
+          <div>
+            <label htmlFor="login-username" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Username
+            </label>
+            <input
+              id="login-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              autoComplete="username"
+            />
+          </div>
+          <div>
+            <label htmlFor="login-password" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Password
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              autoComplete="current-password"
+            />
+          </div>
           <button
             type="submit"
             disabled={state === "logging_in"}
-            className="mt-4 rounded-lg bg-mint/20 px-3 py-2 text-sm text-mint hover:bg-mint/30 disabled:opacity-60"
+            className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-60"
           >
-            {state === "logging_in" ? "Logging in…" : "Login"}
+            {state === "logging_in" ? "Logging in..." : "Login"}
           </button>
         </form>
 

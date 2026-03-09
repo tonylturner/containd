@@ -7,6 +7,7 @@ import Link from "next/link";
 import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Sparkline } from "../../components/Sparkline";
+import { Card } from "../../components/Card";
 
 export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -141,10 +142,6 @@ export default function MonitoringOverviewPage() {
     typeof (services as any)?.nginx?.rate_per_min === "number"
       ? (services as any).nginx.rate_per_min
       : null;
-  const nginxErrors =
-    typeof (services as any)?.nginx?.errors_rate_per_min === "number"
-      ? (services as any).nginx.errors_rate_per_min
-      : null;
 
   const serviceCards = services
     ? [
@@ -233,7 +230,7 @@ export default function MonitoringOverviewPage() {
                   <span className="text-slate-500"> · nginx {nginxRate.toFixed(1)}/min</span>
                 )}
                 {envoyErrors !== null && (
-                  <span className="text-amber-300"> · {envoyErrors.toFixed(1)} err/min</span>
+                  <span className="text-amber-400"> · {envoyErrors.toFixed(1)} err/min</span>
                 )}
               </span>
             </div>
@@ -241,13 +238,13 @@ export default function MonitoringOverviewPage() {
               {serviceCards.slice(0, 4).map((svc) => (
                 <div
                   key={svc.key}
-                  className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 transition-ui"
                 >
                   <span className="flex items-center gap-2 text-slate-300">
                     <Image src={svc.icon} alt="" width={16} height={16} className="h-4 w-4" />
                     {svc.label}
                   </span>
-                  <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] text-slate-200">
+                  <span className="rounded-full bg-white/[0.08] px-2 py-1 text-[10px] text-slate-200">
                     {svc.status}
                   </span>
                 </div>
@@ -270,7 +267,7 @@ export default function MonitoringOverviewPage() {
                     <span className="uppercase text-slate-400">{row.proto}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/5">
+                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -311,10 +308,10 @@ export default function MonitoringOverviewPage() {
             <Sparkline values={activitySeries} color="var(--primary)" />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
-            <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1">
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
               DPI {dpiCount.toLocaleString()}
             </div>
-            <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1">
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
               Alerts {alertCount.toLocaleString()}
             </div>
           </div>
@@ -331,7 +328,7 @@ export default function MonitoringOverviewPage() {
                     <span className="uppercase text-slate-400">{row.app}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/5">
+                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -348,7 +345,7 @@ export default function MonitoringOverviewPage() {
               <span className="text-slate-400">Sources</span>
               <span className="text-white">{endpointStats.srcCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/5">
+            <div className="h-2 w-full rounded-full bg-white/[0.03]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
@@ -358,7 +355,7 @@ export default function MonitoringOverviewPage() {
               <span className="text-slate-400">Destinations</span>
               <span className="text-white">{endpointStats.dstCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/5">
+            <div className="h-2 w-full rounded-full bg-white/[0.03]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}
@@ -368,22 +365,5 @@ export default function MonitoringOverviewPage() {
         </Card>
       </div>
     </Shell>
-  );
-}
-
-function Card({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
-        {title}
-      </p>
-      <div className="mt-3">{children}</div>
-    </div>
   );
 }

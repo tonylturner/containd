@@ -73,19 +73,19 @@ export default function TopologyPage() {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm" />
       ) : null}
       <div
-        className={`relative min-h-[640px] rounded-2xl border border-white/10 bg-black/40 p-2 shadow-lg backdrop-blur ${
+        className={`relative min-h-[640px] rounded-xl border border-white/[0.08] bg-white/[0.03] p-2 shadow-card backdrop-blur ${
           expanded ? "fixed inset-6 z-[60] h-[calc(100vh-48px)]" : "h-[calc(100vh-160px)]"
         }`}
       >
         {error ? (
-          <div className="absolute left-4 top-4 z-10 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          <div className="absolute left-4 top-4 z-10 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {error}
           </div>
         ) : null}
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-black/70 text-slate-200 hover:bg-black/60"
+          className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-black/70 text-slate-200 transition-ui hover:bg-white/[0.08]"
           title={expanded ? "Exit full screen" : "Full screen"}
           aria-label="Toggle fullscreen"
         >
@@ -167,7 +167,7 @@ type UpstreamNodeData = {
 
 function UpstreamNode({ data }: NodeProps<UpstreamNodeData>) {
   return (
-    <div className="w-[220px] rounded-full border border-white/10 bg-black/60 px-5 py-3 text-sm text-slate-200 shadow-lg">
+    <div className="w-[220px] rounded-full border border-white/[0.08] bg-black/60 px-5 py-3 text-sm text-slate-200 shadow-card">
       <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
       <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: "var(--primary)" }} />
       <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Upstream</div>
@@ -185,7 +185,7 @@ type GatewayNodeData = {
 
 function GatewayNode({ data }: NodeProps<GatewayNodeData>) {
   return (
-    <div className="flex w-[240px] items-center gap-3 rounded-xl border border-white/10 bg-black/60 px-3 py-2 text-xs text-slate-200">
+    <div className="flex w-[240px] items-center gap-3 rounded-xl border border-white/[0.08] bg-black/60 px-3 py-2 text-xs text-slate-200">
       <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
       <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
       <div className="h-7 w-7 rotate-45 rounded border border-white/20 bg-black/70" />
@@ -213,7 +213,7 @@ type FirewallNodeData = {
 
 function FirewallNode({ data }: NodeProps<FirewallNodeData>) {
   return (
-    <div className="w-[260px] rounded-2xl border border-white/10 bg-black/70 px-4 py-4 text-sm text-slate-200 shadow-lg backdrop-blur">
+    <div className="w-[260px] rounded-2xl border border-white/[0.08] bg-black/70 px-4 py-4 text-sm text-slate-200 shadow-card backdrop-blur">
       <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
       <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
       <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
@@ -245,7 +245,7 @@ type ZoneNodeData = {
 function ZoneNode({ data }: NodeProps<ZoneNodeData>) {
   const accent = zoneAccent(data.name);
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm text-slate-200 shadow-lg">
+    <div className="rounded-2xl border border-white/[0.08] bg-black/70 px-4 py-3 text-sm text-slate-200 shadow-card">
       <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
       <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
       <div className="mb-2 h-1 w-12 rounded-full" style={{ backgroundColor: accent.color }} />
@@ -260,7 +260,7 @@ function ZoneNode({ data }: NodeProps<ZoneNodeData>) {
           ) : null}
         </div>
         <div
-          className="rounded-full border border-white/10 bg-black/40 px-2 py-1 text-xs text-slate-300"
+          className="rounded-full border border-white/[0.08] bg-black/40 px-2 py-1 text-xs text-slate-300"
           style={{ color: accent.color }}
         >
           {data.count} nodes
@@ -284,7 +284,7 @@ function InterfaceNode({ data }: NodeProps<InterfaceNodeData>) {
   const accent = zoneAccent(data.zone);
   return (
     <div
-      className="w-[230px] rounded-xl border border-white/10 bg-black/70 px-3 py-2 text-xs text-slate-200"
+      className="w-[230px] rounded-xl border border-white/[0.08] bg-black/70 px-3 py-2 text-xs text-slate-200"
       style={{ borderLeft: `3px solid ${accent.color}` }}
     >
       <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
@@ -297,13 +297,13 @@ function InterfaceNode({ data }: NodeProps<InterfaceNodeData>) {
         </div>
         <span
           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-            data.up ? "bg-mint/15 text-mint" : "bg-amber/15 text-amber"
+            data.up ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
           }`}
         >
           {data.up ? "up" : "down"}
         </span>
       </div>
-      <div className="mt-1 inline-flex items-center rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-slate-300">
+      <div className="mt-1 inline-flex items-center rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-slate-300">
         {data.zone || "unassigned"}
       </div>
       <div className="mt-1 text-[11px] text-slate-400">
@@ -326,15 +326,15 @@ type AssetNodeData = {
 
 function AssetNode({ data }: NodeProps<AssetNodeData>) {
   return (
-    <div className="w-[230px] rounded-xl border border-white/10 bg-black/60 px-3 py-2 text-xs text-slate-200">
+    <div className="w-[230px] rounded-xl border border-white/[0.08] bg-black/60 px-3 py-2 text-xs text-slate-200">
       <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
       <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-white">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-mint/60" />
+          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500/60" />
           {data.name}
         </div>
-        <span className="rounded-full border border-white/10 bg-black/40 px-2 py-0.5 text-[10px] text-slate-300">
+        <span className="rounded-full border border-white/[0.08] bg-black/40 px-2 py-0.5 text-[10px] text-slate-300">
           {data.criticality ?? "standard"}
         </span>
       </div>
@@ -354,7 +354,7 @@ type RoutesNodeData = {
 
 function RoutesNode({ data }: NodeProps<RoutesNodeData>) {
   return (
-    <div className="w-[280px] rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-xs text-slate-200">
+    <div className="w-[280px] rounded-2xl border border-white/[0.08] bg-black/70 px-4 py-3 text-xs text-slate-200">
       <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
       <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: "var(--purple)" }} />
       <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Routes</div>

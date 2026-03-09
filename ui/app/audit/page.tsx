@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, type AuditRecord } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { EmptyState } from "../../components/EmptyState";
 import { useTableControls } from "../../hooks/useTableControls";
 import { SearchBar, SortableHeader, Pagination } from "../../components/TableControls";
 
@@ -38,7 +39,7 @@ export default function AuditPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10 transition-ui"
         >
           Refresh
         </button>
@@ -53,9 +54,15 @@ export default function AuditPage() {
         <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search audit log..." />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg backdrop-blur">
+      {records.length === 0 && table.data.length === 0 ? (
+        <EmptyState
+          title="No audit records yet"
+          description="Administrative actions will appear here automatically."
+        />
+      ) : (
+      <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+          <thead className="bg-white/[0.03]">
             <tr>
               <SortableHeader label="Time" sortKey="timestamp" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
               <SortableHeader label="Actor" sortKey="actor" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
@@ -69,14 +76,12 @@ export default function AuditPage() {
             {table.data.length === 0 && (
               <tr>
                 <td className="px-4 py-4 text-slate-400" colSpan={6}>
-                  {records.length === 0
-                    ? "No audit records yet. Administrative actions will appear here automatically."
-                    : "No audit records match your search."}
+                  No audit records match your search.
                 </td>
               </tr>
             )}
             {table.data.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
+              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
                 <td className="px-4 py-3 text-slate-200">
                   {new Date(r.timestamp).toLocaleString()}
                 </td>
@@ -93,6 +98,7 @@ export default function AuditPage() {
         </table>
         <Pagination page={table.page} totalPages={table.totalPages} totalItems={table.totalItems} onPage={table.setPage} />
       </div>
+      )}
     </Shell>
   );
 }

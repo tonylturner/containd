@@ -15,12 +15,15 @@ import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { Card } from "../../components/Card";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
   const canEdit = isAdmin();
   const toast = useToast();
+  const confirm = useConfirm();
   const [status, setStatus] = useState<any>(null);
   const [forward, setForward] = useState<ForwardProxyConfig>({
     enabled: false,
@@ -182,10 +185,18 @@ export default function ProxiesPage() {
 
   function deleteSite(name: string) {
     if (!canEdit) return;
-    setReverse((r) => ({
-      ...r,
-      sites: (r.sites ?? []).filter((s) => s.name !== name),
-    }));
+    confirm.open({
+      title: "Delete site",
+      message: `Remove reverse proxy site "${name}"? This change takes effect when you save.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: () => {
+        setReverse((r) => ({
+          ...r,
+          sites: (r.sites ?? []).filter((s) => s.name !== name),
+        }));
+      },
+    });
   }
 
   return (
@@ -195,7 +206,7 @@ export default function ProxiesPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
           >
             Refresh
           </button>
@@ -204,20 +215,21 @@ export default function ProxiesPage() {
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
+              className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
             />
             Auto-refresh
           </label>
         </div>
       }
     >
+      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <div className="mb-4 grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
             <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
@@ -244,7 +256,7 @@ export default function ProxiesPage() {
                 Telemetry: access logs when enabled.
               </p>
               {status?.envoy_last_error ? (
-                <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+                <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {status.envoy_last_error}
                 </div>
               ) : null}
@@ -261,8 +273,8 @@ export default function ProxiesPage() {
               </div>
             </>
           )}
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        </Card>
+        <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
             <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
@@ -289,7 +301,7 @@ export default function ProxiesPage() {
                 Telemetry: access logs from published apps.
               </p>
               {status?.nginx_last_error ? (
-                <div className="mt-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber">
+                <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {status.nginx_last_error}
                 </div>
               ) : null}
@@ -306,19 +318,19 @@ export default function ProxiesPage() {
               </div>
             </>
           )}
-        </div>
+        </Card>
       </div>
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       <p className="mb-4 text-xs text-slate-400">
-        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "---"} {autoRefresh ? "(auto)" : ""}
       </p>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
           <h2 className="text-lg font-semibold text-white">Forward proxy</h2>
           <p className="mt-1 text-sm text-slate-300">
             Quick controls for enablement and listening port.
@@ -333,7 +345,7 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setForward((f) => ({ ...f, enabled: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
+                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
               />
               Enabled
             </label>
@@ -352,11 +364,11 @@ export default function ProxiesPage() {
                     listenPort: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
 
-            <details className="rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+            <details className="rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
               <summary className="cursor-pointer text-sm text-slate-200">
                 Advanced options
               </summary>
@@ -380,7 +392,7 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="mgmt, lan"
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
 
@@ -403,7 +415,7 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="*.example.com"
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
 
@@ -423,7 +435,7 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="http://upstream:3128"
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
               </div>
@@ -437,7 +449,7 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setForward((f) => ({ ...f, logRequests: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
+                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
               />
               Log requests
               <InfoTip label="Writes access logs so the UI can show request rate and errors." />
@@ -445,16 +457,16 @@ export default function ProxiesPage() {
 
             <div className="flex items-center justify-end gap-3">
               {saveState === "error" && (
-                <span className="text-sm text-amber">Save failed</span>
+                <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-mint">Saved</span>
+                <span className="text-sm text-emerald-400">Saved</span>
               )}
               {canEdit && (
                 <button
                   onClick={onSaveForward}
                   disabled={saveState === "saving"}
-                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
                 </button>
@@ -463,7 +475,7 @@ export default function ProxiesPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
           <h2 className="text-lg font-semibold text-white">Reverse proxy</h2>
           <p className="mt-1 text-sm text-slate-300">
             Add sites to expose internal apps.
@@ -478,12 +490,12 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setReverse((r) => ({ ...r, enabled: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/20 bg-black/30"
+                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
               />
               Enabled
             </label>
 
-            <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+            <div className="rounded-xl border border-white/[0.08] bg-black/30 p-4">
               <h3 className="text-sm font-semibold text-white">Add site</h3>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <input
@@ -494,7 +506,7 @@ export default function ProxiesPage() {
                     setNewSite((s) => ({ ...s, name: e.target.value }))
                   }
                   placeholder="site name"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="number"
@@ -507,7 +519,7 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="listen port"
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="text"
@@ -523,7 +535,7 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="backends host:port, host:port"
-                  className="md:col-span-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  className="md:col-span-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="text"
@@ -539,14 +551,14 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="hostnames (optional)"
-                  className="md:col-span-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  className="md:col-span-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div className="mt-3 flex justify-end">
                 {canEdit && (
                   <button
                     onClick={addSite}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                    className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
                   >
                     Add
                   </button>
@@ -563,7 +575,7 @@ export default function ProxiesPage() {
               {(reverse.sites ?? []).map((site) => (
                 <div
                   key={site.name}
-                  className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2"
                 >
                   <div>
                     <div className="text-sm font-semibold text-white">
@@ -576,7 +588,7 @@ export default function ProxiesPage() {
                   {canEdit && (
                     <button
                       onClick={() => deleteSite(site.name)}
-                      className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                      className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-200 transition-ui hover:bg-white/[0.08]"
                     >
                       Delete
                     </button>
@@ -587,16 +599,16 @@ export default function ProxiesPage() {
 
             <div className="flex items-center justify-end gap-3">
               {saveState === "error" && (
-                <span className="text-sm text-amber">Save failed</span>
+                <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-mint">Saved</span>
+                <span className="text-sm text-emerald-400">Saved</span>
               )}
               {canEdit && (
                 <button
                   onClick={onSaveReverse}
                   disabled={saveState === "saving"}
-                  className="rounded-lg bg-mint/20 px-4 py-2 text-sm font-semibold text-mint hover:bg-mint/30 disabled:opacity-50"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
                 </button>
