@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  --ui-bg: #121212;
+  --ui-surface: #1e1e1e;
+  --ui-border: #2e2e2e;
+  --ui-text: #ffffff;
+  --ui-text-muted: #a3a3a3;
+  --ui-primary: #2563eb;
+  --ui-primary-hover: #3b82f6;
+  --ui-primary-active: #1e40af;
+  --ui-success: #10b981;
+  --ui-warning: #fbbf24;
+  --ui-error: #ef4444;
+  --ui-purple: #8b5cf6;
+  --ui-teal: #06b6d4;
+  --ui-pink: #ec4899;
+  --ui-orange: #f97316;
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --border: #2e2e2e;
+  --text: #ffffff;
+  --text-muted: #a3a3a3;
+  --primary: #2563eb;
+  --primary-hover: #3b82f6;
+  --primary-active: #1e40af;
+  --success: #10b981;
+  --warning: #fbbf24;
+  --error: #ef4444;
+  --purple: #8b5cf6;
+  --teal: #06b6d4;
+  --pink: #ec4899;
+  --orange: #f97316;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: var(--ui-bg);
+  --md-default-fg-color: var(--ui-text);
+  --md-default-fg-color--light: var(--ui-text-muted);
+  --md-default-fg-color--lighter: #6b7280;
+  --md-default-fg-color--lightest: #4b5563;
+  --md-primary-fg-color: var(--ui-primary);
+  --md-primary-fg-color--light: var(--ui-primary-hover);
+  --md-primary-fg-color--dark: var(--ui-primary-active);
+  --md-accent-fg-color: var(--ui-teal);
+  --md-typeset-a-color: var(--ui-primary-hover);
+  --md-code-bg-color: var(--ui-surface);
+  --md-code-fg-color: var(--ui-text);
+  --md-footer-bg-color: var(--ui-bg);
+  --md-footer-bg-color--dark: #0f1115;
+}
+
+body {
+  font-family: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.06), transparent 30%),
+    radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.08), transparent 30%),
+    var(--ui-bg);
+}
+
+.md-header {
+  background-color: var(--ui-bg);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.md-content__inner {
+  background: transparent;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5 {
+  color: var(--ui-text);
+}
+
+.md-typeset code {
+  border: 1px solid var(--ui-border);
+}
+
+.md-nav__link--active,
+.md-nav__link:focus,
+.md-nav__link:hover {
+  color: var(--ui-primary-hover);
+}
+
+.md-header__link--app {
+  color: var(--ui-text);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.md-header__link--app:hover,
+.md-header__link--app:focus {
+  color: var(--ui-primary-hover);
+}
