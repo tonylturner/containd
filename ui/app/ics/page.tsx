@@ -14,6 +14,7 @@ import {
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { InfoTip } from "../../components/InfoTip";
+import { RulePreviewButton } from "../../components/RulePreview";
 
 /* ── Protocol metadata for the UI ────────────────────────────────── */
 
@@ -679,7 +680,28 @@ function EditICSModal({
           </div>
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <RulePreviewButton
+            rule={{
+              id: rule.id,
+              ics: enabled
+                ? {
+                    protocol,
+                    functionCode: functionCodes
+                      .split(",")
+                      .map((v) => Number(v.trim()))
+                      .filter((n) => Number.isFinite(n) && n >= 0),
+                    addresses: addresses
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    readOnly,
+                    writeOnly,
+                    mode,
+                  }
+                : undefined,
+            }}
+          />
           <button
             onClick={onClose}
             className="rounded-lg bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"

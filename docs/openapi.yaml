@@ -151,6 +151,72 @@ components:
         result: { type: string, enum: [success, failure] }
         detail: { type: string }
 
+    PolicyAnalysis:
+      type: object
+      properties:
+        rules: { type: array, items: { type: object }, description: Auto-generated allowlist rules }
+        profiles:
+          type: array
+          items: { $ref: "#/components/schemas/LearnedProfile" }
+        stats:
+          type: object
+          properties:
+            events: { type: array, items: { type: object } }
+            flows: { type: array, items: { type: object } }
+            protocols: { type: object, additionalProperties: { type: integer } }
+            duration: { type: string, description: Duration of the capture }
+            packetCount: { type: integer }
+        eventSummary: { type: object, additionalProperties: { type: integer }, description: Event counts keyed by protocol }
+
+    LearnedProfile:
+      type: object
+      properties:
+        protocol: { type: string }
+        sourceIP: { type: string }
+        destIP: { type: string }
+        unitIDs: { type: object, additionalProperties: { type: boolean } }
+        functionCodes: { type: object, additionalProperties: { type: boolean } }
+        addresses: { type: object, additionalProperties: { type: boolean } }
+        readSeen: { type: boolean }
+        writeSeen: { type: boolean }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+
+    ICSTemplateInfo:
+      type: object
+      properties:
+        name: { type: string, example: modbus_read_only }
+        description: { type: string }
+        protocol: { type: string, example: modbus }
+
+    ApplyICSTemplateRequest:
+      type: object
+      required: [template]
+      properties:
+        template: { type: string, description: "Template name (e.g. modbus_read_only, dnp3_secure_operations)" }
+        source_zones: { type: array, items: { type: string } }
+        dest_zones: { type: array, items: { type: string } }
+        params:
+          type: object
+          properties:
+            ranges: { type: array, items: { type: string }, description: Register address ranges (modbus_register_guard only) }
+
+    RulePreviewResponse:
+      type: object
+      properties:
+        match_count: { type: integer, description: Number of recent events matching the rule }
+        sample_matches:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+          description: Up to 50 sample matching events
+        time_range:
+          type: object
+          nullable: true
+          properties:
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+        total_events: { type: integer, description: Total events evaluated }
+
   parameters:
     pathId:
       name: id
@@ -494,3 +560,142 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/AuditRecord" } }
+
+  # ── PCAP Analysis ────────────────────────────────────────────────
+  /pcap/analyze:
+    post:
+      summary: Upload a PCAP file for DPI analysis and policy generation
+      tags: [PCAP]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PCAP or PCAPng file
+      responses:
+        "200":
+          description: Analysis results with generated rules
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyAnalysis" }
+        "400": { description: Invalid or non-PCAP file }
+
+  /pcap/analyze/{name}:
+    post:
+      summary: Analyze a previously uploaded PCAP by name
+      tags: [PCAP]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+          description: Name of an uploaded PCAP file
+      responses:
+        "200":
+          description: Analysis results with generated rules
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyAnalysis" }
+        "404": { description: PCAP not found }
+
+  # ── ICS Rule Templates ──────────────────────────────────────────
+  /templates/ics:
+    get:
+      summary: List available ICS protocol security templates
+      tags: [Templates]
+      responses:
+        "200":
+          description: Array of available ICS templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ICSTemplateInfo" }
+
+  /templates/ics/apply:
+    post:
+      summary: Apply an ICS template to generate firewall rules
+      tags: [Templates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplyICSTemplateRequest" }
+      responses:
+        "200":
+          description: Generated rules from the template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template: { type: string }
+                  rules: { type: array, items: { type: object } }
+        "400": { description: Unknown template or missing params }
+
+  # ── Rule Impact Preview ─────────────────────────────────────────
+  /firewall/rules/preview:
+    post:
+      summary: Dry-run a proposed rule against recent traffic
+      tags: [Firewall]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A firewall rule definition (same schema as rule creation)
+      responses:
+        "200":
+          description: Preview results showing how many recent events match
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RulePreviewResponse" }
+        "400": { description: Invalid rule payload }
+
+  # ── Learn Mode ──────────────────────────────────────────────────
+  /learn/profiles:
+    get:
+      summary: List learned ICS traffic profiles
+      tags: [Learn]
+      responses:
+        "200":
+          description: Array of learned traffic profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LearnedProfile" }
+
+  /learn/generate:
+    post:
+      summary: Generate firewall rules from learned profiles
+      tags: [Learn]
+      responses:
+        "200":
+          description: Generated allowlist rules
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+
+  /learn/apply:
+    post:
+      summary: Apply learned rules to the running configuration
+      tags: [Learn]
+      responses:
+        "200": { description: Learned rules applied to config }
+        "400": { description: Learn mode not available }
+
+  /learn:
+    delete:
+      summary: Clear all learned traffic profiles
+      tags: [Learn]
+      responses:
+        "200": { description: Learned data cleared }
+        "400": { description: Learn mode not available }
