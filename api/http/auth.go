@@ -27,7 +27,7 @@ const ctxUserKey = "user"
 const ctxSessionKey = "session"
 
 const (
-	idleTTL = 5 * time.Minute
+	idleTTL = 30 * time.Minute
 	maxTTL  = 4 * time.Hour
 )
 

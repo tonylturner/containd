@@ -1178,15 +1178,15 @@ export const api = {
     if (handleUnauthorized(res) || !res.ok) return null;
     return await res.blob();
   },
-  commit: () => postJSON<{ status: string }>("/api/v1/config/commit", {}),
+  commit: () => postJSONResult<{ status: string }>("/api/v1/config/commit", {}),
   commitConfirmed: (ttlSeconds?: number) =>
-    postJSON<{ status: string }>(
+    postJSONResult<{ status: string }>(
       "/api/v1/config/commit_confirmed",
       ttlSeconds ? { ttl_seconds: ttlSeconds } : {},
     ),
   confirmCommit: () =>
-    postJSON<{ status: string }>("/api/v1/config/confirm", {}),
-  rollback: () => postJSON<{ status: string }>("/api/v1/config/rollback", {}),
+    postJSONResult<{ status: string }>("/api/v1/config/confirm", {}),
+  rollback: () => postJSONResult<{ status: string }>("/api/v1/config/rollback", {}),
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
