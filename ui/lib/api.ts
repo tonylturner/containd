@@ -1497,14 +1497,6 @@ export const api = {
   stopSimulation: () =>
     postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
 
-  // Simulation
-  getSimulationStatus: () =>
-    getJSON<{ running: boolean }>("/api/v1/simulation"),
-  startSimulation: () =>
-    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "start" }),
-  stopSimulation: () =>
-    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
-
   // Sessions / Conntrack
   listConntrack: (limit = 200) =>
     getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
