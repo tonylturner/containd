@@ -401,6 +401,7 @@ func DefaultConfig() *Config {
 				FlushEvery: 2,
 			},
 		},
+		IDS:  DefaultIDSConfig(),
 		PCAP: PCAPConfig{},
 	}
 }

@@ -32,6 +32,7 @@ import (
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/synth"
 )
@@ -99,7 +100,9 @@ func Run(ctx context.Context, opts Options) error {
 	// Start synthetic traffic generator in lab/dpiMock mode.
 	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
 		logger.Infof("dpiMock enabled: starting synthetic traffic generator")
-		go synth.Run(ctx, dpEngine.Events(), synth.DefaultConfig())
+		synthCfg := synth.DefaultConfig()
+		synthCfg.OnEvent = synthIDSCallback(dpEngine)
+		go synth.Run(ctx, dpEngine.Events(), synthCfg)
 	}
 
 	ownership.start(ctx)
@@ -682,6 +685,40 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.Hand
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+	}
+}
+
+// synthIDSCallback returns a callback that evaluates IDS rules against synthetic
+// events, generating alert events in the telemetry store.
+func synthIDSCallback(dpEngine *engine.Engine) func(dpevents.Event) {
+	return func(ev dpevents.Event) {
+		snap := dpEngine.CurrentRules()
+		if snap == nil || !snap.IDS.Enabled || len(snap.IDS.Rules) == 0 {
+			return
+		}
+		eval := ids.New(snap.IDS)
+		dpiEv := dpi.Event{
+			FlowID:     ev.FlowID,
+			Proto:      ev.Proto,
+			Kind:       ev.Kind,
+			Attributes: ev.Attributes,
+			Timestamp:  ev.Timestamp,
+		}
+		alerts := eval.Evaluate(dpiEv)
+		for _, a := range alerts {
+			dpEngine.Events().Append(dpevents.Event{
+				FlowID:     ev.FlowID,
+				Proto:      a.Proto,
+				Kind:       a.Kind,
+				Attributes: a.Attributes,
+				Timestamp:  a.Timestamp,
+				SrcIP:      ev.SrcIP,
+				DstIP:      ev.DstIP,
+				SrcPort:    ev.SrcPort,
+				DstPort:    ev.DstPort,
+				Transport:  ev.Transport,
+			})
 		}
 	}
 }
