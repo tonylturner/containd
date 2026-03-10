@@ -1021,36 +1021,45 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 	}
 	if engine != nil {
+		// Infrastructure steps (interfaces, routing, services, pcap) may fail in
+		// unprivileged environments (e.g. Docker without NET_ADMIN). Collect those
+		// errors but always proceed to compile and apply rules so that IDS/firewall
+		// rule evaluation works even when nftables is unavailable.
+		var infraErrs []error
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("interfaces: %w", err))
 		}
 		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("routing: %w", err))
 		}
 		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("services: %w", err))
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("dataplane: %w", err))
 		}
 		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("pcap config: %w", err))
 		}
 		if cfg.PCAP.Enabled {
 			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-				return err
+				infraErrs = append(infraErrs, fmt.Errorf("pcap start: %w", err))
 			}
 		} else {
 			if _, err := engine.StopPcap(ctx); err != nil {
-				return err
+				infraErrs = append(infraErrs, fmt.Errorf("pcap stop: %w", err))
 			}
 		}
+		// Always compile and push rules regardless of infrastructure errors.
 		snap, err := compile.CompileSnapshot(cfg)
 		if err != nil {
 			return err
 		}
 		if err := engine.ApplyRules(ctx, snap); err != nil {
 			return err
+		}
+		if len(infraErrs) > 0 {
+			return errors.Join(infraErrs...)
 		}
 	}
 	return nil
