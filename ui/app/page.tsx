@@ -131,8 +131,8 @@ export default function Home() {
             <Skeleton className="h-5 w-48" />
           )}
           {health?.build && (
-            <span className="hidden sm:inline text-2xs text-slate-600 font-mono">
-              Build {health.build}
+            <span className="hidden sm:inline text-2xs text-amber-500/60 font-mono">
+              {health.build === "dev" ? "v0.1.1-beta" : `v${health.build}`}
             </span>
           )}
         </div>
@@ -157,19 +157,19 @@ export default function Home() {
               type="button"
               onClick={toggleSimulation}
               disabled={simToggling}
-              className={`flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-2xs font-mono transition-ui ${
-                simRunning
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                  : "border-white/[0.08] bg-white/[0.03] text-slate-500 hover:bg-white/[0.06]"
-              }`}
+              className="flex items-center gap-2 text-2xs font-mono"
               title={simRunning ? "Stop traffic simulation" : "Start traffic simulation"}
             >
+              <span className={`text-2xs ${simRunning ? "text-amber-400" : "text-slate-500"}`}>SIM</span>
               <span
-                className={`inline-block h-1.5 w-1.5 rounded-full ${
-                  simRunning ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
+                className={`relative inline-flex h-4 w-8 items-center rounded-[2px] transition-colors ${
+                  simRunning ? "bg-amber-500" : "bg-white/10"
                 }`}
-              />
-              {simToggling ? "..." : simRunning ? "SIM" : "SIM"}
+              >
+                <span className={`inline-block h-3 w-3 rounded-[1px] bg-white transition-transform ${
+                  simRunning ? "translate-x-4" : "translate-x-0.5"
+                }`} />
+              </span>
             </button>
           )}
           <span className="text-amber-500/80 tabular-nums">{clock}</span>

@@ -138,9 +138,7 @@ func parseYARARuleHeader(text string) (name string, tags []string, body string, 
 	}
 	name = m[1]
 	if m[2] != "" {
-		for _, t := range strings.Fields(strings.TrimSpace(m[2])) {
-			tags = append(tags, t)
-		}
+		tags = append(tags, strings.Fields(strings.TrimSpace(m[2]))...)
 	}
 	body = m[3]
 	return name, tags, body, nil

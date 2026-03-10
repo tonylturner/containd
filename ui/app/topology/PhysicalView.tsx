@@ -264,7 +264,7 @@ export default function PhysicalView() {
   const memLimit = st?.container.memLimitBytes ?? 0;
 
   const containerId = insp?.container.id || st?.container.id || "\u2014";
-  const containerImage = insp?.container.image || data.health?.build || "\u2014";
+  const containerImage = insp?.container.image || "containd:" + (data.health?.build || "unknown");
   const restartPolicy = insp?.container.restartPolicy || "\u2014";
   const restartCount = insp?.container.restartCount ?? 0;
   const networkMode = insp?.container.networkMode || "\u2014";

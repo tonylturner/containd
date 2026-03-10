@@ -209,70 +209,24 @@ export default function ICSPolicyPage() {
         </div>
       )}
 
-      {/* -- DPI capture config ------------------------------------------ */}
-      <Card
-        title="DPI Capture (Required)"
-        titleRight={
-          canEdit ? (
-            <button
-              onClick={saveDpiConfig}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
-            >
-              {dpiSaveState === "saving" ? "Saving..." : "Save"}
-            </button>
-          ) : undefined
-        }
-        className="mb-4"
-      >
-        <div className="mb-3 text-sm text-[var(--text)]">
-          ICS filters require DPI capture to be enabled on at least one
-          interface.
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-              Capture interfaces
-              <InfoTip label="Comma-separated interfaces to inspect for ICS protocol traffic." />
-            </label>
-            <input
-              value={dpiIfaceCSV}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setDpiConfig((c) => ({
-                  ...c,
-                  captureInterfaces: e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
-              placeholder="lan2, lan3"
-              className="mt-1 w-full input-industrial"
-            />
+      {/* -- DPI status --------------------------------------------------- */}
+      <Card title="DPI Status" className="mb-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-[var(--text)]">
+            ICS protocol filters require DPI to be enabled with at least one capture interface configured.
           </div>
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-            <input
-              type="checkbox"
-              checked={dpiConfig.dpiMock ?? false}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setDpiConfig((c) => ({ ...c, dpiMock: e.target.checked }))
-              }
-              className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
-            />
-            Safe learning lab mode (DPI inspect-all)
-            <InfoTip label="Lab-only: inspect all traffic for DPI learning and UI visibility." />
-          </label>
+          <StatusBadge variant={(dpiConfig.dpiEnabled ?? false) ? "success" : "neutral"} dot>
+            {(dpiConfig.dpiEnabled ?? false) ? "DPI Enabled" : "DPI Disabled"}
+          </StatusBadge>
         </div>
-        {!canEdit && (
+        {(dpiConfig.captureInterfaces ?? []).length > 0 && (
           <div className="mt-2 text-xs text-[var(--text-muted)]">
-            View-only mode: DPI capture settings are read-only.
+            Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
         )}
-        <div className="mt-2 text-xs text-[var(--text-muted)]">
-          PCAP management lives in{" "}
-          <Link href="/dataplane/" className="text-[var(--amber)] hover:text-[var(--amber)]">
-            PCAP &rarr;
+        <div className="mt-2">
+          <Link href="/firewall/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+            Configure DPI in Firewall Rules &rarr;
           </Link>
         </div>
       </Card>

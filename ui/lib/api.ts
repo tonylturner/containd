@@ -198,6 +198,12 @@ function clearAuthExpired() {
   }
 }
 
+export type DPIExclusion = {
+  value: string;
+  type: "ip" | "cidr" | "domain";
+  reason?: string;
+};
+
 export type DataPlaneConfig = {
   captureInterfaces?: string[];
   enforcement?: boolean;

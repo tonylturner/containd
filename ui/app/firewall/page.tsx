@@ -559,27 +559,7 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <Card padding="md" className="mt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">DPI Status</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Deep packet inspection for ICS protocol filtering.
-            </p>
-          </div>
-          <StatusBadge variant={(dpiConfig.captureInterfaces ?? []).length > 0 ? "success" : "neutral"} dot>
-            {(dpiConfig.captureInterfaces ?? []).length > 0 ? "Enabled" : "Disabled"}
-          </StatusBadge>
-        </div>
-        <div className="mt-2 text-xs text-[var(--text)]">
-          Monitored interfaces: {(dpiConfig.captureInterfaces ?? []).length > 0 ? (dpiConfig.captureInterfaces ?? []).join(", ") : "none"}
-        </div>
-        <div className="mt-2">
-          <Link href="/dataplane/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
-            Configure DPI settings &rarr;
-          </Link>
-        </div>
-      </Card>
+      <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
@@ -786,33 +766,16 @@ function EditRuleModal({
         </div>
 
         {icsEnabled && (
-          <div className="mt-3 grid gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 md:grid-cols-4">
-            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="input-industrial">
-              {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
-            </select>
-            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="input-industrial md:col-span-1">
-              <option value="learn">safe learning</option>
-              <option value="enforce">enforce</option>
-            </select>
-            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="input-industrial" />
-            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="input-industrial" />
-            {icsMeta.showUnitId && (
-              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="input-industrial" />
-            )}
-            {icsMeta.showObjectClasses && (
-              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="input-industrial md:col-span-2" />
-            )}
-            <div className="flex items-center gap-4 text-sm text-[var(--text)]">
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-                Read-only
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-                Write-only
-              </label>
-            </div>
-          </div>
+          <ICSPredicateFields
+            protocol={icsProtocol} onProtocolChange={setIcsProtocol}
+            mode={mode} onModeChange={setMode}
+            functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
+            addresses={addresses} onAddressesChange={setAddresses}
+            unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
+            objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
+            readOnly={readOnly} onReadOnlyChange={setReadOnly}
+            writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
+          />
         )}
 
         <div className="mt-4 flex justify-end gap-2">
@@ -948,33 +911,16 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
       </div>
 
       {icsEnabled && (
-        <div className="mt-3 grid gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 md:grid-cols-4">
-          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="input-industrial">
-            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
-          </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="input-industrial md:col-span-1">
-            <option value="learn">safe learning</option>
-            <option value="enforce">enforce</option>
-          </select>
-          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="input-industrial" />
-          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="input-industrial" />
-          {icsMeta.showUnitId && (
-            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="input-industrial" />
-          )}
-          {icsMeta.showObjectClasses && (
-            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="input-industrial md:col-span-2" />
-          )}
-          <div className="flex items-center gap-4 text-sm text-[var(--text)]">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-              Read-only
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-              Write-only
-            </label>
-          </div>
-        </div>
+        <ICSPredicateFields
+          protocol={icsProtocol} onProtocolChange={setIcsProtocol}
+          mode={mode} onModeChange={setMode}
+          functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
+          addresses={addresses} onAddressesChange={setAddresses}
+          unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
+          objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
+          readOnly={readOnly} onReadOnlyChange={setReadOnly}
+          writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
+        />
       )}
 
       <div className="mt-3 flex items-center justify-between">
@@ -984,6 +930,146 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
         </button>
       </div>
     </Card>
+  );
+}
+
+/* ── Shared ICS Predicate Fields ── */
+
+function ICSPredicateFields({
+  protocol, onProtocolChange,
+  mode, onModeChange,
+  functionCodes, onFunctionCodesChange,
+  addresses, onAddressesChange,
+  unitId, onUnitIdChange,
+  objectClasses, onObjectClassesChange,
+  readOnly, onReadOnlyChange,
+  writeOnly, onWriteOnlyChange,
+}: {
+  protocol: string; onProtocolChange: (v: string) => void;
+  mode: string; onModeChange: (v: "enforce" | "learn") => void;
+  functionCodes: string; onFunctionCodesChange: (v: string) => void;
+  addresses: string; onAddressesChange: (v: string) => void;
+  unitId: string; onUnitIdChange: (v: string) => void;
+  objectClasses: string; onObjectClassesChange: (v: string) => void;
+  readOnly: boolean; onReadOnlyChange: (v: boolean) => void;
+  writeOnly: boolean; onWriteOnlyChange: (v: boolean) => void;
+}) {
+  const meta = icsProtoMeta(protocol);
+  const [showHelp, setShowHelp] = useState(false);
+
+  return (
+    <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 space-y-3">
+      {/* Row 1: Protocol + Mode */}
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="md:col-span-2">
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">ICS Protocol</label>
+          <select value={protocol} onChange={(e) => onProtocolChange(e.target.value)} className="input-industrial w-full">
+            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Rule Mode</label>
+          <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
+            <option value="learn">Learning (passive)</option>
+            <option value="enforce">Enforcement (active)</option>
+          </select>
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className="rounded-sm border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
+          >
+            {showHelp ? "Hide" : "Show"} protocol reference
+          </button>
+        </div>
+      </div>
+
+      {/* Protocol reference panel */}
+      {showHelp && (
+        <div className="rounded-sm border border-blue-500/[0.1] bg-blue-500/[0.03] p-3 space-y-2">
+          <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="text-[10px] font-medium text-[var(--text)]">{meta.fcLabel}</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.fcHelp}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-medium text-[var(--text)]">{meta.addrLabel}</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.addrHelp}</div>
+            </div>
+          </div>
+          {meta.notes && (
+            <div className="text-[10px] text-[var(--text-dim)] border-t border-white/[0.04] pt-2 mt-2">{meta.notes}</div>
+          )}
+        </div>
+      )}
+
+      {/* Row 2: Function codes + Addresses */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.fcLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+          <input value={functionCodes} onChange={(e) => onFunctionCodesChange(e.target.value)} placeholder={meta.fcPlaceholder || `${meta.fcLabel}`} className="input-industrial w-full" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.addrLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+          <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder={meta.addrPlaceholder || meta.addrLabel} className="input-industrial w-full" />
+        </div>
+      </div>
+
+      {/* Row 3: Protocol-specific fields */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {meta.showUnitId && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Unit ID <span className="text-[var(--text-dim)]">(0-255, Modbus slave)</span></label>
+            <input value={unitId} onChange={(e) => onUnitIdChange(e.target.value)} placeholder="e.g. 1" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showObjectClasses && (
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">CIP Object Classes <span className="text-[var(--text-dim)]">(hex csv)</span></label>
+            <input value={objectClasses} onChange={(e) => onObjectClassesChange(e.target.value)} placeholder="0x02, 0x04, 0x66" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showStationAddrs && (
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Station Addresses <span className="text-[var(--text-dim)]">(source/destination, 0-65534)</span></label>
+            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showDbNumber && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">DB Numbers <span className="text-[var(--text-dim)]">(Siemens data blocks)</span></label>
+            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="DB1, DB100" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showObjectType && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Object Type <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+            <input disabled placeholder="analog-input, binary-output" className="input-industrial w-full opacity-60" title="Object type filtering coming soon" />
+          </div>
+        )}
+        {meta.showPropertyId && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Property ID <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+            <input disabled placeholder="85 (present-value)" className="input-industrial w-full opacity-60" title="Property ID filtering coming soon" />
+          </div>
+        )}
+      </div>
+
+      {/* Row 4: Direction filter */}
+      <div className="flex items-center gap-4 text-sm text-[var(--text)]">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          Read-only
+          <InfoTip label="Only match read operations (function codes that read data without modifying state)." />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={writeOnly} onChange={(e) => onWriteOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          Write-only
+          <InfoTip label="Only match write/control operations (function codes that modify device state)." />
+        </label>
+      </div>
+    </div>
   );
 }
 
