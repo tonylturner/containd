@@ -2,111 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, Zone, Conduit, ConduitMap } from "../../lib/api";
+import { type ZoneView, type SRCheck, SR_DEFS, MAX_SL, mapZone, scoreZone, slColor, zoneColor } from "../../lib/security-scoring";
 import s from "./security.module.css";
 import ts from "./topology.module.css";
-
-/* ════════════════════════════════════════════════════════════════════
-   IEC 62443-3-3 SR DEFINITIONS — DO NOT MODIFY SCORING LOGIC
-   ════════════════════════════════════════════════════════════════════ */
-
-interface SRDef {
-  id: string;
-  sl: number;
-  label: string;
-  source: "zone" | "conduit";
-  check: (z: ZoneView, cs: Conduit[]) => boolean;
-}
-
-const SR_DEFS: SRDef[] = [
-  { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",          source: "zone",    check: (z) => z.id !== "internet" },
-  { id: "SR-3.3",  sl: 1, label: "Security functionality verification",                       source: "zone",    check: () => true },
-  { id: "SR-5.1",  sl: 1, label: "Network segmentation — zone has explicit policy",           source: "zone",    check: (_, cs) => cs.some((c) => c.defaultDeny || c.state === "block") },
-  { id: "SR-2.8",  sl: 1, label: "Auditable events — conduit traffic logged",                  source: "conduit", check: (_, cs) => cs.every((c) => c.auditLogged) },
-  { id: "SR-1.2",  sl: 2, label: "Software process & device identification (IDS)",             source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.ids === "full" || c.ids === "partial") },
-  { id: "SR-3.1",  sl: 2, label: "Communication integrity — TLS on active conduits",           source: "conduit", check: (_, cs) => cs.filter((c) => c.state === "allow" || c.state === "partial").every((c) => c.tlsEnforced) },
-  { id: "SR-5.2",  sl: 2, label: "Zone boundary protection — explicit default deny",           source: "zone",    check: (_, cs) => cs.some((c) => c.defaultDeny) },
-  { id: "SR-5.4",  sl: 2, label: "Application partitioning — protocol whitelisting",           source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.protoWhitelist) },
-  { id: "SR-1.13", sl: 3, label: "Access via untrusted networks requires MFA",                 source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.mfaRequired) },
-  { id: "SR-2.12", sl: 3, label: "Non-repudiation — signed/tamper-evident audit log",          source: "zone",    check: () => false },
-  { id: "SR-3.2",  sl: 3, label: "Malicious code protection — AV scanning on conduit",         source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.avEnabled) },
-  { id: "SR-5.4b", sl: 3, label: "Full DPI + protocol whitelist on all active conduits",       source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.protoWhitelist && c.ids === "full") },
-];
-
-/* ════════════════════════════════════════════════════════════════════
-   TYPES
-   ════════════════════════════════════════════════════════════════════ */
-
-interface ZoneView {
-  id: string;
-  name: string;
-  sl_t: number;
-  color: string;
-  hosts: number;
-  consequence: string;
-  overrides: Record<string, boolean>;
-}
-
-interface SRCheck extends SRDef {
-  met: boolean;
-  auto: boolean;
-  overridden: boolean;
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   HELPERS
-   ════════════════════════════════════════════════════════════════════ */
-
-const ZONE_COLORS: Record<string, string> = {
-  internet: "#6b7280", wan: "#ef4444", dmz: "#f97316",
-  lan: "#f59e0b", mgmt: "#22c55e", enclave: "#a855f7",
-  corp: "#f59e0b", ot: "#a855f7", scada: "#a855f7",
-};
-
-function zoneColor(name: string): string {
-  const lower = name.toLowerCase();
-  for (const [k, v] of Object.entries(ZONE_COLORS)) {
-    if (lower.includes(k)) return v;
-  }
-  // Cycle through colors based on hash
-  const colors = ["#06b6d4", "#a855f7", "#f59e0b", "#22c55e", "#ef4444", "#f97316"];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  return colors[Math.abs(h) % colors.length];
-}
-
-function mapZone(z: Zone): ZoneView {
-  return {
-    id: z.name.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
-    name: z.name.toUpperCase(),
-    sl_t: z.slTarget ?? 0,
-    color: zoneColor(z.name),
-    hosts: 0,
-    consequence: z.consequence || "",
-    overrides: z.slOverrides || {},
-  };
-}
-
-function scoreZone(zone: ZoneView, conduits: ConduitMap): { sl_a: number; checks: SRCheck[] } {
-  const cs = Object.entries(conduits)
-    .filter(([k]) => k.startsWith(zone.id + "\u2192"))
-    .map(([, v]) => v);
-  const checks: SRCheck[] = SR_DEFS.map((sr) => {
-    const auto = sr.check(zone, cs);
-    const overridden = zone.overrides.hasOwnProperty(sr.id);
-    const met = overridden ? zone.overrides[sr.id] : auto;
-    return { ...sr, met, auto, overridden };
-  });
-  let sl_a = 0;
-  for (let lvl = 1; lvl <= 3; lvl++) {
-    if (checks.filter((c) => c.sl <= lvl).every((c) => c.met)) sl_a = lvl;
-    else break;
-  }
-  return { sl_a, checks };
-}
-
-function slColor(sl_a: number, sl_t: number): string {
-  return sl_a >= sl_t ? "var(--topo-green)" : sl_a === sl_t - 1 ? "var(--amber)" : "var(--topo-red)";
-}
 
 const MAX_ZONES = 6;
 
@@ -119,6 +17,8 @@ export default function SecurityView() {
   const [conduits, setConduits] = useState<ConduitMap>({});
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -217,7 +117,12 @@ export default function SecurityView() {
   // ── Cell selection ──
   const selectCell = useCallback((key: string) => {
     setSelected(key);
+    setPanelOpen(true);
   }, []);
+
+  const zoomIn = () => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)));
+  const zoomOut = () => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)));
+  const zoomReset = () => setZoom(1);
 
   if (loading) {
     return (
@@ -241,7 +146,7 @@ export default function SecurityView() {
   const selectedTo = selected ? allZones.find((z) => z.id === selected.split("\u2192")[1]) : null;
 
   return (
-    <div className={ts.workspace} style={{ gridTemplateColumns: "1fr 320px" }}>
+    <div className={ts.workspace} style={{ gridTemplateColumns: panelOpen ? "1fr 320px" : "1fr" }}>
       <div className={s.matrixPane}>
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
@@ -306,7 +211,7 @@ export default function SecurityView() {
 
         {/* Matrix grid */}
         <div className={s.matrixScroll}>
-          <div className={s.gridWrap}>
+          <div className={s.gridWrap} style={{ transform: `scale(${zoom})`, transformOrigin: "top left", transition: "transform .15s" }}>
             {/* Column headers */}
             <div className={s.gridColHeaders}>
               {activeZones.map((z) => {
@@ -396,32 +301,43 @@ export default function SecurityView() {
           <div style={{ width: 1, height: 12, background: "var(--topo-border)", margin: "0 4px" }} />
           <div className={s.legendItem}><span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--amber)" }}>SL-A/T</span> = achieved / target</div>
         </div>
+        {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
+        <div className={ts.zoomControls}>
+          <button className={ts.zoomBtn} onClick={zoomIn} title="Zoom in">+</button>
+          <div className={ts.zoomLevel} onClick={zoomReset} style={{ cursor: "pointer" }}>{Math.round(zoom * 100)}%</div>
+          <button className={ts.zoomBtn} onClick={zoomOut} title="Zoom out">&minus;</button>
+        </div>
       </div>
 
       {/* Detail panel */}
-      <div className={ts.detailPanel}>
-        <div className={ts.panelHeader}>
-          <span className={ts.panelTitle}>{selectedFrom && selectedTo ? `${selectedFrom.name} \u2192 ${selectedTo.name}` : "SELECT A CELL"}</span>
-          {selectedConduit && (
-            <span style={{
-              fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1,
-              background: selectedConduit.state === "allow" ? "#14532d" : selectedConduit.state === "block" ? "#7f1d1d" : selectedConduit.state === "partial" ? "#78490a" : "#1f2937",
-              color: selectedConduit.state === "allow" ? "#22c55e" : selectedConduit.state === "block" ? "#ef4444" : selectedConduit.state === "partial" ? "#f59e0b" : "#6b7280",
-            }}>{selectedConduit.state.toUpperCase()}</span>
-          )}
-          {!selectedConduit && <span style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1, background: "#78490a", color: "#f59e0b" }}>IEC 62443</span>}
-        </div>
-        <div className={ts.panelBody}>
-          {selectedConduit && selectedFrom && selectedTo ? (
-            <PanelContent conduit={selectedConduit} fromZ={selectedFrom} toZ={selectedTo} conduits={conduits} setSLTarget={setSLTarget} toggleOverride={toggleOverride} />
-          ) : (
-            <div className={s.empty}>
-              <div className={s.emptyIcon}>&#x2B21;</div>
-              <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS coverage, and IEC 62443 SR compliance.<br /><br />SL-T is editable per zone. SR checks are auto-computed but can be manually overridden.</div>
+      {panelOpen && (
+        <div className={ts.detailPanel}>
+          <div className={ts.panelHeader}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+              <span className={ts.panelTitle} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedFrom && selectedTo ? `${selectedFrom.name} \u2192 ${selectedTo.name}` : "SELECT A CELL"}</span>
+              {selectedConduit && (
+                <span style={{
+                  fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1, flexShrink: 0,
+                  background: selectedConduit.state === "allow" ? "#14532d" : selectedConduit.state === "block" ? "#7f1d1d" : selectedConduit.state === "partial" ? "#78490a" : "#1f2937",
+                  color: selectedConduit.state === "allow" ? "#22c55e" : selectedConduit.state === "block" ? "#ef4444" : selectedConduit.state === "partial" ? "#f59e0b" : "#6b7280",
+                }}>{selectedConduit.state.toUpperCase()}</span>
+              )}
+              {!selectedConduit && <span style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1, background: "#78490a", color: "#f59e0b", flexShrink: 0 }}>IEC 62443</span>}
             </div>
-          )}
+            <button className={ts.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
+          </div>
+          <div className={ts.panelBody}>
+            {selectedConduit && selectedFrom && selectedTo ? (
+              <PanelContent conduit={selectedConduit} fromZ={selectedFrom} toZ={selectedTo} conduits={conduits} setSLTarget={setSLTarget} toggleOverride={toggleOverride} />
+            ) : (
+              <div className={s.empty}>
+                <div className={s.emptyIcon}>&#x2B21;</div>
+                <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS coverage, and IEC 62443 SR compliance.<br /><br />SL-T is editable per zone. SR checks are auto-computed but can be manually overridden.</div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -459,11 +375,11 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
       <SLSection zone={toZ} label="Destination zone" conduits={conduits} setSLTarget={setSLTarget} toggleOverride={toggleOverride} />
 
       {/* Protocols */}
-      {(conduit.proto || []).length > 0 && (
+      {conduit.proto?.length > 0 && (
         <div className={s.ps}>
           <div className={s.psLabel}>Protocols</div>
           <div className={s.protoRow}>
-            {(conduit.proto || []).map((p, i) => (
+            {conduit.proto.map((p, i) => (
               <span key={i} className={`${s.proto} ${p.t === "allowed" ? s.protoAllowed : p.t === "denied" ? s.protoDenied : s.protoInspect}`}>{p.n}</span>
             ))}
           </div>
@@ -471,28 +387,28 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
       )}
 
       {/* Rules */}
-      {(conduit.rules || []).length > 0 && (
+      {conduit.rules?.length > 0 && (
         <div className={s.ps}>
           <div className={s.psLabel}>Rules</div>
-          {(conduit.rules || []).map((r, i) => (
+          {conduit.rules.map((r, i) => (
             <div key={i} className={s.dr}><span className={s.dk}>&middot;</span><span className={s.dv} style={{ color: "var(--text-mid)", textAlign: "left", paddingLeft: 6, flex: 1 }}>{r}</span></div>
           ))}
         </div>
       )}
 
       {/* Gaps */}
-      {(conduit.gaps || []).length > 0 && (
+      {conduit.gaps?.length > 0 && (
         <div className={s.ps}>
-          <div className={s.psLabel}>Gaps ({(conduit.gaps || []).length})</div>
-          {(conduit.gaps || []).map((g, i) => <div key={i} className={s.gapItem}>{g}</div>)}
+          <div className={s.psLabel}>Gaps ({conduit.gaps.length})</div>
+          {conduit.gaps.map((g, i) => <div key={i} className={s.gapItem}>{g}</div>)}
         </div>
       )}
 
       {/* MITRE */}
-      {(conduit.mitre || []).length > 0 && (
+      {conduit.mitre?.length > 0 && (
         <div className={s.ps}>
           <div className={s.psLabel}>MITRE Vectors</div>
-          {(conduit.mitre || []).map((m, i) => <div key={i} className={s.mitreItem}>{m}</div>)}
+          {conduit.mitre.map((m, i) => <div key={i} className={s.mitreItem}>{m}</div>)}
         </div>
       )}
     </>
@@ -525,7 +441,7 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
         <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", marginBottom: 4, letterSpacing: 1 }}>SL TARGET &mdash; click to set</div>
         <div className={s.slEditor}>
           <span className={s.slEditorLabel}>SL-T</span>
-          {[0, 1, 2, 3].map((lvl) => (
+          {Array.from({ length: MAX_SL + 1 }, (_, lvl) => (
             <button key={lvl} className={`${s.slPipBtn} ${lvl === zone.sl_t ? s.slPipSelected : lvl < zone.sl_t ? s.slPipBelow : ""}`} onClick={() => setSLTarget(zone.id, lvl)}>{lvl}</button>
           ))}
         </div>

@@ -146,7 +146,7 @@ export default function ZonesPage() {
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="lg">
         <h2 className="text-sm font-semibold text-[var(--text)]">Create zone</h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <div>
             <label htmlFor="zone-name" className="sr-only">Zone name</label>
             <input
@@ -178,7 +178,7 @@ export default function ZonesPage() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="description"
               disabled={!isAdmin()}
-              className="w-full input-industrial md:col-span-1"
+              className="w-full input-industrial"
             />
           </div>
           <div>
@@ -231,13 +231,15 @@ export default function ZonesPage() {
                   <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+                  <th className="px-4 py-3 text-center whitespace-nowrap">SL-T</th>
+                  <th className="px-4 py-3 text-center whitespace-nowrap">SL-A</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {table.data.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={4}>
+                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
                       No zones match your search.
                     </td>
                   </tr>
@@ -246,6 +248,7 @@ export default function ZonesPage() {
                   <ZoneRow
                     key={z.name}
                     zone={z}
+                    conduits={conduits}
                     onDelete={onDelete}
                     onUpdate={onUpdate}
                     canEdit={isAdmin()}

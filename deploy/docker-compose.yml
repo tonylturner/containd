@@ -105,50 +105,5 @@ services:
     # environment:
     #   - CONTAIND_COOKIE_SECURE=1
 
-    # ── [PROD] Resource limits ──────────────────────────────────
-    # Prevents the container from exhausting host resources.
-    # Baseline idle: ~30 MB RSS, 19 PIDs, <1% CPU.
-    # Under burst API load: ~55 MB RSS.
-    # With active DPI/IPS on real traffic: estimate 100-200 MB.
-    # Uncomment and tune for your environment.
-    #
-    # mem_limit: 512m            # Hard memory ceiling
-    # memswap_limit: 512m        # Disable swap (set equal to mem_limit)
-    # cpus: 1.0                  # Limit to 1 CPU core (sufficient for most deployments)
-    # pids_limit: 256            # Fork bomb protection (idle uses ~19 PIDs)
-
-    # ── [PROD] Read-only root filesystem ────────────────────────
-    # Makes the container filesystem immutable. Writable paths must
-    # be explicitly listed as tmpfs or volume mounts.
-    #
-    # read_only: true
-    # tmpfs:
-    #   - /tmp:size=64m
-    #   - /run:size=64m
-
-    # ── [PROD] Security options ─────────────────────────────────
-    # Prevents privilege escalation via setuid/setgid binaries.
-    #
-    # security_opt:
-    #   - no-new-privileges:true
-
-    # ── [PROD] Logging limits ───────────────────────────────────
-    # Prevents container logs from filling the host disk.
-    #
-    # logging:
-    #   driver: json-file
-    #   options:
-    #     max-size: "50m"
-    #     max-file: "5"
-
-    # ── [PROD] HTTPS-only ───────────────────────────────────────
-    # In production, disable HTTP and only expose HTTPS + SSH:
-    #
-    # ports:
-    #   - "8443:8443"
-    #   - "2222:2222"
-    # environment:
-    #   - CONTAIND_COOKIE_SECURE=1
-
 volumes:
   containd-data:
