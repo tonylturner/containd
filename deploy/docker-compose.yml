@@ -53,6 +53,12 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/containd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
     # ── [PROD] Resource limits ──────────────────────────────────
     # Prevents the container from exhausting host resources.

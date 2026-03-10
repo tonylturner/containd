@@ -1,6 +1,6 @@
 /* ── Security Matrix View ── */
 
-.matrixPane { display: flex; flex-direction: column; overflow: hidden; height: 100%; }
+.matrixPane { display: flex; flex-direction: column; overflow: hidden; height: 100%; position: relative; }
 .matrixHeader { padding: 16px 24px 12px; border-bottom: 1px solid var(--topo-border); flex-shrink: 0; }
 .matrixTitle { font-family: var(--display); font-size: 9px; letter-spacing: 3px; color: var(--text-mid); margin-bottom: 2px; }
 .matrixSubtitle { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }

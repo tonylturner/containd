@@ -399,6 +399,7 @@ function TopologyInner() {
   const [nodes, setNodes] = useState<Node<TopoNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [syncTime, setSyncTime] = useState("\u2014");
   const [currentView, setCurrentView] = useState("logical");
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
@@ -461,6 +462,7 @@ function TopologyInner() {
   // ── Handle node click ──
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedId(node.id);
+    setPanelOpen(true);
   }, []);
 
   const onPaneClick = useCallback(() => {
@@ -508,7 +510,7 @@ function TopologyInner() {
       ) : currentView === "security" ? (
         <SecurityView />
       ) : (
-        <div className={s.workspace}>
+        <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
             <ReactFlow
               nodes={nodes}
@@ -550,23 +552,27 @@ function TopologyInner() {
               <div className={s.legendItem}><div className={s.legendLine} style={{ background: "#a855f7", opacity: 0.7 }} />Interface / VLAN</div>
               <div className={s.legendItem}><div className={s.legendLine} style={{ background: "#6b7280", opacity: 0.7, borderTop: "1px dashed #6b7280", height: 0 }} />External / WAN</div>
             </div>
+
+            {!panelOpen && <button className={s.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
           </div>
 
           {/* DETAIL PANEL */}
-          <div className={s.detailPanel}>
-            <div className={s.panelHeader}>
-              <span className={s.panelTitle}>{selectedData?.label || "TOPOLOGY"}</span>
-              {selectedData && <button className={s.panelClose} onClick={() => setSelectedId(null)}>&#x2715;</button>}
+          {panelOpen && (
+            <div className={s.detailPanel}>
+              <div className={s.panelHeader}>
+                <span className={s.panelTitle}>{selectedData?.label || "TOPOLOGY"}</span>
+                <button className={s.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
+              </div>
+              <div className={s.panelBody}>
+                {selectedData ? <DetailContent data={selectedData} /> : (
+                  <div className={s.panelEmpty}>
+                    <div className={s.panelEmptyIcon}>&#x2B21;</div>
+                    <div>Select any node to inspect its configuration, interfaces, routes, and active rules.</div>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className={s.panelBody}>
-              {selectedData ? <DetailContent data={selectedData} /> : (
-                <div className={s.panelEmpty}>
-                  <div className={s.panelEmptyIcon}>&#x2B21;</div>
-                  <div>Select any node to inspect its configuration, interfaces, routes, and active rules.</div>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       )}
     </div>

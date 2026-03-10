@@ -195,6 +195,8 @@ function ResBar({ name, val, pct, color }: { name: string; val: string; pct: num
 export default function PhysicalView() {
   const [data, setData] = useState<PhysicalData | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -283,6 +285,11 @@ export default function PhysicalView() {
   const goVersion = insp?.process.goVersion || "\u2014";
   const buildVersion = data.health?.build || "\u2014";
 
+  const selectLayer = (id: LayerId) => { setSelectedLayer(id); setPanelOpen(true); };
+  const zoomIn = () => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)));
+  const zoomOut = () => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)));
+  const zoomReset = () => setZoom(1);
+
   const layerCls = (id: LayerId) =>
     `${s.layer} ${s[`layer${id.charAt(0).toUpperCase() + id.slice(1)}`]} ${selectedLayer === id ? s.layerActive : ""}`;
 
@@ -295,11 +302,12 @@ export default function PhysicalView() {
   const warnCount = flags.filter((f) => f.level === "warn").length;
 
   return (
-    <div className={ts.workspace} style={{ gridTemplateColumns: "1fr 300px" }}>
+    <div className={ts.workspace} style={{ gridTemplateColumns: panelOpen ? "1fr 300px" : "1fr" }}>
       <div className={s.stackView}>
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: "top center", transition: "transform .15s" }}>
 
         {/* ── LAYER 1: HOST ── */}
-        <div className={layerCls("host")} onClick={() => setSelectedLayer("host")}>
+        <div className={layerCls("host")} onClick={() => selectLayer("host")}>
           <div className={s.layerConnector}>
             <div className={s.layerNode}>H</div>
             <div className={s.layerWire} />
@@ -357,7 +365,7 @@ export default function PhysicalView() {
         </div>
 
         {/* ── LAYER 2: CONTAINER RUNTIME ── */}
-        <div className={layerCls("runtime")} onClick={() => setSelectedLayer("runtime")}>
+        <div className={layerCls("runtime")} onClick={() => selectLayer("runtime")}>
           <div className={s.layerConnector}>
             <div className={s.layerNode}>R</div>
             <div className={s.layerWire} />
@@ -430,7 +438,7 @@ export default function PhysicalView() {
         </div>
 
         {/* ── LAYER 3: CONTAINER ── */}
-        <div className={layerCls("container")} onClick={() => setSelectedLayer("container")}>
+        <div className={layerCls("container")} onClick={() => selectLayer("container")}>
           <div className={s.layerConnector}>
             <div className={s.layerNode}>C</div>
             <div className={s.layerWire} />
@@ -527,7 +535,7 @@ export default function PhysicalView() {
         </div>
 
         {/* ── LAYER 4: PROCESS ── */}
-        <div className={layerCls("process")} onClick={() => setSelectedLayer("process")}>
+        <div className={layerCls("process")} onClick={() => selectLayer("process")}>
           <div className={s.layerConnector}>
             <div className={s.layerNode}>P</div>
           </div>
@@ -587,43 +595,52 @@ export default function PhysicalView() {
         </div>
 
         <div style={{ height: 32 }} />
+        </div>{/* end zoom wrapper */}
+        {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
+        <div className={ts.zoomControls}>
+          <button className={ts.zoomBtn} onClick={zoomIn} title="Zoom in">+</button>
+          <div className={ts.zoomLevel} onClick={zoomReset} style={{ cursor: "pointer" }}>{Math.round(zoom * 100)}%</div>
+          <button className={ts.zoomBtn} onClick={zoomOut} title="Zoom out">&minus;</button>
+        </div>
       </div>
 
       {/* DETAIL PANEL */}
-      <div className={ts.detailPanel}>
-        <div className={ts.panelHeader}>
-          <span className={ts.panelTitle}>{selectedLayer ? selectedLayer.toUpperCase() : "PHYSICAL VIEW"}</span>
-          {selectedLayer && <button className={ts.panelClose} onClick={() => setSelectedLayer(null)}>&#x2715;</button>}
-        </div>
-        <div className={ts.panelBody}>
-          {/* Security flags summary */}
-          <div className={ts.panelSection}>
-            <div className={ts.panelSectionLabel}>Security Flags {critCount > 0 && <span style={{ color: "#ef4444" }}>({critCount} CRIT)</span>} {warnCount > 0 && <span style={{ color: "#f59e0b" }}>({warnCount} WARN)</span>}</div>
-            <div className={s.flagList}>
-              {flags.map((f, i) => (
-                <div key={i} className={`${s.flag} ${f.level === "crit" ? s.flagCrit : f.level === "warn" ? s.flagWarn : s.flagOk}`}>
-                  <div className={s.flagDot} style={{ background: f.level === "crit" ? "#ef4444" : f.level === "warn" ? "#f59e0b" : "#22c55e" }} />
-                  <div className={s.flagBody}>
-                    <div className={s.flagTitle}>{f.title}</div>
-                    <div className={s.flagDesc}>{f.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+      {panelOpen && (
+        <div className={ts.detailPanel}>
+          <div className={ts.panelHeader}>
+            <span className={ts.panelTitle}>{selectedLayer ? selectedLayer.toUpperCase() : "PHYSICAL VIEW"}</span>
+            <button className={ts.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
           </div>
-
-          {!selectedLayer && (
+          <div className={ts.panelBody}>
+            {/* Security flags summary */}
             <div className={ts.panelSection}>
-              <div className={ts.panelSectionLabel}>Click a layer for details</div>
-              <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", lineHeight: 1.6 }}>
-                Select HOST, RUNTIME, CONTAINER, or PROCESS layer to inspect that level in depth.
+              <div className={ts.panelSectionLabel}>Security Flags {critCount > 0 && <span style={{ color: "#ef4444" }}>({critCount} CRIT)</span>} {warnCount > 0 && <span style={{ color: "#f59e0b" }}>({warnCount} WARN)</span>}</div>
+              <div className={s.flagList}>
+                {flags.map((f, i) => (
+                  <div key={i} className={`${s.flag} ${f.level === "crit" ? s.flagCrit : f.level === "warn" ? s.flagWarn : s.flagOk}`}>
+                    <div className={s.flagDot} style={{ background: f.level === "crit" ? "#ef4444" : f.level === "warn" ? "#f59e0b" : "#22c55e" }} />
+                    <div className={s.flagBody}>
+                      <div className={s.flagTitle}>{f.title}</div>
+                      <div className={s.flagDesc}>{f.desc}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
 
-          {selectedLayer && <LayerDetail layer={selectedLayer} data={data} />}
+            {!selectedLayer && (
+              <div className={ts.panelSection}>
+                <div className={ts.panelSectionLabel}>Click a layer for details</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", lineHeight: 1.6 }}>
+                  Select HOST, RUNTIME, CONTAINER, or PROCESS layer to inspect that level in depth.
+                </div>
+              </div>
+            )}
+
+            {selectedLayer && <LayerDetail layer={selectedLayer} data={data} />}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

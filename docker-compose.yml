@@ -66,6 +66,12 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/containd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     # Default: run combined mgmt+engine. Override with ["mgmt"] or ["engine"] if desired.
     command: ["all"]
     networks:

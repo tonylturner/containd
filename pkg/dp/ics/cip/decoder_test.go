@@ -385,12 +385,6 @@ func buildSendRRDataPayloadWithData(serviceCode uint8, pathSize uint8, path []by
 }
 
 func TestParseMSPServices(t *testing.T) {
-	type subSvc struct {
-		code     uint8
-		pathSize uint8
-		path     []byte
-	}
-
 	t.Run("two sub-services Read_Tag+Write_Tag", func(t *testing.T) {
 		mspData := buildMSPData([]struct {
 			code     uint8
