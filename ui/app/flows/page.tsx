@@ -50,11 +50,11 @@ function FlowsInner() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="transition-ui rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06]"
+            className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"
           >
             Refresh
           </button>
-          <label className="flex items-center gap-2 text-xs text-slate-200">
+          <label className="flex items-center gap-2 text-xs text-[var(--text)]">
             <input
               type="checkbox"
               className="transition-ui h-4 w-4"
@@ -78,9 +78,9 @@ function FlowsInner() {
           description="Enable DPI capture or learning mode to generate events."
         />
       ) : (
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-left text-sm">
-            <thead className="bg-white/[0.03] text-xs font-medium uppercase tracking-wider text-slate-500">
+            <thead className="bg-[var(--surface)] text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">
               <tr>
                 <th className="px-4 py-3">Flow</th>
                 <th className="px-4 py-3">App/Proto</th>
@@ -102,23 +102,23 @@ function FlowsInner() {
                 .map((f) => (
                 <tr
                   key={f.flowId}
-                  className={`table-row-hover transition-ui border-t border-white/[0.06] ${
+                  className={`table-row-hover transition-ui border-t border-amber-500/[0.1] ${
                     f.avBlocked ? "bg-[color:var(--error)]/10" : f.avDetected ? "bg-amber/10" : ""
                   }`}
                 >
-                  <td className="px-4 py-3 font-mono text-xs text-slate-200">
+                  <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
                     {f.flowId.slice(0, 10)}…
                   </td>
                   <td className="px-4 py-3 text-slate-100">
                     {f.application || f.transport || "-"}
                   </td>
-                  <td className="px-4 py-3 text-slate-200">
+                  <td className="px-4 py-3 text-[var(--text)]">
                     {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}
                   </td>
-                  <td className="px-4 py-3 text-slate-400">
+                  <td className="px-4 py-3 text-[var(--text-muted)]">
                     {new Date(f.firstSeen).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-slate-400">
+                  <td className="px-4 py-3 text-[var(--text-muted)]">
                     {new Date(f.lastSeen).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-right text-slate-100">
@@ -146,7 +146,7 @@ function FlowsInner() {
 
 export default function FlowsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-slate-200">Loading flows…</div>}>
+    <Suspense fallback={<div className="p-4 text-[var(--text)]">Loading flows…</div>}>
       <FlowsInner />
     </Suspense>
   );

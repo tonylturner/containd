@@ -477,7 +477,7 @@ function ConfigPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
         >
           Refresh
         </button>
@@ -485,7 +485,7 @@ function ConfigPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -496,8 +496,8 @@ function ConfigPage() {
             onClick={() => setTab(t)}
             className={
               tab === t
-                ? "rounded-lg bg-white/[0.08] px-3 py-1.5 text-sm text-white transition-ui"
-                : "rounded-lg px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-ui"
+                ? "rounded-sm bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--text)] transition-ui"
+                : "rounded-sm px-3 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
             }
           >
             {t}
@@ -507,12 +507,12 @@ function ConfigPage() {
 
       {status && (
         <div
-          className={`mb-4 rounded-xl px-4 py-3 text-sm ${
+          className={`mb-4 rounded-sm px-4 py-3 text-sm ${
             status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
               ? "border border-red-500/30 bg-red-500/10 text-red-400"
               : status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                : "border border-white/[0.08] bg-white/[0.03] text-slate-200"
+                : "border border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
           }`}
         >
           {status}
@@ -526,22 +526,22 @@ function ConfigPage() {
             <Card padding="lg">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                     Backup &amp; Restore
                   </div>
-                  <h2 className="text-lg font-semibold text-white">Config vault</h2>
+                  <h2 className="text-lg font-semibold text-[var(--text)]">Config vault</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => downloadConfig(true)}
-                    className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Download redacted
                   </button>
                   {canEdit && (
                     <button
                       onClick={() => downloadConfig(false)}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 transition-ui"
+                      className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                     >
                       Download full
                     </button>
@@ -554,40 +554,40 @@ function ConfigPage() {
                   accept=".json"
                   onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   disabled={!canEdit}
-                  className="rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 outline-none"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                 />
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-[var(--text-muted)]">
                   Restore replaces running config. Use redacted backups for sharing.
                 </div>
                 {canEdit && (
                   <button
                     onClick={restoreConfig}
-                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-ui"
+                    className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
                   >
                     Restore
                   </button>
                 )}
               </div>
-              <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-card">
+              <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">
                       Appliance backups
                     </div>
-                    <div className="text-sm text-slate-200">Store backups on the firewall.</div>
+                    <div className="text-sm text-[var(--text)]">Store backups on the firewall.</div>
                   </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => createBackup(true)}
                     disabled={!canEdit}
-                    className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs text-slate-200 hover:bg-white/[0.06] transition-ui"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Save redacted
                   </button>
                   {canEdit && (
                       <button
                         onClick={() => createBackup(false)}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition-ui"
+                        className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 transition-ui"
                       >
                         Save full
                       </button>
@@ -600,26 +600,26 @@ function ConfigPage() {
                     onChange={(e) => setBackupName(e.target.value)}
                     placeholder="Name this backup (optional)"
                     disabled={!canEdit}
-                    className="rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-slate-200 transition-ui focus:border-blue-500/40 outline-none"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                   />
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-[var(--text-muted)]">
                     Backups are stored under the appliance data volume.
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2">
                   {backups.length === 0 ? (
-                    <div className="rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-xs text-slate-400">
+                    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
                       No backups saved yet.
                     </div>
                   ) : (
                     backups.map((backup) => (
                       <div
                         key={backup.id}
-                        className="grid gap-2 rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-xs text-slate-300 md:grid-cols-[1fr_auto]"
+                        className="grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:grid-cols-[1fr_auto]"
                       >
                         <div>
-                          <div className="font-semibold text-slate-100">{backup.name}</div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="font-semibold text-[var(--text)]">{backup.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
                             {new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.size)} ·{" "}
                             {backup.redacted ? "Redacted" : "Full"} · ID {backup.id.slice(0, 6)}
                           </div>
@@ -627,7 +627,7 @@ function ConfigPage() {
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <button
                             onClick={() => downloadBackup(backup)}
-                            className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-xs text-slate-200 hover:bg-white/[0.06] transition-ui"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                           >
                             Download
                           </button>
@@ -647,7 +647,7 @@ function ConfigPage() {
               </div>
             </Card>
             <Card padding="lg">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                 Config health
               </div>
               <div className="mt-3 grid gap-3 text-sm">
@@ -656,7 +656,7 @@ function ConfigPage() {
                 <Stat label="Firewall rules" value={ruleCount} />
                 <Stat label="Assets" value={assetCount} />
               </div>
-              <div className="mt-4 text-xs text-slate-400">
+              <div className="mt-4 text-xs text-[var(--text-muted)]">
                 Build your config by defining zones, then binding interfaces, then adding policies.
               </div>
             </Card>
@@ -665,19 +665,19 @@ function ConfigPage() {
           <Card padding="lg">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                   Config viewer
                 </div>
-                <h2 className="text-lg font-semibold text-white">Explore blocks</h2>
+                <h2 className="text-lg font-semibold text-[var(--text)]">Explore blocks</h2>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>Source</span>
                 <button
                   onClick={() => setViewerSource("running")}
                   className={
                     viewerSource === "running"
-                      ? "rounded-md bg-white/[0.08] px-2 py-1 text-white transition-ui"
-                      : "rounded-md px-2 py-1 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-ui"
+                      ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
+                      : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
                   running
@@ -686,8 +686,8 @@ function ConfigPage() {
                   onClick={() => setViewerSource("candidate")}
                   className={
                     viewerSource === "candidate"
-                      ? "rounded-md bg-white/[0.08] px-2 py-1 text-white transition-ui"
-                      : "rounded-md px-2 py-1 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-ui"
+                      ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
+                      : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
                   candidate
@@ -721,8 +721,8 @@ function ConfigPage() {
                     title={item.help}
                     className={
                       selectedBlock === item.key
-                        ? "rounded-lg bg-white/[0.08] px-3 py-2 text-left text-sm text-white transition-ui"
-                        : "rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] transition-ui"
+                        ? "rounded-sm bg-amber-500/[0.1] px-3 py-2 text-left text-sm text-[var(--text)] transition-ui"
+                        : "rounded-sm px-3 py-2 text-left text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                     }
                   >
                     {item.label}
@@ -731,12 +731,12 @@ function ConfigPage() {
               </div>
               <div className="grid gap-3">
                 {blockItems.length > 0 && (
-                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-card">
+                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 shadow-card">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                         {selectedBlock} entries
                       </div>
-                      <span className="text-xs text-slate-400">{blockItems.length} items</span>
+                      <span className="text-xs text-[var(--text-muted)]">{blockItems.length} items</span>
                     </div>
                     <div className="mt-2 grid gap-1 md:grid-cols-2">
                       {blockItems.map((item: BlockItem) => (
@@ -745,38 +745,38 @@ function ConfigPage() {
                           onClick={() => setSelectedItemId(item.id)}
                           className={
                             selectedItemId === item.id
-                              ? "rounded-lg border border-white/[0.08] bg-white/[0.08] px-2 py-1 text-left text-xs text-white transition-ui"
-                              : "rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-left text-xs text-slate-200 hover:bg-white/[0.06] transition-ui"
+                              ? "rounded-sm border border-amber-500/[0.15] bg-amber-500/[0.1] px-2 py-1 text-left text-xs text-[var(--text)] transition-ui"
+                              : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-left text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                           }
                         >
                           <div className="font-semibold">{item.label}</div>
-                          <div className="text-[11px] text-slate-400">{item.meta}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">{item.meta}</div>
                         </button>
                       ))}
                     </div>
                     {selectedItem && (
-                      <div className="mt-3 rounded-lg border border-white/[0.08] bg-black/40 p-3 text-xs text-slate-100">
+                      <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)]">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Selected
                           </div>
                           {selectedBlock === "zones" && (
-                            <a href="/zones/" className="text-xs text-blue-400 hover:text-blue-300 transition-ui">
+                            <a href="/zones/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Zones
                             </a>
                           )}
                           {selectedBlock === "interfaces" && (
-                            <a href="/interfaces/" className="text-xs text-blue-400 hover:text-blue-300 transition-ui">
+                            <a href="/interfaces/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Interfaces
                             </a>
                           )}
                           {selectedBlock === "firewall" && (
-                            <a href="/firewall/" className="text-xs text-blue-400 hover:text-blue-300 transition-ui">
+                            <a href="/firewall/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Firewall
                             </a>
                           )}
                           {selectedBlock === "assets" && (
-                            <a href="/assets/" className="text-xs text-blue-400 hover:text-blue-300 transition-ui">
+                            <a href="/assets/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Assets
                             </a>
                           )}
@@ -788,11 +788,11 @@ function ConfigPage() {
                     )}
                   </div>
                 )}
-                <div className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-xs text-slate-100">
+                <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
                   {viewerConfig ? (
                     Array.isArray(blockValue) ? (
                       blockValue.length === 0 ? (
-                        <div className="text-slate-400">No entries in this block.</div>
+                        <div className="text-[var(--text-muted)]">No entries in this block.</div>
                       ) : (
                         <div className="grid gap-2">
                           {blockValue.map((item: any) => {
@@ -812,8 +812,8 @@ function ConfigPage() {
                                 ref={isSelected ? selectedRef : undefined}
                                 className={
                                   isSelected
-                                    ? "rounded-lg border border-blue-500/40 bg-blue-500/10 p-3 transition-ui"
-                                    : "rounded-lg border border-white/[0.08] bg-black/30 p-3 hover:border-white/[0.12] transition-ui"
+                                    ? "rounded-sm border border-amber-500/40 bg-amber-500/[0.1] p-3 transition-ui"
+                                    : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 hover:border-amber-500/30 transition-ui"
                                 }
                               >
                                 <pre className="whitespace-pre-wrap">
@@ -830,12 +830,12 @@ function ConfigPage() {
                       </pre>
                     )
                   ) : (
-                    <div className="text-slate-400">No config loaded for this source.</div>
+                    <div className="text-[var(--text-muted)]">No config loaded for this source.</div>
                   )}
                 </div>
               </div>
             </div>
-            <div className="mt-3 text-xs text-slate-400">
+            <div className="mt-3 text-xs text-[var(--text-muted)]">
               Select a block to jump to its JSON. Use running for live state, candidate for staged changes.
             </div>
           </Card>
@@ -845,7 +845,7 @@ function ConfigPage() {
               {canEdit && (
                 <button
                   onClick={doCommit}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 transition-ui"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Commit
                 </button>
@@ -854,7 +854,7 @@ function ConfigPage() {
                 {canEdit && (
                   <button
                     onClick={doCommitConfirmed}
-                    className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Commit-confirmed
                   </button>
@@ -863,21 +863,21 @@ function ConfigPage() {
                   value={ttlSeconds}
                   onChange={(e) => setTtlSeconds(e.target.value)}
                   disabled={!canEdit}
-                  className="w-20 rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 outline-none"
+                  className="w-20 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                 />
-                <span className="text-xs text-slate-300">seconds</span>
+                <span className="text-xs text-[var(--text)]">seconds</span>
               </div>
               {canEdit && (
                 <>
                   <button
                     onClick={doConfirm}
-                    className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Confirm
                   </button>
                   <button
                     onClick={doRollback}
-                    className="rounded-lg bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+                    className="rounded-sm bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
                   >
                     Rollback
                   </button>
@@ -892,8 +892,8 @@ function ConfigPage() {
         <Card padding="md">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-white">Candidate JSON</h2>
-              <div className="text-xs text-slate-400">
+              <h2 className="text-sm font-semibold text-[var(--text)]">Candidate JSON</h2>
+              <div className="text-xs text-[var(--text-muted)]">
                 {candidateLoadedAt
                   ? `Last saved ${candidateLoadedAt.toLocaleString()}`
                   : "Not saved yet"}
@@ -903,13 +903,13 @@ function ConfigPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={copyRunningToCandidate}
-                  className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
                   Copy running → candidate
                 </button>
                 <button
                   onClick={saveCandidate}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 transition-ui"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Save candidate
                 </button>
@@ -921,14 +921,14 @@ function ConfigPage() {
             onChange={(e) => setCandidateText(e.target.value)}
             readOnly={!canEdit}
             rows={22}
-            className="w-full rounded-lg border border-white/[0.08] bg-black/40 p-3 font-mono text-xs text-white transition-ui focus:border-blue-500/40 outline-none"
+            className="w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
           />
         </Card>
       )}
 
       {tab === "running" && (
-        <div className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-xs text-slate-100 shadow-card">
-          <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
+          <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
             <div>Running config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
           </div>
@@ -939,35 +939,35 @@ function ConfigPage() {
       {tab === "diff" && (
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
+            <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
               Candidate looks older than running. Copy running → candidate to diff your latest changes.
             </div>
           )}
           {!candidate ? (
-            <div className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-sm text-slate-200 shadow-card">
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
               No candidate config to compare. Save a candidate to see a diff.
             </div>
           ) : diffBlocks.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.08] bg-black/40 p-4 text-sm text-slate-200 shadow-card">
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
               No differences between running and candidate.
             </div>
           ) : (
             diffBlocks.map((block) => (
               <div
                 key={block.key}
-                className="rounded-xl border border-white/[0.08] bg-black/40 p-4 shadow-card"
+                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card"
               >
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Changed block</div>
-                    <div className="text-sm font-semibold text-white">{block.label}</div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">Changed block</div>
+                    <div className="text-sm font-semibold text-[var(--text)]">{block.label}</div>
                   </div>
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-[var(--text-muted)]">
                     {block.diff.filter((l) => l.type === "add").length} added ·{" "}
                     {block.diff.filter((l) => l.type === "del").length} removed
                   </div>
                 </div>
-                <div className="grid gap-1 rounded-lg border border-white/[0.08] bg-black/60 p-3 text-xs text-slate-100">
+                <div className="grid gap-1 rounded-sm border border-amber-500/[0.15] bg-black/60 p-3 text-xs text-[var(--text)]">
                   {block.diff.map((line, idx) => (
                     <div
                       key={`${block.key}-${idx}`}
@@ -996,7 +996,7 @@ function ConfigPage() {
             {canEdit && (
               <button
                 onClick={doCommit}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 transition-ui"
+                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
               >
                 Commit
               </button>
@@ -1005,7 +1005,7 @@ function ConfigPage() {
               {canEdit && (
                 <button
                   onClick={doCommitConfirmed}
-                  className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
                   Commit-confirmed
                 </button>
@@ -1014,21 +1014,21 @@ function ConfigPage() {
                 value={ttlSeconds}
                 onChange={(e) => setTtlSeconds(e.target.value)}
                 disabled={!canEdit}
-                className="w-20 rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 outline-none"
+                className="w-20 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
               />
-              <span className="text-xs text-slate-300">seconds</span>
+              <span className="text-xs text-[var(--text)]">seconds</span>
             </div>
             {canEdit && (
               <>
                 <button
                   onClick={doConfirm}
-                  className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
                   Confirm
                 </button>
                 <button
                   onClick={doRollback}
-                  className="rounded-lg bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+                  className="rounded-sm bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
                 >
                   Rollback
                 </button>
@@ -1043,9 +1043,9 @@ function ConfigPage() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2">
-      <span className="text-slate-300">{label}</span>
-      <span className="text-white">{value}</span>
+    <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+      <span className="text-[var(--text)]">{label}</span>
+      <span className="text-[var(--text)]">{value}</span>
     </div>
   );
 }

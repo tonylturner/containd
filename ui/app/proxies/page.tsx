@@ -206,16 +206,16 @@ export default function ProxiesPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
+          <label className="flex items-center gap-2 text-xs text-[var(--text)]">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
+              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
             />
             Auto-refresh
           </label>
@@ -224,7 +224,7 @@ export default function ProxiesPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -232,7 +232,7 @@ export default function ProxiesPage() {
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
             <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-white">Forward proxy (Envoy)</h2>
+            <h2 className="text-sm font-semibold text-[var(--text)]">Forward proxy (Envoy)</h2>
             <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
           </div>
           {loading ? (
@@ -242,25 +242,25 @@ export default function ProxiesPage() {
             </div>
           ) : (
             <>
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
                 Running: {status?.envoy_running ? "yes" : "no"}{" "}
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[var(--text-muted)]">
                 Rate: {typeof status?.envoy?.rate_per_min === "number" ? status?.envoy?.rate_per_min.toFixed(1) : "0.0"} / min
               </p>
               <p className="text-xs text-amber-300">
                 Errors: {typeof status?.envoy?.errors_rate_per_min === "number" ? status?.envoy?.errors_rate_per_min.toFixed(1) : "0.0"} / min
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--text-dim)]">
                 Telemetry: access logs when enabled.
               </p>
               {status?.envoy_last_error ? (
-                <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                <div className="mt-2 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {status.envoy_last_error}
                 </div>
               ) : null}
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
                 Last start: {status?.envoy_last_start ? String(status.envoy_last_start) : "n/a"}
               </p>
               <div className="mt-4">
@@ -277,7 +277,7 @@ export default function ProxiesPage() {
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
             <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-white">Reverse proxy (Nginx)</h2>
+            <h2 className="text-sm font-semibold text-[var(--text)]">Reverse proxy (Nginx)</h2>
             <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
           </div>
           {loading ? (
@@ -287,25 +287,25 @@ export default function ProxiesPage() {
             </div>
           ) : (
             <>
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
                 Running: {status?.nginx_running ? "yes" : "no"}{" "}
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[var(--text-muted)]">
                 Rate: {typeof status?.nginx?.rate_per_min === "number" ? status?.nginx?.rate_per_min.toFixed(1) : "0.0"} / min
               </p>
               <p className="text-xs text-amber-300">
                 Errors: {typeof status?.nginx?.errors_rate_per_min === "number" ? status?.nginx?.errors_rate_per_min.toFixed(1) : "0.0"} / min
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--text-dim)]">
                 Telemetry: access logs from published apps.
               </p>
               {status?.nginx_last_error ? (
-                <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                <div className="mt-2 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {status.nginx_last_error}
                 </div>
               ) : null}
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
                 Last start: {status?.nginx_last_start ? String(status.nginx_last_start) : "n/a"}
               </p>
               <div className="mt-4">
@@ -321,18 +321,18 @@ export default function ProxiesPage() {
         </Card>
       </div>
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "---"} {autoRefresh ? "(auto)" : ""}
       </p>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
-          <h2 className="text-lg font-semibold text-white">Forward proxy</h2>
-          <p className="mt-1 text-sm text-slate-300">
+        <section className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
+          <h2 className="text-lg font-semibold text-[var(--text)]">Forward proxy</h2>
+          <p className="mt-1 text-sm text-[var(--text)]">
             Quick controls for enablement and listening port.
           </p>
 
@@ -345,13 +345,13 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setForward((f) => ({ ...f, enabled: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
+                className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
               />
               Enabled
             </label>
 
             <div>
-              <label className="block text-sm font-medium text-slate-200">
+              <label className="block text-sm font-medium text-[var(--text)]">
                 Listen port
               </label>
               <input
@@ -364,17 +364,17 @@ export default function ProxiesPage() {
                     listenPort: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-2 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
 
-            <details className="rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
-              <summary className="cursor-pointer text-sm text-slate-200">
+            <details className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+              <summary className="cursor-pointer text-sm text-[var(--text)]">
                 Advanced options
               </summary>
               <div className="mt-3 space-y-4">
                 <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
                     Listen zones
                     <InfoTip label="Comma-separated zones where the proxy listens. Leave blank to bind on all." />
                   </label>
@@ -392,12 +392,12 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="mgmt, lan"
-                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-2 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
                     Allowed domains
                     <InfoTip label="Comma-separated FQDN patterns (e.g. *.vendor.com). Use * to allow all." />
                   </label>
@@ -415,12 +415,12 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="*.example.com"
-                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-2 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
                     Upstream proxy
                     <InfoTip label="Optional upstream proxy URL for chaining (phased). Leave empty for direct egress." />
                   </label>
@@ -435,7 +435,7 @@ export default function ProxiesPage() {
                       }))
                     }
                     placeholder="http://upstream:3128"
-                    className="mt-2 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-2 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                   />
                 </div>
               </div>
@@ -449,7 +449,7 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setForward((f) => ({ ...f, logRequests: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
+                className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
               />
               Log requests
               <InfoTip label="Writes access logs so the UI can show request rate and errors." />
@@ -466,7 +466,7 @@ export default function ProxiesPage() {
                 <button
                   onClick={onSaveForward}
                   disabled={saveState === "saving"}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+                  className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
                 </button>
@@ -475,9 +475,9 @@ export default function ProxiesPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card backdrop-blur">
-          <h2 className="text-lg font-semibold text-white">Reverse proxy</h2>
-          <p className="mt-1 text-sm text-slate-300">
+        <section className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
+          <h2 className="text-lg font-semibold text-[var(--text)]">Reverse proxy</h2>
+          <p className="mt-1 text-sm text-[var(--text)]">
             Add sites to expose internal apps.
           </p>
 
@@ -490,13 +490,13 @@ export default function ProxiesPage() {
                 onChange={(e) =>
                   setReverse((r) => ({ ...r, enabled: e.target.checked }))
                 }
-                className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
+                className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
               />
               Enabled
             </label>
 
-            <div className="rounded-xl border border-white/[0.08] bg-black/30 p-4">
-              <h3 className="text-sm font-semibold text-white">Add site</h3>
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+              <h3 className="text-sm font-semibold text-[var(--text)]">Add site</h3>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <input
                   type="text"
@@ -506,7 +506,7 @@ export default function ProxiesPage() {
                     setNewSite((s) => ({ ...s, name: e.target.value }))
                   }
                   placeholder="site name"
-                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="number"
@@ -519,7 +519,7 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="listen port"
-                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="text"
@@ -535,7 +535,7 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="backends host:port, host:port"
-                  className="md:col-span-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="md:col-span-2 input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
                 <input
                   type="text"
@@ -551,14 +551,14 @@ export default function ProxiesPage() {
                     }))
                   }
                   placeholder="hostnames (optional)"
-                  className="md:col-span-2 rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="md:col-span-2 input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
               <div className="mt-3 flex justify-end">
                 {canEdit && (
                   <button
                     onClick={addSite}
-                    className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                   >
                     Add
                   </button>
@@ -568,27 +568,27 @@ export default function ProxiesPage() {
 
             <div className="space-y-2">
               {(reverse.sites ?? []).length === 0 && (
-                <div className="text-sm text-slate-400">
+                <div className="text-sm text-[var(--text-muted)]">
                   No reverse proxy sites configured.
                 </div>
               )}
               {(reverse.sites ?? []).map((site) => (
                 <div
                   key={site.name}
-                  className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2"
+                  className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2"
                 >
                   <div>
-                    <div className="text-sm font-semibold text-white">
+                    <div className="text-sm font-semibold text-[var(--text)]">
                       {site.name}
                     </div>
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-[var(--text-muted)]">
                       port {site.listenPort} → {(site.backends ?? []).join(", ")}
                     </div>
                   </div>
                   {canEdit && (
                     <button
                       onClick={() => deleteSite(site.name)}
-                      className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-200 transition-ui hover:bg-white/[0.08]"
+                      className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                     >
                       Delete
                     </button>
@@ -608,7 +608,7 @@ export default function ProxiesPage() {
                 <button
                   onClick={onSaveReverse}
                   disabled={saveState === "saving"}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+                  className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
                 </button>

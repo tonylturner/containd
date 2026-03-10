@@ -33,6 +33,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/synth"
 )
 
 type Options struct {
@@ -94,6 +95,12 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Errorf("capture start failed: %v", err)
 		}
 	}()
+
+	// Start synthetic traffic generator in lab/dpiMock mode.
+	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
+		logger.Infof("dpiMock enabled: starting synthetic traffic generator")
+		go synth.Run(ctx, dpEngine.Events(), synth.DefaultConfig())
+	}
 
 	ownership.start(ctx)
 	dhcpMgr := dhcpd.NewManager()
@@ -624,6 +631,7 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 
 func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.HandlerFunc {
 	var current config.DataPlaneConfig
+	var synthCancel context.CancelFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -657,6 +665,18 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.Hand
 					logger.Errorf("capture start failed: %v", err)
 				}
 			}()
+			// Stop previous synth generator if running.
+			if synthCancel != nil {
+				synthCancel()
+				synthCancel = nil
+			}
+			// Start synth generator if dpiMock is enabled.
+			if dp.DPIMock {
+				logger.Infof("dpiMock enabled via API: starting synthetic traffic generator")
+				synthCtx, cancel := context.WithCancel(context.Background())
+				synthCancel = cancel
+				go synth.Run(synthCtx, dpEngine.Events(), synth.DefaultConfig())
+			}
 			writeJSON(w, map[string]any{"status": "configured"})
 			return
 		default:

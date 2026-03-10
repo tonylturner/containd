@@ -694,6 +694,40 @@ export type ReverseProxyConfig = {
 
 export type ServicesStatus = Record<string, unknown>;
 
+export type SystemStats = {
+  cpu: { usagePercent: number; numCPU: number };
+  memory: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+  };
+  disk: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+  };
+  ruleEval: { rulesLoaded: number; avgLatencyMs: number };
+  container: {
+    running: boolean;
+    id?: string;
+    image?: string;
+    uptime?: string;
+    memUsedBytes: number;
+    memLimitBytes: number;
+    memPercent: number;
+  };
+  runtime: {
+    goroutines: number;
+    heapAllocMB: number;
+    heapSysMB: number;
+    gcPauseMsAvg: number;
+    uptime: string;
+  };
+  collectedAt: string;
+};
+
 export type IDSCondition = {
   all?: IDSCondition[];
   any?: IDSCondition[];
@@ -1214,6 +1248,8 @@ export const api = {
     postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
   getServicesStatus: () =>
     getJSON<ServicesStatus>("/api/v1/services/status"),
+  getSystemStats: () =>
+    getJSON<SystemStats>("/api/v1/system/stats"),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),

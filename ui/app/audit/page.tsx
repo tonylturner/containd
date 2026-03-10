@@ -39,14 +39,14 @@ export default function AuditPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10 transition-ui"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.1] transition-ui"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-sm border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>
       )}
@@ -60,9 +60,9 @@ export default function AuditPage() {
           description="Administrative actions will appear here automatically."
         />
       ) : (
-      <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden shadow-card">
+      <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-white/[0.03]">
+          <thead className="bg-[var(--surface)]">
             <tr>
               <SortableHeader label="Time" sortKey="timestamp" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
               <SortableHeader label="Actor" sortKey="actor" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
@@ -75,23 +75,23 @@ export default function AuditPage() {
           <tbody>
             {table.data.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-slate-400" colSpan={6}>
+                <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
                   No audit records match your search.
                 </td>
               </tr>
             )}
             {table.data.map((r) => (
-              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
-                <td className="px-4 py-3 text-slate-200">
+              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                <td className="px-4 py-3 text-[var(--text)]">
                   {new Date(r.timestamp).toLocaleString()}
                 </td>
-                <td className="px-4 py-3 text-slate-200">{r.actor}</td>
-                <td className="px-4 py-3 text-slate-200">{r.source}</td>
-                <td className="px-4 py-3 font-mono text-xs text-white">
+                <td className="px-4 py-3 text-[var(--text)]">{r.actor}</td>
+                <td className="px-4 py-3 text-[var(--text)]">{r.source}</td>
+                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
                   {r.action}
                 </td>
-                <td className="px-4 py-3 text-slate-200">{r.target}</td>
-                <td className="px-4 py-3 text-slate-200">{r.result}</td>
+                <td className="px-4 py-3 text-[var(--text)]">{r.target}</td>
+                <td className="px-4 py-3 text-[var(--text)]">{r.result}</td>
               </tr>
             ))}
           </tbody>
@@ -102,4 +102,3 @@ export default function AuditPage() {
     </Shell>
   );
 }
-

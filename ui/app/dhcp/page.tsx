@@ -157,21 +157,21 @@ export default function DHCPPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500">
+            <button onClick={onSave} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
               Save
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/[0.08] bg-black/30"
+              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
             />
             Auto
           </label>
@@ -180,58 +180,58 @@ export default function DHCPPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+      <div className="mb-4 flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
         <span>Related LAN services</span>
-        <Link href="/system/services/dns/" className="text-blue-400 hover:text-blue-300">
+        <Link href="/system/services/dns/" className="text-[var(--amber)] hover:text-[var(--amber)]">
           DNS resolver &rarr;
         </Link>
       </div>
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
         {loading ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-8 w-1/2" />
           </div>
         ) : (
-          <div className="mt-3 grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+          <div className="mt-3 grid gap-2 text-sm text-[var(--text)] md:grid-cols-2">
             <div>
-              Enabled: <span className="text-slate-100">{status?.enabled ? "yes" : "no"}</span>
+              Enabled: <span className="text-[var(--text)]">{status?.enabled ? "yes" : "no"}</span>
             </div>
             <div>
-              Pools: <span className="text-slate-100">{status?.pools ?? 0}</span>
+              Pools: <span className="text-[var(--text)]">{status?.pools ?? 0}</span>
             </div>
             <div>
-              Reservations: <span className="text-slate-100">{status?.reservations ?? 0}</span>
+              Reservations: <span className="text-[var(--text)]">{status?.reservations ?? 0}</span>
             </div>
             <div>
-              Listen ifaces: <span className="text-slate-100">{status?.listen_ifaces ?? 0}</span>
+              Listen ifaces: <span className="text-[var(--text)]">{status?.listen_ifaces ?? 0}</span>
             </div>
             <div>
-              Rate: <span className="text-slate-100">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-[var(--text)]">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div>
               Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             {status?.last_error ? (
-              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              <div className="md:col-span-2 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
               </div>
             ) : null}
             {status?.note ? (
-              <div className="md:col-span-2 text-xs text-slate-400">{status.note}</div>
+              <div className="md:col-span-2 text-xs text-[var(--text-muted)]">{status.note}</div>
             ) : null}
             <div className="md:col-span-2">
               <Sparkline
@@ -246,13 +246,13 @@ export default function DHCPPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-white">DHCPv4 Server</h2>
-        <p className="mt-1 text-sm text-slate-300">
+        <h2 className="text-lg font-semibold text-[var(--text)]">DHCPv4 Server</h2>
+        <p className="mt-1 text-sm text-[var(--text)]">
           Configure LAN-side DHCP. The engine runs a minimal DHCPv4 server (IPv4 only) when enabled and committed.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-slate-200">
+          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
@@ -264,7 +264,7 @@ export default function DHCPPage() {
             <InfoTip label="Provides IPv4 leases on LAN interfaces when enabled." />
           </label>
 
-          <label className="flex items-center gap-2 text-sm text-slate-200">
+          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
               type="checkbox"
               checked={cfg.authoritative ?? true}
@@ -276,13 +276,13 @@ export default function DHCPPage() {
             <InfoTip label="When enabled, this DHCP server takes full authority for the subnet (recommended in lab deployments)." />
           </label>
 
-          <details className="md:col-span-2 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
-            <summary className="cursor-pointer text-sm text-slate-200">
+          <details className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+            <summary className="cursor-pointer text-sm text-[var(--text)]">
               Advanced options
             </summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Listen Interfaces (CSV)
                   <InfoTip label="Comma-separated interfaces where DHCP listens (e.g., lan2, lan3)." />
                 </label>
@@ -299,12 +299,12 @@ export default function DHCPPage() {
                     }))
                   }
                   placeholder="lan2, lan3"
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Lease Seconds
                   <InfoTip label="How long clients keep their IPs before renewal (default 3600)." />
                 </label>
@@ -313,12 +313,12 @@ export default function DHCPPage() {
                   value={cfg.leaseSeconds ?? 3600}
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Router (Gateway)
                   <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
                 </label>
@@ -327,12 +327,12 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
                   placeholder="192.168.1.1"
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   DNS Servers (CSV)
                   <InfoTip label="DNS servers handed to clients (leave empty to use the firewall DNS)." />
                 </label>
@@ -349,12 +349,12 @@ export default function DHCPPage() {
                     }))
                   }
                   placeholder="192.168.1.1, 1.1.1.1"
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Domain (optional)
                   <InfoTip label="Optional search domain handed to clients." />
                 </label>
@@ -363,12 +363,12 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
                   placeholder="lab.local"
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Pools (one per line)
                   <InfoTip label="Format: iface,start,end (validated on save)." />
                 </label>
@@ -378,12 +378,12 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, pools: textToPools(e.target.value) }))}
                   placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                   Reservations (one per line)
                   <InfoTip label="Format: iface,mac,ip (must fall inside pool for that iface)." />
                 </label>
@@ -393,14 +393,14 @@ export default function DHCPPage() {
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
                   placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
-                  className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 />
               </div>
             </div>
           </details>
         </div>
 
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="mt-3 text-xs text-[var(--text-muted)]">
           State:{" "}
           {saveState === "saving"
             ? "saving\u2026"
@@ -415,19 +415,19 @@ export default function DHCPPage() {
       <Card className="mt-6">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-white">Active Leases</h2>
-            <p className="mt-1 text-sm text-slate-300">Leases issued by the embedded DHCP server (best-effort).</p>
+            <h2 className="text-lg font-semibold text-[var(--text)]">Active Leases</h2>
+            <p className="mt-1 text-sm text-[var(--text)]">Leases issued by the embedded DHCP server (best-effort).</p>
           </div>
           <div className="flex items-center gap-2">
             <a
               href="/events?filter=service&kind=service.dhcp.reservation"
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               Reservation events
             </a>
             <button
               onClick={() => refreshLeases()}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               Refresh
             </button>
@@ -435,12 +435,12 @@ export default function DHCPPage() {
         </div>
 
         {leaseError && (
-          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+          <div className="mt-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {leaseError}
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
+        <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
           {leasesLoading ? (
             <div className="space-y-2 p-3">
               <Skeleton className="h-10 w-full" />
@@ -448,8 +448,8 @@ export default function DHCPPage() {
               <Skeleton className="h-10 w-full" />
             </div>
           ) : (
-            <table className="w-full text-left text-sm text-slate-200">
-              <thead className="bg-black/30 text-xs uppercase tracking-wide text-slate-400">
+            <table className="w-full text-left text-sm text-[var(--text)]">
+              <thead className="bg-[var(--surface)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
                   <th className="px-3 py-2">Iface</th>
                   <th className="px-3 py-2">IP</th>
@@ -460,14 +460,14 @@ export default function DHCPPage() {
               </thead>
               <tbody>
                 {leases.length === 0 ? (
-                  <tr className="border-t border-white/[0.06]">
-                    <td colSpan={5} className="px-3 py-3 text-sm text-slate-400">
+                  <tr className="border-t border-amber-500/[0.1]">
+                    <td colSpan={5} className="px-3 py-3 text-sm text-[var(--text-muted)]">
                       No leases.
                     </td>
                   </tr>
                 ) : (
                   leases.map((l) => (
-                    <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-white/[0.06] table-row-hover transition-ui">
+                    <tr key={`${l.iface}-${l.mac}-${l.ip}`} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
                       <td className="px-3 py-2 font-mono text-xs">{l.iface}</td>
                       <td className="px-3 py-2 font-mono text-xs">{l.ip}</td>
                       <td className="px-3 py-2 font-mono text-xs">{l.mac}</td>

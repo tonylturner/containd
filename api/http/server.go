@@ -213,6 +213,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", rateLimitSensitive(), changeMyPasswordHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
+		protected.GET("/system/stats", systemStatsHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))

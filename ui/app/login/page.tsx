@@ -83,11 +83,11 @@ function LoginInner() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black text-slate-100">
-      <div className="w-full max-w-md rounded-xl border border-white/[0.08] bg-surface-raised p-8 shadow-card-lg">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-[var(--text)]">
+      <div className="w-full max-w-md rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-8 shadow-card-lg">
         <div className="mb-6 flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full bg-blue-500" />
-          <h1 className="text-xl font-semibold text-white">containd login</h1>
+          <div className="h-2 w-2 rounded-full bg-amber-500" />
+          <h1 className="text-xl font-semibold text-[var(--text)]">containd login</h1>
         </div>
 
         {error && (
@@ -96,18 +96,18 @@ function LoginInner() {
           </div>
         )}
         {info && (
-          <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
+          <div className="mb-4 rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
             {info}
           </div>
         )}
         {detail && (
-          <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+          <div className="mb-4 rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
             Last auth error: <span className="font-mono">{detail}</span>
           </div>
         )}
 
         {alreadyLoggedIn && (
-          <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-slate-100">
+          <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-[var(--text)]">
             You are already logged in.
             <div className="mt-2">
               <button
@@ -115,7 +115,7 @@ function LoginInner() {
                 onClick={() => {
                   if (typeof window !== "undefined") window.location.href = "/";
                 }}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >
                 Continue
               </button>
@@ -125,19 +125,19 @@ function LoginInner() {
 
         <form onSubmit={onSubmit} className="grid gap-4">
           <div>
-            <label htmlFor="login-username" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">
+            <label htmlFor="login-username" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
               Username
             </label>
             <input
               id="login-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full input-industrial"
               autoComplete="username"
             />
           </div>
           <div>
-            <label htmlFor="login-password" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">
+            <label htmlFor="login-password" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
               Password
             </label>
             <input
@@ -145,20 +145,20 @@ function LoginInner() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full input-industrial"
               autoComplete="current-password"
             />
           </div>
           <button
             type="submit"
             disabled={state === "logging_in"}
-            className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-60"
+            className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
           >
             {state === "logging_in" ? "Logging in..." : "Login"}
           </button>
         </form>
 
-        <p className="mt-4 text-xs text-slate-400">
+        <p className="mt-4 text-xs text-[var(--text-muted)]">
           Default credentials on fresh installs: containd / containd.
         </p>
       </div>

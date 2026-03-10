@@ -54,10 +54,10 @@ export default function AlertsPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setLive((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium transition-colors ${
               live
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10"
+                : "border-amber-500/[0.15] bg-[var(--surface2)] text-[var(--text-muted)] hover:bg-amber-500/[0.1]"
             }`}
           >
             {live && (
@@ -70,7 +70,7 @@ export default function AlertsPage() {
           </button>
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs font-medium text-[var(--text)] transition-colors hover:bg-amber-500/[0.1] hover:text-[var(--text)]"
           >
             Refresh
           </button>
@@ -89,10 +89,10 @@ export default function AlertsPage() {
           description="No intrusion detection alerts have been recorded yet. Alerts will appear here when the IDS engine detects suspicious activity."
         />
       ) : (
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="bg-white/[0.03] text-xs font-medium uppercase tracking-wider text-slate-500">
+              <tr className="bg-[var(--surface)] text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">
                 <th className="px-4 py-3 font-medium">Message</th>
                 <th className="px-4 py-3 font-medium">Severity</th>
                 <th className="px-4 py-3 font-medium">Source</th>
@@ -111,22 +111,22 @@ export default function AlertsPage() {
                 return (
                   <tr
                     key={ev.id}
-                    className="table-row-hover transition-ui border-t border-white/[0.06]"
+                    className="table-row-hover transition-ui border-t border-amber-500/[0.1]"
                   >
-                    <td className="px-4 py-3 font-medium text-white">{msg}</td>
+                    <td className="px-4 py-3 font-medium text-[var(--text)]">{msg}</td>
                     <td className="px-4 py-3">
                       <StatusBadge variant={severityVariant(sev)} dot>
                         {sev}
                       </StatusBadge>
                     </td>
-                    <td className="px-4 py-3 text-slate-300">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {ev.srcIp}:{ev.srcPort}
                       {ev.transport ? ` (${ev.transport})` : ""}
                     </td>
-                    <td className="px-4 py-3 text-slate-300">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {ev.dstIp}:{ev.dstPort}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">
                       {new Date(ev.timestamp).toLocaleString()}
                     </td>
                   </tr>

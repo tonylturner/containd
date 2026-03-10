@@ -197,20 +197,20 @@ export default function MonitoringOverviewPage() {
     <Shell title="Operations Center">
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Flows">
-          <div className="text-3xl font-bold text-white">{flows.length}</div>
-          <Link href="/flows/" className="text-xs text-slate-300 hover:text-white">
+          <div className="text-3xl font-bold text-[var(--text)]">{flows.length}</div>
+          <Link href="/flows/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
             View flows →
           </Link>
         </Card>
         <Card title="DPI Events">
-          <div className="text-3xl font-bold text-white">{dpiCount}</div>
-          <Link href="/events/" className="text-xs text-slate-300 hover:text-white">
+          <div className="text-3xl font-bold text-[var(--text)]">{dpiCount}</div>
+          <Link href="/events/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
             View events →
           </Link>
         </Card>
         <Card title="IDS Alerts">
-          <div className="text-3xl font-bold text-white">{alertCount}</div>
-          <Link href="/alerts/" className="text-xs text-slate-300 hover:text-white">
+          <div className="text-3xl font-bold text-[var(--text)]">{alertCount}</div>
+          <Link href="/alerts/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
             View alerts →
           </Link>
         </Card>
@@ -218,16 +218,16 @@ export default function MonitoringOverviewPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card title="Services Health">
-          <div className="space-y-3 text-xs text-slate-300">
+          <div className="space-y-3 text-xs text-[var(--text)]">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-slate-400">
+              <span className="flex items-center gap-2 text-[var(--text-muted)]">
                 <Image src="/icons/nginx.svg" alt="" width={16} height={16} className="h-4 w-4" />
                 Proxies
               </span>
               <span>
                 {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min
                 {nginxRate !== null && (
-                  <span className="text-slate-500"> · nginx {nginxRate.toFixed(1)}/min</span>
+                  <span className="text-[var(--text-dim)]"> · nginx {nginxRate.toFixed(1)}/min</span>
                 )}
                 {envoyErrors !== null && (
                   <span className="text-amber-400"> · {envoyErrors.toFixed(1)} err/min</span>
@@ -238,36 +238,36 @@ export default function MonitoringOverviewPage() {
               {serviceCards.slice(0, 4).map((svc) => (
                 <div
                   key={svc.key}
-                  className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 transition-ui"
+                  className="flex items-center justify-between rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 transition-ui"
                 >
-                  <span className="flex items-center gap-2 text-slate-300">
+                  <span className="flex items-center gap-2 text-[var(--text)]">
                     <Image src={svc.icon} alt="" width={16} height={16} className="h-4 w-4" />
                     {svc.label}
                   </span>
-                  <span className="rounded-full bg-white/[0.08] px-2 py-1 text-[10px] text-slate-200">
+                  <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-[10px] text-[var(--text)]">
                     {svc.status}
                   </span>
                 </div>
               ))}
             </div>
-            <Link href="/system/services/" className="text-xs text-slate-300 hover:text-white">
+            <Link href="/system/services/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
               Configure services →
             </Link>
           </div>
         </Card>
         <Card title="Top Protocols">
           {protoSeries.length === 0 && (
-            <div className="text-sm text-slate-400">No telemetry yet.</div>
+            <div className="text-sm text-[var(--text-muted)]">No telemetry yet.</div>
           )}
           {protoSeries.length > 0 && (
-            <div className="space-y-2 text-xs text-slate-300">
+            <div className="space-y-2 text-xs text-[var(--text)]">
               {protoSeries.map((row) => (
                 <div key={row.proto} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="uppercase text-slate-400">{row.proto}</span>
+                    <span className="uppercase text-[var(--text-muted)]">{row.proto}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
+                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -280,17 +280,17 @@ export default function MonitoringOverviewPage() {
         </Card>
         <Card title="Recent Alerts">
           {alertCount === 0 && (
-            <div className="text-sm text-slate-400">No alerts.</div>
+            <div className="text-sm text-[var(--text-muted)]">No alerts.</div>
           )}
           {events
             .filter((ev) => ev.proto === "ids" && ev.kind === "alert")
             .slice(0, 5)
             .map((ev) => (
-              <div key={ev.id} className="mb-2 rounded-lg bg-black/30 p-2 text-xs">
+              <div key={ev.id} className="mb-2 rounded-lg bg-[var(--surface)] p-2 text-xs">
                 <div className="text-slate-100">
                   {(ev.attributes?.["message"] as string) ?? "IDS alert"}
                 </div>
-                <div className="text-slate-400">
+                <div className="text-[var(--text-muted)]">
                   {new Date(ev.timestamp).toLocaleString()}
                 </div>
               </div>
@@ -300,35 +300,35 @@ export default function MonitoringOverviewPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card title="Traffic Pulse">
-          <div className="flex items-center justify-between text-xs text-slate-400">
+          <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
             <span>Last 60 min</span>
-            <span className="text-slate-300">{events.length.toLocaleString()} events</span>
+            <span className="text-[var(--text)]">{events.length.toLocaleString()} events</span>
           </div>
           <div className="mt-3">
             <Sparkline values={activitySeries} color="var(--primary)" />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--text)]">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
               DPI {dpiCount.toLocaleString()}
             </div>
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
               Alerts {alertCount.toLocaleString()}
             </div>
           </div>
         </Card>
         <Card title="Top Applications">
           {appSeries.length === 0 && (
-            <div className="text-sm text-slate-400">No flow apps yet.</div>
+            <div className="text-sm text-[var(--text-muted)]">No flow apps yet.</div>
           )}
           {appSeries.length > 0 && (
-            <div className="space-y-2 text-xs text-slate-300">
+            <div className="space-y-2 text-xs text-[var(--text)]">
               {appSeries.map((row) => (
                 <div key={row.app} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="uppercase text-slate-400">{row.app}</span>
+                    <span className="uppercase text-[var(--text-muted)]">{row.app}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
+                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -340,22 +340,22 @@ export default function MonitoringOverviewPage() {
           )}
         </Card>
         <Card title="Endpoints">
-          <div className="space-y-3 text-xs text-slate-300">
+          <div className="space-y-3 text-xs text-[var(--text)]">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Sources</span>
-              <span className="text-white">{endpointStats.srcCount}</span>
+              <span className="text-[var(--text-muted)]">Sources</span>
+              <span className="text-[var(--text)]">{endpointStats.srcCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/[0.03]">
+            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
               />
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Destinations</span>
-              <span className="text-white">{endpointStats.dstCount}</span>
+              <span className="text-[var(--text-muted)]">Destinations</span>
+              <span className="text-[var(--text)]">{endpointStats.dstCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/[0.03]">
+            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}
