@@ -453,9 +453,12 @@ type PCAPForwardTarget struct {
 }
 
 type Zone struct {
-	Name        string `json:"name"`
-	Alias       string `json:"alias,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string          `json:"name"`
+	Alias       string          `json:"alias,omitempty"`
+	Description string          `json:"description,omitempty"`
+	SLTarget    int             `json:"slTarget,omitempty"`
+	Consequence string          `json:"consequence,omitempty"`
+	SLOverrides map[string]bool `json:"slOverrides,omitempty"`
 }
 
 type ObjectType string

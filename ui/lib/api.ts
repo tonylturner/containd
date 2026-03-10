@@ -265,7 +265,33 @@ export type Zone = {
   name: string;
   alias?: string;
   description?: string;
+  slTarget?: number;
+  consequence?: string;
+  slOverrides?: Record<string, boolean>;
 };
+
+export type ConduitProto = {
+  n: string;
+  t: "allowed" | "denied" | "inspect";
+};
+
+export type Conduit = {
+  state: "allow" | "block" | "partial" | "unmodeled";
+  ids: "full" | "partial" | "none";
+  proto: ConduitProto[];
+  traffic: number;
+  rules: string[];
+  gaps: string[];
+  mitre: string[];
+  defaultDeny: boolean;
+  tlsEnforced: boolean;
+  protoWhitelist: boolean;
+  mfaRequired: boolean;
+  auditLogged: boolean;
+  avEnabled: boolean;
+};
+
+export type ConduitMap = Record<string, Conduit>;
 
 export type Interface = {
   name: string;
@@ -1177,6 +1203,8 @@ export const api = {
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
   deleteZone: (name: string) =>
     deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`),
+  getSecurityConduits: () =>
+    getJSON<ConduitMap>("/api/v1/security/conduits"),
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
   listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),

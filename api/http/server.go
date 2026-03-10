@@ -343,6 +343,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/learn/generate", requireAdmin(), learnGenerateHandler(engine))
 		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))
 		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
+		protected.GET("/security/conduits", securityConduitsHandler(store))
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store, engine, services))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
@@ -3848,36 +3849,80 @@ func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 func updateZoneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
-		var z config.Zone
-		if err := c.ShouldBindJSON(&z); err != nil {
+
+		// Read raw JSON for partial merge.
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+		var patch map[string]interface{}
+		if err := json.Unmarshal(body, &patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid zone payload")
 			return
 		}
+
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		updated := false
+		idx := -1
 		for i, existing := range cfg.Zones {
 			if existing.Name == name {
-				if z.Name == "" {
-					z.Name = existing.Name
-				}
-				cfg.Zones[i] = z
-				updated = true
+				idx = i
 				break
 			}
 		}
-		if !updated {
+		if idx < 0 {
 			apiError(c, http.StatusNotFound, "zone not found")
 			return
 		}
+		z := &cfg.Zones[idx]
+
+		if v, ok := patch["name"]; ok {
+			if s, ok := v.(string); ok {
+				z.Name = s
+			}
+		}
+		if v, ok := patch["alias"]; ok {
+			if s, ok := v.(string); ok {
+				z.Alias = s
+			}
+		}
+		if v, ok := patch["description"]; ok {
+			if s, ok := v.(string); ok {
+				z.Description = s
+			}
+		}
+		if v, ok := patch["slTarget"]; ok {
+			if f, ok := v.(float64); ok {
+				z.SLTarget = int(f)
+			}
+		}
+		if v, ok := patch["consequence"]; ok {
+			if s, ok := v.(string); ok {
+				z.Consequence = s
+			}
+		}
+		if v, ok := patch["slOverrides"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if z.SLOverrides == nil {
+					z.SLOverrides = make(map[string]bool)
+				}
+				for k, val := range m {
+					if b, ok := val.(bool); ok {
+						z.SLOverrides[k] = b
+					}
+				}
+			}
+		}
+
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, z)
+		c.JSON(http.StatusOK, *z)
 	}
 }
 

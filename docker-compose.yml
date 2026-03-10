@@ -1,3 +1,15 @@
+# containd — local development compose
+# This file builds from source and creates simulated zone networks.
+# For production deployment, see deploy/docker-compose.yml.
+#
+# ── Production hardening (uncomment when deploying for real) ────
+# See deploy/docker-compose.yml for the full list. Key additions:
+#   mem_limit: 512m
+#   pids_limit: 256
+#   read_only: true  (+ tmpfs for /tmp, /run)
+#   security_opt: [no-new-privileges:true]
+#   logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }
+
 services:
   containd:
     build:
