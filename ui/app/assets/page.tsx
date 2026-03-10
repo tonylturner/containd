@@ -98,14 +98,14 @@ export default function AssetsPage() {
   }
 
   return (
-    <Shell title="Assets" actions={<button onClick={refresh} className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui">Refresh</button>}>
+    <Shell title="Assets" actions={<button onClick={refresh} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui">Refresh</button>}>
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -116,24 +116,24 @@ export default function AssetsPage() {
             value={id}
             onChange={(e) => setId(e.target.value)}
             placeholder="id (e.g. plc-1)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             {["PLC", "HMI", "SIS", "RTU", "HISTORIAN", "EWS", "GATEWAY", "LAPTOP", "OTHER"].map((t) => (
               <option key={t} value={t}>
@@ -144,7 +144,7 @@ export default function AssetsPage() {
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
@@ -157,12 +157,12 @@ export default function AssetsPage() {
             value={ips}
             onChange={(e) => setIps(e.target.value)}
             placeholder="IPs (csv)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 md:col-span-2 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial md:col-span-2 transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((c) => (
               <option key={c} value={c}>
@@ -174,7 +174,7 @@ export default function AssetsPage() {
         <div className="mt-3 flex justify-end">
           <button
             onClick={onCreate}
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-ui"
+            className="rounded-sm bg-[var(--amber)] hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
           >
             Create asset
           </button>
@@ -182,7 +182,7 @@ export default function AssetsPage() {
       </Card>
       )}
 
-      <div className="mt-6 rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden shadow-card">
+      <div className="mt-6 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
             <tr>
@@ -208,17 +208,17 @@ export default function AssetsPage() {
               </tr>
             )}
             {assets.map((a) => (
-              <tr key={a.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-white">
+              <tr key={a.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
                   {a.id}
                 </td>
-                <td className="px-4 py-3 text-slate-200">{a.name}</td>
-                <td className="px-4 py-3 text-slate-200">{a.alias || "\u2014"}</td>
-                <td className="px-4 py-3 text-slate-200">{a.type || "\u2014"}</td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">{a.name}</td>
+                <td className="px-4 py-3 text-[var(--text)]">{a.alias || "\u2014"}</td>
+                <td className="px-4 py-3 text-[var(--text)]">{a.type || "\u2014"}</td>
+                <td className="px-4 py-3 text-[var(--text)]">
                   {a.zone ? zoneLabel(zones.find((z) => z.name === a.zone) ?? { name: a.zone }) : "\u2014"}
                 </td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">
                   {(a.ips ?? []).join(", ") || "\u2014"}
                 </td>
                 <td className="px-4 py-3">
@@ -233,7 +233,7 @@ export default function AssetsPage() {
                     <>
                       <button
                         onClick={() => setEditing(a)}
-                        className="mr-2 rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10 transition-ui"
+                        className="mr-2 rounded-md bg-[var(--surface2)] px-2 py-1 text-xs hover:bg-amber-500/[0.12] transition-ui"
                       >
                         Edit
                       </button>
@@ -317,14 +317,14 @@ function EditAssetModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-xl bg-surface-raised border border-white/[0.08] p-5 shadow-card-lg animate-fade-in animate-slide-down">
+      <div className="w-full max-w-xl rounded-sm bg-[var(--surface)] border border-amber-500/[0.15] p-5 shadow-card-lg animate-fade-in animate-slide-down">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-[var(--text)]">
             Edit asset {asset.id}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10 transition-ui"
+            className="rounded-md bg-[var(--surface2)] px-2 py-1 text-xs hover:bg-amber-500/[0.12] transition-ui"
           >
             Close
           </button>
@@ -335,18 +335,18 @@ function EditAssetModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             {["PLC", "HMI", "SIS", "RTU", "HISTORIAN", "EWS", "GATEWAY", "LAPTOP", "OTHER"].map((t) => (
               <option key={t} value={t}>
@@ -357,7 +357,7 @@ function EditAssetModal({
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
@@ -370,12 +370,12 @@ function EditAssetModal({
             value={ips}
             onChange={(e) => setIps(e.target.value)}
             placeholder="IPs (csv)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((c) => (
               <option key={c} value={c}>
@@ -387,27 +387,27 @@ function EditAssetModal({
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             placeholder="tags (csv)"
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="description"
             rows={3}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white md:col-span-2 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] md:col-span-2 transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-sm text-slate-200 hover:bg-white/[0.06] transition-ui"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-ui"
+            className="rounded-sm bg-[var(--amber)] hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
           >
             Save changes
           </button>

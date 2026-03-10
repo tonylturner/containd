@@ -147,7 +147,7 @@ export default function AVPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
@@ -155,7 +155,7 @@ export default function AVPage() {
             <button
               onClick={onRunUpdate}
               disabled={updating}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08] disabled:opacity-50"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
             >
               {updating ? "Updating\u2026" : "Run definition update"}
             </button>
@@ -163,7 +163,7 @@ export default function AVPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
@@ -182,7 +182,7 @@ export default function AVPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -196,13 +196,13 @@ export default function AVPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {(updateMsg || notice) && (
         <div className="mb-4 space-y-2">
           {updateMsg && (
-            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-slate-200">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
               {updateMsg}
             </div>
           )}
@@ -220,7 +220,7 @@ export default function AVPage() {
         </div>
       )}
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-white">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
         {loading || !status ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-24 w-full" />
@@ -272,7 +272,7 @@ export default function AVPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-white">Settings</h2>
+        <h2 className="text-lg font-semibold text-[var(--text)]">Settings</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
@@ -304,7 +304,7 @@ export default function AVPage() {
                   return next;
                 });
               }}
-              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="mt-1 w-full input-industrial"
             >
               <option value="icap">ICAP (external)</option>
               <option value="clamav">ClamAV (embedded)</option>
@@ -316,7 +316,7 @@ export default function AVPage() {
               value={cfg.failPolicy ?? "open"}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, failPolicy: e.target.value as AVConfig["failPolicy"] }))}
-              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="mt-1 w-full input-industrial"
             >
               <option value="open">Fail open</option>
               <option value="closed">Fail closed</option>
@@ -339,7 +339,7 @@ export default function AVPage() {
               value={cfg.maxSizeBytes ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="mt-1 w-full input-industrial"
             />
           </div>
           <div>
@@ -349,7 +349,7 @@ export default function AVPage() {
               value={cfg.blockTtlSeconds ?? 600}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, blockTtlSeconds: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="mt-1 w-full input-industrial"
             />
           </div>
           <div>
@@ -359,7 +359,7 @@ export default function AVPage() {
               value={cfg.timeoutSec ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, timeoutSec: Number(e.target.value) }))}
-              className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="mt-1 w-full input-industrial"
             />
           </div>
         </div>
@@ -374,20 +374,20 @@ export default function AVPage() {
           <p className="text-xs text-[var(--text-muted)]">Use when mode is ICAP; leave empty to disable.</p>
           <div className="mt-3 space-y-2">
             {icapServers.map((srv, idx) => (
-              <div key={idx} className="grid gap-2 rounded-lg border border-white/[0.08] bg-black/30 p-3 md:grid-cols-4">
+              <div key={idx} className="grid gap-2 rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] p-3 md:grid-cols-4">
                 <input
                   value={srv.address}
                   onChange={(e) => updateICAPServer(idx, "address", e.target.value)}
                   disabled={!canEdit}
                   placeholder="host:port"
-                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial"
                 />
                 <input
                   value={srv.service ?? ""}
                   onChange={(e) => updateICAPServer(idx, "service", e.target.value)}
                   disabled={!canEdit}
                   placeholder="service (optional)"
-                  className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial"
                 />
                 <label className="flex items-center gap-2 text-sm text-[var(--text)]">
                   <input
@@ -402,7 +402,7 @@ export default function AVPage() {
                 {canEdit && (
                   <button
                     onClick={() => deleteICAPServer(idx)}
-                    className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                    className="rounded-sm border border-amber-500/[0.15] px-3 py-2 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                   >
                     Delete
                   </button>
@@ -412,7 +412,7 @@ export default function AVPage() {
             {canEdit && (
               <button
                 onClick={addICAPServer}
-                className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
               >
                 Add server
               </button>
@@ -433,7 +433,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), socketPath: e.target.value } }))
                 }
                 placeholder="/var/run/clamav/clamd.sock"
-                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full input-industrial"
               />
             </div>
             <div>
@@ -445,7 +445,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), customDefsPath: e.target.value } }))
                 }
                 placeholder="/data/clamav/custom.d"
-                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full input-industrial"
               />
             </div>
             <div>
@@ -457,7 +457,7 @@ export default function AVPage() {
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), updateSchedule: e.target.value } }))
                 }
                 placeholder="e.g. 4h or cron expr"
-                className="mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full input-industrial"
               />
             </div>
             <label className="flex items-center gap-2 text-sm text-[var(--text)]">
@@ -499,14 +499,14 @@ export default function AVPage() {
                 />
               </label>
             </div>
-            <div className="rounded-lg border border-white/[0.08] bg-black/30 p-3 text-xs text-slate-200">
-              <div className="mb-2 font-semibold text-white">Existing defs</div>
-              {defsPath && <div className="mb-2 text-[10px] text-slate-400">Path: {defsPath}</div>}
-              {defs.length === 0 && <div className="text-slate-400">None uploaded.</div>}
+            <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)]">
+              <div className="mb-2 font-semibold text-[var(--text)]">Existing defs</div>
+              {defsPath && <div className="mb-2 text-[10px] text-[var(--text-muted)]">Path: {defsPath}</div>}
+              {defs.length === 0 && <div className="text-[var(--text-muted)]">None uploaded.</div>}
               {defs.length > 0 && (
                 <ul className="space-y-1">
                   {defs.map((d) => (
-                    <li key={d} className="flex items-center justify-between rounded border border-white/[0.08] bg-black/20 px-2 py-1">
+                    <li key={d} className="flex items-center justify-between rounded border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1">
                       <span>{d}</span>
                       {canEdit && (
                         <button

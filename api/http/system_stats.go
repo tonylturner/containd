@@ -5,6 +5,8 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -185,11 +187,12 @@ func collectMemory() memoryStats {
 
 // collectDisk reads disk usage for /.
 func collectDisk() diskStats {
+	var d diskStats
 	// Use syscall.Statfs on Linux; this file won't compile on non-Linux but
 	// the build tags in the sibling file handle that.  For portability we
 	// simply read /proc/mounts + df-like info, but the simplest cross-compile
 	// approach is to read from the cgroup or just return zeros.
-	d := diskStatfs("/")
+	d = diskStatfs("/")
 	return d
 }
 
@@ -251,3 +254,58 @@ func dockerSockAvailable() bool {
 	return true
 }
 
+// dockerContainerCount queries the Docker API for running container count.
+// Returns -1 if unavailable.
+func dockerContainerCount(ctx context.Context) int {
+	if !dockerSockAvailable() {
+		return -1
+	}
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.DialTimeout("unix", "/var/run/docker.sock", time.Second)
+			},
+		},
+		Timeout: 2 * time.Second,
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/containers/json", nil)
+	if err != nil {
+		return -1
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return -1
+	}
+	// Count the JSON array elements without fully parsing
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return -1
+	}
+	s := strings.TrimSpace(string(body))
+	if s == "[]" || s == "null" {
+		return 0
+	}
+	// Quick count by counting top-level objects
+	count := 0
+	depth := 0
+	for _, ch := range s {
+		switch ch {
+		case '{':
+			if depth == 1 {
+				count++
+			}
+			depth++
+		case '}':
+			depth--
+		case '[':
+			depth++
+		case ']':
+			depth--
+		}
+	}
+	return count
+}

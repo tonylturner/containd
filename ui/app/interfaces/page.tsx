@@ -68,7 +68,7 @@ export default function InterfacesPage() {
       body: (
         <>
           Add zones in{" "}
-          <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
+          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
             Zones
           </Link>{" "}
           so you can assign them to interfaces.
@@ -268,7 +268,7 @@ export default function InterfacesPage() {
               <button
                 onClick={onAutoAssign}
                 disabled={assigning}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected OS interfaces"
               >
                 {assigning ? "Assigning..." : "Auto-assign"}
@@ -276,7 +276,7 @@ export default function InterfacesPage() {
               <button
                 onClick={onReconcileReplace}
                 disabled={reconciling}
-                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
+                className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
                 title="Reconcile interface addresses (replace semantics for configured static addresses)"
               >
                 {reconciling ? "Reconciling..." : "Reconcile"}
@@ -285,7 +285,7 @@ export default function InterfacesPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
@@ -294,18 +294,18 @@ export default function InterfacesPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       {notice && (
-        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
       {state.length === 0 && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
           <div className="font-semibold">Interface runtime state unavailable</div>
           <div className="mt-1 text-amber-400/90">
             The UI cannot see OS/Docker-assigned addresses right now (the engine interface-state feed is empty). In the
@@ -317,7 +317,7 @@ export default function InterfacesPage() {
         </div>
       )}
       {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
           <div className="font-semibold">Interface bindings needed</div>
           <div className="mt-1 text-amber-400/90">
             Some configured interfaces are not bound to OS devices. Use <span className="font-semibold">Auto-assign</span>{" "}
@@ -326,21 +326,21 @@ export default function InterfacesPage() {
         </div>
       )}
       <Card padding="lg">
-        <h2 className="text-sm font-semibold text-white">Create interface</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Create interface</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-6">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name (e.g. tunnel1)"
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+            className="input-industrial"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+            className="input-industrial"
           />
           <select
             value={ifaceType}
@@ -350,7 +350,7 @@ export default function InterfacesPage() {
               )
             }
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial"
             title="Interface type"
           >
             <option value="physical">physical</option>
@@ -361,7 +361,7 @@ export default function InterfacesPage() {
             value={zone}
             onChange={(e) => setZone(e.target.value)}
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial"
           >
             <option value="">(no zone)</option>
             {zones.map((z) => (
@@ -371,9 +371,9 @@ export default function InterfacesPage() {
             ))}
           </select>
           {zones.length === 0 && (
-            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-slate-300 md:col-span-2">
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
               No zones yet.{" "}
-              <Link href="/zones/" className="font-semibold text-blue-400 hover:text-blue-300">
+              <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
                 Create a zone
               </Link>{" "}
               to assign it here.
@@ -385,7 +385,7 @@ export default function InterfacesPage() {
               onChange={(e) => setMembers(e.target.value)}
               placeholder="members (comma-separated)"
               disabled={!isAdmin()}
-              className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500 md:col-span-2"
+              className="input-industrial md:col-span-2"
             />
           ) : ifaceType === "vlan" ? (
             <>
@@ -394,14 +394,14 @@ export default function InterfacesPage() {
                 onChange={(e) => setParent(e.target.value)}
                 placeholder="parent (e.g. wan or eth0)"
                 disabled={!isAdmin()}
-                className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+                className="input-industrial"
               />
               <input
                 value={vlanId}
                 onChange={(e) => setVlanId(e.target.value)}
                 placeholder="vlan id (1-4094)"
                 disabled={!isAdmin()}
-                className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+                className="input-industrial"
               />
             </>
           ) : null}
@@ -410,7 +410,7 @@ export default function InterfacesPage() {
             onChange={(e) => setAddresses(e.target.value)}
             placeholder="addresses (CIDR, comma-separated)"
             disabled={!isAdmin()}
-            className="rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500 md:col-span-2"
+            className="input-industrial md:col-span-2"
           />
         </div>
         <div className="mt-2 text-xs text-[var(--text-muted)]">
@@ -429,12 +429,12 @@ export default function InterfacesPage() {
           )}
         </div>
         <div className="mt-3 flex items-center justify-between">
-          {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
+          {error && <p className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
           {isAdmin() && (
             <button
               onClick={onCreate}
               disabled={saving}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
             </button>
@@ -442,7 +442,7 @@ export default function InterfacesPage() {
         </div>
       </Card>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
+      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
             <tr>
@@ -488,11 +488,11 @@ export default function InterfacesPage() {
 
       {state.length > 0 && (
         <Card padding="lg" className="mt-6">
-          <h2 className="text-sm font-semibold text-white">Detected OS interfaces</h2>
-          <div className="mt-1 text-xs text-slate-400">
+          <h2 className="text-sm font-semibold text-[var(--text)]">Detected OS interfaces</h2>
+          <div className="mt-1 text-xs text-[var(--text-muted)]">
             This is what the kernel currently exposes (used for device binding and link/address state).
           </div>
-          <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08]">
+          <div className="mt-3 overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
@@ -509,8 +509,8 @@ export default function InterfacesPage() {
                   .sort((a, b) => a.index - b.index)
                   .filter((s) => s.name !== "lo")
                   .map((s) => (
-                    <tr key={s.name} className="border-t border-white/[0.06] table-row-hover transition-ui">
-                      <td className="px-4 py-3 font-medium text-white">{s.name}</td>
+                    <tr key={s.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                      <td className="px-4 py-3 font-medium text-[var(--text)]">{s.name}</td>
                       <td className="px-4 py-3">
                         <span className={chipClass(s.up)}>{s.up ? "up" : "down"}</span>
                       </td>
@@ -605,8 +605,8 @@ function InterfaceRow({
     : "—";
 
   return (
-    <tr className="border-t border-white/[0.06] table-row-hover transition-ui">
-      <td className="px-4 py-3 font-medium text-white">{iface.name}</td>
+    <tr className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+      <td className="px-4 py-3 font-medium text-[var(--text)]">{iface.name}</td>
       <td className="px-4 py-3">
         {editing ? (
           <input
@@ -614,7 +614,7 @@ function InterfaceRow({
             onChange={(e) => setAlias(e.target.value)}
             disabled={!canEdit}
             placeholder="alias (optional)"
-            className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
           />
         ) : (
           <span className="text-[var(--text)]">{iface.alias || "—"}</span>
@@ -627,7 +627,7 @@ function InterfaceRow({
               value={itype}
               onChange={(e) => setIType(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="physical">physical</option>
               <option value="bridge">bridge</option>
@@ -640,7 +640,7 @@ function InterfaceRow({
                   onChange={(e) => setMembers(e.target.value)}
                   disabled={!canEdit}
                   placeholder="members (comma-separated)"
-                  className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
                 />
                 <select
                   value=""
@@ -655,7 +655,7 @@ function InterfaceRow({
                     setMembers(existing.join(", "));
                   }}
                   disabled={!canEdit}
-                  className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                   title="Quick-pick a member (appends)"
                 >
                   <option value="">+ add member…</option>
@@ -672,7 +672,7 @@ function InterfaceRow({
                   value={parent}
                   onChange={(e) => setParent(e.target.value)}
                   disabled={!canEdit}
-                  className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                 >
                   <option value="">(parent)</option>
                   {parentCandidates.map((c) => (
@@ -686,7 +686,7 @@ function InterfaceRow({
                   onChange={(e) => setVlanId(e.target.value)}
                   disabled={!canEdit}
                   placeholder="vlan id (1-4094)"
-                  className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
                 />
               </div>
             ) : null}
@@ -702,7 +702,7 @@ function InterfaceRow({
             onChange={(e) => setDevice(e.target.value)}
             disabled={!canEdit}
             placeholder="os iface (e.g. eth0)"
-            className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
           />
         ) : (
           <span className="text-[var(--text)]">{iface.device || "—"}</span>
@@ -721,7 +721,7 @@ function InterfaceRow({
             value={zone}
             onChange={(e) => setZone(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           >
             <option value="">(no zone)</option>
             {zones.map((z) => (
@@ -741,7 +741,7 @@ function InterfaceRow({
               value={mode}
               onChange={(e) => setMode(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="static">static</option>
               <option value="dhcp">dhcp</option>
@@ -751,14 +751,14 @@ function InterfaceRow({
               onChange={(e) => setAddresses(e.target.value)}
               disabled={!canEdit || mode === "dhcp"}
               placeholder="CIDRs (comma-separated)"
-              className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
             />
             <input
               value={gateway}
               onChange={(e) => setGateway(e.target.value)}
               disabled={!canEdit || mode === "dhcp"}
               placeholder="gateway (optional)"
-              className="w-full rounded-md border border-white/[0.08] bg-black/30 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-slate-500"
+              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
             />
             {canEdit && mode !== "dhcp" && detectedCIDR && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text)]">
@@ -769,7 +769,7 @@ function InterfaceRow({
                     setAddresses(detectedCIDR);
                     if (suggestedGateway) setGateway(suggestedGateway);
                   }}
-                  className="rounded-md bg-blue-600/15 px-2 py-1 text-blue-400 transition-ui hover:bg-blue-600/25"
+                  className="rounded-md bg-amber-500/[0.15] px-2 py-1 text-[var(--amber)] transition-ui hover:bg-amber-500/[0.25]"
                   title="Use the currently detected OS address as this interface's static address (and infer gateway)."
                 >
                   Use detected
@@ -832,12 +832,12 @@ function InterfaceRow({
           const network = runtime?.addrs?.length ? runtime.addrs.join(", ") : "—";
           const hasNetwork = network !== "—";
           return (
-            <span className="relative inline-flex items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.03] p-1 text-slate-200 group">
+            <span className="relative inline-flex items-center justify-center rounded-md border border-amber-500/[0.15] bg-[var(--surface)] p-1 text-[var(--text)] group">
               <Image src="/icons/docker.svg" alt="Docker" width={16} height={16} className="h-4 w-4" />
-              <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-lg border border-white/[0.08] bg-black/90 px-3 py-2 text-xs text-slate-200 opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
-                <div className="font-semibold text-white">Network</div>
-                <div className="mt-1 text-slate-200">
-                  <span className="text-slate-400">OS/Docker address:</span> {network}
+              <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
+                <div className="font-semibold text-[var(--text)]">Network</div>
+                <div className="mt-1 text-[var(--text)]">
+                  <span className="text-[var(--text-muted)]">OS/Docker address:</span> {network}
                 </div>
                 <div className="text-[var(--text)]">
                   <span className="text-[var(--text-muted)]">Interface address:</span> {configured}
@@ -942,7 +942,7 @@ function InterfaceRow({
                 });
                 setEditing(false);
               }}
-              className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white transition-ui hover:bg-blue-500"
+              className="rounded-sm bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
@@ -964,7 +964,7 @@ function InterfaceRow({
                 setHTTPS(iface.access?.https ?? true);
                 setEditing(false);
               }}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-300 transition-ui hover:bg-white/[0.08]"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               Cancel
             </button>
@@ -975,13 +975,13 @@ function InterfaceRow({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-300 transition-ui hover:bg-white/[0.08]"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                 >
                   Edit
                 </button>
                 <button
                   onClick={async () => onDelete(iface.name)}
-                  className="rounded-lg px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                  className="rounded-sm px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                 >
                   Delete
                 </button>

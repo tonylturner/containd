@@ -132,20 +132,20 @@ export default function ZonesPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08] hover:text-white"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] hover:text-[var(--text)]"
         >
           Refresh
         </button>
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="lg">
-        <h2 className="text-sm font-semibold text-white">Create zone</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Create zone</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div>
             <label htmlFor="zone-name" className="sr-only">Zone name</label>
@@ -155,7 +155,7 @@ export default function ZonesPage() {
               onChange={(e) => { setName(e.target.value); setNameError(validateName(e.target.value)); }}
               placeholder="name (e.g. ot)"
               disabled={!isAdmin()}
-              className={"w-full rounded-lg border bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none " + (nameError ? "border-red-500/30" : "border-white/[0.08]")}
+              className={"w-full input-industrial " + (nameError ? "border-red-500/30" : "border-amber-500/[0.15]")}
             />
             {nameError && <p className="mt-1 text-xs text-red-400">{nameError}</p>}
           </div>
@@ -167,7 +167,7 @@ export default function ZonesPage() {
               onChange={(e) => setAlias(e.target.value)}
               placeholder="alias (optional)"
               disabled={!isAdmin()}
-              className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full input-industrial"
             />
           </div>
           <div>
@@ -178,7 +178,7 @@ export default function ZonesPage() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="description"
               disabled={!isAdmin()}
-              className="w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-1"
+              className="w-full input-industrial md:col-span-1"
             />
           </div>
           <div>
@@ -199,12 +199,12 @@ export default function ZonesPage() {
           </div>
         </div>
         <div className="mt-3 flex items-center justify-between">
-          {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
+          {error && <p className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
           {isAdmin() && (
             <button
               onClick={onCreate}
               disabled={saving}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
             </button>
@@ -224,9 +224,9 @@ export default function ZonesPage() {
             <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search zones..." />
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
+          <div className="mt-3 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
             <table className="w-full text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
@@ -237,7 +237,7 @@ export default function ZonesPage() {
               <tbody>
                 {table.data.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={4}>
+                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={4}>
                       No zones match your search.
                     </td>
                   </tr>
@@ -298,18 +298,18 @@ function ZoneRow({
   const sl_t = zone.slTarget ?? 0;
 
   return (
-    <tr className="table-row-hover border-t border-white/5 transition-ui">
-      <td className="px-4 py-3 font-medium text-white">{zone.name}</td>
+    <tr className="table-row-hover border-t border-amber-500/[0.08] transition-ui">
+      <td className="px-4 py-3 font-medium text-[var(--text)]">{zone.name}</td>
       <td className="px-4 py-3">
         {editing ? (
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
         ) : (
-          <span className="text-slate-200">{zone.alias || "\u2014"}</span>
+          <span className="text-[var(--text)]">{zone.alias || "\u2014"}</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -318,10 +318,10 @@ function ZoneRow({
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-white/[0.08] bg-black/40 px-2 py-1 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
           />
         ) : (
-          <span className="text-slate-200">{zone.description || "\u2014"}</span>
+          <span className="text-[var(--text)]">{zone.description || "\u2014"}</span>
         )}
       </td>
       <td className="px-4 py-3 text-center">
@@ -357,7 +357,7 @@ function ZoneRow({
                 });
                 setEditing(false);
               }}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               Save
             </button>
@@ -368,7 +368,7 @@ function ZoneRow({
                 setEditSlt(zone.slTarget ?? 0);
                 setEditing(false);
               }}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               Cancel
             </button>
@@ -379,13 +379,13 @@ function ZoneRow({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300 transition-ui hover:bg-white/[0.08]"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => onDelete(zone.name)}
-                  className="text-red-400 transition-ui hover:bg-red-500/10 hover:text-red-300 rounded-lg px-3 py-1.5 text-sm"
+                  className="text-red-400 transition-ui hover:bg-red-500/10 hover:text-red-300 rounded-sm px-3 py-1.5 text-sm"
                 >
                   Delete
                 </button>

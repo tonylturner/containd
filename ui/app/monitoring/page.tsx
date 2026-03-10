@@ -238,13 +238,13 @@ export default function MonitoringOverviewPage() {
               {serviceCards.slice(0, 4).map((svc) => (
                 <div
                   key={svc.key}
-                  className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 transition-ui"
+                  className="flex items-center justify-between rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 transition-ui"
                 >
                   <span className="flex items-center gap-2 text-[var(--text)]">
                     <Image src={svc.icon} alt="" width={16} height={16} className="h-4 w-4" />
                     {svc.label}
                   </span>
-                  <span className="rounded-full bg-white/[0.08] px-2 py-1 text-[10px] text-slate-200">
+                  <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-[10px] text-[var(--text)]">
                     {svc.status}
                   </span>
                 </div>
@@ -267,7 +267,7 @@ export default function MonitoringOverviewPage() {
                     <span className="uppercase text-[var(--text-muted)]">{row.proto}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
+                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -307,11 +307,11 @@ export default function MonitoringOverviewPage() {
           <div className="mt-3">
             <Sparkline values={activitySeries} color="var(--primary)" />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--text)]">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
               DPI {dpiCount.toLocaleString()}
             </div>
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
               Alerts {alertCount.toLocaleString()}
             </div>
           </div>
@@ -328,7 +328,7 @@ export default function MonitoringOverviewPage() {
                     <span className="uppercase text-[var(--text-muted)]">{row.app}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.03]">
+                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -345,7 +345,7 @@ export default function MonitoringOverviewPage() {
               <span className="text-[var(--text-muted)]">Sources</span>
               <span className="text-[var(--text)]">{endpointStats.srcCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/[0.03]">
+            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
@@ -355,7 +355,7 @@ export default function MonitoringOverviewPage() {
               <span className="text-[var(--text-muted)]">Destinations</span>
               <span className="text-[var(--text)]">{endpointStats.dstCount}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-white/[0.03]">
+            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
                 style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}

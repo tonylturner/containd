@@ -405,7 +405,7 @@ export default function RoutingPage() {
   }
 
   const inputClass =
-    "mt-1 w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none";
+    "mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none";
 
   return (
     <Shell
@@ -414,7 +414,7 @@ export default function RoutingPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refreshOSRouting}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             title="Reload OS routing table snapshot"
           >
             {detecting ? "Detecting..." : "Detect from OS"}
@@ -422,7 +422,7 @@ export default function RoutingPage() {
           {isAdmin() && (
             <button
               onClick={autoWanDefaultRoute}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
               title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
             >
               Auto WAN default
@@ -432,7 +432,7 @@ export default function RoutingPage() {
             <button
               onClick={reconcileReplace}
               disabled={reconciling}
-              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
+              className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
               title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
             >
               {reconciling ? "Reconciling..." : "Reconcile"}
@@ -440,7 +440,7 @@ export default function RoutingPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
@@ -448,19 +448,19 @@ export default function RoutingPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
 
       {error && (
-        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-400">
+        <div className="mb-4 rounded-sm border border-amber-500/20 bg-amber-500/[0.1] px-4 py-3 text-sm text-[var(--amber)]">
           {notice}
         </div>
       )}
@@ -471,7 +471,7 @@ export default function RoutingPage() {
         const hasOSDefault = !!(osRouting?.defaultRoute?.gateway && osRouting?.defaultRoute?.iface);
         if (hasConfig || !hasOSDefault) return null;
         return (
-          <div className="mb-6 rounded-xl border border-blue-500/20 bg-blue-500/10 p-5 shadow-card backdrop-blur">
+          <div className="mb-6 rounded-sm border border-amber-500/20 bg-amber-500/[0.1] p-5 shadow-card backdrop-blur">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-[var(--text)]">Routing not configured yet</div>
@@ -485,7 +485,7 @@ export default function RoutingPage() {
               {isAdmin() ? (
                 <button
                   onClick={adoptOSDefaultRoute}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
                 >
                   Adopt OS default route
                 </button>
@@ -510,7 +510,7 @@ export default function RoutingPage() {
             <button
               onClick={adoptOSDefaultRoute}
               disabled={!osRouting?.defaultRoute?.gateway || !osRouting?.defaultRoute?.iface}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
               title="Create a gateway + default route in config from the detected OS default route"
             >
               Adopt default route
@@ -531,8 +531,8 @@ export default function RoutingPage() {
               </thead>
               <tbody>
                 {osRouting.routes.map((r, idx) => (
-                  <tr key={idx} className="table-row-hover transition-ui border-t border-white/[0.06]">
-                    <td className="px-3 py-2 font-medium text-white">{r.dst || "\u2014"}</td>
+                  <tr key={idx} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
+                    <td className="px-3 py-2 font-medium text-[var(--text)]">{r.dst || "\u2014"}</td>
                     <td className="px-3 py-2">{r.gateway || "\u2014"}</td>
                     <td className="px-3 py-2">{r.iface || "\u2014"}</td>
                     <td className="px-3 py-2">{typeof r.metric === "number" ? String(r.metric) : "\u2014"}</td>
@@ -564,12 +564,12 @@ export default function RoutingPage() {
                 Named next-hops you can reference from routes (use the gateway name in the route gateway field).
               </div>
             </div>
-            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
+            {saving && <span className="text-xs text-[var(--text-muted)]">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
-              <summary className="cursor-pointer text-sm text-slate-200">
+            <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+              <summary className="cursor-pointer text-sm text-[var(--text)]">
                 Add gateway (advanced)
               </summary>
               <div className="mt-3 grid gap-2 md:grid-cols-5">
@@ -625,7 +625,7 @@ export default function RoutingPage() {
                   </label>
                   <button
                     onClick={addGateway}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                    className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
                   >
                     Add
                   </button>
@@ -634,7 +634,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
+          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
@@ -655,12 +655,12 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.gateways ?? []).map((g, idx) => (
-                  <tr key={`${g.name}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
-                    <td className="px-4 py-3 font-medium text-white">{g.name}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.alias || "\u2014"}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.address}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.iface || "\u2014"}</td>
-                    <td className="px-4 py-3 text-slate-200">{g.description || "\u2014"}</td>
+                  <tr key={`${g.name}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
+                    <td className="px-4 py-3 font-medium text-[var(--text)]">{g.name}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{g.alias || "\u2014"}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{g.address}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{g.iface || "\u2014"}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{g.description || "\u2014"}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
@@ -670,7 +670,7 @@ export default function RoutingPage() {
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">\u2014</span>
+                        <span className="text-[var(--text-dim)]">\u2014</span>
                       )}
                     </td>
                   </tr>
@@ -682,13 +682,13 @@ export default function RoutingPage() {
 
         <Card padding="lg">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">Static routes</h2>
-            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
+            <h2 className="text-sm font-semibold text-[var(--text)]">Static routes</h2>
+            {saving && <span className="text-xs text-[var(--text-muted)]">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
-              <summary className="cursor-pointer text-sm text-slate-200">
+            <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+              <summary className="cursor-pointer text-sm text-[var(--text)]">
                 Add static route (advanced)
               </summary>
               <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -720,7 +720,7 @@ export default function RoutingPage() {
                         const v = e.target.value;
                         if (v) setRouteGw(v);
                       }}
-                      className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                     >
                       <option value="">Pick gateway\u2026</option>
                       {(cfg.gateways ?? []).map((g) => (
@@ -766,7 +766,7 @@ export default function RoutingPage() {
                 <div className="md:col-span-2 flex justify-end">
                   <button
                     onClick={addRoute}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                    className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
                   >
                     Add route
                   </button>
@@ -775,7 +775,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
+          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
@@ -796,12 +796,12 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.routes ?? []).map((r, idx) => (
-                  <tr key={`${r.dst}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
-                    <td className="px-4 py-3 font-medium text-white">{r.dst}</td>
-                    <td className="px-4 py-3 text-slate-200">{gatewayLabel(r.gateway)}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.iface ?? "\u2014"}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.table ?? 0}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.metric ?? "\u2014"}</td>
+                  <tr key={`${r.dst}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
+                    <td className="px-4 py-3 font-medium text-[var(--text)]">{r.dst}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{gatewayLabel(r.gateway)}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{r.iface ?? "\u2014"}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{r.table ?? 0}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{r.metric ?? "\u2014"}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
@@ -811,7 +811,7 @@ export default function RoutingPage() {
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">\u2014</span>
+                        <span className="text-[var(--text-dim)]">\u2014</span>
                       )}
                     </td>
                   </tr>
@@ -823,13 +823,13 @@ export default function RoutingPage() {
 
         <Card padding="lg">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">Policy-based routing (ip rules)</h2>
-            {saving && <span className="text-xs text-slate-400">saving\u2026</span>}
+            <h2 className="text-sm font-semibold text-[var(--text)]">Policy-based routing (ip rules)</h2>
+            {saving && <span className="text-xs text-[var(--text-muted)]">saving\u2026</span>}
           </div>
 
           {isAdmin() && (
-            <details className="mt-3 rounded-xl border border-white/[0.08] bg-black/30 px-4 py-3">
-              <summary className="cursor-pointer text-sm text-slate-200">
+            <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+              <summary className="cursor-pointer text-sm text-[var(--text)]">
                 Add policy rule (advanced)
               </summary>
               <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -876,7 +876,7 @@ export default function RoutingPage() {
                 <div className="md:col-span-2 flex justify-end">
                   <button
                     onClick={addRule}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+                    className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
                   >
                     Add rule
                   </button>
@@ -885,7 +885,7 @@ export default function RoutingPage() {
             </details>
           )}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08]">
+          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
@@ -905,11 +905,11 @@ export default function RoutingPage() {
                   </tr>
                 )}
                 {(cfg.rules ?? []).map((r, idx) => (
-                  <tr key={`${r.table}-${idx}`} className="table-row-hover transition-ui border-t border-white/[0.06]">
-                    <td className="px-4 py-3 text-slate-200">{r.priority ?? "auto"}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.src ?? "\u2014"}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.dst ?? "\u2014"}</td>
-                    <td className="px-4 py-3 font-medium text-white">{r.table}</td>
+                  <tr key={`${r.table}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
+                    <td className="px-4 py-3 text-[var(--text)]">{r.priority ?? "auto"}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{r.src ?? "\u2014"}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">{r.dst ?? "\u2014"}</td>
+                    <td className="px-4 py-3 font-medium text-[var(--text)]">{r.table}</td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin() ? (
                         <button
@@ -919,7 +919,7 @@ export default function RoutingPage() {
                           Delete
                         </button>
                       ) : (
-                        <span className="text-slate-500">\u2014</span>
+                        <span className="text-[var(--text-dim)]">\u2014</span>
                       )}
                     </td>
                   </tr>

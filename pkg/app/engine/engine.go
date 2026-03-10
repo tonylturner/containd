@@ -97,12 +97,10 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	// Simulation manager for synthetic traffic (lab/demo mode).
-	simMgr := &simulationManager{dpEngine: dpEngine, logger: logger}
-
-	// Auto-start synthetic traffic generator if CONTAIND_DPI_MOCK=1.
+	// Start synthetic traffic generator in lab/dpiMock mode.
 	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
-		simMgr.start(nil) // nil subnets → uses DefaultSubnets
+		logger.Infof("dpiMock enabled: starting synthetic traffic generator")
+		go synth.Run(ctx, dpEngine.Events(), synth.DefaultConfig())
 	}
 
 	ownership.start(ctx)
@@ -635,6 +633,7 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 
 func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *simulationManager) http.HandlerFunc {
 	var current config.DataPlaneConfig
+	var synthCancel context.CancelFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -678,12 +677,17 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 					logger.Errorf("capture start failed: %v", err)
 				}
 			}()
-			// Toggle synth generator based on dpiMock.
+			// Stop previous synth generator if running.
+			if synthCancel != nil {
+				synthCancel()
+				synthCancel = nil
+			}
+			// Start synth generator if dpiMock is enabled.
 			if dp.DPIMock {
-				simMgr.stop()
-				simMgr.start(nil)
-			} else {
-				simMgr.stop()
+				logger.Infof("dpiMock enabled via API: starting synthetic traffic generator")
+				synthCtx, cancel := context.WithCancel(context.Background())
+				synthCancel = cancel
+				go synth.Run(synthCtx, dpEngine.Events(), synth.DefaultConfig())
 			}
 			writeJSON(w, map[string]any{"status": "configured"})
 			return

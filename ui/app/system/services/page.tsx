@@ -90,7 +90,7 @@ export default function ServicesOverviewPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
@@ -107,7 +107,7 @@ export default function ServicesOverviewPage() {
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -125,33 +125,33 @@ export default function ServicesOverviewPage() {
           </Link>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">DNS</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">DNS</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {dnsRunning ? "running" : "stopped"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">DHCP</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">DHCP</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {dhcpEnabled ? "enabled" : "off"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">VPN</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-emerald-400/20 text-emerald-400" : "bg-white/[0.08] text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">VPN</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {vpnActive ? "active" : "off"}
             </span>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-          <Link href="/system/services/dns/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text)]">
+          <Link href="/system/services/dns/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure DNS
           </Link>
-          <Link href="/dhcp/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
+          <Link href="/dhcp/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure DHCP
           </Link>
-          <Link href="/vpn/" className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 transition-ui hover:bg-white/[0.08]">
+          <Link href="/vpn/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure VPN
           </Link>
         </div>
@@ -440,8 +440,8 @@ function ServiceCard({
       ? spark.values[spark.values.length - 1] - spark.values[0]
       : 0;
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-card">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card">
+      <p className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
         {title}
       </p>
       <div className="mt-3">
@@ -465,7 +465,7 @@ function ServiceCard({
           />
           <div className="text-xs text-[var(--text-muted)]">
             Trend:{" "}
-            <span className={trend > 0 ? "text-emerald-400" : trend < 0 ? "text-amber-400" : "text-slate-300"}>
+            <span className={trend > 0 ? "text-emerald-400" : trend < 0 ? "text-amber-400" : "text-[var(--text)]"}>
               {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {trend}
             </span>
             {typeof rate === "number" ? (

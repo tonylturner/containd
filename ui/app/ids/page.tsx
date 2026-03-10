@@ -70,14 +70,14 @@ export default function IDSPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
@@ -86,21 +86,24 @@ export default function IDSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      <div className="mb-6 flex items-center gap-4">
+      <div className="mb-6 flex items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
+          <input
+            type="checkbox"
+            checked={!!ids.enabled}
+            disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-black/30"
+            className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
           />
           Enable native IDS
         </label>
@@ -117,9 +120,9 @@ export default function IDSPage() {
         />
       )}
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card">
+      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
             <tr>
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Title</th>
@@ -141,22 +144,22 @@ export default function IDSPage() {
               </tr>
             )}
             {rules.map((r) => (
-              <tr key={r.id} className="border-t border-white/[0.06] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-white">
+              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
                   {r.id}
                 </td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">
                   {r.title || r.message || "\u2014"}
                 </td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">
                   {(r.proto || "*") + " / " + (r.kind || "*")}
                 </td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">
                   <span title={conditionSummary(r.when)}>
                     {conditionSummary(r.when) || "\u2014"}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-slate-200">
+                <td className="px-4 py-3 text-[var(--text)]">
                   <StatusBadge
                     variant={
                       r.severity === "critical" || r.severity === "high"
@@ -174,7 +177,7 @@ export default function IDSPage() {
                     <>
                       <button
                         onClick={() => setEditing(r)}
-                        className="mr-2 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
+                        className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]"
                       >
                         Edit
                       </button>
@@ -576,7 +579,7 @@ function GroupsPanel({ groups, rules, canEdit, onUpdate }: {
         type="file"
         accept=".yml,.yaml,text/yaml"
         onChange={onFile}
-        className="text-xs text-slate-300"
+        className="text-xs text-[var(--text)]"
       />
     }>
       <textarea
@@ -584,13 +587,13 @@ function GroupsPanel({ groups, rules, canEdit, onUpdate }: {
         onChange={(e) => onChange(e.target.value)}
         placeholder="Paste Sigma YAML here"
         rows={8}
-        className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+        className="w-full input-industrial font-mono text-xs"
       />
       <div className="mt-2 flex justify-end">
         <button
           onClick={onConvert}
           disabled={!value.trim()}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500 disabled:opacity-50"
+          className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
         >
           Convert & Add
         </button>
@@ -790,20 +793,20 @@ function EditRuleModal({ rule, onClose, onSave }: { rule: IDSRule; onClose: () =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-3xl rounded-xl border border-white/[0.08] bg-surface-raised p-5 shadow-card-lg animate-fade-in">
+      <div className="w-full max-w-3xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">
+          <h2 className="text-lg font-semibold text-[var(--text)]">
             Edit IDS rule {rule.id}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs transition-ui hover:bg-white/[0.08]"
+            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]"
           >
             Close
           </button>
         </div>
         {err && (
-          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          <div className="mb-3 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             {err}
           </div>
         )}
@@ -811,18 +814,18 @@ function EditRuleModal({ rule, onClose, onSave }: { rule: IDSRule; onClose: () =
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={14}
-          className="w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 font-mono text-xs text-white transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="w-full input-industrial font-mono text-xs"
         />
         <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-sm text-slate-200 transition-ui hover:bg-white/[0.08]"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-ui hover:bg-blue-500"
+            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Save rule
           </button>
