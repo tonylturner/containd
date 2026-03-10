@@ -109,9 +109,27 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
   if (!insp.container.readonlyRootfs) {
     flags.push({ level: "warn", title: "Root filesystem not read-only", desc: "Container rootfs is writable. Set --read-only for defense in depth." });
   }
+  if (!insp.security.cgroupPIDsLimit || insp.security.cgroupPIDsLimit === "max") {
+    flags.push({ level: "warn", title: "PIDs limit not set", desc: "No fork bomb protection. Set pids_limit in docker-compose or --pids-limit on docker run." });
+  }
+  // Check for RW mounts that could be sensitive
+  const rwMounts = insp.container.mounts.filter((m) => {
+    const mode = m.mode?.toLowerCase() || "";
+    if (!mode.includes("rw")) return false;
+    // Skip expected RW mounts (overlay root, /etc/resolv.conf, /etc/hostname, /etc/hosts)
+    const skip = ["/etc/resolv.conf", "/etc/hostname", "/etc/hosts"];
+    return !skip.includes(m.containerPath);
+  });
+  if (rwMounts.length > 0) {
+    const paths = rwMounts.map((m) => m.containerPath).join(", ");
+    flags.push({ level: "warn", title: `${rwMounts.length} writable volume mount(s)`, desc: `Writable mounts: ${paths}. Mount read-only where possible (:ro).` });
+  }
   const hasLabEnv = insp.container.envVars.some((e) => /lab|debug/i.test(e.value));
   if (hasLabEnv) {
     flags.push({ level: "warn", title: "Lab/debug env detected", desc: "Environment variables contain 'lab' or 'debug'. Not suitable for production." });
+  }
+  if (!insp.container.noNewPrivileges) {
+    flags.push({ level: "warn", title: "no-new-privileges not set", desc: "Process can gain privileges via setuid/setgid binaries. Set security_opt: no-new-privileges in production." });
   }
 
   // OK flags

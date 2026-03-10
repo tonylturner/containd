@@ -17,6 +17,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import PhysicalView from "./PhysicalView";
+import SecurityView from "./SecurityView";
 import { Shell } from "../../components/Shell";
 import {
   api,
@@ -504,6 +505,8 @@ function TopologyInner() {
       {/* WORKSPACE — switches between views */}
       {currentView === "physical" ? (
         <PhysicalView />
+      ) : currentView === "security" ? (
+        <SecurityView />
       ) : (
         <div className={s.workspace}>
           <div className={s.flowWrap}>
