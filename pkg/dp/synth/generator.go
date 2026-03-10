@@ -22,6 +22,9 @@ type Config struct {
 	EventsPerSecond float64
 	// Zones is the list of zone names for zone attribution.
 	Zones []string
+	// OnEvent is an optional callback invoked for each generated event.
+	// The engine uses this to run IDS rule evaluation on synthetic events.
+	OnEvent func(dpevents.Event)
 }
 
 // DefaultConfig returns a reasonable lab demo configuration.
@@ -55,6 +58,9 @@ func Run(ctx context.Context, store *dpevents.Store, cfg Config) {
 		case <-ticker.C:
 			ev := gen.next()
 			store.Append(ev)
+			if cfg.OnEvent != nil {
+				cfg.OnEvent(ev)
+			}
 		}
 	}
 }

@@ -100,7 +100,9 @@ func Run(ctx context.Context, opts Options) error {
 	// Start synthetic traffic generator in lab/dpiMock mode.
 	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
 		logger.Infof("dpiMock enabled: starting synthetic traffic generator")
-		go synth.Run(ctx, dpEngine.Events(), synth.DefaultConfig())
+		synthCfg := synth.DefaultConfig()
+		synthCfg.OnEvent = synthIDSCallback(dpEngine)
+		go synth.Run(ctx, dpEngine.Events(), synthCfg)
 	}
 
 	ownership.start(ctx)
@@ -694,71 +696,6 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
-		}
-	}
-}
-
-// ── Simulation manager ──────────────────────────────────────────────
-
-type simulationManager struct {
-	dpEngine *engine.Engine
-	logger   *zap.SugaredLogger
-	cancel   context.CancelFunc
-	running  bool
-}
-
-func (sm *simulationManager) start(subnets []synth.Subnet) {
-	if sm.running {
-		return
-	}
-	cfg := synth.Config{
-		EventsPerSecond: 4,
-		Subnets:         subnets, // nil → Run() uses DefaultSubnets
-		OnEvent:         synthIDSCallback(sm.dpEngine),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	sm.cancel = cancel
-	sm.running = true
-	sm.logger.Infof("simulation started (%d subnets)", len(cfg.Subnets))
-	go synth.Run(ctx, sm.dpEngine.Events(), cfg)
-}
-
-func (sm *simulationManager) stop() {
-	if !sm.running || sm.cancel == nil {
-		return
-	}
-	sm.cancel()
-	sm.cancel = nil
-	sm.running = false
-	sm.logger.Infof("simulation stopped")
-}
-
-func simulationHandler(sm *simulationManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, map[string]any{"running": sm.running})
-		case http.MethodPost:
-			var req struct {
-				Action  string         `json:"action"` // "start" or "stop"
-				Subnets []synth.Subnet `json:"subnets,omitempty"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, "invalid JSON", http.StatusBadRequest)
-				return
-			}
-			switch req.Action {
-			case "start":
-				sm.start(req.Subnets)
-				writeJSON(w, map[string]any{"running": true})
-			case "stop":
-				sm.stop()
-				writeJSON(w, map[string]any{"running": false})
-			default:
-				http.Error(w, `action must be "start" or "stop"`, http.StatusBadRequest)
-			}
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	}
 }
