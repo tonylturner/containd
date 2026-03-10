@@ -36,6 +36,8 @@ export default function Home() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [clock, setClock] = useState("");
+  const [simRunning, setSimRunning] = useState<boolean | null>(null);
+  const [simToggling, setSimToggling] = useState(false);
 
   // Clock
   useEffect(() => {
@@ -55,6 +57,7 @@ export default function Home() {
       api.listEvents(50).then((r) => alive && r && setEvents(r));
       api.listFlows(100).then((r) => alive && r && setFlows(r));
       api.getSystemStats().then((r) => alive && r && setStats(r));
+      api.getSimulationStatus().then((r) => alive && r && setSimRunning(r.running));
     };
     load();
     const id = setInterval(load, 10_000);
@@ -63,6 +66,18 @@ export default function Home() {
       clearInterval(id);
     };
   }, []);
+
+  const toggleSimulation = useCallback(async () => {
+    setSimToggling(true);
+    try {
+      const r = simRunning
+        ? await api.stopSimulation()
+        : await api.startSimulation();
+      if (r) setSimRunning(r.running);
+    } finally {
+      setSimToggling(false);
+    }
+  }, [simRunning]);
 
   const health = data?.health ?? null;
   const eventStats = data?.eventStats ?? null;
@@ -124,6 +139,26 @@ export default function Home() {
               />
             </Link>
           ))}
+          {simRunning !== null && (
+            <button
+              type="button"
+              onClick={toggleSimulation}
+              disabled={simToggling}
+              className={`flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-2xs font-mono transition-ui ${
+                simRunning
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                  : "border-white/[0.08] bg-white/[0.03] text-slate-500 hover:bg-white/[0.06]"
+              }`}
+              title={simRunning ? "Stop traffic simulation" : "Start traffic simulation"}
+            >
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  simRunning ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
+                }`}
+              />
+              {simToggling ? "..." : simRunning ? "SIM" : "SIM"}
+            </button>
+          )}
           <span className="text-amber-500/80 tabular-nums">{clock}</span>
         </div>
       </div>

@@ -11,27 +11,97 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"time"
 
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
+// Subnet defines a zone-to-prefix mapping for synthetic traffic generation.
+type Subnet struct {
+	Zone   string // zone name (must match config zone names)
+	Prefix string // IPv4 prefix, e.g. "10.10.10." — host octets are randomised
+}
+
 // Config controls the synthetic traffic generator.
 type Config struct {
 	// EventsPerSecond is the average rate of events to generate.
 	EventsPerSecond float64
-	// Zones is the list of zone names for zone attribution.
-	Zones []string
+	// Subnets maps zones to address prefixes for IP generation.
+	// If empty, DefaultSubnets() is used as a fallback.
+	Subnets []Subnet
 	// OnEvent is an optional callback invoked for each generated event.
 	// The engine uses this to run IDS rule evaluation on synthetic events.
 	OnEvent func(dpevents.Event)
+}
+
+// DefaultSubnets returns the built-in zone/prefix mappings.
+func DefaultSubnets() []Subnet {
+	return []Subnet{
+		{Zone: "wan", Prefix: "203.0.113."},
+		{Zone: "dmz", Prefix: "10.10.10."},
+		{Zone: "lan", Prefix: "172.16.0."},
+		{Zone: "mgmt", Prefix: "10.20.0."},
+	}
+}
+
+// SubnetsFromInterfaces builds Subnet entries from configured interfaces.
+// Each interface with a zone and at least one IPv4 address generates one Subnet
+// whose prefix is derived from the first three octets of the network address.
+// Zones that have no CIDR address fall back to a synthetic 10.x.x. prefix.
+func SubnetsFromInterfaces(ifaces []IfaceSummary) []Subnet {
+	seen := map[string]bool{}
+	out := []Subnet{}
+	fallback := byte(1)
+	for _, ifc := range ifaces {
+		if ifc.Zone == "" || seen[ifc.Zone] {
+			continue
+		}
+		seen[ifc.Zone] = true
+		prefix := prefixFromCIDR(ifc.Address)
+		if prefix == "" {
+			prefix = fmt.Sprintf("10.%d.%d.", fallback, fallback)
+			fallback++
+		}
+		out = append(out, Subnet{Zone: ifc.Zone, Prefix: prefix})
+	}
+	if len(out) == 0 {
+		return DefaultSubnets()
+	}
+	return out
+}
+
+// IfaceSummary is the minimal interface info needed to build subnets.
+type IfaceSummary struct {
+	Zone    string // zone this interface belongs to
+	Address string // first IPv4 CIDR, e.g. "10.10.10.1/24" (may be empty)
+}
+
+// prefixFromCIDR extracts the first three octets of the network address.
+// e.g. "192.168.100.1/24" → "192.168.100."
+func prefixFromCIDR(cidr string) string {
+	if cidr == "" {
+		return ""
+	}
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		ip = net.ParseIP(cidr)
+	}
+	if ip == nil {
+		return ""
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d.", ip[0], ip[1], ip[2])
 }
 
 // DefaultConfig returns a reasonable lab demo configuration.
 func DefaultConfig() Config {
 	return Config{
 		EventsPerSecond: 4,
-		Zones:           []string{"ot-level0", "ot-level1", "it-dmz", "it-corp", "wan"},
+		Subnets:         DefaultSubnets(),
 	}
 }
 
@@ -43,13 +113,17 @@ func Run(ctx context.Context, store *dpevents.Store, cfg Config) {
 	if cfg.EventsPerSecond <= 0 {
 		cfg.EventsPerSecond = 4
 	}
+	subs := cfg.Subnets
+	if len(subs) == 0 {
+		subs = DefaultSubnets()
+	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	interval := time.Duration(float64(time.Second) / cfg.EventsPerSecond)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	gen := &generator{rng: rng, cfg: cfg, flowSeq: 1}
+	gen := &generator{rng: rng, cfg: cfg, subnets: subs, flowSeq: 1}
 
 	for {
 		select {
@@ -68,20 +142,8 @@ func Run(ctx context.Context, store *dpevents.Store, cfg Config) {
 type generator struct {
 	rng     *rand.Rand
 	cfg     Config
+	subnets []Subnet
 	flowSeq int
-}
-
-// ── Synthetic network topology ──────────────────────────────────────
-
-var subnets = []struct {
-	zone   string
-	prefix string
-}{
-	{"ot-level0", "10.1.0."},
-	{"ot-level1", "10.1.1."},
-	{"it-dmz", "172.16.0."},
-	{"it-corp", "192.168.1."},
-	{"wan", "203.0.113."},
 }
 
 // ── Protocol scenario definitions ───────────────────────────────────
@@ -199,36 +261,37 @@ func (g *generator) next() dpevents.Event {
 		}
 	}
 
-	// Pick source/dest from synthetic topology
-	srcNet := subnets[g.rng.Intn(len(subnets))]
-	dstNet := subnets[g.rng.Intn(len(subnets))]
+	// Pick source/dest from configured subnets
+	subs := g.subnets
+	srcNet := subs[g.rng.Intn(len(subs))]
+	dstNet := subs[g.rng.Intn(len(subs))]
 	// Avoid same subnet for cross-zone traffic
-	for dstNet.zone == srcNet.zone && len(subnets) > 1 {
-		dstNet = subnets[g.rng.Intn(len(subnets))]
+	for dstNet.Zone == srcNet.Zone && len(subs) > 1 {
+		dstNet = subs[g.rng.Intn(len(subs))]
 	}
 
-	srcIP := fmt.Sprintf("%s%d", srcNet.prefix, g.rng.Intn(50)+10)
-	dstIP := fmt.Sprintf("%s%d", dstNet.prefix, g.rng.Intn(50)+10)
+	srcIP := fmt.Sprintf("%s%d", srcNet.Prefix, g.rng.Intn(50)+10)
+	dstIP := fmt.Sprintf("%s%d", dstNet.Prefix, g.rng.Intn(50)+10)
 	srcPort := uint16(g.rng.Intn(64511) + 1024)
 
 	flowID := fmt.Sprintf("%s|%s|%d|%d|%s", srcIP, dstIP, srcPort, sc.dstPort, sc.transport)
 
 	attrs := sc.attrFn(g.rng)
-	attrs["srcZone"] = srcNet.zone
-	attrs["dstZone"] = dstNet.zone
+	attrs["srcZone"] = srcNet.Zone
+	attrs["dstZone"] = dstNet.Zone
 
 	g.flowSeq++
 
 	return dpevents.Event{
-		FlowID:     flowID,
-		Proto:      sc.proto,
-		Kind:       sc.kind,
+		FlowID:    flowID,
+		Proto:     sc.proto,
+		Kind:      sc.kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
-		SrcIP:      srcIP,
-		DstIP:      dstIP,
-		SrcPort:    srcPort,
-		DstPort:    sc.dstPort,
-		Transport:  sc.transport,
+		Timestamp: time.Now().UTC(),
+		SrcIP:     srcIP,
+		DstIP:     dstIP,
+		SrcPort:   srcPort,
+		DstPort:   sc.dstPort,
+		Transport: sc.transport,
 	}
 }

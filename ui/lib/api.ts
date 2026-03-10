@@ -728,6 +728,60 @@ export type SystemStats = {
   collectedAt: string;
 };
 
+export type InspectionMount = {
+  hostPath: string;
+  containerPath: string;
+  mode: string;
+};
+
+export type InspectionEnvVar = {
+  key: string;
+  value: string;
+};
+
+export type SystemInspection = {
+  host: {
+    kernel: string;
+    os: string;
+    arch: string;
+    hostUptime: string;
+    numCPU: number;
+  };
+  runtime: {
+    dockerVersion: string;
+    containerdVersion: string;
+    cgroupDriver: string;
+    storageDriver: string;
+  };
+  container: {
+    id: string;
+    image: string;
+    restartPolicy: string;
+    restartCount: number;
+    networkMode: string;
+    privileged: boolean;
+    seccompProfile: string;
+    apparmorProfile: string;
+    readonlyRootfs: boolean;
+    noNewPrivileges: boolean;
+    capabilities: string[];
+    mounts: InspectionMount[];
+    envVars: InspectionEnvVar[];
+  };
+  process: {
+    pid: number;
+    goVersion: string;
+    fdCount: number;
+    fdSoftLimit: number;
+    fdHardLimit: number;
+  };
+  security: {
+    dockerSocketMounted: boolean;
+    cgroupCPUQuota: string;
+    cgroupPIDsLimit: string;
+  };
+};
+
 export type IDSCondition = {
   all?: IDSCondition[];
   any?: IDSCondition[];
@@ -1250,6 +1304,8 @@ export const api = {
     getJSON<ServicesStatus>("/api/v1/services/status"),
   getSystemStats: () =>
     getJSON<SystemStats>("/api/v1/system/stats"),
+  getSystemInspection: () =>
+    getJSON<SystemInspection>("/api/v1/system/inspection"),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
@@ -1298,6 +1354,14 @@ export const api = {
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
   listFlows: (limit = 200) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+
+  // Simulation
+  getSimulationStatus: () =>
+    getJSON<{ running: boolean }>("/api/v1/simulation"),
+  startSimulation: () =>
+    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "start" }),
+  stopSimulation: () =>
+    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
 
   // Sessions / Conntrack
   listConntrack: (limit = 200) =>

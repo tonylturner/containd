@@ -38,6 +38,7 @@ import (
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/templates"
 	"github.com/tonylturner/containd/pkg/cp/users"
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
@@ -103,6 +104,12 @@ type DHCPLeasesClient interface {
 
 type WireGuardStatusClient interface {
 	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
+}
+
+// SimulationClient is an optional interface for controlling the synthetic traffic generator.
+type SimulationClient interface {
+	SimulationStatus(ctx context.Context) (engineclient.SimulationStatus, error)
+	SimulationControl(ctx context.Context, action string) (engineclient.SimulationStatus, error)
 }
 
 // InventoryClient is an optional interface for querying the ICS asset inventory.
@@ -214,6 +221,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/auth/me/password", rateLimitSensitive(), changeMyPasswordHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
 		protected.GET("/system/stats", systemStatsHandler())
+		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
@@ -263,6 +271,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/simulation", simulationStatusHandler(engine))
+		protected.POST("/simulation", requireAdmin(), simulationControlHandler(engine))
 		protected.GET("/stats/protocols", protoStatsHandler(engine))
 		protected.GET("/stats/top-talkers", topTalkersHandler(engine))
 		protected.GET("/anomalies", listAnomaliesHandler(engine))
@@ -1967,6 +1977,46 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, flows)
+	}
+}
+
+func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SimulationClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, engineclient.SimulationStatus{Running: false})
+			return
+		}
+		st, err := sc.SimulationStatus(c.Request.Context())
+		if err != nil {
+			apiError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, st)
+	}
+}
+
+func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SimulationClient)
+		if !ok || sc == nil {
+			apiError(c, http.StatusBadRequest, "simulation unavailable")
+			return
+		}
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || (req.Action != "start" && req.Action != "stop") {
+			apiError(c, http.StatusBadRequest, `action must be "start" or "stop"`)
+			return
+		}
+		st, err := sc.SimulationControl(c.Request.Context(), req.Action)
+		if err != nil {
+			apiError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "synth"})
+		c.JSON(http.StatusOK, st)
 	}
 }
 
