@@ -653,10 +653,20 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 			}
 			// Reconfigure by rebuilding the engine instance.
 			current = dp
+			// Convert DPI exclusions to engine type.
+			var excl []engine.DPIExclusion
+			for _, e := range dp.DPIExclusions {
+				excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
+			}
 			newEngine, err := engine.New(engine.Config{
-				Capture:    capture.Config{Interfaces: dp.CaptureInterfaces},
-				Enforce:    engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
-				InspectAll: dp.DPIMock,
+				Capture:         capture.Config{Interfaces: dp.CaptureInterfaces},
+				Enforce:         engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
+				InspectAll:      dp.DPIMock,
+				DPIEnabled:      dp.DPIEnabled,
+				DPIMode:         dp.DPIMode,
+				DPIProtocols:    dp.DPIProtocols,
+				DPIICSProtocols: dp.DPIICSProtocols,
+				DPIExclusions:   excl,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)

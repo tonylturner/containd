@@ -412,6 +412,21 @@ type DataPlaneConfig struct {
 	Enforcement       bool     `json:"enforcement,omitempty"`       // enable nftables apply
 	EnforceTable      string   `json:"enforceTable,omitempty"`      // nftables table name
 	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
+
+	// DPI controls
+	DPIEnabled       bool            `json:"dpiEnabled,omitempty"`       // master DPI on/off
+	DPIMode          string          `json:"dpiMode,omitempty"`          // "learn" or "enforce" (ICS DPI global mode)
+	DPIProtocols     map[string]bool `json:"dpiProtocols,omitempty"`     // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
+	DPIICSProtocols  map[string]bool `json:"dpiIcsProtocols,omitempty"`  // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua"
+	DPIExclusions    []DPIExclusion  `json:"dpiExclusions,omitempty"`    // IPs/domains excluded from DPI
+}
+
+// DPIExclusion represents an IP address, CIDR range, or domain name
+// that should be excluded from deep packet inspection.
+type DPIExclusion struct {
+	Value  string `json:"value"`            // IP, CIDR, or domain
+	Type   string `json:"type"`             // "ip", "cidr", "domain"
+	Reason string `json:"reason,omitempty"` // optional user note
 }
 
 // ExportConfig controls DPI event export to SIEM systems.

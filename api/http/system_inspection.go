@@ -160,7 +160,19 @@ func systemInspectionHandler() gin.HandlerFunc {
 		// Container + Runtime info (try Docker API first, fall back to proc)
 		hostname, _ := os.Hostname()
 		if dockerSockAvailable() {
-			resp.Runtime, resp.Container = collectFromDocker(c.Request.Context(), hostname)
+			ri, ci, dockerHost := collectFromDocker(c.Request.Context(), hostname)
+			resp.Runtime = ri
+			resp.Container = ci
+			// Prefer Docker-reported host info over /proc (which shows container's view)
+			if dockerHost.OS != "" {
+				resp.Host.OS = dockerHost.OS
+			}
+			if dockerHost.Kernel != "" {
+				resp.Host.Kernel = dockerHost.Kernel
+			}
+			if dockerHost.Arch != "" {
+				resp.Host.Arch = dockerHost.Arch
+			}
 		}
 
 		// Fill in anything Docker didn't provide from /proc
@@ -295,10 +307,13 @@ func dockerHTTPClient() *http.Client {
 	}
 }
 
-// collectFromDocker queries the Docker API for runtime and container details.
-func collectFromDocker(ctx context.Context, hostname string) (runtimeInfo, containerInfo) {
+// collectFromDocker queries the Docker API for runtime, container, and host details.
+// The returned hostInfo contains the Docker daemon's view of the host OS, which
+// reflects the actual host (e.g., macOS) rather than the container's Linux distro.
+func collectFromDocker(ctx context.Context, hostname string) (runtimeInfo, containerInfo, hostInfo) {
 	ri := runtimeInfo{}
 	ci := containerInfo{}
+	hostOut := hostInfo{}
 	client := dockerHTTPClient()
 
 	// Docker version info
@@ -343,6 +358,16 @@ func collectFromDocker(ctx context.Context, hostname string) (runtimeInfo, conta
 					if v, ok := info["CgroupDriver"].(string); ok {
 						ri.CgroupDriver = v
 					}
+					// Host OS info from Docker daemon (reflects actual host, not container)
+					if v, ok := info["OperatingSystem"].(string); ok {
+						hostOut.OS = v
+					}
+					if v, ok := info["KernelVersion"].(string); ok {
+						hostOut.Kernel = v
+					}
+					if v, ok := info["Architecture"].(string); ok {
+						hostOut.Arch = v
+					}
 				}
 			}
 		}
@@ -364,7 +389,7 @@ func collectFromDocker(ctx context.Context, hostname string) (runtimeInfo, conta
 		}
 	}
 
-	return ri, ci
+	return ri, ci, hostOut
 }
 
 // parseDockerInspect extracts container details from a Docker inspect JSON response.

@@ -198,11 +198,22 @@ function clearAuthExpired() {
   }
 }
 
+export type DPIExclusion = {
+  value: string;
+  type: "ip" | "cidr" | "domain";
+  reason?: string;
+};
+
 export type DataPlaneConfig = {
   captureInterfaces?: string[];
   enforcement?: boolean;
   enforceTable?: string;
   dpiMock?: boolean;
+  dpiEnabled?: boolean;
+  dpiMode?: "learn" | "enforce";
+  dpiProtocols?: Record<string, boolean>;
+  dpiIcsProtocols?: Record<string, boolean>;
+  dpiExclusions?: DPIExclusion[];
 };
 
 export type PcapForwardTarget = {

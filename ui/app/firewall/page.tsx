@@ -7,8 +7,10 @@ import {
   api,
   isAdmin,
   fetchDataPlane,
+  setDataPlane,
   getRulesetPreview,
   type DataPlaneConfig,
+  type DPIExclusion,
   type FirewallRule,
   type Gateway,
   type Interface,
@@ -32,20 +34,107 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 /* ── ICS protocol metadata for firewall rule modals ───────────── */
 
-const ICS_PROTOCOLS: Record<string, { label: string; fcLabel: string; fcPlaceholder: string; addrLabel: string; addrPlaceholder: string; showUnitId?: boolean; showObjectClasses?: boolean }> = {
-  modbus: { label: "Modbus/TCP", fcLabel: "Function codes", fcPlaceholder: "3, 16", addrLabel: "Register addresses", addrPlaceholder: "0-100", showUnitId: true },
-  dnp3: { label: "DNP3", fcLabel: "Function codes", fcPlaceholder: "1, 2, 3", addrLabel: "Addresses", addrPlaceholder: "1-10" },
-  cip: { label: "CIP / EtherNet/IP", fcLabel: "Service codes", fcPlaceholder: "76, 77", addrLabel: "CIP path addresses", addrPlaceholder: "", showObjectClasses: true },
-  s7comm: { label: "S7comm (Siemens)", fcLabel: "Function codes", fcPlaceholder: "4, 5", addrLabel: "DB / variable addresses", addrPlaceholder: "" },
-  mms: { label: "IEC 61850 MMS", fcLabel: "Service codes", fcPlaceholder: "", addrLabel: "Variable names", addrPlaceholder: "" },
-  bacnet: { label: "BACnet/IP", fcLabel: "Service choices", fcPlaceholder: "12, 15", addrLabel: "Object instance", addrPlaceholder: "" },
-  opcua: { label: "OPC UA", fcLabel: "Service node IDs", fcPlaceholder: "", addrLabel: "Node IDs", addrPlaceholder: "" },
+type ICSProtoMeta = {
+  label: string;
+  port: string;
+  fcLabel: string;
+  fcPlaceholder: string;
+  fcHelp: string;
+  addrLabel: string;
+  addrPlaceholder: string;
+  addrHelp: string;
+  showUnitId?: boolean;
+  showObjectClasses?: boolean;
+  showStationAddrs?: boolean;
+  showDbNumber?: boolean;
+  showObjectType?: boolean;
+  showPropertyId?: boolean;
+  notes?: string;
+};
+
+const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
+  modbus: {
+    label: "Modbus/TCP", port: "502",
+    fcLabel: "Function codes",
+    fcPlaceholder: "3, 16",
+    fcHelp: "1=Read Coils, 2=Read Discrete Inputs, 3=Read Holding Registers, 4=Read Input Registers, 5=Write Single Coil, 6=Write Single Register, 8=Diagnostics, 15=Write Multiple Coils, 16=Write Multiple Registers, 43=Encapsulated Interface Transport (MEI)",
+    addrLabel: "Register / coil addresses",
+    addrPlaceholder: "0-100, 40001-40100",
+    addrHelp: "Comma-separated ranges. Supports decimal (0-100) or hex (0x0000-0x00FF). Modbus registers are 16-bit (0-65535).",
+    showUnitId: true,
+    notes: "Unit ID identifies the slave device on a serial-to-TCP gateway (0-255, 0=broadcast).",
+  },
+  dnp3: {
+    label: "DNP3", port: "20000",
+    fcLabel: "Function codes",
+    fcPlaceholder: "1, 2, 129",
+    fcHelp: "1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 6=Direct Operate No Ack, 13=Cold Restart, 14=Warm Restart, 129=Response, 130=Unsolicited Response",
+    addrLabel: "Point indices",
+    addrPlaceholder: "0-10",
+    addrHelp: "DNP3 data point indices. Used to restrict which binary/analog points this rule matches.",
+    showStationAddrs: true,
+    notes: "DNP3 uses source/destination station addresses (0-65534) to identify master and outstation. IIN (Internal Indications) flags are inspected for anomaly detection.",
+  },
+  cip: {
+    label: "CIP / EtherNet/IP", port: "44818",
+    fcLabel: "CIP service codes",
+    fcPlaceholder: "0x4C, 0x4D, 0x52",
+    fcHelp: "0x01=Get Attributes All, 0x02=Set Attributes All, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x52=Multiple Service Packet, 0x4F=Read Tag Fragmented, 0x53=Write Tag Fragmented",
+    addrLabel: "EPATH (class/instance)",
+    addrPlaceholder: "0x02/1, 0x04/1",
+    addrHelp: "CIP path segments as class/instance pairs. The EPATH defines the target object in the CIP object model.",
+    showObjectClasses: true,
+    notes: "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x66=Connection Manager). Multiple Service Packet (0x52) requests are unpacked into individual services for inspection.",
+  },
+  s7comm: {
+    label: "S7comm (Siemens)", port: "102",
+    fcLabel: "Function codes",
+    fcPlaceholder: "4, 5",
+    fcHelp: "0x04=Read Variable, 0x05=Write Variable, 0x1D=Request Download, 0x1E=Download Block, 0x1F=Download Ended, 0x28=PI Service (PLC Control), 0x29=PLC Stop",
+    addrLabel: "Variable addresses",
+    addrPlaceholder: "DB1.DBX0.0, MW100",
+    addrHelp: "S7 addressing: DBx.DBXy.z (data blocks), Mx (merkers), Ix (inputs), Qx (outputs). DB number identifies the data block.",
+    showDbNumber: true,
+    notes: "S7comm shares TCP port 102 with IEC 61850 MMS (differentiated by COTP protocol ID). Memory areas: 0x81=Inputs, 0x82=Outputs, 0x83=Merkers, 0x84=Data Blocks, 0x1C=Counters, 0x1D=Timers.",
+  },
+  mms: {
+    label: "IEC 61850 MMS", port: "102",
+    fcLabel: "MMS service types",
+    fcPlaceholder: "",
+    fcHelp: "MMS services: Read (confirmed), Write (confirmed), GetNameList, GetVariableAccessAttributes, DefineNamedVariableList, DeleteNamedVariableList, ObtainFile, Report, GOOSE-control. Service codes are ASN.1 context tags.",
+    addrLabel: "Named variables",
+    addrPlaceholder: "LLN0$BR$brcb01",
+    addrHelp: "IEC 61850 variable names follow domain/item naming: LogicalDevice/LogicalNode$FC$DataObject (e.g., XCBR1$ST$Pos). FC = Functional Constraint (ST=Status, MX=Measured, CO=Control).",
+    notes: "MMS is the application layer for IEC 61850 substation automation. Uses ISO/ACSE transport over TPKT/COTP on port 102. Shares port with S7comm (differentiated by COTP protocol ID byte).",
+  },
+  bacnet: {
+    label: "BACnet/IP", port: "47808",
+    fcLabel: "Service choices",
+    fcPlaceholder: "12, 14, 15",
+    fcHelp: "Confirmed: 12=ReadProperty, 14=WriteProperty, 15=WritePropertyMultiple, 5=SubscribeCOV, 26=ReadPropertyMultiple. Unconfirmed: 0=I-Am, 1=I-Have, 8=Who-Is, 7=Who-Has, 2=COV-Notification",
+    addrLabel: "Object type / instance",
+    addrPlaceholder: "analog-input:1, binary-output:5",
+    addrHelp: "BACnet objects are type:instance pairs. Common types: analog-input (0), analog-output (1), analog-value (2), binary-input (3), binary-output (4), binary-value (5), device (8).",
+    showObjectType: true,
+    showPropertyId: true,
+    notes: "BACnet/IP uses UDP port 47808 (0xBAC0). BVLC (BACnet Virtual Link Control) encapsulates NPDU and APDU layers. Property IDs: 85=Present Value, 28=Description, 77=Object Name.",
+  },
+  opcua: {
+    label: "OPC UA", port: "4840",
+    fcLabel: "Service types",
+    fcPlaceholder: "",
+    fcHelp: "Services: OpenSecureChannel, CloseSecureChannel, CreateSession, ActivateSession, Read, Write, Browse, BrowseNext, Call, CreateSubscription, Publish, CreateMonitoredItems",
+    addrLabel: "Node IDs",
+    addrPlaceholder: "ns=2;s=MyVariable",
+    addrHelp: "OPC UA node IDs: ns=<namespace>;i=<numeric> or ns=<namespace>;s=<string>. Namespace 0 is the OPC UA standard namespace. Application-specific nodes typically use ns=1 or ns=2.",
+    notes: "OPC UA uses a binary protocol over TCP. The decoder identifies message types (HEL, ACK, OPN, CLO, MSG) and extracts service IDs from MSG chunks. Security is negotiated at the secure channel level.",
+  },
 };
 
 const ICS_PROTOCOL_KEYS = Object.keys(ICS_PROTOCOLS);
 
-function icsProtoMeta(name: string) {
-  return ICS_PROTOCOLS[name] ?? { label: name, fcLabel: "Function codes", fcPlaceholder: "", addrLabel: "Addresses", addrPlaceholder: "" };
+function icsProtoMeta(name: string): ICSProtoMeta {
+  return ICS_PROTOCOLS[name] ?? { label: name, port: "", fcLabel: "Function codes", fcPlaceholder: "", fcHelp: "", addrLabel: "Addresses", addrPlaceholder: "", addrHelp: "" };
 }
 
 function zoneLabel(zone: Zone): string {
@@ -178,10 +267,7 @@ export default function FirewallPage() {
     setNat(n ?? { enabled: false });
     setRouting(rt);
     if (dp) {
-      setDpiConfig({
-        captureInterfaces: dp.captureInterfaces ?? [],
-        dpiMock: dp.dpiMock ?? false,
-      });
+      setDpiConfig(dp);
     }
   }
 
@@ -473,27 +559,7 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <Card padding="md" className="mt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">DPI Status</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Deep packet inspection for ICS protocol filtering.
-            </p>
-          </div>
-          <StatusBadge variant={(dpiConfig.captureInterfaces ?? []).length > 0 ? "success" : "neutral"} dot>
-            {(dpiConfig.captureInterfaces ?? []).length > 0 ? "Enabled" : "Disabled"}
-          </StatusBadge>
-        </div>
-        <div className="mt-2 text-xs text-[var(--text)]">
-          Monitored interfaces: {(dpiConfig.captureInterfaces ?? []).length > 0 ? (dpiConfig.captureInterfaces ?? []).join(", ") : "none"}
-        </div>
-        <div className="mt-2">
-          <Link href="/dataplane/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
-            Configure DPI settings &rarr;
-          </Link>
-        </div>
-      </Card>
+      <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
@@ -700,33 +766,16 @@ function EditRuleModal({
         </div>
 
         {icsEnabled && (
-          <div className="mt-3 grid gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 md:grid-cols-4">
-            <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="input-industrial">
-              {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
-            </select>
-            <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="input-industrial md:col-span-1">
-              <option value="learn">safe learning</option>
-              <option value="enforce">enforce</option>
-            </select>
-            <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="input-industrial" />
-            <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="input-industrial" />
-            {icsMeta.showUnitId && (
-              <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="input-industrial" />
-            )}
-            {icsMeta.showObjectClasses && (
-              <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="input-industrial md:col-span-2" />
-            )}
-            <div className="flex items-center gap-4 text-sm text-[var(--text)]">
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-                Read-only
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-                Write-only
-              </label>
-            </div>
-          </div>
+          <ICSPredicateFields
+            protocol={icsProtocol} onProtocolChange={setIcsProtocol}
+            mode={mode} onModeChange={setMode}
+            functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
+            addresses={addresses} onAddressesChange={setAddresses}
+            unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
+            objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
+            readOnly={readOnly} onReadOnlyChange={setReadOnly}
+            writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
+          />
         )}
 
         <div className="mt-4 flex justify-end gap-2">
@@ -862,33 +911,16 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
       </div>
 
       {icsEnabled && (
-        <div className="mt-3 grid gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 md:grid-cols-4">
-          <select value={icsProtocol} onChange={(e) => setIcsProtocol(e.target.value)} className="input-industrial">
-            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label}</option>))}
-          </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value as "enforce" | "learn")} className="input-industrial md:col-span-1">
-            <option value="learn">safe learning</option>
-            <option value="enforce">enforce</option>
-          </select>
-          <input value={functionCodes} onChange={(e) => setFunctionCodes(e.target.value)} placeholder={icsMeta.fcPlaceholder || `${icsMeta.fcLabel} (csv)`} className="input-industrial" />
-          <input value={addresses} onChange={(e) => setAddresses(e.target.value)} placeholder={icsMeta.addrPlaceholder || `${icsMeta.addrLabel} (csv)`} className="input-industrial" />
-          {icsMeta.showUnitId && (
-            <input value={icsUnitId} onChange={(e) => setIcsUnitId(e.target.value)} placeholder="Unit ID (0-255)" className="input-industrial" />
-          )}
-          {icsMeta.showObjectClasses && (
-            <input value={objectClasses} onChange={(e) => setObjectClasses(e.target.value)} placeholder="Object classes (hex csv, e.g. 0x02, 0x04)" className="input-industrial md:col-span-2" />
-          )}
-          <div className="flex items-center gap-4 text-sm text-[var(--text)]">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-              Read-only
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={writeOnly} onChange={(e) => setWriteOnly(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
-              Write-only
-            </label>
-          </div>
-        </div>
+        <ICSPredicateFields
+          protocol={icsProtocol} onProtocolChange={setIcsProtocol}
+          mode={mode} onModeChange={setMode}
+          functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
+          addresses={addresses} onAddressesChange={setAddresses}
+          unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
+          objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
+          readOnly={readOnly} onReadOnlyChange={setReadOnly}
+          writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
+        />
       )}
 
       <div className="mt-3 flex items-center justify-between">
@@ -901,7 +933,758 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
   );
 }
 
+/* ── Shared ICS Predicate Fields ── */
+
+function ICSPredicateFields({
+  protocol, onProtocolChange,
+  mode, onModeChange,
+  functionCodes, onFunctionCodesChange,
+  addresses, onAddressesChange,
+  unitId, onUnitIdChange,
+  objectClasses, onObjectClassesChange,
+  readOnly, onReadOnlyChange,
+  writeOnly, onWriteOnlyChange,
+}: {
+  protocol: string; onProtocolChange: (v: string) => void;
+  mode: string; onModeChange: (v: "enforce" | "learn") => void;
+  functionCodes: string; onFunctionCodesChange: (v: string) => void;
+  addresses: string; onAddressesChange: (v: string) => void;
+  unitId: string; onUnitIdChange: (v: string) => void;
+  objectClasses: string; onObjectClassesChange: (v: string) => void;
+  readOnly: boolean; onReadOnlyChange: (v: boolean) => void;
+  writeOnly: boolean; onWriteOnlyChange: (v: boolean) => void;
+}) {
+  const meta = icsProtoMeta(protocol);
+  const [showHelp, setShowHelp] = useState(false);
+
+  return (
+    <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 space-y-3">
+      {/* Row 1: Protocol + Mode */}
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="md:col-span-2">
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">ICS Protocol</label>
+          <select value={protocol} onChange={(e) => onProtocolChange(e.target.value)} className="input-industrial w-full">
+            {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Rule Mode</label>
+          <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
+            <option value="learn">Learning (passive)</option>
+            <option value="enforce">Enforcement (active)</option>
+          </select>
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className="rounded-sm border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
+          >
+            {showHelp ? "Hide" : "Show"} protocol reference
+          </button>
+        </div>
+      </div>
+
+      {/* Protocol reference panel */}
+      {showHelp && (
+        <div className="rounded-sm border border-blue-500/[0.1] bg-blue-500/[0.03] p-3 space-y-2">
+          <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="text-[10px] font-medium text-[var(--text)]">{meta.fcLabel}</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.fcHelp}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-medium text-[var(--text)]">{meta.addrLabel}</div>
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.addrHelp}</div>
+            </div>
+          </div>
+          {meta.notes && (
+            <div className="text-[10px] text-[var(--text-dim)] border-t border-white/[0.04] pt-2 mt-2">{meta.notes}</div>
+          )}
+        </div>
+      )}
+
+      {/* Row 2: Function codes + Addresses */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.fcLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+          <input value={functionCodes} onChange={(e) => onFunctionCodesChange(e.target.value)} placeholder={meta.fcPlaceholder || `${meta.fcLabel}`} className="input-industrial w-full" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.addrLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+          <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder={meta.addrPlaceholder || meta.addrLabel} className="input-industrial w-full" />
+        </div>
+      </div>
+
+      {/* Row 3: Protocol-specific fields */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {meta.showUnitId && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Unit ID <span className="text-[var(--text-dim)]">(0-255, Modbus slave)</span></label>
+            <input value={unitId} onChange={(e) => onUnitIdChange(e.target.value)} placeholder="e.g. 1" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showObjectClasses && (
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">CIP Object Classes <span className="text-[var(--text-dim)]">(hex csv)</span></label>
+            <input value={objectClasses} onChange={(e) => onObjectClassesChange(e.target.value)} placeholder="0x02, 0x04, 0x66" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showStationAddrs && (
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Station Addresses <span className="text-[var(--text-dim)]">(source/destination, 0-65534)</span></label>
+            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showDbNumber && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">DB Numbers <span className="text-[var(--text-dim)]">(Siemens data blocks)</span></label>
+            <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="DB1, DB100" className="input-industrial w-full" />
+          </div>
+        )}
+        {meta.showObjectType && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Object Type <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+            <input disabled placeholder="analog-input, binary-output" className="input-industrial w-full opacity-60" title="Object type filtering coming soon" />
+          </div>
+        )}
+        {meta.showPropertyId && (
+          <div>
+            <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Property ID <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+            <input disabled placeholder="85 (present-value)" className="input-industrial w-full opacity-60" title="Property ID filtering coming soon" />
+          </div>
+        )}
+      </div>
+
+      {/* Row 4: Direction filter */}
+      <div className="flex items-center gap-4 text-sm text-[var(--text)]">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          Read-only
+          <InfoTip label="Only match read operations (function codes that read data without modifying state)." />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={writeOnly} onChange={(e) => onWriteOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          Write-only
+          <InfoTip label="Only match write/control operations (function codes that modify device state)." />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function splitCSV(v: string): string[] | undefined {
   const out = v.split(",").map((s) => s.trim()).filter(Boolean);
   return out.length > 0 ? out : undefined;
+}
+
+/* ── DPI Configuration Section ───────────────────────────────────── */
+
+const IT_PROTOCOLS: { key: string; label: string; port: string; desc: string }[] = [
+  { key: "dns", label: "DNS", port: "53", desc: "Domain name queries and responses" },
+  { key: "tls", label: "TLS / SSL", port: "443", desc: "TLS handshake metadata, SNI, JA3 fingerprinting" },
+  { key: "http", label: "HTTP", port: "80", desc: "HTTP method, URI, host, status inspection" },
+  { key: "ssh", label: "SSH", port: "22", desc: "SSH version exchange and cipher negotiation" },
+  { key: "smb", label: "SMB", port: "445", desc: "Windows file sharing commands and shares" },
+  { key: "ntp", label: "NTP", port: "123", desc: "Network time protocol mode and stratum" },
+  { key: "snmp", label: "SNMP", port: "161", desc: "SNMP community auth, PDU type, OIDs" },
+  { key: "rdp", label: "RDP", port: "3389", desc: "Remote desktop protocol negotiation and security" },
+];
+
+const ICS_DPI_PROTOCOLS: { key: string; label: string; port: string; desc: string }[] = [
+  { key: "modbus", label: "Modbus/TCP", port: "502", desc: "Function codes, register addresses, unit IDs" },
+  { key: "dnp3", label: "DNP3", port: "20000", desc: "Function codes, station addresses, IIN flags" },
+  { key: "cip", label: "CIP / EtherNet/IP", port: "44818", desc: "Service codes, object classes, CIP paths" },
+  { key: "s7comm", label: "S7comm", port: "102", desc: "Memory areas, DB numbers, read/write ops" },
+  { key: "mms", label: "IEC 61850 MMS", port: "102", desc: "MMS service requests, named variables" },
+  { key: "bacnet", label: "BACnet/IP", port: "47808", desc: "Service types, object types, property IDs" },
+  { key: "opcua", label: "OPC UA", port: "4840", desc: "Service types, node IDs, browse/read/write" },
+];
+
+const ICS_PROTOCOL_OPTIONS: Record<string, { fcLabel: string; fcHelp: string; addrLabel: string; addrHelp: string; hasUnitId?: boolean; hasObjectClasses?: boolean }> = {
+  modbus: { fcLabel: "Function codes", fcHelp: "1=Read Coils, 3=Read Holding, 5=Write Coil, 6=Write Register, 15=Write Coils, 16=Write Registers", addrLabel: "Register/coil addresses", addrHelp: "e.g. 0-100, 40001-40100", hasUnitId: true },
+  dnp3: { fcLabel: "Function codes", fcHelp: "1=Read, 2=Write, 3=Select, 4=Operate, 13=Cold Restart, 14=Warm Restart", addrLabel: "Station addresses", addrHelp: "Source and destination addresses (0-65534)" },
+  cip: { fcLabel: "Service codes", fcHelp: "0x4C=Read Tag, 0x4D=Write Tag, 0x52=Multiple Service", addrLabel: "CIP path", addrHelp: "Object class / instance path", hasObjectClasses: true },
+  s7comm: { fcLabel: "Function codes", fcHelp: "0x04=Read, 0x05=Write, 0x28=Setup Comm, 0x29=PLC Stop", addrLabel: "Memory area / DB", addrHelp: "DB numbers, memory area types" },
+  mms: { fcLabel: "Service types", fcHelp: "Read, Write, GetNameList, Define, Report", addrLabel: "Named variables", addrHelp: "Domain/variable name patterns" },
+  bacnet: { fcLabel: "Service types", fcHelp: "ReadProperty, WriteProperty, SubscribeCOV, WhoIs", addrLabel: "Object type / instance", addrHelp: "e.g. analog-input:1, binary-output:5" },
+  opcua: { fcLabel: "Service types", fcHelp: "Read, Write, Browse, Call, CreateSubscription", addrLabel: "Node IDs", addrHelp: "Namespace and identifier patterns" },
+};
+
+function DPIConfigSection({ config: cfg, onChange }: { config: DataPlaneConfig; onChange: (c: DataPlaneConfig) => void }) {
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saved" | "error">("idle");
+  const [showProtoModal, setShowProtoModal] = useState(false);
+  const [showExclModal, setShowExclModal] = useState(false);
+  const [showICSConfigModal, setShowICSConfigModal] = useState(false);
+  const canEdit = isAdmin();
+  const dpiOn = cfg.dpiEnabled ?? false;
+  const dpiMode = cfg.dpiMode ?? "learn";
+  const protos = cfg.dpiProtocols ?? {};
+  const icsProtos = cfg.dpiIcsProtocols ?? {};
+  const exclusions = cfg.dpiExclusions ?? [];
+
+  const enabledProtoCount = IT_PROTOCOLS.filter((p) => protos[p.key] !== false).length;
+  const enabledICSCount = ICS_DPI_PROTOCOLS.filter((p) => icsProtos[p.key] !== false).length;
+
+  async function save(updated: DataPlaneConfig) {
+    if (!canEdit) return;
+    setSaving(true);
+    const result = await setDataPlane(updated);
+    setSaving(false);
+    setSaveState(result ? "saved" : "error");
+    setTimeout(() => setSaveState("idle"), 1500);
+  }
+
+  function toggleDPI() {
+    const updated = { ...cfg, dpiEnabled: !dpiOn };
+    onChange(updated);
+    save(updated);
+  }
+
+  function setMode(mode: "learn" | "enforce") {
+    const updated = { ...cfg, dpiMode: mode };
+    onChange(updated);
+    save(updated);
+  }
+
+  function saveProtos(newProtos: Record<string, boolean>) {
+    const updated = { ...cfg, dpiProtocols: newProtos };
+    onChange(updated);
+    save(updated);
+  }
+
+  function saveICSProtos(newICSProtos: Record<string, boolean>) {
+    const updated = { ...cfg, dpiIcsProtocols: newICSProtos };
+    onChange(updated);
+    save(updated);
+  }
+
+  function saveExclusions(newExcl: DPIExclusion[]) {
+    const updated = { ...cfg, dpiExclusions: newExcl };
+    onChange(updated);
+    save(updated);
+  }
+
+  return (
+    <>
+      <Card padding="md" className="mt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text)]">Deep Packet Inspection</h2>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Inspect ICS and IT protocol traffic for visibility, IDS alerting, and policy enforcement.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {saving && <span className="text-[10px] text-[var(--text-muted)]">Saving...</span>}
+            {saveState === "saved" && <span className="text-[10px] text-emerald-400">Saved</span>}
+            {saveState === "error" && <span className="text-[10px] text-red-400">Error</span>}
+            {canEdit && (
+              <button
+                onClick={toggleDPI}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  dpiOn ? "bg-emerald-500" : "bg-white/10"
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                  dpiOn ? "translate-x-6" : "translate-x-1"
+                }`} />
+              </button>
+            )}
+            <StatusBadge variant={dpiOn ? "success" : "neutral"} dot>
+              {dpiOn ? "Enabled" : "Disabled"}
+            </StatusBadge>
+          </div>
+        </div>
+
+        {dpiOn && (
+          <div className="mt-4 space-y-3">
+            {/* ICS DPI Mode */}
+            <div className="rounded-sm border border-amber-500/[0.08] bg-[var(--surface2)] px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-[var(--text)]">ICS DPI Mode</span>
+                  <InfoTip label="Learning mode passively observes traffic to build a baseline. Enforcement mode actively applies DPI policy rules." />
+                </div>
+                {canEdit && (
+                  <div className="flex items-center rounded-sm border border-amber-500/[0.1] overflow-hidden">
+                    <button
+                      onClick={() => setMode("learn")}
+                      className={`px-3 py-1 text-[10px] font-medium transition-ui ${
+                        dpiMode === "learn"
+                          ? "bg-blue-500/20 text-blue-400 border-r border-amber-500/[0.1]"
+                          : "bg-[var(--surface)] text-[var(--text-muted)] hover:bg-white/[0.04] border-r border-amber-500/[0.1]"
+                      }`}
+                    >
+                      Learning
+                    </button>
+                    <button
+                      onClick={() => setMode("enforce")}
+                      className={`px-3 py-1 text-[10px] font-medium transition-ui ${
+                        dpiMode === "enforce"
+                          ? "bg-amber-500/20 text-amber-400"
+                          : "bg-[var(--surface)] text-[var(--text-muted)] hover:bg-white/[0.04]"
+                      }`}
+                    >
+                      Enforcement
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+                {dpiMode === "learn"
+                  ? "Passively observing ICS traffic to build protocol baseline. No traffic will be blocked."
+                  : "Actively enforcing DPI policy rules. Non-conforming traffic may be blocked."}
+              </p>
+            </div>
+
+            {/* ICS Protocols */}
+            <div className="rounded-sm border border-amber-500/[0.08] bg-[var(--surface2)] px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-[var(--text)]">ICS Protocol Decoders</span>
+                  <span className="ml-2 text-[10px] text-[var(--text-muted)]">{enabledICSCount}/{ICS_DPI_PROTOCOLS.length} enabled</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {canEdit && (
+                    <button
+                      onClick={() => setShowICSConfigModal(true)}
+                      className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2.5 py-1 text-[10px] font-medium text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                    >
+                      Configure
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {ICS_DPI_PROTOCOLS.map((p) => {
+                  const on = icsProtos[p.key] !== false;
+                  return (
+                    <span key={p.key} className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+                      on
+                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                        : "border-white/[0.06] bg-white/[0.02] text-[var(--text-dim)] line-through"
+                    }`}>
+                      {p.label}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* IT Protocols */}
+            <div className="rounded-sm border border-amber-500/[0.08] bg-[var(--surface2)] px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-[var(--text)]">IT Protocol Decoders</span>
+                  <span className="ml-2 text-[10px] text-[var(--text-muted)]">{enabledProtoCount}/{IT_PROTOCOLS.length} enabled</span>
+                </div>
+                {canEdit && (
+                  <button
+                    onClick={() => setShowProtoModal(true)}
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2.5 py-1 text-[10px] font-medium text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                  >
+                    Configure
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {IT_PROTOCOLS.map((p) => {
+                  const on = protos[p.key] !== false;
+                  return (
+                    <span key={p.key} className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+                      on
+                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                        : "border-white/[0.06] bg-white/[0.02] text-[var(--text-dim)] line-through"
+                    }`}>
+                      {p.label}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* DPI Exclusions */}
+            <div className="rounded-sm border border-amber-500/[0.08] bg-[var(--surface2)] px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-[var(--text)]">DPI Exclusions</span>
+                  <span className="ml-2 text-[10px] text-[var(--text-muted)]">
+                    {exclusions.length === 0 ? "None" : `${exclusions.length} excluded`}
+                  </span>
+                </div>
+                {canEdit && (
+                  <button
+                    onClick={() => setShowExclModal(true)}
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2.5 py-1 text-[10px] font-medium text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                  >
+                    {exclusions.length > 0 ? "Manage" : "Add Exclusion"}
+                  </button>
+                )}
+              </div>
+              {exclusions.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {exclusions.map((e, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-sm border border-white/[0.04] bg-[var(--surface)] px-2 py-1 text-[10px]">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-sm border border-amber-500/20 bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-400 uppercase">{e.type}</span>
+                        <span className="font-mono text-[var(--text)]">{e.value}</span>
+                      </div>
+                      {e.reason && <span className="text-[var(--text-muted)] truncate max-w-[180px]">{e.reason}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Info note */}
+            <div className="text-[10px] text-[var(--text-dim)]">
+              Use Learning mode to passively build a traffic baseline before switching to Enforcement.
+              DPI exclusions skip inspection for specific IPs, CIDRs, or domains.
+              TLS inspection covers handshake metadata only (SNI, JA3) — full interception is planned.
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {showProtoModal && (
+        <DPIProtocolModal
+          protocols={protos}
+          onSave={(p) => { saveProtos(p); setShowProtoModal(false); }}
+          onClose={() => setShowProtoModal(false)}
+        />
+      )}
+      {showExclModal && (
+        <DPIExclusionModal
+          exclusions={exclusions}
+          onSave={(e) => { saveExclusions(e); setShowExclModal(false); }}
+          onClose={() => setShowExclModal(false)}
+        />
+      )}
+      {showICSConfigModal && (
+        <ICSDPIConfigModal
+          icsProtocols={icsProtos}
+          onSave={(p) => { saveICSProtos(p); setShowICSConfigModal(false); }}
+          onClose={() => setShowICSConfigModal(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/* ── IT Protocol Toggle Modal ── */
+
+function DPIProtocolModal({ protocols, onSave, onClose }: {
+  protocols: Record<string, boolean>;
+  onSave: (p: Record<string, boolean>) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, boolean>>({ ...protocols });
+
+  function toggle(key: string) {
+    setDraft((d) => ({ ...d, [key]: d[key] === false ? true : false }));
+  }
+
+  function enableAll() {
+    const next: Record<string, boolean> = {};
+    IT_PROTOCOLS.forEach((p) => { next[p.key] = true; });
+    setDraft(next);
+  }
+
+  function disableAll() {
+    const next: Record<string, boolean> = {};
+    IT_PROTOCOLS.forEach((p) => { next[p.key] = false; });
+    setDraft(next);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-lg rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-[var(--text)]">IT Protocol DPI Configuration</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={enableAll} className="rounded-sm border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400 hover:bg-emerald-500/20">
+              Enable All
+            </button>
+            <button onClick={disableAll} className="rounded-sm border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-400 hover:bg-red-500/20">
+              Disable All
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          {IT_PROTOCOLS.map((p) => {
+            const on = draft[p.key] !== false;
+            return (
+              <div
+                key={p.key}
+                onClick={() => toggle(p.key)}
+                className={`flex items-center justify-between rounded-sm border px-3 py-2.5 cursor-pointer transition-ui ${
+                  on
+                    ? "border-emerald-500/20 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.08]"
+                    : "border-white/[0.04] bg-white/[0.01] hover:bg-white/[0.03]"
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-medium ${on ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`}>{p.label}</span>
+                    <span className="font-mono text-[10px] text-[var(--text-muted)]">:{p.port}</span>
+                  </div>
+                  <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{p.desc}</div>
+                </div>
+                <div className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-white/10"}`}>
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 text-[10px] text-[var(--text-dim)]">
+          ICS protocol decoders (Modbus, DNP3, CIP, S7comm, IEC 61850 MMS, BACnet, OPC UA) are always active and cannot be disabled.
+          TLS inspection covers handshake metadata only (SNI, JA3, cipher suites) — full TLS interception is planned for a future release.
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
+          <button onClick={() => onSave(draft)} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110">Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── ICS DPI Configuration Modal ── */
+
+function ICSDPIConfigModal({ icsProtocols, onSave, onClose }: {
+  icsProtocols: Record<string, boolean>;
+  onSave: (p: Record<string, boolean>) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, boolean>>({ ...icsProtocols });
+  const [activeProto, setActiveProto] = useState<string | null>(null);
+
+  function toggle(key: string) {
+    setDraft((d) => ({ ...d, [key]: d[key] === false ? true : false }));
+  }
+
+  function enableAll() {
+    const next: Record<string, boolean> = {};
+    ICS_DPI_PROTOCOLS.forEach((p) => { next[p.key] = true; });
+    setDraft(next);
+  }
+
+  function disableAll() {
+    const next: Record<string, boolean> = {};
+    ICS_DPI_PROTOCOLS.forEach((p) => { next[p.key] = false; });
+    setDraft(next);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-2xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text)]">ICS Protocol DPI Configuration</h2>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">Enable or disable individual ICS protocol decoders and view protocol-specific options.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={enableAll} className="rounded-sm border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400 hover:bg-emerald-500/20">
+              Enable All
+            </button>
+            <button onClick={disableAll} className="rounded-sm border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-400 hover:bg-red-500/20">
+              Disable All
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          {ICS_DPI_PROTOCOLS.map((p) => {
+            const on = draft[p.key] !== false;
+            const expanded = activeProto === p.key;
+            const opts = ICS_PROTOCOL_OPTIONS[p.key];
+            return (
+              <div key={p.key}>
+                <div
+                  className={`flex items-center justify-between rounded-sm border px-3 py-2.5 transition-ui ${
+                    on
+                      ? "border-emerald-500/20 bg-emerald-500/[0.04]"
+                      : "border-white/[0.04] bg-white/[0.01]"
+                  } ${expanded ? "rounded-b-none" : ""}`}
+                >
+                  <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => setActiveProto(expanded ? null : p.key)}>
+                    <svg className={`w-3 h-3 text-[var(--text-muted)] transition-transform ${expanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-medium ${on ? "text-[var(--text)]" : "text-[var(--text-dim)]"}`}>{p.label}</span>
+                        <span className="font-mono text-[10px] text-[var(--text-muted)]">:{p.port}</span>
+                      </div>
+                      <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{p.desc}</div>
+                    </div>
+                  </div>
+                  <div
+                    onClick={() => toggle(p.key)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer shrink-0 ${on ? "bg-emerald-500" : "bg-white/10"}`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </div>
+                </div>
+
+                {expanded && opts && (
+                  <div className="border border-t-0 border-amber-500/[0.08] rounded-b-sm bg-[var(--surface2)] px-4 py-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{opts.fcLabel}</label>
+                        <p className="text-[9px] text-[var(--text-dim)] mb-1.5">{opts.fcHelp}</p>
+                        <div className="text-[10px] text-[var(--text-dim)] italic">Configured in firewall rules per-entry</div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{opts.addrLabel}</label>
+                        <p className="text-[9px] text-[var(--text-dim)] mb-1.5">{opts.addrHelp}</p>
+                        <div className="text-[10px] text-[var(--text-dim)] italic">Configured in firewall rules per-entry</div>
+                      </div>
+                    </div>
+                    {opts.hasUnitId && (
+                      <div className="text-[10px] text-[var(--text-dim)]">
+                        Unit ID filtering available in firewall rules (per-entry ICS predicate).
+                      </div>
+                    )}
+                    {opts.hasObjectClasses && (
+                      <div className="text-[10px] text-[var(--text-dim)]">
+                        CIP object class filtering available in firewall rules (per-entry ICS predicate).
+                      </div>
+                    )}
+                    <div className="pt-2 border-t border-white/[0.04]">
+                      <div className="flex items-center gap-2 text-[10px]">
+                        <span className="text-[var(--text-muted)]">Decoder status:</span>
+                        {on ? (
+                          <span className="text-emerald-400">Active — inspecting traffic on port {p.port}</span>
+                        ) : (
+                          <span className="text-[var(--text-dim)]">Disabled — traffic on port {p.port} will not be decoded</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 text-[10px] text-[var(--text-dim)]">
+          Protocol-specific DPI parameters (function codes, register addresses, unit IDs) are configured per-rule in firewall entries with ICS predicates.
+          This panel controls which ICS decoders are active at the engine level.
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
+          <button onClick={() => onSave(draft)} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110">Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── DPI Exclusion Modal ── */
+
+function DPIExclusionModal({ exclusions, onSave, onClose }: {
+  exclusions: DPIExclusion[];
+  onSave: (e: DPIExclusion[]) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<DPIExclusion[]>([...exclusions]);
+  const [newValue, setNewValue] = useState("");
+  const [newType, setNewType] = useState<"ip" | "cidr" | "domain">("ip");
+  const [newReason, setNewReason] = useState("");
+
+  function detectType(v: string): "ip" | "cidr" | "domain" {
+    if (v.includes("/")) return "cidr";
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v)) return "ip";
+    if (v.includes(":") && !v.includes(".")) return "ip"; // IPv6
+    return "domain";
+  }
+
+  function add() {
+    const val = newValue.trim();
+    if (!val) return;
+    if (draft.some((e) => e.value === val)) return;
+    setDraft([...draft, { value: val, type: detectType(val), reason: newReason.trim() || undefined }]);
+    setNewValue("");
+    setNewReason("");
+  }
+
+  function remove(i: number) {
+    setDraft(draft.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="w-full max-w-lg rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+        <h2 className="text-sm font-semibold text-[var(--text)] mb-4">DPI Exclusions</h2>
+        <p className="text-xs text-[var(--text-muted)] mb-3">
+          Exclude specific IP addresses, CIDR ranges, or domains from deep packet inspection.
+          Traffic to or from excluded targets will bypass DPI entirely.
+        </p>
+
+        {/* Add new exclusion */}
+        <div className="flex gap-2 mb-4">
+          <select
+            value={newType}
+            onChange={(e) => setNewType(e.target.value as "ip" | "cidr" | "domain")}
+            className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface2)] px-2.5 py-2.5 text-sm text-[var(--text)] outline-none"
+          >
+            <option value="ip">IP</option>
+            <option value="cidr">CIDR</option>
+            <option value="domain">Domain</option>
+          </select>
+          <input
+            value={newValue}
+            onChange={(e) => {
+              setNewValue(e.target.value);
+              setNewType(detectType(e.target.value));
+            }}
+            placeholder={newType === "domain" ? "example.com" : newType === "cidr" ? "10.0.0.0/8" : "192.168.1.1"}
+            className="flex-1 input-industrial py-2.5 text-sm"
+            onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+          />
+          <input
+            value={newReason}
+            onChange={(e) => setNewReason(e.target.value)}
+            placeholder="Reason (optional)"
+            className="w-40 input-industrial py-2.5 text-sm"
+            onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+          />
+          <button onClick={add} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110">Add</button>
+        </div>
+
+        {/* Exclusion list */}
+        <div className="max-h-[280px] overflow-y-auto space-y-1">
+          {draft.length === 0 ? (
+            <div className="text-center py-6 text-xs text-[var(--text-muted)]">No exclusions configured.</div>
+          ) : (
+            draft.map((e, i) => (
+              <div key={i} className="flex items-center justify-between rounded-sm border border-white/[0.04] bg-[var(--surface2)] px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="shrink-0 rounded-sm border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-400 uppercase">{e.type}</span>
+                  <span className="font-mono text-xs text-[var(--text)] truncate">{e.value}</span>
+                  {e.reason && <span className="text-[10px] text-[var(--text-muted)] truncate">— {e.reason}</span>}
+                </div>
+                <button onClick={() => remove(i)} className="shrink-0 ml-2 rounded-sm border border-red-500/20 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-500/20 transition-ui">Remove</button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="mt-3 text-[10px] text-[var(--text-dim)]">
+          IP and CIDR exclusions take effect immediately. Domain exclusions will be supported when TLS interception is added.
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
+          <button onClick={() => onSave(draft)} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110">Save</button>
+        </div>
+      </div>
+    </div>
+  );
 }

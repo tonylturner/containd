@@ -15,8 +15,8 @@ const (
 
 // Build metadata injected at compile time via -ldflags.
 var (
-	BuildVersion = "dev"
-	BuildCommit  = "unknown"
+	BuildVersion = SchemaVersionCurrent
+	BuildCommit  = "local"
 )
 
 type semver struct {
