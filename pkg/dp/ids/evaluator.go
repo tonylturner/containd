@@ -49,6 +49,9 @@ func (e *Evaluator) Evaluate(ev dpi.Event) []dpi.Event {
 		if r.ID == "" {
 			continue
 		}
+		if r.Enabled != nil && !*r.Enabled {
+			continue
+		}
 		if r.Proto != "" && !strings.EqualFold(r.Proto, ev.Proto) {
 			continue
 		}
@@ -70,6 +73,28 @@ func (e *Evaluator) Evaluate(ev dpi.Event) []dpi.Event {
 		}
 		if ev.Attributes != nil {
 			attrs["event_attrs"] = ev.Attributes
+		}
+		if len(r.References) > 0 {
+			attrs["references"] = r.References
+		}
+		if len(r.CVE) > 0 {
+			attrs["cve"] = r.CVE
+		}
+		if len(r.MITREAttackIDs) > 0 {
+			attrs["mitre_attack_ids"] = r.MITREAttackIDs
+		}
+		if r.Description != "" {
+			attrs["description"] = r.Description
+		}
+		if r.SourceFormat != "" {
+			attrs["source_format"] = r.SourceFormat
+		}
+		if len(r.ContentMatches) > 0 {
+			var patterns []string
+			for _, cm := range r.ContentMatches {
+				patterns = append(patterns, cm.Pattern)
+			}
+			attrs["matched_patterns"] = patterns
 		}
 		out = append(out, dpi.Event{
 			FlowID:     ev.FlowID,

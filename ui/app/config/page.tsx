@@ -1,10 +1,13 @@
- "use client";
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 type Tab = "overview" | "running" | "candidate" | "diff";
 type ViewerSource = "running" | "candidate";
@@ -53,9 +56,20 @@ function diffLines(aLines: string[], bLines: string[]): DiffLine[] {
   return out.reverse();
 }
 
-export default function ConfigPage() {
+export default function ConfigPageWrapper() {
+  return (
+    <Suspense>
+      <ConfigPage />
+    </Suspense>
+  );
+}
+
+function ConfigPage() {
   const canEdit = isAdmin();
-  const [tab, setTab] = useState<Tab>("overview");
+  const confirm = useConfirm();
+  const searchParams = useSearchParams();
+  const initialTab = (searchParams.get("tab") as Tab) || "overview";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [running, setRunning] = useState<ConfigBundle | null>(null);
   const [candidate, setCandidate] = useState<ConfigBundle | null>(null);
   const [candidateText, setCandidateText] = useState("");
@@ -119,39 +133,76 @@ export default function ConfigPage() {
     refresh();
   }
 
-  async function doCommit() {
+  function doCommit() {
     if (!canEdit) return;
-    setStatus(null);
-    const res = await api.commit();
-    setStatus(res ? "Committed." : "Commit failed.");
-    refresh();
+    const changedCount = diffBlocks.length;
+    confirm.open({
+      title: "Commit configuration",
+      message: changedCount > 0
+        ? `This will apply ${changedCount} changed block${changedCount === 1 ? "" : "s"} from the candidate to the running config. This takes effect immediately.`
+        : "This will promote the candidate config to running. No differences were detected — the configs may already be in sync.",
+      confirmLabel: "Commit",
+      variant: "default",
+      onConfirm: async () => {
+        setStatus(null);
+        const result = await api.commit();
+        if (result.ok) {
+          setStatus("Committed.");
+          window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        } else {
+          setStatus(`Commit failed: ${result.error}`);
+        }
+        refresh();
+      },
+    });
   }
 
-  async function doCommitConfirmed() {
+  function doCommitConfirmed() {
     if (!canEdit) return;
-    setStatus(null);
     const ttl = Number(ttlSeconds);
-    const res = await api.commitConfirmed(
-      Number.isFinite(ttl) && ttl > 0 ? ttl : undefined,
-    );
-    setStatus(res ? "Commit-confirmed started." : "Commit-confirmed failed.");
-    refresh();
+    const secs = Number.isFinite(ttl) && ttl > 0 ? ttl : 60;
+    confirm.open({
+      title: "Commit with auto-rollback",
+      message: `This will apply the candidate config for ${secs} seconds. If you do not click "Confirm" before the timer expires, the config will automatically roll back to the previous running state. Use this for risky changes.`,
+      confirmLabel: "Start timer",
+      variant: "default",
+      onConfirm: async () => {
+        setStatus(null);
+        const result = await api.commitConfirmed(secs);
+        setStatus(result.ok ? `Commit-confirmed started (${secs}s).` : `Commit-confirmed failed: ${result.error}`);
+        refresh();
+      },
+    });
   }
 
   async function doConfirm() {
     if (!canEdit) return;
     setStatus(null);
-    const res = await api.confirmCommit();
-    setStatus(res ? "Commit confirmed." : "Confirm failed.");
+    const result = await api.confirmCommit();
+    setStatus(result.ok ? "Commit confirmed." : `Confirm failed: ${result.error}`);
     refresh();
   }
 
-  async function doRollback() {
+  function doRollback() {
     if (!canEdit) return;
-    setStatus(null);
-    const res = await api.rollback();
-    setStatus(res ? "Rolled back." : "Rollback failed.");
-    refresh();
+    confirm.open({
+      title: "Rollback configuration",
+      message:
+        "This will restore the previous running config (from before the last commit). Any changes made since the last commit — including new zones, rules, or interfaces — will be lost. This cannot be undone.",
+      confirmLabel: "Rollback",
+      variant: "danger",
+      onConfirm: async () => {
+        setStatus(null);
+        const result = await api.rollback();
+        if (result.ok) {
+          setStatus("Rolled back.");
+          window.dispatchEvent(new CustomEvent("containd:config:committed"));
+        } else {
+          setStatus(`Rollback failed: ${result.error}`);
+        }
+        refresh();
+      },
+    });
   }
 
   async function downloadConfig(redacted: boolean) {
@@ -229,15 +280,22 @@ export default function ConfigPage() {
 
   async function deleteBackup(backup: ConfigBackup) {
     if (!canEdit) return;
-    if (!window.confirm(`Delete backup "${backup.name}"?`)) return;
-    setStatus(null);
-    const res = await api.deleteConfigBackup(backup.id);
-    if (!res) {
-      setStatus("Failed to delete backup.");
-      return;
-    }
-    setStatus("Backup deleted.");
-    refreshBackups();
+    confirm.open({
+      title: "Delete backup",
+      message: `Delete backup "${backup.name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        setStatus(null);
+        const res = await api.deleteConfigBackup(backup.id);
+        if (!res) {
+          setStatus("Failed to delete backup.");
+          return;
+        }
+        setStatus("Backup deleted.");
+        refreshBackups();
+      },
+    });
   }
 
   function formatBytes(size: number) {
@@ -419,14 +477,15 @@ export default function ConfigPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
         >
           Refresh
         </button>
       }
     >
+      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -437,8 +496,8 @@ export default function ConfigPage() {
             onClick={() => setTab(t)}
             className={
               tab === t
-                ? "rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white"
-                : "rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                ? "rounded-sm bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--text)] transition-ui"
+                : "rounded-sm px-3 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
             }
           >
             {t}
@@ -447,7 +506,15 @@ export default function ConfigPage() {
       </div>
 
       {status && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-200">
+        <div
+          className={`mb-4 rounded-sm px-4 py-3 text-sm ${
+            status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
+              ? "border border-red-500/30 bg-red-500/10 text-red-400"
+              : status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
+                ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                : "border border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
+          }`}
+        >
           {status}
         </div>
       )}
@@ -456,25 +523,25 @@ export default function ConfigPage() {
         <div className="grid gap-4">
           <TipsBanner tips={tips} />
           <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+            <Card padding="lg">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                     Backup &amp; Restore
                   </div>
-                  <h2 className="text-lg font-semibold text-white">Config vault</h2>
+                  <h2 className="text-lg font-semibold text-[var(--text)]">Config vault</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => downloadConfig(true)}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Download redacted
                   </button>
                   {canEdit && (
                     <button
                       onClick={() => downloadConfig(false)}
-                      className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
+                      className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                     >
                       Download full
                     </button>
@@ -487,40 +554,40 @@ export default function ConfigPage() {
                   accept=".json"
                   onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   disabled={!canEdit}
-                  className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                 />
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-[var(--text-muted)]">
                   Restore replaces running config. Use redacted backups for sharing.
                 </div>
                 {canEdit && (
                   <button
                     onClick={restoreConfig}
-                    className="rounded-lg bg-amber/20 px-3 py-2 text-sm font-semibold text-amber hover:bg-amber/30"
+                    className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
                   >
                     Restore
                   </button>
                 )}
               </div>
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-4">
+              <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">
                       Appliance backups
                     </div>
-                    <div className="text-sm text-slate-200">Store backups on the firewall.</div>
+                    <div className="text-sm text-[var(--text)]">Store backups on the firewall.</div>
                   </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => createBackup(true)}
                     disabled={!canEdit}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Save redacted
                   </button>
                   {canEdit && (
                       <button
                         onClick={() => createBackup(false)}
-                        className="rounded-lg bg-mint/20 px-3 py-1.5 text-xs font-semibold text-mint hover:bg-mint/30"
+                        className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 transition-ui"
                       >
                         Save full
                       </button>
@@ -533,26 +600,26 @@ export default function ConfigPage() {
                     onChange={(e) => setBackupName(e.target.value)}
                     placeholder="Name this backup (optional)"
                     disabled={!canEdit}
-                    className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-200"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                   />
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-[var(--text-muted)]">
                     Backups are stored under the appliance data volume.
                   </div>
                 </div>
                 <div className="mt-3 grid gap-2">
                   {backups.length === 0 ? (
-                    <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-slate-400">
+                    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
                       No backups saved yet.
                     </div>
                   ) : (
                     backups.map((backup) => (
                       <div
                         key={backup.id}
-                        className="grid gap-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-slate-300 md:grid-cols-[1fr_auto]"
+                        className="grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:grid-cols-[1fr_auto]"
                       >
                         <div>
-                          <div className="font-semibold text-slate-100">{backup.name}</div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="font-semibold text-[var(--text)]">{backup.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
                             {new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.size)} ·{" "}
                             {backup.redacted ? "Redacted" : "Full"} · ID {backup.id.slice(0, 6)}
                           </div>
@@ -560,14 +627,14 @@ export default function ConfigPage() {
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <button
                             onClick={() => downloadBackup(backup)}
-                            className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                           >
                             Download
                           </button>
                           {canEdit && (
                             <button
                               onClick={() => deleteBackup(backup)}
-                              className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                              className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 hover:bg-red-600/30 transition-ui"
                             >
                               Delete
                             </button>
@@ -578,9 +645,9 @@ export default function ConfigPage() {
                   )}
                 </div>
               </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+            </Card>
+            <Card padding="lg">
+              <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                 Config health
               </div>
               <div className="mt-3 grid gap-3 text-sm">
@@ -589,28 +656,28 @@ export default function ConfigPage() {
                 <Stat label="Firewall rules" value={ruleCount} />
                 <Stat label="Assets" value={assetCount} />
               </div>
-              <div className="mt-4 text-xs text-slate-400">
+              <div className="mt-4 text-xs text-[var(--text-muted)]">
                 Build your config by defining zones, then binding interfaces, then adding policies.
               </div>
-            </div>
+            </Card>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
+          <Card padding="lg">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                   Config viewer
                 </div>
-                <h2 className="text-lg font-semibold text-white">Explore blocks</h2>
+                <h2 className="text-lg font-semibold text-[var(--text)]">Explore blocks</h2>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>Source</span>
                 <button
                   onClick={() => setViewerSource("running")}
                   className={
                     viewerSource === "running"
-                      ? "rounded-md bg-white/10 px-2 py-1 text-slate-100"
-                      : "rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-300 hover:bg-white/10"
+                      ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
+                      : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
                   running
@@ -619,8 +686,8 @@ export default function ConfigPage() {
                   onClick={() => setViewerSource("candidate")}
                   className={
                     viewerSource === "candidate"
-                      ? "rounded-md bg-white/10 px-2 py-1 text-slate-100"
-                      : "rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-300 hover:bg-white/10"
+                      ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
+                      : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
                   candidate
@@ -654,8 +721,8 @@ export default function ConfigPage() {
                     title={item.help}
                     className={
                       selectedBlock === item.key
-                        ? "rounded-lg bg-white/10 px-3 py-2 text-left text-sm text-white"
-                        : "rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-slate-300 hover:bg-white/10"
+                        ? "rounded-sm bg-amber-500/[0.1] px-3 py-2 text-left text-sm text-[var(--text)] transition-ui"
+                        : "rounded-sm px-3 py-2 text-left text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                     }
                   >
                     {item.label}
@@ -664,12 +731,12 @@ export default function ConfigPage() {
               </div>
               <div className="grid gap-3">
                 {blockItems.length > 0 && (
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 shadow-card">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                         {selectedBlock} entries
                       </div>
-                      <span className="text-xs text-slate-400">{blockItems.length} items</span>
+                      <span className="text-xs text-[var(--text-muted)]">{blockItems.length} items</span>
                     </div>
                     <div className="mt-2 grid gap-1 md:grid-cols-2">
                       {blockItems.map((item: BlockItem) => (
@@ -678,38 +745,38 @@ export default function ConfigPage() {
                           onClick={() => setSelectedItemId(item.id)}
                           className={
                             selectedItemId === item.id
-                              ? "rounded-lg border border-white/10 bg-white/10 px-2 py-1 text-left text-xs text-white"
-                              : "rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-xs text-slate-200 hover:bg-white/10"
+                              ? "rounded-sm border border-amber-500/[0.15] bg-amber-500/[0.1] px-2 py-1 text-left text-xs text-[var(--text)] transition-ui"
+                              : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-left text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                           }
                         >
                           <div className="font-semibold">{item.label}</div>
-                          <div className="text-[11px] text-slate-400">{item.meta}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">{item.meta}</div>
                         </button>
                       ))}
                     </div>
                     {selectedItem && (
-                      <div className="mt-3 rounded-lg border border-white/10 bg-black/40 p-3 text-xs text-slate-100">
+                      <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)]">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Selected
                           </div>
                           {selectedBlock === "zones" && (
-                            <a href="/zones/" className="text-xs text-mint hover:text-mint/80">
+                            <a href="/zones/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Zones
                             </a>
                           )}
                           {selectedBlock === "interfaces" && (
-                            <a href="/interfaces/" className="text-xs text-mint hover:text-mint/80">
+                            <a href="/interfaces/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Interfaces
                             </a>
                           )}
                           {selectedBlock === "firewall" && (
-                            <a href="/firewall/" className="text-xs text-mint hover:text-mint/80">
+                            <a href="/firewall/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Firewall
                             </a>
                           )}
                           {selectedBlock === "assets" && (
-                            <a href="/assets/" className="text-xs text-mint hover:text-mint/80">
+                            <a href="/assets/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Assets
                             </a>
                           )}
@@ -721,11 +788,11 @@ export default function ConfigPage() {
                     )}
                   </div>
                 )}
-                <div className="rounded-xl border border-white/10 bg-black/40 p-4 text-xs text-slate-100">
+                <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
                   {viewerConfig ? (
                     Array.isArray(blockValue) ? (
                       blockValue.length === 0 ? (
-                        <div className="text-slate-400">No entries in this block.</div>
+                        <div className="text-[var(--text-muted)]">No entries in this block.</div>
                       ) : (
                         <div className="grid gap-2">
                           {blockValue.map((item: any) => {
@@ -745,8 +812,8 @@ export default function ConfigPage() {
                                 ref={isSelected ? selectedRef : undefined}
                                 className={
                                   isSelected
-                                    ? "rounded-lg border border-mint/40 bg-mint/10 p-3"
-                                    : "rounded-lg border border-white/10 bg-black/30 p-3 hover:border-white/20"
+                                    ? "rounded-sm border border-amber-500/40 bg-amber-500/[0.1] p-3 transition-ui"
+                                    : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 hover:border-amber-500/30 transition-ui"
                                 }
                               >
                                 <pre className="whitespace-pre-wrap">
@@ -763,22 +830,22 @@ export default function ConfigPage() {
                       </pre>
                     )
                   ) : (
-                    <div className="text-slate-400">No config loaded for this source.</div>
+                    <div className="text-[var(--text-muted)]">No config loaded for this source.</div>
                   )}
                 </div>
               </div>
             </div>
-            <div className="mt-3 text-xs text-slate-400">
+            <div className="mt-3 text-xs text-[var(--text-muted)]">
               Select a block to jump to its JSON. Use running for live state, candidate for staged changes.
             </div>
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+          <Card padding="md">
             <div className="flex flex-wrap items-center gap-2">
               {canEdit && (
                 <button
                   onClick={doCommit}
-                  className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Commit
                 </button>
@@ -787,7 +854,7 @@ export default function ConfigPage() {
                 {canEdit && (
                   <button
                     onClick={doCommitConfirmed}
-                    className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Commit-confirmed
                   </button>
@@ -796,37 +863,37 @@ export default function ConfigPage() {
                   value={ttlSeconds}
                   onChange={(e) => setTtlSeconds(e.target.value)}
                   disabled={!canEdit}
-                  className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+                  className="w-20 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                 />
-                <span className="text-xs text-slate-300">seconds</span>
+                <span className="text-xs text-[var(--text)]">seconds</span>
               </div>
               {canEdit && (
                 <>
                   <button
                     onClick={doConfirm}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                    className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                   >
                     Confirm
                   </button>
                   <button
                     onClick={doRollback}
-                    className="rounded-lg bg-amber/20 px-3 py-1.5 text-sm font-semibold text-amber hover:bg-amber/30"
+                    className="rounded-sm bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
                   >
                     Rollback
                   </button>
                 </>
               )}
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
       {tab === "candidate" && (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+        <Card padding="md">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-white">Candidate JSON</h2>
-              <div className="text-xs text-slate-400">
+              <h2 className="text-sm font-semibold text-[var(--text)]">Candidate JSON</h2>
+              <div className="text-xs text-[var(--text-muted)]">
                 {candidateLoadedAt
                   ? `Last saved ${candidateLoadedAt.toLocaleString()}`
                   : "Not saved yet"}
@@ -836,13 +903,13 @@ export default function ConfigPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={copyRunningToCandidate}
-                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
                   Copy running → candidate
                 </button>
                 <button
                   onClick={saveCandidate}
-                  className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Save candidate
                 </button>
@@ -854,14 +921,14 @@ export default function ConfigPage() {
             onChange={(e) => setCandidateText(e.target.value)}
             readOnly={!canEdit}
             rows={22}
-            className="w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs text-white"
+            className="w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
           />
-        </div>
+        </Card>
       )}
 
       {tab === "running" && (
-        <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-xs text-slate-100 shadow-lg backdrop-blur">
-          <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
+          <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
             <div>Running config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
           </div>
@@ -872,35 +939,35 @@ export default function ConfigPage() {
       {tab === "diff" && (
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
-            <div className="rounded-2xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber shadow-lg backdrop-blur">
+            <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
               Candidate looks older than running. Copy running → candidate to diff your latest changes.
             </div>
           )}
           {!candidate ? (
-            <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 shadow-lg backdrop-blur">
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
               No candidate config to compare. Save a candidate to see a diff.
             </div>
           ) : diffBlocks.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-slate-200 shadow-lg backdrop-blur">
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
               No differences between running and candidate.
             </div>
           ) : (
             diffBlocks.map((block) => (
               <div
                 key={block.key}
-                className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-lg backdrop-blur"
+                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card"
               >
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Changed block</div>
-                    <div className="text-sm font-semibold text-white">{block.label}</div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">Changed block</div>
+                    <div className="text-sm font-semibold text-[var(--text)]">{block.label}</div>
                   </div>
-                  <div className="text-xs text-slate-400">
+                  <div className="text-xs text-[var(--text-muted)]">
                     {block.diff.filter((l) => l.type === "add").length} added ·{" "}
                     {block.diff.filter((l) => l.type === "del").length} removed
                   </div>
                 </div>
-                <div className="grid gap-1 rounded-lg border border-white/10 bg-black/60 p-3 text-xs text-slate-100">
+                <div className="grid gap-1 rounded-sm border border-amber-500/[0.15] bg-black/60 p-3 text-xs text-[var(--text)]">
                   {block.diff.map((line, idx) => (
                     <div
                       key={`${block.key}-${idx}`}
@@ -924,49 +991,51 @@ export default function ConfigPage() {
       )}
 
       {tab !== "overview" && (
-        <div className="mt-6 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
-          {canEdit && (
-            <button
-              onClick={doCommit}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm font-semibold text-mint hover:bg-mint/30"
-            >
-              Commit
-            </button>
-          )}
-          <div className="flex items-center gap-2">
+        <Card className="mt-6" padding="md">
+          <div className="flex flex-wrap items-center gap-2">
             {canEdit && (
               <button
-                onClick={doCommitConfirmed}
-                className="rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+                onClick={doCommit}
+                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
               >
-                Commit-confirmed
+                Commit
               </button>
             )}
-            <input
-              value={ttlSeconds}
-              onChange={(e) => setTtlSeconds(e.target.value)}
-              disabled={!canEdit}
-              className="w-20 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
-            />
-            <span className="text-xs text-slate-300">seconds</span>
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <button
+                  onClick={doCommitConfirmed}
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                >
+                  Commit-confirmed
+                </button>
+              )}
+              <input
+                value={ttlSeconds}
+                onChange={(e) => setTtlSeconds(e.target.value)}
+                disabled={!canEdit}
+                className="w-20 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+              />
+              <span className="text-xs text-[var(--text)]">seconds</span>
+            </div>
+            {canEdit && (
+              <>
+                <button
+                  onClick={doConfirm}
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={doRollback}
+                  className="rounded-sm bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+                >
+                  Rollback
+                </button>
+              </>
+            )}
           </div>
-          {canEdit && (
-            <>
-              <button
-                onClick={doConfirm}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
-              >
-                Confirm
-              </button>
-              <button
-                onClick={doRollback}
-                className="rounded-lg bg-amber/20 px-3 py-1.5 text-sm font-semibold text-amber hover:bg-amber/30"
-              >
-                Rollback
-              </button>
-            </>
-          )}
-        </div>
+        </Card>
       )}
     </Shell>
   );
@@ -974,9 +1043,9 @@ export default function ConfigPage() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/40 px-3 py-2">
-      <span className="text-slate-300">{label}</span>
-      <span className="text-white">{value}</span>
+    <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+      <span className="text-[var(--text)]">{label}</span>
+      <span className="text-[var(--text)]">{value}</span>
     </div>
   );
 }

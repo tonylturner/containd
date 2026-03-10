@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
+import { Card } from "../../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
 import { api, isAdmin, type User, type UserRole } from "../../../lib/api";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function UsersPage() {
+  const confirm = useConfirm();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +39,10 @@ export default function UsersPage() {
     role: "view",
     password: "",
   });
+
+  // Reset password modal state
+  const [resetPwUserId, setResetPwUserId] = useState<string | null>(null);
+  const [resetPwValue, setResetPwValue] = useState("");
 
   async function refresh() {
     if (!isAdmin()) {
@@ -109,57 +116,107 @@ export default function UsersPage() {
     setTimeout(() => setSaveState("idle"), 1200);
   }
 
-  async function onResetPassword(id: string) {
-    const pw = prompt("Enter new password:");
-    if (!pw) return;
+  function onResetPassword(id: string) {
+    setResetPwUserId(id);
+    setResetPwValue("");
+  }
+
+  async function submitResetPassword() {
+    if (!resetPwUserId || !resetPwValue) return;
     setError(null);
     setSaveState("saving");
-    const ok = await api.setUserPassword(id, pw);
+    const ok = await api.setUserPassword(resetPwUserId, resetPwValue);
     if (!ok) {
       setSaveState("error");
       setError("Failed to set password.");
       setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
+    setResetPwUserId(null);
+    setResetPwValue("");
     setSaveState("saved");
     setTimeout(() => setSaveState("idle"), 1200);
   }
 
-  async function onDeleteUser(user: User) {
+  function onDeleteUser(user: User) {
     if (!isAdmin()) return;
-    const confirmed = confirm(`Delete user ${user.username}? This cannot be undone.`);
-    if (!confirmed) return;
-    setError(null);
-    setSaveState("saving");
-    const ok = await api.deleteUser(user.id);
-    if (!ok) {
-      setSaveState("error");
-      setError("Failed to delete user. Ensure at least one admin remains.");
-      setTimeout(() => setSaveState("idle"), 5000);
-      return;
-    }
-    await refresh();
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1200);
+    confirm.open({
+      title: "Delete User",
+      message: `Delete user ${user.username}? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        setError(null);
+        setSaveState("saving");
+        const ok = await api.deleteUser(user.id);
+        if (!ok) {
+          setSaveState("error");
+          setError("Failed to delete user. Ensure at least one admin remains.");
+          setTimeout(() => setSaveState("idle"), 5000);
+          return;
+        }
+        await refresh();
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      },
+    });
   }
 
   return (
     <Shell title="User Management">
+      <ConfirmDialog {...confirm.props} />
+
+      {/* Reset password modal */}
+      {resetPwUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 shadow-card-lg animate-slide-down">
+            <h2 className="text-base font-semibold text-[var(--text)]">Reset Password</h2>
+            <div className="mt-3">
+              <input
+                type="password"
+                value={resetPwValue}
+                onChange={(e) => setResetPwValue(e.target.value)}
+                placeholder="Enter new password"
+                autoFocus
+                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              />
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => { setResetPwUserId(null); setResetPwValue(""); }}
+                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitResetPassword}
+                disabled={!resetPwValue}
+                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+              >
+                Set Password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!isAdmin() && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 p-4 text-sm text-amber">
+        <div className="mb-4 rounded-sm border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-400">
           Admin access required.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 md:grid-cols-2 opacity-100">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-          <h2 className="text-lg font-semibold text-white">Users</h2>
-          <p className="mt-1 text-sm text-slate-300">
+        <Card padding="lg">
+          <h2 className="text-lg font-semibold text-[var(--text)]">Users</h2>
+          <p className="mt-1 text-sm text-[var(--text)]">
             Manage local accounts and roles.
           </p>
 
@@ -168,13 +225,13 @@ export default function UsersPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search users (name, email, role)"
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-slate-500"
+              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             />
           </div>
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
             <table className="w-full text-sm">
-              <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-slate-300">
+              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <th className="px-4 py-3">Username</th>
                   <th className="px-4 py-3">Name</th>
@@ -187,14 +244,14 @@ export default function UsersPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
+                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!loading && users.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-slate-400" colSpan={6}>
+                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
                       No users found.
                     </td>
                   </tr>
@@ -216,9 +273,9 @@ export default function UsersPage() {
                     return hay.includes(q);
                   })
                   .map((u) => (
-                  <tr key={u.id} className="border-t border-white/5">
-                    <td className="px-4 py-3 text-slate-200">{u.username}</td>
-                    <td className="px-4 py-3 text-slate-200">
+                  <tr key={u.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                    <td className="px-4 py-3 text-[var(--text)]">{u.username}</td>
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {editingUserId === u.id && editDraft ? (
                         <div className="grid gap-1">
                           <input
@@ -228,7 +285,7 @@ export default function UsersPage() {
                             }
                             disabled={!isAdmin()}
                             placeholder="first name"
-                            className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                           />
                           <input
                             value={editDraft.lastName}
@@ -237,14 +294,14 @@ export default function UsersPage() {
                             }
                             disabled={!isAdmin()}
                             placeholder="last name"
-                            className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                           />
                         </div>
                       ) : (
                         (u.firstName || "") + " " + (u.lastName || "")
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-200">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {editingUserId === u.id && editDraft ? (
                         <input
                           value={editDraft.email}
@@ -253,7 +310,7 @@ export default function UsersPage() {
                           }
                           disabled={!isAdmin()}
                           placeholder="email"
-                          className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+                          className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                         />
                       ) : (
                         u.email ?? ""
@@ -267,18 +324,18 @@ export default function UsersPage() {
                             setEditDraft((d) => d ? { ...d, role: e.target.value as UserRole } : d)
                           }
                           disabled={!isAdmin()}
-                          className="rounded-md border border-white/10 bg-black/40 px-2 py-1 text-sm text-white"
+                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                         >
                           <option value="view">view-only</option>
                           <option value="admin">admin</option>
                         </select>
                       ) : (
-                        <span className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200">
+                        <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-[var(--text)]">
                           {u.role}
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
+                    <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
                       {formatTimestamp(u.updatedAt ?? u.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -287,13 +344,13 @@ export default function UsersPage() {
                           <button
                             onClick={() => saveEdit(u.id)}
                             disabled={!isAdmin()}
-                            className="rounded-md bg-mint/20 px-2 py-1 text-xs text-mint hover:bg-mint/30"
+                            className="rounded-md bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
                           >
                             Save
                           </button>
                           <button
                             onClick={cancelEdit}
-                            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                            className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                           >
                             Cancel
                           </button>
@@ -303,21 +360,21 @@ export default function UsersPage() {
                           <button
                             onClick={() => startEdit(u)}
                             disabled={!isAdmin()}
-                            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                            className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => onResetPassword(u.id)}
                             disabled={!isAdmin()}
-                            className="rounded-md bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/20"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                           >
                             Reset password
                           </button>
                           <button
                             onClick={() => onDeleteUser(u)}
                             disabled={!isAdmin()}
-                            className="rounded-md bg-[color:var(--error)]/10 px-2 py-1 text-xs text-[color:var(--error)] hover:bg-[color:var(--error)]/20"
+                            className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                           >
                             Delete
                           </button>
@@ -330,10 +387,10 @@ export default function UsersPage() {
             </table>
           </div>
 
-        </div>
+        </Card>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-          <h2 className="text-lg font-semibold text-white">Add User</h2>
+        <Card padding="lg">
+          <h2 className="text-lg font-semibold text-[var(--text)]">Add User</h2>
           <div className="mt-4 grid gap-2">
             <input
               value={newUser.username}
@@ -342,7 +399,7 @@ export default function UsersPage() {
               }
               disabled={!isAdmin()}
               placeholder="username"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <div className="grid gap-2 md:grid-cols-2">
               <input
@@ -352,7 +409,7 @@ export default function UsersPage() {
                 }
                 disabled={!isAdmin()}
                 placeholder="first name"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
               />
               <input
                 value={newUser.lastName}
@@ -361,7 +418,7 @@ export default function UsersPage() {
                 }
                 disabled={!isAdmin()}
                 placeholder="last name"
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+                className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
               />
             </div>
             <input
@@ -371,7 +428,7 @@ export default function UsersPage() {
               }
               disabled={!isAdmin()}
               placeholder="email"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <select
               value={newUser.role}
@@ -379,12 +436,12 @@ export default function UsersPage() {
                 setNewUser((n) => ({ ...n, role: e.target.value as UserRole }))
               }
               disabled={!isAdmin()}
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             >
               <option value="view">view-only</option>
               <option value="admin">admin</option>
             </select>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[var(--text-muted)]">
               Admins can manage users and system settings; view-only accounts have read access.
             </p>
             <input
@@ -395,17 +452,17 @@ export default function UsersPage() {
               }
               disabled={!isAdmin()}
               placeholder="password"
-              className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             />
             <button
               onClick={onCreate}
               disabled={!isAdmin()}
-              className="mt-2 rounded-lg bg-mint/20 px-3 py-2 text-sm text-mint hover:bg-mint/30"
+              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Create user
             </button>
           </div>
-        </div>
+        </Card>
       </div>
     </Shell>
   );

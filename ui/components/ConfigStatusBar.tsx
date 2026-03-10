@@ -22,7 +22,6 @@ export function ConfigStatusBar() {
       const c = JSON.stringify(diff.candidate ?? null);
       setDirty(r !== c);
     } catch {
-      // If the API is unreachable, don't show the bar.
       setDirty(false);
     } finally {
       checkingRef.current = false;
@@ -35,7 +34,6 @@ export function ConfigStatusBar() {
     return () => clearInterval(timer);
   }, [check]);
 
-  // Listen for custom events that indicate config was committed or changed.
   React.useEffect(() => {
     const onCommit = () => {
       setDirty(false);
@@ -48,11 +46,16 @@ export function ConfigStatusBar() {
   if (!dirty) return null;
 
   return (
-    <div className="mb-4 flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400">
-      <span>Uncommitted configuration changes</span>
+    <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-2.5 text-sm animate-fade-in">
+      <div className="flex items-center gap-2 text-amber-400">
+        <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
+          <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+        </svg>
+        <span>You have uncommitted configuration changes</span>
+      </div>
       <Link
-        href="/config/"
-        className="rounded-lg bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/30"
+        href="/config/?tab=diff"
+        className="rounded-lg bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-300 transition-ui hover:bg-amber-500/30"
       >
         Review &amp; Commit
       </Link>

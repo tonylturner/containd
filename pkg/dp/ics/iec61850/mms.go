@@ -339,37 +339,6 @@ func skipASN1TagLength(data []byte) ([]byte, bool) {
 	return data[pos : pos+l], true
 }
 
-// asn1ValueLength returns the value length encoded in a BER-TLV element.
-// Returns -1 if the encoding is malformed.
-func asn1ValueLength(data []byte) int {
-	if len(data) < 2 {
-		return -1
-	}
-	pos := 1
-	if data[0]&0x1F == 0x1F {
-		for pos < len(data) && data[pos]&0x80 != 0 {
-			pos++
-		}
-		pos++
-		if pos >= len(data) {
-			return -1
-		}
-	}
-	if data[pos]&0x80 == 0 {
-		return int(data[pos])
-	}
-	numBytes := int(data[pos] & 0x7F)
-	pos++
-	if numBytes == 0 || numBytes > 4 || pos+numBytes > len(data) {
-		return -1
-	}
-	l := 0
-	for i := 0; i < numBytes; i++ {
-		l = l<<8 | int(data[pos])
-		pos++
-	}
-	return l
-}
 
 // asn1ElementSize returns the total size (tag + length + value) of a
 // BER-TLV element. Returns -1 if the encoding is malformed.

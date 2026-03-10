@@ -71,7 +71,7 @@ export function clearLocalAuth() {
   }
   setSessionToken(null);
   setStoredRole(null);
-  authExpiredEmitted = false;
+  clearAuthExpired();
 }
 
 export function getStoredRole(): UserRole | null {
@@ -165,32 +165,55 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
   return res;
 }
 
+// Debounce 401 handling: only emit the expired event after a short delay so that
+// transient 401s (e.g. during token refresh) don't immediately log out the user.
+// The Shell listener re-verifies the session before actually redirecting.
+let authExpiredTimer: ReturnType<typeof setTimeout> | null = null;
+
 function handleUnauthorized(res: Response) {
   if (res.status !== 401) return false;
-  // 401 means the session is not valid anymore; clear local state and force re-auth.
   if (typeof window !== "undefined") {
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {}
-  }
-  setSessionToken(null);
-  setStoredRole(null);
-  if (typeof window !== "undefined") {
-    // Centralize redirects in the Shell to avoid multiple simultaneous navigation events
-    // (which causes visible flicker when many parallel API calls 401).
+    // Debounce: wait 1.5s before emitting the expired event.  If another request
+    // succeeds in the meantime (resetting authExpiredEmitted), the event won't fire.
     if (!authExpiredEmitted) {
       authExpiredEmitted = true;
-      window.dispatchEvent(new CustomEvent("containd:auth:expired"));
+      if (authExpiredTimer) clearTimeout(authExpiredTimer);
+      authExpiredTimer = setTimeout(() => {
+        // Only dispatch if still flagged (no successful request intervened).
+        if (authExpiredEmitted) {
+          window.dispatchEvent(new CustomEvent("containd:auth:expired"));
+        }
+      }, 1500);
     }
   }
   return true;
 }
+
+/** Call after any successful authenticated response to cancel pending logout. */
+function clearAuthExpired() {
+  authExpiredEmitted = false;
+  if (authExpiredTimer) {
+    clearTimeout(authExpiredTimer);
+    authExpiredTimer = null;
+  }
+}
+
+export type DPIExclusion = {
+  value: string;
+  type: "ip" | "cidr" | "domain";
+  reason?: string;
+};
 
 export type DataPlaneConfig = {
   captureInterfaces?: string[];
   enforcement?: boolean;
   enforceTable?: string;
   dpiMock?: boolean;
+  dpiEnabled?: boolean;
+  dpiMode?: "learn" | "enforce";
+  dpiProtocols?: Record<string, boolean>;
+  dpiIcsProtocols?: Record<string, boolean>;
+  dpiExclusions?: DPIExclusion[];
 };
 
 export type PcapForwardTarget = {
@@ -253,7 +276,33 @@ export type Zone = {
   name: string;
   alias?: string;
   description?: string;
+  slTarget?: number;
+  consequence?: string;
+  slOverrides?: Record<string, boolean>;
 };
+
+export type ConduitProto = {
+  n: string;
+  t: "allowed" | "denied" | "inspect";
+};
+
+export type Conduit = {
+  state: "allow" | "block" | "partial" | "unmodeled";
+  ids: "full" | "partial" | "none";
+  proto: ConduitProto[];
+  traffic: number;
+  rules: string[];
+  gaps: string[];
+  mitre: string[];
+  defaultDeny: boolean;
+  tlsEnforced: boolean;
+  protoWhitelist: boolean;
+  mfaRequired: boolean;
+  auditLogged: boolean;
+  avEnabled: boolean;
+};
+
+export type ConduitMap = Record<string, Conduit>;
 
 export type Interface = {
   name: string;
@@ -682,6 +731,94 @@ export type ReverseProxyConfig = {
 
 export type ServicesStatus = Record<string, unknown>;
 
+export type SystemStats = {
+  cpu: { usagePercent: number; numCPU: number };
+  memory: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+  };
+  disk: {
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usagePercent: number;
+  };
+  ruleEval: { rulesLoaded: number; avgLatencyMs: number };
+  container: {
+    running: boolean;
+    id?: string;
+    image?: string;
+    uptime?: string;
+    memUsedBytes: number;
+    memLimitBytes: number;
+    memPercent: number;
+  };
+  runtime: {
+    goroutines: number;
+    heapAllocMB: number;
+    heapSysMB: number;
+    gcPauseMsAvg: number;
+    uptime: string;
+  };
+  collectedAt: string;
+};
+
+export type InspectionMount = {
+  hostPath: string;
+  containerPath: string;
+  mode: string;
+};
+
+export type InspectionEnvVar = {
+  key: string;
+  value: string;
+};
+
+export type SystemInspection = {
+  host: {
+    kernel: string;
+    os: string;
+    arch: string;
+    hostUptime: string;
+    numCPU: number;
+  };
+  runtime: {
+    dockerVersion: string;
+    containerdVersion: string;
+    cgroupDriver: string;
+    storageDriver: string;
+  };
+  container: {
+    id: string;
+    image: string;
+    restartPolicy: string;
+    restartCount: number;
+    networkMode: string;
+    privileged: boolean;
+    seccompProfile: string;
+    apparmorProfile: string;
+    readonlyRootfs: boolean;
+    noNewPrivileges: boolean;
+    capabilities: string[];
+    mounts: InspectionMount[];
+    envVars: InspectionEnvVar[];
+  };
+  process: {
+    pid: number;
+    goVersion: string;
+    fdCount: number;
+    fdSoftLimit: number;
+    fdHardLimit: number;
+  };
+  security: {
+    dockerSocketMounted: boolean;
+    cgroupCPUQuota: string;
+    cgroupPIDsLimit: string;
+  };
+};
+
 export type IDSCondition = {
   all?: IDSCondition[];
   any?: IDSCondition[];
@@ -691,8 +828,29 @@ export type IDSCondition = {
   value?: unknown;
 };
 
+export type ContentMatch = {
+  pattern: string;
+  isHex?: boolean;
+  negate?: boolean;
+  nocase?: boolean;
+  depth?: number;
+  offset?: number;
+  distance?: number;
+  within?: number;
+};
+
+export type YARAString = {
+  name: string;
+  pattern: string;
+  type: string; // text|hex|regex
+  nocase?: boolean;
+  wide?: boolean;
+  ascii?: boolean;
+};
+
 export type IDSRule = {
   id: string;
+  enabled?: boolean | null; // null/undefined = enabled
   title?: string;
   description?: string;
   proto?: string;
@@ -701,11 +859,52 @@ export type IDSRule = {
   severity?: string;
   message?: string;
   labels?: Record<string, string>;
+  // Multi-format fields
+  sourceFormat?: string;
+  action?: string;
+  srcAddr?: string;
+  dstAddr?: string;
+  srcPort?: string;
+  dstPort?: string;
+  contentMatches?: ContentMatch[];
+  yaraStrings?: YARAString[];
+  references?: string[];
+  cve?: string[];
+  mitreAttackIDs?: string[];
+  rawSource?: string;
+  conversionNotes?: string[];
+};
+
+export type RuleGroup = {
+  id: string;
+  name: string;
+  description?: string;
+  filter?: string;
+  enabled: boolean;
+  ruleCount?: number;
 };
 
 export type IDSConfig = {
   enabled?: boolean;
   rules?: IDSRule[];
+  ruleGroups?: RuleGroup[];
+};
+
+export type IDSImportResult = {
+  imported: number;
+  skipped: number;
+  total: number;
+  format: string;
+};
+
+export type IDSRuleSource = {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  format: string;
+  license: string;
+  licenseNote?: string;
 };
 
 export type RulesetPreview = {
@@ -882,7 +1081,10 @@ async function getJSON<T>(path: string): Promise<T | null> {
       cache: "no-store",
       headers: authHeaders(),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    // Any non-401 response means auth middleware passed — session is valid.
+    clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -896,6 +1098,7 @@ async function getJSONWithStatus<T>(path: string): Promise<{ status: number; dat
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return { status: 401, data: null };
+    clearAuthExpired();
     if (!res.ok) return { status: res.status, data: null };
     return { status: res.status, data: (await res.json()) as T };
   } catch {
@@ -910,7 +1113,9 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -924,7 +1129,9 @@ async function patchJSON<T>(path: string, payload: unknown): Promise<T | null> {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
+    if (handleUnauthorized(res)) return null;
+    clearAuthExpired();
+    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -938,6 +1145,7 @@ async function deleteJSON(path: string): Promise<boolean> {
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return false;
+    clearAuthExpired();
     return res.ok;
   } catch {
     return false;
@@ -961,6 +1169,7 @@ async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiRes
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: (await res.json()) as T };
   } catch (e) {
@@ -976,6 +1185,7 @@ async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiRe
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: (await res.json()) as T };
   } catch (e) {
@@ -990,6 +1200,7 @@ async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
       headers: authHeaders(),
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: undefined };
   } catch (e) {
@@ -1009,7 +1220,7 @@ export const api = {
     if (res?.user?.role) setStoredRole(res.user.role);
     if (res) {
       // Allow future session-expired notifications after a successful login.
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return res;
@@ -1017,14 +1228,13 @@ export const api = {
   logout: async () => {
     const ok = await postJSON<{ status: string }>("/api/v1/auth/logout", {});
     clearLocalAuth();
-    // If we logged out, allow future session-expired notifications too.
     return ok;
   },
   me: async () => {
     const u = await getJSON<User>("/api/v1/auth/me");
     if (u?.role) setStoredRole(u.role);
     if (u) {
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return u;
@@ -1033,7 +1243,7 @@ export const api = {
     const res = await getJSONWithStatus<User>("/api/v1/auth/me");
     if (res.data?.role) setStoredRole(res.data.role);
     if (res.status === 200) {
-      authExpiredEmitted = false;
+      clearAuthExpired();
       setLastAuthError(null);
     }
     return res;
@@ -1066,6 +1276,8 @@ export const api = {
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
   deleteZone: (name: string) =>
     deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`),
+  getSecurityConduits: () =>
+    getJSON<ConduitMap>("/api/v1/security/conduits"),
 
   listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
   listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
@@ -1119,11 +1331,48 @@ export const api = {
   deleteAsset: (id: string) =>
     deleteJSONResult(`/api/v1/assets/${encodeURIComponent(id)}`),
 
-  // IDS / Sigma
+  // IDS / Rules
   getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
   setIDS: (cfg: IDSConfig) => postJSON<IDSConfig>("/api/v1/ids/rules", cfg),
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
+  importIDSRules: async (file: File, format?: string): Promise<IDSImportResult | null> => {
+    const form = new FormData();
+    form.append("file", file);
+    if (format) form.append("format", format);
+    const res = await fetch(`${API_BASE}/api/v1/ids/import`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+  exportIDSRules: async (format: string): Promise<boolean> => {
+    const res = await fetch(`${API_BASE}/api/v1/ids/export?format=${encodeURIComponent(format)}`, {
+      credentials: "include",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const ext: Record<string, string> = { suricata: ".rules", snort: ".rules", yara: ".yar", sigma: ".yml" };
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(2);
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const filename = `${format}-${yy}${mm}${dd}${ext[format] || ".txt"}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  },
+  getIDSSources: () => getJSON<IDSRuleSource[]>("/api/v1/ids/sources"),
 
   listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
@@ -1157,15 +1406,15 @@ export const api = {
     if (handleUnauthorized(res) || !res.ok) return null;
     return await res.blob();
   },
-  commit: () => postJSON<{ status: string }>("/api/v1/config/commit", {}),
+  commit: () => postJSONResult<{ status: string }>("/api/v1/config/commit", {}),
   commitConfirmed: (ttlSeconds?: number) =>
-    postJSON<{ status: string }>(
+    postJSONResult<{ status: string }>(
       "/api/v1/config/commit_confirmed",
       ttlSeconds ? { ttl_seconds: ttlSeconds } : {},
     ),
   confirmCommit: () =>
-    postJSON<{ status: string }>("/api/v1/config/confirm", {}),
-  rollback: () => postJSON<{ status: string }>("/api/v1/config/rollback", {}),
+    postJSONResult<{ status: string }>("/api/v1/config/confirm", {}),
+  rollback: () => postJSONResult<{ status: string }>("/api/v1/config/rollback", {}),
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
@@ -1191,12 +1440,16 @@ export const api = {
     postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
   getServicesStatus: () =>
     getJSON<ServicesStatus>("/api/v1/services/status"),
+  getSystemStats: () =>
+    getJSON<SystemStats>("/api/v1/system/stats"),
+  getSystemInspection: () =>
+    getJSON<SystemInspection>("/api/v1/system/inspection"),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
   getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
-  setAV: (cfg: AVConfig) => postJSON<AVConfig>("/api/v1/services/av", cfg),
-  runAVUpdate: () => postJSON<{ status: string }>("/api/v1/services/av/update", {}),
+  setAV: (cfg: AVConfig) => postJSONResult<AVConfig>("/api/v1/services/av", cfg),
+  runAVUpdate: () => postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
   listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
   uploadAVDef: async (file: File) => {
     const form = new FormData();
@@ -1239,6 +1492,16 @@ export const api = {
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
   listFlows: (limit = 200) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+  getEvent: (id: number) =>
+    getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
+
+  // Simulation
+  getSimulationStatus: () =>
+    getJSON<{ running: boolean }>("/api/v1/simulation"),
+  startSimulation: () =>
+    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "start" }),
+  stopSimulation: () =>
+    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
 
   // Sessions / Conntrack
   listConntrack: (limit = 200) =>

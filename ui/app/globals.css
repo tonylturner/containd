@@ -4,22 +4,37 @@
 
 :root {
   color-scheme: dark;
-  --bg: #121212;
-  --surface: #1e1e1e;
-  --border: #2e2e2e;
-  --text: #ffffff;
-  --text-muted: #a3a3a3;
-  --primary: #2563eb;
-  --primary-hover: #3b82f6;
-  --primary-active: #1e40af;
-  --success: #10b981;
-  --warning: #fbbf24;
+  --amber: #f59e0b;
+  --amber-dim: #78490a;
+  --amber-glow: rgba(245, 158, 11, 0.15);
+  --green: #22c55e;
+  --green-dim: #14532d;
+  --red: #ef4444;
+  --red-dim: #7f1d1d;
+  --cyan: #06b6d4;
+  --bg: #080a08;
+  --surface: #0d110d;
+  --surface2: #111611;
+  --border: rgba(245, 158, 11, 0.15);
+  --border-strong: rgba(245, 158, 11, 0.3);
+  --text: #e8d5a3;
+  --text-muted: #a89670;
+  --text-dim: #6b5c3e;
+  --primary: #f59e0b;
+  --primary-hover: #fbbf24;
+  --primary-muted: rgba(245, 158, 11, 0.15);
+  --success: #22c55e;
+  --success-muted: rgba(34, 197, 94, 0.12);
+  --warning: #f59e0b;
+  --warning-muted: rgba(245, 158, 11, 0.12);
   --error: #ef4444;
+  --error-muted: rgba(239, 68, 68, 0.12);
   --purple: #8b5cf6;
   --teal: #06b6d4;
   --pink: #ec4899;
   --orange: #f97316;
-  --card-shadow: rgba(0, 0, 0, 0.5);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.08);
+  --card-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(245, 158, 11, 0.1);
   background-color: var(--bg);
   color: var(--text);
 }
@@ -27,10 +42,26 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.06), transparent 30%),
-    radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.08), transparent 30%),
-    var(--bg);
+  font-family: "Rajdhani", "Inter", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scanline overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
 }
 
 a {
@@ -38,28 +69,144 @@ a {
   text-decoration: none;
 }
 
-.grid-overlay {
-  background-image: radial-gradient(circle at 1px 1px, rgba(6, 182, 212, 0.12) 1px, transparent 0);
-  background-size: 22px 22px;
+/* ── Utility classes ────────────────────────────────────────── */
+
+/* Transition defaults for interactive elements */
+.transition-ui {
+  transition: background-color 150ms ease, border-color 150ms ease,
+    color 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
 }
+
+/* Focus ring */
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--amber);
+}
+
+/* Card with top amber gradient line */
+.card-industrial {
+  position: relative;
+  overflow: hidden;
+}
+.card-industrial::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  opacity: 0.5;
+}
+
+/* Card label with trailing rule */
+.card-label {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Table row hover */
+.table-row-hover {
+  transition: background-color 100ms ease;
+}
+.table-row-hover:hover {
+  background-color: rgba(245, 158, 11, 0.04);
+}
+
+/* Accordion transition */
+.accordion-body {
+  overflow: hidden;
+  transition: max-height 200ms ease, opacity 200ms ease;
+}
+
+/* Scrollbar styling - amber themed */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--amber-dim);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--amber);
+}
+
+/* ── ReactFlow overrides ──────────────────────────────────── */
 
 .reactflow-controls {
   background: rgba(0, 0, 0, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .reactflow-controls button {
   background: rgba(0, 0, 0, 0.8);
-  color: #ffffff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
 }
 
 .reactflow-controls button:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .reactflow-controls button svg {
-  stroke: #ffffff;
+  stroke: var(--text);
+}
+
+/* ── Industrial form elements ─────────────────────────────── */
+
+.input-industrial {
+  width: 100%;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 12px;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 13px;
+  color: var(--text);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.input-industrial::placeholder {
+  color: var(--text-dim);
+}
+.input-industrial:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+}
+
+/* Status badge variants */
+.badge-secure {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.badge-warning {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+.badge-critical {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.badge-offline {
+  background: #1a1a1a;
+  color: var(--text-dim);
 }

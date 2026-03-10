@@ -41,6 +41,34 @@ func ConvertSigmaYAML(in []byte) (config.IDSRule, error) {
 	return ConvertSigmaRule(sr)
 }
 
+// ConvertSigmaFile parses raw Sigma YAML data (which may contain multiple
+// documents separated by "---") and returns a slice of containd IDSRules.
+func ConvertSigmaFile(data []byte) ([]config.IDSRule, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var rules []config.IDSRule
+	for {
+		var sr SigmaRule
+		err := dec.Decode(&sr)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		r, err := ConvertSigmaRule(sr)
+		if err != nil {
+			return nil, err
+		}
+		r.SourceFormat = "sigma"
+		r.RawSource = "" // multi-doc: cannot preserve per-rule raw source easily
+		rules = append(rules, r)
+	}
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("no Sigma rules found in data")
+	}
+	return rules, nil
+}
+
 // ConvertSigmaRule converts a parsed SigmaRule to a containd IDSRule.
 func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 	if sr.ID == "" && sr.Title == "" {
@@ -53,15 +81,17 @@ func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 
 	proto, kind := inferProtoKindFromTags(sr.Tags)
 	rule := config.IDSRule{
-		ID:          firstNonEmpty(sr.ID, slugify(sr.Title)),
-		Title:       sr.Title,
-		Description: sr.Description,
-		Proto:       proto,
-		Kind:        kind,
-		When:        conds,
-		Severity:    mapSigmaLevel(sr.Level),
-		Message:     sr.Title,
-		Labels:      map[string]string{},
+		ID:           firstNonEmpty(sr.ID, slugify(sr.Title)),
+		Title:        sr.Title,
+		Description:  sr.Description,
+		Proto:        proto,
+		Kind:         kind,
+		When:         conds,
+		Severity:     mapSigmaLevel(sr.Level),
+		Message:      sr.Title,
+		Labels:       map[string]string{},
+		SourceFormat: "sigma",
+		References:   sr.References,
 	}
 
 	if len(sr.Tags) > 0 {

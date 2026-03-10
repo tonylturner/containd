@@ -27,7 +27,7 @@ const ctxUserKey = "user"
 const ctxSessionKey = "session"
 
 const (
-	idleTTL = 5 * time.Minute
+	idleTTL = 30 * time.Minute
 	maxTTL  = 4 * time.Hour
 )
 
@@ -64,7 +64,7 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 						return nil, jwt.ErrSignatureInvalid
 					}
 					return secret, nil
-				})
+				}, jwt.WithLeeway(30*time.Second))
 				if err != nil || !parsed.Valid {
 					abortJSON(c, http.StatusUnauthorized, "invalid token")
 					return
@@ -118,7 +118,7 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return secret, nil
-		})
+		}, jwt.WithLeeway(30*time.Second))
 		if err != nil || !parsed.Valid {
 			abortJSON(c, http.StatusUnauthorized, "invalid token")
 			return

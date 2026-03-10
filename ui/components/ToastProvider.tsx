@@ -25,6 +25,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const ctx = useMemo(() => ({ addToast }), [addToast]);
 
+  const toneClasses = {
+    success: "border-[var(--green)]/25 bg-[var(--green-dim)] text-[var(--green)]",
+    error: "border-[var(--red)]/25 bg-[var(--red-dim)] text-[var(--red)]",
+    info: "border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]",
+  };
+
   return (
     <ToastContext.Provider value={ctx}>
       {children}
@@ -32,13 +38,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`rounded-lg border px-3 py-2 text-sm shadow-lg backdrop-blur transition-all duration-200 ${
-              t.tone === "success"
-                ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.15)] text-[var(--text)]"
-                : t.tone === "error"
-                  ? "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.15)] text-[var(--text)]"
-                  : "border-white/10 bg-white/5 text-[var(--text)]"
-            }`}
+            className={`card-industrial rounded-sm border px-3 py-2.5 font-mono text-xs shadow-card-lg animate-slide-down ${toneClasses[t.tone]}`}
           >
             {t.message}
           </div>

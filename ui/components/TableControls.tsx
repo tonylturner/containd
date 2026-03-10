@@ -5,13 +5,19 @@ export function SearchBar({ value, onChange, placeholder }: {
   value: string; onChange: (s: string) => void; placeholder?: string;
 }) {
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder ?? "Search..."}
-      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-white/20 focus:outline-none"
-    />
+    <div className="relative">
+      <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.35-4.35" />
+      </svg>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder ?? "Search..."}
+        className="input-industrial w-full py-1.5 pl-9 pr-3 text-sm"
+      />
+    </div>
   );
 }
 
@@ -21,28 +27,58 @@ export function SortableHeader({ label, sortKey, currentSort, currentDir, onSort
   const active = currentSort === sortKey;
   return (
     <th
-      className="cursor-pointer select-none px-4 py-2 text-left text-xs font-medium uppercase text-slate-400 hover:text-white"
+      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left font-mono text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)] transition-ui hover:text-[var(--text)]"
       onClick={() => onSort(sortKey)}
     >
-      {label} {active ? (currentDir === "asc" ? "\u25B2" : "\u25BC") : ""}
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active && (
+          <span className="text-[var(--amber)]">{currentDir === "asc" ? "\u25B2" : "\u25BC"}</span>
+        )}
+      </span>
     </th>
   );
 }
 
-export function Pagination({ page, totalPages, totalItems, onPage }: {
+export function Pagination({ page, totalPages, totalItems, onPage, pageSize, onPageSize, pageSizeOptions }: {
   page: number; totalPages: number; totalItems: number; onPage: (p: number) => void;
+  pageSize?: number; onPageSize?: (s: number) => void; pageSizeOptions?: number[];
 }) {
-  if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between border-t border-white/5 px-4 py-2 text-xs text-slate-400">
-      <span>{totalItems} items</span>
-      <div className="flex gap-2">
-        <button disabled={page <= 0} onClick={() => onPage(page - 1)}
-          className="rounded bg-white/5 px-2 py-1 hover:bg-white/10 disabled:opacity-30">Prev</button>
-        <span className="px-2 py-1">{page + 1} / {totalPages}</span>
-        <button disabled={page >= totalPages - 1} onClick={() => onPage(page + 1)}
-          className="rounded bg-white/5 px-2 py-1 hover:bg-white/10 disabled:opacity-30">Next</button>
+    <div className="flex items-center justify-between border-t border-amber-500/[0.1] px-4 py-2.5 font-mono text-[10px] text-[var(--text-dim)]">
+      <div className="flex items-center gap-3">
+        <span>{totalItems} items</span>
+        {onPageSize && pageSizeOptions && (
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSize(Number(e.target.value))}
+            className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface2)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] outline-none"
+          >
+            {pageSizeOptions.map((s) => (
+              <option key={s} value={s}>{s} / page</option>
+            ))}
+          </select>
+        )}
       </div>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            disabled={page <= 0}
+            onClick={() => onPage(page - 1)}
+            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+          <span className="px-2 py-1 tabular-nums">{page + 1} / {totalPages}</span>
+          <button
+            disabled={page >= totalPages - 1}
+            onClick={() => onPage(page + 1)}
+            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

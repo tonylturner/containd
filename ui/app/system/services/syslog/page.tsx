@@ -7,6 +7,7 @@ import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { Card } from "../../../../components/Card";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -112,24 +113,24 @@ export default function SyslogPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30"
+              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-slate-300">
+          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
+              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
             />
               Auto
           </label>
@@ -137,24 +138,24 @@ export default function SyslogPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-slate-400">
-        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
+        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {status && (
-        <div className="mb-4 grid gap-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-slate-200 md:grid-cols-4">
+        <div className="mb-4 grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)] md:grid-cols-4">
           <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
           <div>Sent: {status?.sent_total ?? 0}</div>
           <div>Failed: {status?.failed_total ?? 0}</div>
-          <div>Last flush: {status?.last_flush || "—"}</div>
+          <div>Last flush: {status?.last_flush || "\u2014"}</div>
           <div>Last batch: {status?.last_batch ?? 0}</div>
           <div>Batch limit: {status?.batch_limit ?? 0}</div>
           <div>Hit limit: {status?.hit_limit ? "yes" : "no"}</div>
@@ -165,15 +166,15 @@ export default function SyslogPage() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-        <h2 className="text-lg font-semibold text-white">Forwarders</h2>
-        <p className="mt-1 text-sm text-slate-300">
+      <Card>
+        <h2 className="text-lg font-semibold text-[var(--text)]">Forwarders</h2>
+        <p className="mt-1 text-sm text-[var(--text)]">
           Send unified events to external syslog collectors.
         </p>
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
           Active forwarders: {status?.configured_forwarders ?? 0}
         </p>
-        <div className="mt-2 grid gap-3 text-xs text-slate-400 md:grid-cols-3">
+        <div className="mt-2 grid gap-3 text-xs text-[var(--text-muted)] md:grid-cols-3">
           <div>
             Log format:
             <select
@@ -185,7 +186,7 @@ export default function SyslogPage() {
                   format: e.target.value as SyslogConfig["format"],
                 }))
               }
-              className="ml-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+              className="ml-2 input-industrial"
             >
               <option value="rfc5424">RFC5424</option>
               <option value="json">JSON</option>
@@ -205,7 +206,7 @@ export default function SyslogPage() {
                   batchSize: Number(e.target.value),
                 }))
               }
-              className="ml-2 w-24 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+              className="ml-2 w-24 input-industrial"
             />
           </div>
           <div>
@@ -222,7 +223,7 @@ export default function SyslogPage() {
                   flushEvery: Number(e.target.value),
                 }))
               }
-              className="ml-2 w-24 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white"
+              className="ml-2 w-24 input-industrial"
             />
           </div>
         </div>
@@ -250,7 +251,7 @@ export default function SyslogPage() {
             />
           )}
           {!loading && typeof status?.rate_per_min === "number" ? (
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
               Rate: {status?.rate_per_min.toFixed(1)} / min
             </p>
           ) : null}
@@ -267,7 +268,7 @@ export default function SyslogPage() {
             onChange={(e) => setNewFwd((f) => ({ ...f, address: e.target.value }))}
             disabled={!canEdit}
             placeholder="address"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            className="input-industrial"
           />
           <input
             type="number"
@@ -275,13 +276,13 @@ export default function SyslogPage() {
             onChange={(e) => setNewFwd((f) => ({ ...f, port: Number(e.target.value) }))}
             disabled={!canEdit}
             placeholder="port"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            className="input-industrial"
           />
           <select
             value={newFwd.proto ?? "udp"}
             onChange={(e) => setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))}
             disabled={!canEdit}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white"
+            className="input-industrial"
           >
             <option value="udp">UDP</option>
             <option value="tcp">TCP</option>
@@ -289,16 +290,16 @@ export default function SyslogPage() {
           {canEdit && (
             <button
               onClick={addForwarder}
-              className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
+              className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Add
             </button>
           )}
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+        <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
           <table className="w-full text-sm">
-            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-slate-300">
+            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-[var(--text)]">
               <tr>
                 <th className="px-4 py-3">Address</th>
                 <th className="px-4 py-3">Port</th>
@@ -309,21 +310,21 @@ export default function SyslogPage() {
             <tbody>
               {fwdCount === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-400" colSpan={4}>
+                  <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={4}>
                     No forwarders configured.
                   </td>
                 </tr>
               )}
               {(cfg.forwarders ?? []).map((f, i) => (
-                <tr key={`${f.address}-${i}`} className="border-t border-white/5">
-                  <td className="px-4 py-3 text-slate-200">{f.address}</td>
-                  <td className="px-4 py-3 text-slate-200">{f.port}</td>
-                  <td className="px-4 py-3 text-slate-200">{f.proto ?? "udp"}</td>
+                <tr key={`${f.address}-${i}`} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                  <td className="px-4 py-3 text-[var(--text)]">{f.address}</td>
+                  <td className="px-4 py-3 text-[var(--text)]">{f.port}</td>
+                  <td className="px-4 py-3 text-[var(--text)]">{f.proto ?? "udp"}</td>
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button
                         onClick={() => deleteForwarder(i)}
-                        className="rounded-md bg-amber/20 px-2 py-1 text-xs text-amber hover:bg-amber/30"
+                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                       >
                         Remove
                       </button>
@@ -335,17 +336,17 @@ export default function SyslogPage() {
           </table>
         </div>
 
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="mt-3 text-xs text-[var(--text-muted)]">
           State:{" "}
           {saveState === "saving"
-            ? "saving…"
+            ? "saving\u2026"
             : saveState === "saved"
               ? "saved"
               : saveState === "error"
                 ? "error"
                 : "idle"}
         </p>
-      </div>
+      </Card>
     </Shell>
   );
 }

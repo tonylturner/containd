@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, type ServicesStatus } from "../../../lib/api";
 import { Shell } from "../../../components/Shell";
+import { Card as BaseCard } from "../../../components/Card";
 import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
 import { Sparkline } from "../../../components/Sparkline";
@@ -89,16 +90,16 @@ export default function ServicesOverviewPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => refresh()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 transition hover:bg-white/10"
+            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
           >
             Refresh
           </button>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
+          <label className="flex items-center gap-2 text-xs text-[var(--text)]">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-black/30"
+              className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
             />
             Auto-refresh
           </label>
@@ -106,57 +107,57 @@ export default function ServicesOverviewPage() {
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg backdrop-blur">
+      <BaseCard className="mb-4" padding="md">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-300">LAN Services</div>
-            <div className="mt-1 text-sm text-slate-200">Core connectivity helpers</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">LAN Services</div>
+            <div className="mt-1 text-sm text-[var(--text)]">Core connectivity helpers</div>
           </div>
-          <Link href="/monitoring/" className="text-xs text-slate-300 hover:text-white">
+          <Link href="/monitoring/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
             View Ops →
           </Link>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">DNS</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">DNS</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {dnsRunning ? "running" : "stopped"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">DHCP</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">DHCP</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {dhcpEnabled ? "enabled" : "off"}
             </span>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
-            <span className="text-slate-200">VPN</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-mint/20 text-mint" : "bg-white/10 text-slate-300"}`}>
+          <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm">
+            <span className="text-[var(--text)]">VPN</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-emerald-400/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
               {vpnActive ? "active" : "off"}
             </span>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-          <Link href="/system/services/dns/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text)]">
+          <Link href="/system/services/dns/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure DNS
           </Link>
-          <Link href="/dhcp/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+          <Link href="/dhcp/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure DHCP
           </Link>
-          <Link href="/vpn/" className="rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10">
+          <Link href="/vpn/" className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 transition-ui hover:bg-amber-500/[0.08]">
             Configure VPN
           </Link>
         </div>
-      </div>
+      </BaseCard>
       <div className="grid gap-4 md:grid-cols-2">
-        <Card
+        <ServiceCard
           title="Syslog"
           loading={loading}
           spark={{
@@ -168,21 +169,21 @@ export default function ServicesOverviewPage() {
           rate={rate("syslog")}
           errorsRate={errRate("syslog")}
         >
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-[var(--text)]">
             Forward unified events to external collectors.
           </p>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Forwarders: {(status?.syslog as any)?.configured_forwarders ?? 0}
             {rate("syslog") !== null && (
               <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
             )}
           </p>
-          <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="Proxies"
           loading={loading}
           spark={{
@@ -194,16 +195,16 @@ export default function ServicesOverviewPage() {
           rate={rate("proxy")}
           errorsRate={errRate("proxy")}
         >
-          <div className="flex items-center gap-2 text-xs text-slate-300">
+          <div className="flex items-center gap-2 text-xs text-[var(--text)]">
             <Image src="/icons/envoyproxy.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <Image src="/icons/nginx.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <span>Envoy + Nginx</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>Envoy + Nginx proxies</span>
             <InfoTip label="Forward proxy for outbound traffic and reverse proxy for published apps." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Envoy: {(status?.proxy as any)?.envoy_running ? "running" : "stopped"}{" "}
             {(status?.proxy as any)?.envoy_last_error && `(error=${(status?.proxy as any)?.envoy_last_error})`}
             <br />
@@ -228,12 +229,12 @@ export default function ServicesOverviewPage() {
             <br />
             Telemetry: access logs when enabled.
           </p>
-          <Link href="/proxies/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/proxies/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="DNS"
           loading={loading}
           spark={{
@@ -245,11 +246,11 @@ export default function ServicesOverviewPage() {
           rate={rate("dns")}
           errorsRate={errRate("dns")}
         >
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>Unbound DNS resolver</span>
             <InfoTip label="Embedded resolver with upstream forwarding and caching." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}, running:{" "}
             {(status?.dns as any)?.running ? "yes" : "no"}
             <br />
@@ -262,12 +263,12 @@ export default function ServicesOverviewPage() {
               </>
             )}
           </p>
-          <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="NTP"
           loading={loading}
           spark={{
@@ -279,11 +280,11 @@ export default function ServicesOverviewPage() {
           rate={rate("ntp")}
           errorsRate={errRate("ntp")}
         >
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>OpenNTPD client</span>
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}, running:{" "}
             {(status?.ntp as any)?.running ? "yes" : "no"}
             <br />
@@ -296,12 +297,12 @@ export default function ServicesOverviewPage() {
               </>
             )}
           </p>
-          <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="DHCP"
           loading={loading}
           spark={{
@@ -313,11 +314,11 @@ export default function ServicesOverviewPage() {
           rate={rate("dhcp")}
           errorsRate={errRate("dhcp")}
         >
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>LAN DHCP server</span>
             <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Enabled: {(status?.dhcp as any)?.enabled ? "yes" : "no"}{" "}
             {((status?.dhcp as any)?.listen_ifaces ?? 0) > 0 &&
               `(ifaces=${(status?.dhcp as any)?.listen_ifaces ?? 0})`}
@@ -328,12 +329,12 @@ export default function ServicesOverviewPage() {
               </>
             )}
           </p>
-          <Link href="/dhcp/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/dhcp/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="VPN"
           loading={loading}
           spark={{
@@ -345,16 +346,16 @@ export default function ServicesOverviewPage() {
           rate={rate("vpn")}
           errorsRate={errRate("vpn")}
         >
-          <div className="flex items-center gap-2 text-xs text-slate-300">
+          <div className="flex items-center gap-2 text-xs text-[var(--text)]">
             <Image src="/icons/wireguard.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <Image src="/icons/openvpn.svg" alt="" width={16} height={16} className="h-4 w-4" />
             <span>WireGuard + OpenVPN</span>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>WireGuard + OpenVPN</span>
             <InfoTip label="Secure remote access tunnels (WireGuard preferred; OpenVPN optional)." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             WireGuard: {(status?.vpn as any)?.wireguard_enabled ? "on" : "off"}{" "}
             {((status?.vpn as any)?.wg_peers ?? 0) > 0 &&
               `(peers=${(status?.vpn as any)?.wg_peers ?? 0})`}
@@ -365,12 +366,12 @@ export default function ServicesOverviewPage() {
               </>
             )}
           </p>
-          <Link href="/vpn/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/vpn/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
 
-        <Card
+        <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
           spark={{
@@ -382,11 +383,11 @@ export default function ServicesOverviewPage() {
           rate={rate("av")}
           errorsRate={errRate("av")}
         >
-          <div className="flex items-center gap-2 text-sm text-slate-200">
+          <div className="flex items-center gap-2 text-sm text-[var(--text)]">
             <span>Async AV scanning</span>
             <InfoTip label="Optional ICAP or embedded ClamAV scanning without inline latency spikes." />
           </div>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
             Mode: {(status?.av as any)?.mode ?? "icap"}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
             <br />
             Block TTL: {(status?.av as any)?.block_ttl ?? "600"}s{" "}
@@ -410,16 +411,16 @@ export default function ServicesOverviewPage() {
               </>
             )}
           </p>
-          <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-slate-300 hover:text-white">
+          <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-[var(--text)] hover:text-[var(--text)]">
             Configure →
           </Link>
-        </Card>
+        </ServiceCard>
       </div>
     </Shell>
   );
 }
 
-function Card({
+function ServiceCard({
   title,
   children,
   loading = false,
@@ -439,8 +440,8 @@ function Card({
       ? spark.values[spark.values.length - 1] - spark.values[0]
       : 0;
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card">
+      <p className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
         {title}
       </p>
       <div className="mt-3">
@@ -462,18 +463,18 @@ function Card({
             background={spark.background}
             title={spark.title}
           />
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-[var(--text-muted)]">
             Trend:{" "}
-            <span className={trend > 0 ? "text-mint" : trend < 0 ? "text-amber" : "text-slate-300"}>
+            <span className={trend > 0 ? "text-emerald-400" : trend < 0 ? "text-amber-400" : "text-[var(--text)]"}>
               {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {trend}
             </span>
             {typeof rate === "number" ? (
-              <span className="ml-2 text-slate-400">
-                Rate: <span className="text-slate-100">{rate.toFixed(1)}/min</span>
+              <span className="ml-2 text-[var(--text-muted)]">
+                Rate: <span className="text-[var(--text)]">{rate.toFixed(1)}/min</span>
               </span>
             ) : null}
             {typeof errorsRate === "number" ? (
-              <span className="ml-2 text-amber-300">
+              <span className="ml-2 text-amber-400">
                 Errors: {errorsRate.toFixed(1)}/min
               </span>
             ) : null}

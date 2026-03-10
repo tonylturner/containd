@@ -746,6 +746,45 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	return out, nil
 }
 
+// SimulationStatus holds the state of the synthetic traffic generator.
+type SimulationStatus struct {
+	Running bool `json:"running"`
+}
+
+// SimulationStatus returns whether the synthetic traffic generator is running.
+func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/simulation", nil)
+	if err != nil {
+		return SimulationStatus{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return SimulationStatus{}, err
+	}
+	defer resp.Body.Close()
+	var st SimulationStatus
+	_ = json.NewDecoder(resp.Body).Decode(&st)
+	return st, nil
+}
+
+// SimulationControl sends a start or stop action to the synthetic traffic generator.
+func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (SimulationStatus, error) {
+	body, _ := json.Marshal(map[string]string{"action": action})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/simulation", bytes.NewReader(body))
+	if err != nil {
+		return SimulationStatus{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return SimulationStatus{}, err
+	}
+	defer resp.Body.Close()
+	var st SimulationStatus
+	_ = json.NewDecoder(resp.Body).Decode(&st)
+	return st, nil
+}
+
 // AnalyzePcap uploads a PCAP file and runs offline DPI analysis on it.
 func (c *HTTPClient) AnalyzePcap(ctx context.Context, filename string, r io.Reader) (*pcap.AnalysisResult, error) {
 	if c.BaseURL == "" {

@@ -247,9 +247,9 @@ func TestRecordDPIEventsEmitsIDSAlert(t *testing.T) {
 }
 
 func TestShouldInspectICSHeuristics(t *testing.T) {
-	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo"}}})
+	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"lo"}}, DPIEnabled: true})
 	if err != nil {
-		e, err = New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}})
+		e, err = New(Config{Capture: capture.Config{Interfaces: []string{"lo0"}}, DPIEnabled: true})
 	}
 	if err != nil {
 		t.Skipf("loopback interface not found or unavailable: %v", err)

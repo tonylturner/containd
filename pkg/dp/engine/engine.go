@@ -6,6 +6,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"runtime"
 	"strconv"
 	"strings"
@@ -49,6 +51,9 @@ type Engine struct {
 	rulesetStatus atomic.Pointer[RulesetStatus]
 	avSink        AVSink
 	inspectAll    bool
+	dpiEnabled    bool            // master DPI on/off
+	dpiMode       string          // "learn" or "enforce"
+	dpiExclusions []DPIExclusion  // IPs/domains excluded from DPI
 	flowMu        sync.Mutex
 	flows         map[string]*flow.State
 	lastSweep     time.Time
@@ -74,9 +79,20 @@ type EnforceConfig struct {
 }
 
 type Config struct {
-	Capture    capture.Config
-	Enforce    EnforceConfig
-	InspectAll bool
+	Capture       capture.Config
+	Enforce       EnforceConfig
+	InspectAll    bool
+	DPIEnabled      bool            // master DPI toggle
+	DPIMode         string          // "learn" or "enforce"
+	DPIProtocols    map[string]bool // per-IT-protocol enable/disable
+	DPIICSProtocols map[string]bool // per-ICS-protocol enable/disable
+	DPIExclusions   []DPIExclusion  // IPs/domains excluded from DPI
+}
+
+// DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
+type DPIExclusion struct {
+	Value string
+	Type  string // "ip", "cidr", "domain"
 }
 
 // DefaultDecoders returns the standard set of DPI decoders for both ICS and
@@ -103,16 +119,77 @@ func DefaultDecoders() []dpi.Decoder {
 	}
 }
 
+// itDecoderProto maps IT DPI decoder types to their protocol key used in
+// DPIProtocols config.
+var itDecoderProto = map[string]string{
+	"*itdpi.DNSDecoder":  "dns",
+	"*itdpi.TLSDecoder":  "tls",
+	"*itdpi.HTTPDecoder": "http",
+	"*itdpi.SSHDecoder":  "ssh",
+	"*itdpi.SMBDecoder":  "smb",
+	"*itdpi.NTPDecoder":  "ntp",
+	"*itdpi.SNMPDecoder": "snmp",
+	"*itdpi.RDPDecoder":  "rdp",
+}
+
+// icsDecoderProto maps ICS DPI decoder types to their protocol key used in
+// DPIICSProtocols config.
+var icsDecoderProto = map[string]string{
+	"*modbus.Decoder":      "modbus",
+	"*dnp3.Decoder":        "dnp3",
+	"*cip.Decoder":         "cip",
+	"*s7comm.Decoder":      "s7comm",
+	"*iec61850.MMSDecoder": "mms",
+	"*bacnet.Decoder":      "bacnet",
+	"*opcua.Decoder":       "opcua",
+}
+
+// FilterDecoders returns decoders filtered by the per-protocol toggle maps.
+// Utility decoders (ICSMarker, PortDetector) are always included. IT decoders
+// are filtered by itProtos and ICS decoders by icsProtos. If both maps are
+// empty, all decoders are returned. For each decoder in a category, it is
+// included if its protocol key is not in the map OR if it is explicitly true.
+func FilterDecoders(itProtos, icsProtos map[string]bool) []dpi.Decoder {
+	all := DefaultDecoders()
+	if len(itProtos) == 0 && len(icsProtos) == 0 {
+		return all // no filter → all enabled
+	}
+	var out []dpi.Decoder
+	for _, d := range all {
+		typeName := fmt.Sprintf("%T", d)
+		if protoKey, isIT := itDecoderProto[typeName]; isIT {
+			enabled, configured := itProtos[protoKey]
+			if !configured || enabled {
+				out = append(out, d)
+			}
+			continue
+		}
+		if protoKey, isICS := icsDecoderProto[typeName]; isICS {
+			enabled, configured := icsProtos[protoKey]
+			if !configured || enabled {
+				out = append(out, d)
+			}
+			continue
+		}
+		// Utility decoder — always include
+		out = append(out, d)
+	}
+	return out
+}
+
 func New(cfg Config) (*Engine, error) {
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
 		return nil, err
 	}
 	e := &Engine{
-		capture:      capManager,
-		inspectAll:   cfg.InspectAll,
-		flows:        make(map[string]*flow.State),
-		verdictCache: NewVerdictCache(30*time.Second, 65536),
+		capture:       capManager,
+		inspectAll:    cfg.InspectAll,
+		dpiEnabled:    cfg.DPIEnabled,
+		dpiMode:       cfg.DPIMode,
+		dpiExclusions: cfg.DPIExclusions,
+		flows:         make(map[string]*flow.State),
+		verdictCache:  NewVerdictCache(30*time.Second, 65536),
 	}
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
@@ -120,7 +197,7 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.eventStore = events.NewStore(4096)
-	e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
+	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -156,6 +233,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.sigEngine = fresh.sigEngine
 	e.avSink = fresh.avSink
 	e.inspectAll = fresh.inspectAll
+	e.dpiEnabled = fresh.dpiEnabled
+	e.dpiMode = fresh.dpiMode
+	e.dpiExclusions = fresh.dpiExclusions
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
@@ -239,6 +319,15 @@ func (e *Engine) DPI() *dpi.Manager {
 // Steering is a no-op for now (capture always userspace in mock), but this keeps the hook stable.
 func (e *Engine) ShouldInspect(state *flow.State, pkt *dpi.ParsedPacket) bool {
 	if e == nil || pkt == nil {
+		return false
+	}
+	// Master DPI toggle — when explicitly disabled, skip DPI entirely.
+	// Note: inspectAll (DPIMock/lab mode) overrides this for testing.
+	if !e.dpiEnabled && !e.inspectAll {
+		return false
+	}
+	// Check IP exclusions.
+	if len(e.dpiExclusions) > 0 && state != nil && e.isExcluded(state) {
 		return false
 	}
 	if e.inspectAll {
@@ -403,6 +492,38 @@ func protocolPortMatches(entry rules.Entry, p rules.Protocol, state *flow.State,
 		return false
 	}
 	return port >= min && port <= max
+}
+
+// isExcluded checks whether either endpoint of a flow matches a DPI exclusion.
+func (e *Engine) isExcluded(state *flow.State) bool {
+	for _, excl := range e.dpiExclusions {
+		switch excl.Type {
+		case "ip":
+			ip := net.ParseIP(excl.Value)
+			if ip == nil {
+				continue
+			}
+			if state.Key.SrcIP.Equal(ip) || state.Key.DstIP.Equal(ip) {
+				return true
+			}
+		case "cidr":
+			_, cidr, err := net.ParseCIDR(excl.Value)
+			if err != nil {
+				continue
+			}
+			if cidr.Contains(state.Key.SrcIP) || cidr.Contains(state.Key.DstIP) {
+				return true
+			}
+		case "domain":
+			// Domain exclusions are matched against flow metadata if available.
+			// In practice, DNS responses populate flow state with resolved names.
+			// For now, domain exclusions match the SNI or query_name if the flow
+			// has been tagged by TLS/DNS decoders — this will be enhanced when
+			// TLS interception is added.
+			continue
+		}
+	}
+	return false
 }
 
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {

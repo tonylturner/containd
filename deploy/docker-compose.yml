@@ -7,6 +7,32 @@
 # HTTPS:   https://localhost:8443
 # SSH CLI: ssh -p 2222 containd@localhost
 # Default credentials: containd / containd (change on first login)
+#
+# ──────────────────────────────────────────────────────────────────
+# PRODUCTION HARDENING
+# ──────────────────────────────────────────────────────────────────
+# The defaults below are tuned for quick evaluation. For production
+# deployments, apply the recommendations marked [PROD] below:
+#
+#   1. Set a strong random JWT secret (replace the default):
+#        export CONTAIND_JWT_SECRET=$(openssl rand -hex 32)
+#
+#   2. Enable HTTPS-only cookies:
+#        CONTAIND_COOKIE_SECURE=1
+#
+#   3. Add resource limits to prevent host exhaustion:
+#        mem_limit, cpus, pids_limit (see inline comments)
+#
+#   4. Use read-only rootfs with tmpfs for writable paths:
+#        read_only: true + tmpfs mounts (see inline comments)
+#
+#   5. Restrict privilege escalation:
+#        security_opt: no-new-privileges:true
+#
+#   6. Mount config/certs volumes read-only where possible
+#
+#   7. Set logging limits to prevent disk exhaustion
+# ──────────────────────────────────────────────────────────────────
 
 services:
   containd:
@@ -27,6 +53,57 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/containd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # ── [PROD] Resource limits ──────────────────────────────────
+    # Prevents the container from exhausting host resources.
+    # Baseline idle: ~30 MB RSS, 19 PIDs, <1% CPU.
+    # Under burst API load: ~55 MB RSS.
+    # With active DPI/IPS on real traffic: estimate 100-200 MB.
+    # Uncomment and tune for your environment.
+    #
+    # mem_limit: 512m            # Hard memory ceiling
+    # memswap_limit: 512m        # Disable swap (set equal to mem_limit)
+    # cpus: 1.0                  # Limit to 1 CPU core (sufficient for most deployments)
+    # pids_limit: 256            # Fork bomb protection (idle uses ~19 PIDs)
+
+    # ── [PROD] Read-only root filesystem ────────────────────────
+    # Makes the container filesystem immutable. Writable paths must
+    # be explicitly listed as tmpfs or volume mounts.
+    #
+    # read_only: true
+    # tmpfs:
+    #   - /tmp:size=64m
+    #   - /run:size=64m
+
+    # ── [PROD] Security options ─────────────────────────────────
+    # Prevents privilege escalation via setuid/setgid binaries.
+    #
+    # security_opt:
+    #   - no-new-privileges:true
+
+    # ── [PROD] Logging limits ───────────────────────────────────
+    # Prevents container logs from filling the host disk.
+    #
+    # logging:
+    #   driver: json-file
+    #   options:
+    #     max-size: "50m"
+    #     max-file: "5"
+
+    # ── [PROD] HTTPS-only ───────────────────────────────────────
+    # In production, disable HTTP and only expose HTTPS + SSH:
+    #
+    # ports:
+    #   - "8443:8443"
+    #   - "2222:2222"
+    # environment:
+    #   - CONTAIND_COOKIE_SECURE=1
 
 volumes:
   containd-data:

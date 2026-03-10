@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	SchemaVersionCurrent = "0.1.0"
+	SchemaVersionCurrent = "0.1.1-beta"
 )
 
 // Build metadata injected at compile time via -ldflags.
 var (
-	BuildVersion = "dev"
-	BuildCommit  = "unknown"
+	BuildVersion = SchemaVersionCurrent
+	BuildCommit  = "local"
 )
 
 type semver struct {
@@ -26,6 +26,10 @@ type semver struct {
 }
 
 func parseSemver(v string) (semver, error) {
+	// Strip pre-release suffix (e.g. "0.1.1-beta" → "0.1.1").
+	if idx := strings.IndexByte(v, '-'); idx >= 0 {
+		v = v[:idx]
+	}
 	parts := strings.Split(v, ".")
 	if len(parts) != 3 {
 		return semver{}, fmt.Errorf("invalid schema_version %q", v)

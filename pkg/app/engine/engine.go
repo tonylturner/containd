@@ -32,7 +32,9 @@ import (
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/synth"
 )
 
 type Options struct {
@@ -95,6 +97,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
+	// Simulation manager for synthetic traffic (lab/demo mode).
+	simMgr := &simulationManager{dpEngine: dpEngine, logger: logger}
+
+	// Auto-start synthetic traffic generator if CONTAIND_DPI_MOCK=1.
+	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
+		simMgr.start(nil) // nil subnets → uses DefaultSubnets
+	}
+
 	ownership.start(ctx)
 	dhcpMgr := dhcpd.NewManager()
 	// Emit DHCP runtime events into the unified telemetry store.
@@ -125,7 +135,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
-	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine))
+	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine, simMgr))
 	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/stop", pcapStopHandler(pcapMgr))
@@ -150,6 +160,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
+	mux.HandleFunc("/internal/simulation", simulationHandler(simMgr))
 
 	logger.Infof("containd engine starting on %s", addr)
 	server := &http.Server{
@@ -622,7 +633,7 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	}
 }
 
-func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.HandlerFunc {
+func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *simulationManager) http.HandlerFunc {
 	var current config.DataPlaneConfig
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -642,10 +653,20 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.Hand
 			}
 			// Reconfigure by rebuilding the engine instance.
 			current = dp
+			// Convert DPI exclusions to engine type.
+			var excl []engine.DPIExclusion
+			for _, e := range dp.DPIExclusions {
+				excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
+			}
 			newEngine, err := engine.New(engine.Config{
-				Capture:    capture.Config{Interfaces: dp.CaptureInterfaces},
-				Enforce:    engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
-				InspectAll: dp.DPIMock,
+				Capture:         capture.Config{Interfaces: dp.CaptureInterfaces},
+				Enforce:         engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
+				InspectAll:      dp.DPIMock,
+				DPIEnabled:      dp.DPIEnabled,
+				DPIMode:         dp.DPIMode,
+				DPIProtocols:    dp.DPIProtocols,
+				DPIICSProtocols: dp.DPIICSProtocols,
+				DPIExclusions:   excl,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -657,11 +678,117 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine) http.Hand
 					logger.Errorf("capture start failed: %v", err)
 				}
 			}()
+			// Toggle synth generator based on dpiMock.
+			if dp.DPIMock {
+				simMgr.stop()
+				simMgr.start(nil)
+			} else {
+				simMgr.stop()
+			}
 			writeJSON(w, map[string]any{"status": "configured"})
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+	}
+}
+
+// ── Simulation manager ──────────────────────────────────────────────
+
+type simulationManager struct {
+	dpEngine *engine.Engine
+	logger   *zap.SugaredLogger
+	cancel   context.CancelFunc
+	running  bool
+}
+
+func (sm *simulationManager) start(subnets []synth.Subnet) {
+	if sm.running {
+		return
+	}
+	cfg := synth.Config{
+		EventsPerSecond: 4,
+		Subnets:         subnets, // nil → Run() uses DefaultSubnets
+		OnEvent:         synthIDSCallback(sm.dpEngine),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.cancel = cancel
+	sm.running = true
+	sm.logger.Infof("simulation started (%d subnets)", len(cfg.Subnets))
+	go synth.Run(ctx, sm.dpEngine.Events(), cfg)
+}
+
+func (sm *simulationManager) stop() {
+	if !sm.running || sm.cancel == nil {
+		return
+	}
+	sm.cancel()
+	sm.cancel = nil
+	sm.running = false
+	sm.logger.Infof("simulation stopped")
+}
+
+func simulationHandler(sm *simulationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, map[string]any{"running": sm.running})
+		case http.MethodPost:
+			var req struct {
+				Action  string         `json:"action"` // "start" or "stop"
+				Subnets []synth.Subnet `json:"subnets,omitempty"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			switch req.Action {
+			case "start":
+				sm.start(req.Subnets)
+				writeJSON(w, map[string]any{"running": true})
+			case "stop":
+				sm.stop()
+				writeJSON(w, map[string]any{"running": false})
+			default:
+				http.Error(w, `action must be "start" or "stop"`, http.StatusBadRequest)
+			}
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+// synthIDSCallback returns a callback that evaluates IDS rules against synthetic
+// events, generating alert events in the telemetry store.
+func synthIDSCallback(dpEngine *engine.Engine) func(dpevents.Event) {
+	return func(ev dpevents.Event) {
+		snap := dpEngine.CurrentRules()
+		if snap == nil || !snap.IDS.Enabled || len(snap.IDS.Rules) == 0 {
+			return
+		}
+		eval := ids.New(snap.IDS)
+		dpiEv := dpi.Event{
+			FlowID:     ev.FlowID,
+			Proto:      ev.Proto,
+			Kind:       ev.Kind,
+			Attributes: ev.Attributes,
+			Timestamp:  ev.Timestamp,
+		}
+		alerts := eval.Evaluate(dpiEv)
+		for _, a := range alerts {
+			dpEngine.Events().Append(dpevents.Event{
+				FlowID:     ev.FlowID,
+				Proto:      a.Proto,
+				Kind:       a.Kind,
+				Attributes: a.Attributes,
+				Timestamp:  a.Timestamp,
+				SrcIP:      ev.SrcIP,
+				DstIP:      ev.DstIP,
+				SrcPort:    ev.SrcPort,
+				DstPort:    ev.DstPort,
+				Transport:  ev.Transport,
+			})
 		}
 	}
 }

@@ -38,6 +38,7 @@ import (
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/templates"
 	"github.com/tonylturner/containd/pkg/cp/users"
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
@@ -103,6 +104,12 @@ type DHCPLeasesClient interface {
 
 type WireGuardStatusClient interface {
 	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
+}
+
+// SimulationClient is an optional interface for controlling the synthetic traffic generator.
+type SimulationClient interface {
+	SimulationStatus(ctx context.Context) (engineclient.SimulationStatus, error)
+	SimulationControl(ctx context.Context, action string) (engineclient.SimulationStatus, error)
 }
 
 // InventoryClient is an optional interface for querying the ICS asset inventory.
@@ -213,6 +220,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", rateLimitSensitive(), changeMyPasswordHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
+		protected.GET("/system/stats", systemStatsHandler())
+		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
@@ -261,7 +270,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine, services))
+		protected.GET("/events/:id", eventDetailHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
+		protected.GET("/simulation", simulationStatusHandler(engine))
+		protected.POST("/simulation", requireAdmin(), simulationControlHandler(engine))
 		protected.GET("/stats/protocols", protoStatsHandler(engine))
 		protected.GET("/stats/top-talkers", topTalkersHandler(engine))
 		protected.GET("/anomalies", listAnomaliesHandler(engine))
@@ -332,9 +344,13 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/learn/generate", requireAdmin(), learnGenerateHandler(engine))
 		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))
 		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
+		protected.GET("/security/conduits", securityConduitsHandler(store))
 		protected.GET("/ids/rules", getIDSHandler(store))
-		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
+		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store, engine, services))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
+		protected.POST("/ids/import", requireAdmin(), idsImportHandler(store, engine, services))
+		protected.POST("/ids/export", idsExportHandler(store))
+		protected.GET("/ids/sources", idsSourcesHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
 		protected.GET("/cli/complete", cliCompleteHandler(store))
@@ -1020,36 +1036,45 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 	}
 	if engine != nil {
+		// Infrastructure steps (interfaces, routing, services, pcap) may fail in
+		// unprivileged environments (e.g. Docker without NET_ADMIN). Collect those
+		// errors but always proceed to compile and apply rules so that IDS/firewall
+		// rule evaluation works even when nftables is unavailable.
+		var infraErrs []error
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("interfaces: %w", err))
 		}
 		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("routing: %w", err))
 		}
 		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("services: %w", err))
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("dataplane: %w", err))
 		}
 		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-			return err
+			infraErrs = append(infraErrs, fmt.Errorf("pcap config: %w", err))
 		}
 		if cfg.PCAP.Enabled {
 			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-				return err
+				infraErrs = append(infraErrs, fmt.Errorf("pcap start: %w", err))
 			}
 		} else {
 			if _, err := engine.StopPcap(ctx); err != nil {
-				return err
+				infraErrs = append(infraErrs, fmt.Errorf("pcap stop: %w", err))
 			}
 		}
+		// Always compile and push rules regardless of infrastructure errors.
 		snap, err := compile.CompileSnapshot(cfg)
 		if err != nil {
 			return err
 		}
 		if err := engine.ApplyRules(ctx, snap); err != nil {
 			return err
+		}
+		if len(infraErrs) > 0 {
+			return errors.Join(infraErrs...)
 		}
 	}
 	return nil
@@ -1938,6 +1963,38 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 	}
 }
 
+func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "invalid event ID")
+			return
+		}
+
+		var all []dpevents.Event
+		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
+			evs, err := tc.ListEvents(c.Request.Context(), 5000)
+			if err == nil {
+				all = append(all, evs...)
+			}
+		}
+		if s, ok := services.(interface {
+			ListTelemetryEvents(limit int) []dpevents.Event
+		}); ok && s != nil {
+			all = append(all, s.ListTelemetryEvents(5000)...)
+		}
+
+		for _, ev := range all {
+			if ev.ID == id {
+				c.JSON(http.StatusOK, ev)
+				return
+			}
+		}
+		apiError(c, http.StatusNotFound, "event not found")
+	}
+}
+
 func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tc, ok := engine.(TelemetryClient)
@@ -1957,6 +2014,46 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, flows)
+	}
+}
+
+func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SimulationClient)
+		if !ok || sc == nil {
+			c.JSON(http.StatusOK, engineclient.SimulationStatus{Running: false})
+			return
+		}
+		st, err := sc.SimulationStatus(c.Request.Context())
+		if err != nil {
+			apiError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, st)
+	}
+}
+
+func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sc, ok := engine.(SimulationClient)
+		if !ok || sc == nil {
+			apiError(c, http.StatusBadRequest, "simulation unavailable")
+			return
+		}
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || (req.Action != "start" && req.Action != "stop") {
+			apiError(c, http.StatusBadRequest, `action must be "start" or "stop"`)
+			return
+		}
+		st, err := sc.SimulationControl(c.Request.Context(), req.Action)
+		if err != nil {
+			apiError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "synth"})
+		c.JSON(http.StatusOK, st)
 	}
 }
 
@@ -2217,7 +2314,7 @@ func getIDSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setIDSHandler(store config.Store) gin.HandlerFunc {
+func setIDSHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var idsCfg config.IDSConfig
 		if err := c.ShouldBindJSON(&idsCfg); err != nil {
@@ -2234,6 +2331,8 @@ func setIDSHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Push updated rules to the engine so IDS evaluation takes effect immediately.
+		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.IDS)
 	}
@@ -2255,6 +2354,120 @@ func convertSigmaHandler() gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, rule)
+	}
+}
+
+// idsImportHandler accepts rules in any supported format and merges them into
+// the IDS configuration.  Body is multipart form: "file" (the rule file) and
+// "format" (suricata|snort|yara|sigma, optional — auto-detected if omitted).
+func idsImportHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "missing file upload")
+			return
+		}
+		defer file.Close()
+
+		data, err := io.ReadAll(file)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read file")
+			return
+		}
+
+		format := c.PostForm("format")
+		if format == "" {
+			format = cpids.DetectFormat(header.Filename, data)
+		}
+		if format == "" {
+			apiError(c, http.StatusBadRequest, "could not detect rule format; specify format parameter")
+			return
+		}
+
+		rules, err := cpids.ImportRules(data, format)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Merge into existing config.
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		existing := make(map[string]bool, len(cfg.IDS.Rules))
+		for _, r := range cfg.IDS.Rules {
+			existing[r.ID] = true
+		}
+		added := 0
+		skipped := 0
+		for _, r := range rules {
+			if existing[r.ID] {
+				skipped++
+				continue
+			}
+			cfg.IDS.Rules = append(cfg.IDS.Rules, r)
+			existing[r.ID] = true
+			added++
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			apiError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format})
+
+		c.JSON(http.StatusOK, gin.H{
+			"imported": added,
+			"skipped":  skipped,
+			"total":    len(cfg.IDS.Rules),
+			"format":   format,
+		})
+	}
+}
+
+// idsExportHandler exports current rules in the requested format.
+// Query param: ?format=suricata|snort|yara|sigma
+func idsExportHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		format := c.Query("format")
+		if format == "" {
+			format = "suricata"
+		}
+
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		data, err := cpids.ExportRules(cfg.IDS.Rules, format)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ext := map[string]string{
+			"suricata": ".rules", "snort": ".rules",
+			"yara": ".yar", "sigma": ".yml",
+		}
+		contentType := "text/plain; charset=utf-8"
+		if format == "sigma" {
+			contentType = "text/yaml; charset=utf-8"
+		}
+
+		now := time.Now()
+		dateStr := fmt.Sprintf("%02d%02d%02d", now.Year()%100, now.Month(), now.Day())
+		filename := fmt.Sprintf("%s-%s%s", format, dateStr, ext[format])
+		c.Header("Content-Disposition", "attachment; filename="+filename)
+		c.Data(http.StatusOK, contentType, data)
+	}
+}
+
+// idsSourcesHandler returns the catalog of external rule sources.
+func idsSourcesHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, cpids.BuiltinSources)
 	}
 }
 
@@ -3786,36 +3999,80 @@ func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 func updateZoneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
-		var z config.Zone
-		if err := c.ShouldBindJSON(&z); err != nil {
+
+		// Read raw JSON for partial merge.
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+		var patch map[string]interface{}
+		if err := json.Unmarshal(body, &patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid zone payload")
 			return
 		}
+
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		updated := false
+		idx := -1
 		for i, existing := range cfg.Zones {
 			if existing.Name == name {
-				if z.Name == "" {
-					z.Name = existing.Name
-				}
-				cfg.Zones[i] = z
-				updated = true
+				idx = i
 				break
 			}
 		}
-		if !updated {
+		if idx < 0 {
 			apiError(c, http.StatusNotFound, "zone not found")
 			return
 		}
+		z := &cfg.Zones[idx]
+
+		if v, ok := patch["name"]; ok {
+			if s, ok := v.(string); ok {
+				z.Name = s
+			}
+		}
+		if v, ok := patch["alias"]; ok {
+			if s, ok := v.(string); ok {
+				z.Alias = s
+			}
+		}
+		if v, ok := patch["description"]; ok {
+			if s, ok := v.(string); ok {
+				z.Description = s
+			}
+		}
+		if v, ok := patch["slTarget"]; ok {
+			if f, ok := v.(float64); ok {
+				z.SLTarget = int(f)
+			}
+		}
+		if v, ok := patch["consequence"]; ok {
+			if s, ok := v.(string); ok {
+				z.Consequence = s
+			}
+		}
+		if v, ok := patch["slOverrides"]; ok {
+			if m, ok := v.(map[string]interface{}); ok {
+				if z.SLOverrides == nil {
+					z.SLOverrides = make(map[string]bool)
+				}
+				for k, val := range m {
+					if b, ok := val.(bool); ok {
+						z.SLOverrides[k] = b
+					}
+				}
+			}
+		}
+
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, z)
+		c.JSON(http.StatusOK, *z)
 	}
 }
 

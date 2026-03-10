@@ -17,6 +17,7 @@ function EventsInner() {
   const [onlyDetections, setOnlyDetections] = useState(false);
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(true);
 
   const filteredEvents = useMemo(
     () =>
@@ -67,7 +68,7 @@ function EventsInner() {
     }
     if (avOnly) setOnlyDetections(true);
     refresh();
-    const id = setInterval(refresh, 3000);
+    const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
   }, [searchParams]);
 
@@ -76,83 +77,91 @@ function EventsInner() {
       title="Events"
       actions={
         <div className="flex items-center gap-2">
+          {live && (
+            <span className="flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+              Live
+            </span>
+          )}
           <button
             onClick={refresh}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+            className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"
           >
             Refresh
           </button>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setFilter("proxy");
-                setKindPrefix("service.envoy");
-              }}
-              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
-            >
-              Envoy
-            </button>
-            <button
-              onClick={() => {
-                setFilter("proxy");
-                setKindPrefix("service.nginx");
-              }}
-              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
-            >
-              Nginx
-            </button>
-          </div>
-          <select
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as any)}
-          >
-            <option value="all">All</option>
-            <option value="service">Service events</option>
-            <option value="proxy">Proxy</option>
-            <option value="dpi">DPI/IDS</option>
-            <option value="firewall">Firewall</option>
-          </select>
-          <input
-            type="text"
-            placeholder="Filter by kind prefix (e.g., service.dhcp.reservation)"
-            value={kindPrefix}
-            onChange={(e) => setKindPrefix(e.target.value)}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200"
-          />
-          <label className="flex items-center gap-2 text-xs text-slate-200">
-            <input
-              type="checkbox"
-              checked={onlyDetections}
-              onChange={(e) => setOnlyDetections(e.target.checked)}
-              className="h-4 w-4"
-            />
-            Show AV detections only
-          </label>
         </div>
       }
     >
+      {/* Filter bar */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+        <button
+          onClick={() => {
+            setFilter("proxy");
+            setKindPrefix("service.envoy");
+          }}
+          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+        >
+          Envoy
+        </button>
+        <button
+          onClick={() => {
+            setFilter("proxy");
+            setKindPrefix("service.nginx");
+          }}
+          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+        >
+          Nginx
+        </button>
+        <select
+          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value as any)}
+        >
+          <option value="all">All</option>
+          <option value="service">Service events</option>
+          <option value="proxy">Proxy</option>
+          <option value="dpi">DPI/IDS</option>
+          <option value="firewall">Firewall</option>
+        </select>
+        <input
+          type="text"
+          placeholder="Filter by kind prefix (e.g., service.dhcp.reservation)"
+          value={kindPrefix}
+          onChange={(e) => setKindPrefix(e.target.value)}
+          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
+        />
+        <label className="flex items-center gap-2 text-xs text-[var(--text)]">
+          <input
+            type="checkbox"
+            checked={onlyDetections}
+            onChange={(e) => setOnlyDetections(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Show AV detections only
+        </label>
+      </div>
+
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <div className="mb-3 flex flex-wrap gap-2 text-xs text-slate-300">
-        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+      <div className="mb-3 flex flex-wrap gap-2 text-xs text-[var(--text)]">
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
           Envoy events: {events.filter((e) => e.kind.startsWith("service.envoy.")).length}
         </div>
-        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
           Nginx events: {events.filter((e) => e.kind.startsWith("service.nginx.")).length}
         </div>
-        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5">
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
           Service events: {events.filter((e) => e.kind.startsWith("service.")).length}
         </div>
       </div>
 
       <div className="space-y-2">
-        {loading && <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-slate-400">Loading…</div>}
+        {loading && <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 text-sm text-[var(--text-muted)]">Loading...</div>}
         {!loading && events.length === 0 && (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center text-sm text-slate-400">
+          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
             No events yet. Enable DPI capture or learning mode to generate events.
           </div>
         )}
@@ -160,22 +169,22 @@ function EventsInner() {
           .map((ev) => (
           <div
             key={ev.id}
-            className="rounded-xl border border-white/10 bg-black/30 p-4"
+            className="table-row-hover rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4"
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-white">
+              <div className="text-sm font-semibold text-[var(--text)]">
                 {ev.proto.toUpperCase()} / {ev.kind}
               </div>
-              <div className="text-xs text-slate-400">
+              <div className="text-xs text-[var(--text-muted)]">
                 {new Date(ev.timestamp).toLocaleString()}
               </div>
             </div>
-            <div className="mt-1 text-xs text-slate-300">
+            <div className="mt-1 text-xs text-[var(--text)]">
               {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
             </div>
             {ev.attributes && (
-              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-slate-200">
+              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-[var(--text)]">
                 {JSON.stringify(ev.attributes, null, 2)}
               </pre>
             )}
@@ -188,7 +197,7 @@ function EventsInner() {
 
 export default function EventsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-slate-200">Loading events…</div>}>
+    <Suspense fallback={<div className="p-4 text-[var(--text)]">Loading events...</div>}>
       <EventsInner />
     </Suspense>
   );

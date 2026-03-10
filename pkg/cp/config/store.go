@@ -120,8 +120,15 @@ CREATE TABLE IF NOT EXISTS configs (
 }
 
 // Save validates and writes the config as the running config.
+// It also clears any stale candidate so that LoadCandidate will re-seed
+// from the updated running config, keeping the two in sync.
 func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
-	return s.saveKind(ctx, configKeyRunning, cfg)
+	if err := s.saveKind(ctx, configKeyRunning, cfg); err != nil {
+		return err
+	}
+	// Clear candidate so it re-seeds from running on next load.
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
+	return nil
 }
 
 // SaveCandidate stores a candidate config (staged).

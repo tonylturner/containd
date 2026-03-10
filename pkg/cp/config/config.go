@@ -401,6 +401,7 @@ func DefaultConfig() *Config {
 				FlushEvery: 2,
 			},
 		},
+		IDS:  DefaultIDSConfig(),
 		PCAP: PCAPConfig{},
 	}
 }
@@ -411,6 +412,21 @@ type DataPlaneConfig struct {
 	Enforcement       bool     `json:"enforcement,omitempty"`       // enable nftables apply
 	EnforceTable      string   `json:"enforceTable,omitempty"`      // nftables table name
 	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
+
+	// DPI controls
+	DPIEnabled       bool            `json:"dpiEnabled,omitempty"`       // master DPI on/off
+	DPIMode          string          `json:"dpiMode,omitempty"`          // "learn" or "enforce" (ICS DPI global mode)
+	DPIProtocols     map[string]bool `json:"dpiProtocols,omitempty"`     // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
+	DPIICSProtocols  map[string]bool `json:"dpiIcsProtocols,omitempty"`  // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua"
+	DPIExclusions    []DPIExclusion  `json:"dpiExclusions,omitempty"`    // IPs/domains excluded from DPI
+}
+
+// DPIExclusion represents an IP address, CIDR range, or domain name
+// that should be excluded from deep packet inspection.
+type DPIExclusion struct {
+	Value  string `json:"value"`            // IP, CIDR, or domain
+	Type   string `json:"type"`             // "ip", "cidr", "domain"
+	Reason string `json:"reason,omitempty"` // optional user note
 }
 
 // ExportConfig controls DPI event export to SIEM systems.
@@ -452,9 +468,12 @@ type PCAPForwardTarget struct {
 }
 
 type Zone struct {
-	Name        string `json:"name"`
-	Alias       string `json:"alias,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string          `json:"name"`
+	Alias       string          `json:"alias,omitempty"`
+	Description string          `json:"description,omitempty"`
+	SLTarget    int             `json:"slTarget,omitempty"`
+	Consequence string          `json:"consequence,omitempty"`
+	SLOverrides map[string]bool `json:"slOverrides,omitempty"`
 }
 
 type ObjectType string
@@ -585,13 +604,27 @@ type PolicyRule struct {
 
 // IDSConfig holds native IDS rules that match on normalized DPI events.
 type IDSConfig struct {
-	Enabled bool      `json:"enabled"`
-	Rules   []IDSRule `json:"rules,omitempty"`
+	Enabled    bool        `json:"enabled"`
+	Rules      []IDSRule   `json:"rules,omitempty"`
+	RuleGroups []RuleGroup `json:"ruleGroups,omitempty"`
 }
 
-// IDSRule is a Sigma-like event rule.
+// RuleGroup is a named set of IDS rules that can be enabled/disabled as a unit.
+type RuleGroup struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Filter      string `json:"filter,omitempty"`   // e.g. "sourceFormat:suricata AND proto:modbus"
+	Enabled     bool   `json:"enabled"`
+	RuleCount   int    `json:"ruleCount,omitempty"` // computed, not persisted
+}
+
+// IDSRule is a normalized event rule that supports native, Suricata, Snort,
+// YARA and Sigma formats.  The struct carries the superset of fields needed
+// to round-trip rules through all formats.
 type IDSRule struct {
 	ID          string            `json:"id"`
+	Enabled     *bool             `json:"enabled,omitempty"` // nil = enabled (default on)
 	Title       string            `json:"title,omitempty"`
 	Description string            `json:"description,omitempty"`
 	Proto       string            `json:"proto,omitempty"` // optional quick filter
@@ -600,6 +633,53 @@ type IDSRule struct {
 	Severity    string            `json:"severity,omitempty"` // low|medium|high|critical
 	Message     string            `json:"message,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
+
+	// Multi-format fields ────────────────────────────────────────────
+	SourceFormat string `json:"sourceFormat,omitempty"` // native|suricata|snort|yara|sigma
+	Action       string `json:"action,omitempty"`       // alert|drop|pass|reject (Suricata/Snort)
+
+	// Network fields (Suricata/Snort header)
+	SrcAddr string `json:"srcAddr,omitempty"`
+	DstAddr string `json:"dstAddr,omitempty"`
+	SrcPort string `json:"srcPort,omitempty"`
+	DstPort string `json:"dstPort,omitempty"`
+
+	// Content matching (Suricata/Snort content keywords)
+	ContentMatches []ContentMatch `json:"contentMatches,omitempty"`
+
+	// YARA string definitions
+	YARAStrings []YARAString `json:"yaraStrings,omitempty"`
+
+	// Enrichment / cross-references
+	References    []string `json:"references,omitempty"`
+	CVE           []string `json:"cve,omitempty"`
+	MITREAttackIDs []string `json:"mitreAttackIDs,omitempty"`
+
+	// Round-trip preservation
+	RawSource       string   `json:"rawSource,omitempty"`
+	ConversionNotes []string `json:"conversionNotes,omitempty"`
+}
+
+// ContentMatch represents a Suricata/Snort content keyword with modifiers.
+type ContentMatch struct {
+	Pattern  string `json:"pattern"`
+	IsHex    bool   `json:"isHex,omitempty"`
+	Negate   bool   `json:"negate,omitempty"`
+	Nocase   bool   `json:"nocase,omitempty"`
+	Depth    int    `json:"depth,omitempty"`
+	Offset   int    `json:"offset,omitempty"`
+	Distance int    `json:"distance,omitempty"`
+	Within   int    `json:"within,omitempty"`
+}
+
+// YARAString represents a named string definition in a YARA rule.
+type YARAString struct {
+	Name    string `json:"name"`              // e.g. "$hex_modbus"
+	Pattern string `json:"pattern"`
+	Type    string `json:"type"`              // text|hex|regex
+	Nocase  bool   `json:"nocase,omitempty"`
+	Wide    bool   `json:"wide,omitempty"`
+	ASCII   bool   `json:"ascii,omitempty"`
 }
 
 type IDSCondition struct {

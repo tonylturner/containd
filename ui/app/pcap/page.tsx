@@ -10,8 +10,10 @@ import {
   type PcapItem,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { Card } from "../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
-/* ── Types matching backend PolicyAnalysis / AnalysisResult ──── */
+/* -- Types matching backend PolicyAnalysis / AnalysisResult -- */
 
 type AnalysisStats = {
   events: unknown[];
@@ -69,7 +71,7 @@ type PolicyAnalysis = {
   eventSummary: Record<string, number>;
 };
 
-/* ── Helpers ───────────────────────────────────────────────────── */
+/* -- Helpers -- */
 
 async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
   try {
@@ -114,7 +116,7 @@ async function applyGeneratedRules(rules: PolicyRule[]): Promise<boolean> {
   }
 }
 
-/* ── Format helpers ────────────────────────────────────────────── */
+/* -- Format helpers -- */
 
 function fmtDuration(nanos: number): string {
   const secs = nanos / 1e9;
@@ -129,10 +131,11 @@ function fmtSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/* ── Page ─────────────────────────────────────────────────────── */
+/* -- Page -- */
 
 export default function PcapAnalysisPage() {
   const canEdit = isAdmin();
+  const confirm = useConfirm();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -217,29 +220,27 @@ export default function PcapAnalysisPage() {
       actions={
         <button
           onClick={refreshPcaps}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/10"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
         >
           Refresh
         </button>
       }
     >
+      <ConfirmDialog {...confirm.props} />
       {error && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {success && (
-        <div className="mb-4 rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {success}
         </div>
       )}
 
-      {/* ── Section 1: PCAP Upload & Analysis ──────────────────── */}
-      <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-        <h2 className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-          Upload & Analyze PCAP
-        </h2>
-        <p className="mb-4 text-sm text-slate-400">
+      {/* -- Section 1: PCAP Upload & Analysis -- */}
+      <Card title="Upload & Analyze PCAP" padding="lg" className="mb-6">
+        <p className="mb-4 text-sm text-[var(--text-muted)]">
           Upload a .pcap file for DPI analysis. The engine will extract flows,
           detect ICS protocols, and generate suggested firewall rules.
         </p>
@@ -250,13 +251,13 @@ export default function PcapAnalysisPage() {
               type="file"
               accept=".pcap,.pcapng"
               onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-slate-200 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-sm file:text-slate-200 hover:file:bg-white/20"
+              className="block w-full text-sm text-[var(--text)] file:mr-3 file:rounded-sm file:border-0 file:bg-amber-500/[0.1] file:px-3 file:py-2 file:text-sm file:text-[var(--text)] hover:file:bg-amber-500/[0.14]"
             />
           </label>
           <button
             onClick={handleAnalyzeUpload}
             disabled={!uploadFile || analyzing}
-            className="rounded-lg bg-mint/20 px-4 py-2 text-sm text-mint hover:bg-mint/30 disabled:opacity-40"
+            className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
           >
             {analyzing ? "Analyzing..." : "Analyze"}
           </button>
@@ -280,28 +281,32 @@ export default function PcapAnalysisPage() {
                   : new Set(result.rules.map((r) => r.id)),
               )
             }
-            onApply={() => handleApplyRules(result.rules, selectedRules)}
+            onApply={() => {
+              confirm.open({
+                title: "Apply Rules",
+                message: `Apply ${selectedRules.size} generated rule(s) to the firewall?`,
+                confirmLabel: "Apply",
+                onConfirm: () => handleApplyRules(result.rules, selectedRules),
+              });
+            }}
             canEdit={canEdit}
           />
         )}
-      </div>
+      </Card>
 
-      {/* ── Section 2: Existing PCAPs ──────────────────────────── */}
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur">
-        <h2 className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-          Existing PCAP Files
-        </h2>
-        <p className="mb-4 text-sm text-slate-400">
+      {/* -- Section 2: Existing PCAPs -- */}
+      <Card title="Existing PCAP Files" padding="lg">
+        <p className="mb-4 text-sm text-[var(--text-muted)]">
           Previously uploaded or captured PCAPs. Click Analyze to extract
           protocols and generate rules.
         </p>
 
         {pcaps.length === 0 ? (
-          <div className="text-sm text-slate-400">No PCAP files found.</div>
+          <div className="text-sm text-[var(--text-muted)]">No PCAP files found.</div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          <div className="overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Interface</th>
@@ -313,17 +318,17 @@ export default function PcapAnalysisPage() {
               </thead>
               <tbody>
                 {pcaps.map((p) => (
-                  <tr key={p.name} className="border-t border-white/5">
-                    <td className="px-4 py-3 font-mono text-xs text-white">
+                  <tr key={p.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                    <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
                       {p.name}
                     </td>
-                    <td className="px-4 py-3 text-slate-200">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {p.interface || "-"}
                     </td>
-                    <td className="px-4 py-3 text-slate-200">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {fmtSize(p.sizeBytes)}
                     </td>
-                    <td className="px-4 py-3 text-slate-200">
+                    <td className="px-4 py-3 text-[var(--text)]">
                       {new Date(p.createdAt).toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
@@ -332,21 +337,21 @@ export default function PcapAnalysisPage() {
                           {p.tags!.map((t) => (
                             <span
                               key={t}
-                              className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
+                              className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-xs text-[var(--text)]"
                             >
                               {t}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400">-</span>
+                        <span className="text-xs text-[var(--text-muted)]">-</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => handleAnalyzeExisting(p.name)}
                         disabled={existingAnalyzing === p.name}
-                        className="rounded-md bg-mint/20 px-2 py-1 text-xs text-mint hover:bg-mint/30 disabled:opacity-40"
+                        className="rounded-md bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
                       >
                         {existingAnalyzing === p.name
                           ? "Analyzing..."
@@ -362,9 +367,9 @@ export default function PcapAnalysisPage() {
 
         {existingResult && (
           <div className="mt-4">
-            <div className="mb-2 text-sm text-slate-200">
+            <div className="mb-2 text-sm text-[var(--text)]">
               Results for{" "}
-              <span className="font-mono text-mint">{existingResult.name}</span>
+              <span className="font-mono text-[var(--amber)]">{existingResult.name}</span>
             </div>
             <AnalysisResults
               result={existingResult.result}
@@ -383,22 +388,28 @@ export default function PcapAnalysisPage() {
                     : new Set(existingResult.result.rules.map((r) => r.id)),
                 )
               }
-              onApply={() =>
-                handleApplyRules(
-                  existingResult.result.rules,
-                  existingSelectedRules,
-                )
-              }
+              onApply={() => {
+                confirm.open({
+                  title: "Apply Rules",
+                  message: `Apply ${existingSelectedRules.size} generated rule(s) to the firewall?`,
+                  confirmLabel: "Apply",
+                  onConfirm: () =>
+                    handleApplyRules(
+                      existingResult.result.rules,
+                      existingSelectedRules,
+                    ),
+                });
+              }}
               canEdit={canEdit}
             />
           </div>
         )}
-      </div>
+      </Card>
     </Shell>
   );
 }
 
-/* ── Analysis Results Component ────────────────────────────────── */
+/* -- Analysis Results Component -- */
 
 function AnalysisResults({
   result,
@@ -429,8 +440,8 @@ function AnalysisResults({
         <StatCard label="Packets" value={stats.packetCount.toLocaleString()} />
         <StatCard label="Flows" value={flowCount.toLocaleString()} />
         <StatCard label="Duration" value={fmtDuration(stats.duration)} />
-        <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-          <div className="text-xs uppercase tracking-wide text-slate-400">
+        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
+          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
             Protocols
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
@@ -438,13 +449,13 @@ function AnalysisResults({
               protocolList.map((p) => (
                 <span
                   key={p}
-                  className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200"
+                  className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-xs text-[var(--text)]"
                 >
                   {p} ({stats.protocols[p]})
                 </span>
               ))
             ) : (
-              <span className="text-xs text-slate-400">none detected</span>
+              <span className="text-xs text-[var(--text-muted)]">none detected</span>
             )}
           </div>
         </div>
@@ -452,9 +463,9 @@ function AnalysisResults({
 
       {/* Event summary table */}
       {eventEntries.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-white/10">
+        <div className="overflow-hidden rounded-sm border border-amber-500/[0.15]">
           <table className="w-full text-sm">
-            <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+            <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
               <tr>
                 <th className="px-4 py-2">Protocol</th>
                 <th className="px-4 py-2">Event Count</th>
@@ -462,9 +473,9 @@ function AnalysisResults({
             </thead>
             <tbody>
               {eventEntries.map(([proto, count]) => (
-                <tr key={proto} className="border-t border-white/5">
-                  <td className="px-4 py-2 text-slate-200">{proto}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                <tr key={proto} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                  <td className="px-4 py-2 text-[var(--text)]">{proto}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                     {count.toLocaleString()}
                   </td>
                 </tr>
@@ -477,12 +488,12 @@ function AnalysisResults({
       {/* Learned profiles */}
       {profiles && profiles.length > 0 && (
         <>
-          <h3 className="text-sm font-semibold text-white">
+          <h3 className="text-sm font-semibold text-[var(--text)]">
             Learned Profiles ({profiles.length})
           </h3>
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          <div className="overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <th className="px-4 py-2">Protocol</th>
                   <th className="px-4 py-2">Source</th>
@@ -493,29 +504,29 @@ function AnalysisResults({
               </thead>
               <tbody>
                 {profiles.map((p, i) => (
-                  <tr key={i} className="border-t border-white/5">
+                  <tr key={i} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
                     <td className="px-4 py-2">
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200">
+                      <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-xs text-[var(--text)]">
                         {p.protocol}
                       </span>
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                    <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                       {p.sourceIP}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                    <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                       {p.destIP}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                    <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                       {p.packetCount}
                     </td>
                     <td className="px-4 py-2 text-xs">
                       {p.readSeen && (
-                        <span className="mr-1 rounded-full bg-mint/20 px-2 py-0.5 text-mint">
+                        <span className="mr-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-400">
                           Read
                         </span>
                       )}
                       {p.writeSeen && (
-                        <span className="rounded-full bg-amber/20 px-2 py-0.5 text-amber">
+                        <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-400">
                           Write
                         </span>
                       )}
@@ -532,13 +543,13 @@ function AnalysisResults({
       {rules.length > 0 && (
         <>
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">
+            <h3 className="text-sm font-semibold text-[var(--text)]">
               Generated Rules ({rules.length})
             </h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={onToggleAll}
-                className="rounded-md bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
+                className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
               >
                 {selectedRules.size === rules.length
                   ? "Deselect All"
@@ -548,16 +559,16 @@ function AnalysisResults({
                 <button
                   onClick={onApply}
                   disabled={selectedRules.size === 0}
-                  className="rounded-lg bg-mint/20 px-3 py-1.5 text-sm text-mint hover:bg-mint/30 disabled:opacity-40"
+                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
                 >
                   Apply {selectedRules.size} Rule(s)
                 </button>
               )}
             </div>
           </div>
-          <div className="overflow-hidden rounded-xl border border-white/10">
+          <div className="overflow-hidden rounded-sm border border-amber-500/[0.15]">
             <table className="w-full text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wide text-slate-300">
+              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <th className="w-8 px-4 py-2"></th>
                   <th className="px-4 py-2">Description</th>
@@ -569,41 +580,41 @@ function AnalysisResults({
               </thead>
               <tbody>
                 {rules.map((r) => (
-                  <tr key={r.id} className="border-t border-white/5">
+                  <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
                     <td className="px-4 py-2">
                       <input
                         type="checkbox"
                         checked={selectedRules.has(r.id)}
                         onChange={() => onToggleRule(r.id)}
-                        className="h-4 w-4 rounded border-white/20 bg-black/30"
+                        className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
                       />
                     </td>
-                    <td className="px-4 py-2 text-slate-200">
+                    <td className="px-4 py-2 text-[var(--text)]">
                       {r.description || r.id}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                    <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                       {(r.sources ?? []).join(", ") || "*"}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-200">
+                    <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
                       {(r.destinations ?? []).join(", ") || "*"}
                     </td>
                     <td className="px-4 py-2">
                       {r.ics?.protocol ? (
-                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-200">
+                        <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-xs text-[var(--text)]">
                           {r.ics.protocol}
                           {r.ics.functionCodes &&
                             r.ics.functionCodes.length > 0 &&
                             ` FC:${r.ics.functionCodes.join(",")}`}
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-400">-</span>
+                        <span className="text-xs text-[var(--text-muted)]">-</span>
                       )}
                     </td>
                     <td className="px-4 py-2">
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs ${
                           r.action === "ALLOW"
-                            ? "bg-mint/20 text-mint"
+                            ? "bg-emerald-500/20 text-emerald-400"
                             : "bg-red-500/20 text-red-400"
                         }`}
                       >
@@ -619,7 +630,7 @@ function AnalysisResults({
       )}
 
       {rules.length === 0 && (
-        <div className="text-sm text-slate-400">
+        <div className="text-sm text-[var(--text-muted)]">
           No rules generated from this PCAP. The capture may not contain
           recognizable ICS protocol traffic.
         </div>
@@ -628,15 +639,15 @@ function AnalysisResults({
   );
 }
 
-/* ── Stat Card ─────────────────────────────────────────────────── */
+/* -- Stat Card -- */
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-      <div className="text-xs uppercase tracking-wide text-slate-400">
+    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
+      <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold text-white">{value}</div>
+      <div className="mt-1 text-lg font-semibold text-[var(--text)]">{value}</div>
     </div>
   );
 }
