@@ -334,7 +334,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))
 		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
 		protected.GET("/ids/rules", getIDSHandler(store))
-		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
+		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store, engine, services))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
@@ -2218,7 +2218,7 @@ func getIDSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setIDSHandler(store config.Store) gin.HandlerFunc {
+func setIDSHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var idsCfg config.IDSConfig
 		if err := c.ShouldBindJSON(&idsCfg); err != nil {
@@ -2235,6 +2235,8 @@ func setIDSHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Push updated rules to the engine so IDS evaluation takes effect immediately.
+		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.IDS)
 	}
