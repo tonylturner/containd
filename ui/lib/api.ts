@@ -817,8 +817,29 @@ export type IDSCondition = {
   value?: unknown;
 };
 
+export type ContentMatch = {
+  pattern: string;
+  isHex?: boolean;
+  negate?: boolean;
+  nocase?: boolean;
+  depth?: number;
+  offset?: number;
+  distance?: number;
+  within?: number;
+};
+
+export type YARAString = {
+  name: string;
+  pattern: string;
+  type: string; // text|hex|regex
+  nocase?: boolean;
+  wide?: boolean;
+  ascii?: boolean;
+};
+
 export type IDSRule = {
   id: string;
+  enabled?: boolean | null; // null/undefined = enabled
   title?: string;
   description?: string;
   proto?: string;
@@ -827,11 +848,52 @@ export type IDSRule = {
   severity?: string;
   message?: string;
   labels?: Record<string, string>;
+  // Multi-format fields
+  sourceFormat?: string;
+  action?: string;
+  srcAddr?: string;
+  dstAddr?: string;
+  srcPort?: string;
+  dstPort?: string;
+  contentMatches?: ContentMatch[];
+  yaraStrings?: YARAString[];
+  references?: string[];
+  cve?: string[];
+  mitreAttackIDs?: string[];
+  rawSource?: string;
+  conversionNotes?: string[];
+};
+
+export type RuleGroup = {
+  id: string;
+  name: string;
+  description?: string;
+  filter?: string;
+  enabled: boolean;
+  ruleCount?: number;
 };
 
 export type IDSConfig = {
   enabled?: boolean;
   rules?: IDSRule[];
+  ruleGroups?: RuleGroup[];
+};
+
+export type IDSImportResult = {
+  imported: number;
+  skipped: number;
+  total: number;
+  format: string;
+};
+
+export type IDSRuleSource = {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  format: string;
+  license: string;
+  licenseNote?: string;
 };
 
 export type RulesetPreview = {
@@ -1258,11 +1320,48 @@ export const api = {
   deleteAsset: (id: string) =>
     deleteJSONResult(`/api/v1/assets/${encodeURIComponent(id)}`),
 
-  // IDS / Sigma
+  // IDS / Rules
   getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
   setIDS: (cfg: IDSConfig) => postJSON<IDSConfig>("/api/v1/ids/rules", cfg),
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
+  importIDSRules: async (file: File, format?: string): Promise<IDSImportResult | null> => {
+    const form = new FormData();
+    form.append("file", file);
+    if (format) form.append("format", format);
+    const res = await fetch(`${API_BASE}/api/v1/ids/import`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+  exportIDSRules: async (format: string): Promise<boolean> => {
+    const res = await fetch(`${API_BASE}/api/v1/ids/export?format=${encodeURIComponent(format)}`, {
+      credentials: "include",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const ext: Record<string, string> = { suricata: ".rules", snort: ".rules", yara: ".yar", sigma: ".yml" };
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(2);
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const filename = `${format}-${yy}${mm}${dd}${ext[format] || ".txt"}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  },
+  getIDSSources: () => getJSON<IDSRuleSource[]>("/api/v1/ids/sources"),
 
   listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
@@ -1382,6 +1481,8 @@ export const api = {
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
   listFlows: (limit = 200) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+  getEvent: (id: number) =>
+    getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
 
   // Simulation
   getSimulationStatus: () =>

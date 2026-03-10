@@ -40,30 +40,45 @@ export function SortableHeader({ label, sortKey, currentSort, currentDir, onSort
   );
 }
 
-export function Pagination({ page, totalPages, totalItems, onPage }: {
+export function Pagination({ page, totalPages, totalItems, onPage, pageSize, onPageSize, pageSizeOptions }: {
   page: number; totalPages: number; totalItems: number; onPage: (p: number) => void;
+  pageSize?: number; onPageSize?: (s: number) => void; pageSizeOptions?: number[];
 }) {
-  if (totalPages <= 1) return null;
   return (
     <div className="flex items-center justify-between border-t border-amber-500/[0.1] px-4 py-2.5 font-mono text-[10px] text-[var(--text-dim)]">
-      <span>{totalItems} items</span>
-      <div className="flex items-center gap-1">
-        <button
-          disabled={page <= 0}
-          onClick={() => onPage(page - 1)}
-          className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          Prev
-        </button>
-        <span className="px-2 py-1 tabular-nums">{page + 1} / {totalPages}</span>
-        <button
-          disabled={page >= totalPages - 1}
-          onClick={() => onPage(page + 1)}
-          className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          Next
-        </button>
+      <div className="flex items-center gap-3">
+        <span>{totalItems} items</span>
+        {onPageSize && pageSizeOptions && (
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSize(Number(e.target.value))}
+            className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface2)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] outline-none"
+          >
+            {pageSizeOptions.map((s) => (
+              <option key={s} value={s}>{s} / page</option>
+            ))}
+          </select>
+        )}
       </div>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            disabled={page <= 0}
+            onClick={() => onPage(page - 1)}
+            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+          <span className="px-2 py-1 tabular-nums">{page + 1} / {totalPages}</span>
+          <button
+            disabled={page >= totalPages - 1}
+            onClick={() => onPage(page + 1)}
+            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

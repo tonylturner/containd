@@ -127,8 +127,9 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	for _, r := range cfg.IDS.Rules {
-		snap.IDS.Rules = append(snap.IDS.Rules, dprules.IDSRule{
+		dr := dprules.IDSRule{
 			ID:          r.ID,
+			Enabled:     r.Enabled,
 			Title:       r.Title,
 			Description: r.Description,
 			Proto:       r.Proto,
@@ -141,10 +142,35 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 				Op:    r.When.Op,
 				Value: r.When.Value,
 			},
-			Severity: r.Severity,
-			Message:  r.Message,
-			Labels:   r.Labels,
-		})
+			Severity:        r.Severity,
+			Message:         r.Message,
+			Labels:          r.Labels,
+			SourceFormat:    r.SourceFormat,
+			Action:          r.Action,
+			SrcAddr:         r.SrcAddr,
+			DstAddr:         r.DstAddr,
+			SrcPort:         r.SrcPort,
+			DstPort:         r.DstPort,
+			References:      r.References,
+			CVE:             r.CVE,
+			MITREAttackIDs:  r.MITREAttackIDs,
+			RawSource:       r.RawSource,
+			ConversionNotes: r.ConversionNotes,
+		}
+		for _, cm := range r.ContentMatches {
+			dr.ContentMatches = append(dr.ContentMatches, dprules.ContentMatch{
+				Pattern: cm.Pattern, IsHex: cm.IsHex, Negate: cm.Negate,
+				Nocase: cm.Nocase, Depth: cm.Depth, Offset: cm.Offset,
+				Distance: cm.Distance, Within: cm.Within,
+			})
+		}
+		for _, ys := range r.YARAStrings {
+			dr.YARAStrings = append(dr.YARAStrings, dprules.YARAString{
+				Name: ys.Name, Pattern: ys.Pattern, Type: ys.Type,
+				Nocase: ys.Nocase, Wide: ys.Wide, ASCII: ys.ASCII,
+			})
+		}
+		snap.IDS.Rules = append(snap.IDS.Rules, dr)
 	}
 
 	return snap, nil

@@ -270,6 +270,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine, services))
+		protected.GET("/events/:id", eventDetailHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
 		protected.GET("/simulation", simulationStatusHandler(engine))
 		protected.POST("/simulation", requireAdmin(), simulationControlHandler(engine))
@@ -347,6 +348,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store, engine, services))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
+		protected.POST("/ids/import", requireAdmin(), idsImportHandler(store, engine, services))
+		protected.POST("/ids/export", idsExportHandler(store))
+		protected.GET("/ids/sources", idsSourcesHandler())
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
 		protected.GET("/cli/complete", cliCompleteHandler(store))
@@ -1959,6 +1963,38 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 	}
 }
 
+func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "invalid event ID")
+			return
+		}
+
+		var all []dpevents.Event
+		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
+			evs, err := tc.ListEvents(c.Request.Context(), 5000)
+			if err == nil {
+				all = append(all, evs...)
+			}
+		}
+		if s, ok := services.(interface {
+			ListTelemetryEvents(limit int) []dpevents.Event
+		}); ok && s != nil {
+			all = append(all, s.ListTelemetryEvents(5000)...)
+		}
+
+		for _, ev := range all {
+			if ev.ID == id {
+				c.JSON(http.StatusOK, ev)
+				return
+			}
+		}
+		apiError(c, http.StatusNotFound, "event not found")
+	}
+}
+
 func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tc, ok := engine.(TelemetryClient)
@@ -2318,6 +2354,120 @@ func convertSigmaHandler() gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, rule)
+	}
+}
+
+// idsImportHandler accepts rules in any supported format and merges them into
+// the IDS configuration.  Body is multipart form: "file" (the rule file) and
+// "format" (suricata|snort|yara|sigma, optional — auto-detected if omitted).
+func idsImportHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "missing file upload")
+			return
+		}
+		defer file.Close()
+
+		data, err := io.ReadAll(file)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read file")
+			return
+		}
+
+		format := c.PostForm("format")
+		if format == "" {
+			format = cpids.DetectFormat(header.Filename, data)
+		}
+		if format == "" {
+			apiError(c, http.StatusBadRequest, "could not detect rule format; specify format parameter")
+			return
+		}
+
+		rules, err := cpids.ImportRules(data, format)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Merge into existing config.
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		existing := make(map[string]bool, len(cfg.IDS.Rules))
+		for _, r := range cfg.IDS.Rules {
+			existing[r.ID] = true
+		}
+		added := 0
+		skipped := 0
+		for _, r := range rules {
+			if existing[r.ID] {
+				skipped++
+				continue
+			}
+			cfg.IDS.Rules = append(cfg.IDS.Rules, r)
+			existing[r.ID] = true
+			added++
+		}
+		if err := store.Save(c.Request.Context(), cfg); err != nil {
+			apiError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format})
+
+		c.JSON(http.StatusOK, gin.H{
+			"imported": added,
+			"skipped":  skipped,
+			"total":    len(cfg.IDS.Rules),
+			"format":   format,
+		})
+	}
+}
+
+// idsExportHandler exports current rules in the requested format.
+// Query param: ?format=suricata|snort|yara|sigma
+func idsExportHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		format := c.Query("format")
+		if format == "" {
+			format = "suricata"
+		}
+
+		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		data, err := cpids.ExportRules(cfg.IDS.Rules, format)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ext := map[string]string{
+			"suricata": ".rules", "snort": ".rules",
+			"yara": ".yar", "sigma": ".yml",
+		}
+		contentType := "text/plain; charset=utf-8"
+		if format == "sigma" {
+			contentType = "text/yaml; charset=utf-8"
+		}
+
+		now := time.Now()
+		dateStr := fmt.Sprintf("%02d%02d%02d", now.Year()%100, now.Month(), now.Day())
+		filename := fmt.Sprintf("%s-%s%s", format, dateStr, ext[format])
+		c.Header("Content-Disposition", "attachment; filename="+filename)
+		c.Data(http.StatusOK, contentType, data)
+	}
+}
+
+// idsSourcesHandler returns the catalog of external rule sources.
+func idsSourcesHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, cpids.BuiltinSources)
 	}
 }
 
