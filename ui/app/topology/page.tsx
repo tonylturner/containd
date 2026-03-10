@@ -17,7 +17,6 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import PhysicalView from "./PhysicalView";
-import SecurityView from "./SecurityView";
 import { Shell } from "../../components/Shell";
 import {
   api,
@@ -73,76 +72,11 @@ const hStyle: React.CSSProperties = { opacity: 0, width: 1, height: 1, border: "
 
 function InternetNode({ data }: NodeProps<TopoNodeData>) {
   return (
-    <Shell title="Topology">
-      {expanded ? (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm" />
-      ) : null}
-      <div
-        className={`relative min-h-[640px] rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-2 shadow-card backdrop-blur ${
-          expanded ? "fixed inset-6 z-[60] h-[calc(100vh-48px)]" : "h-[calc(100vh-160px)]"
-        }`}
-      >
-        {error ? (
-          <div className="absolute left-4 top-4 z-10 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-            {error}
-          </div>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-sm border border-amber-500/[0.15] bg-black/70 text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-          title={expanded ? "Exit full screen" : "Full screen"}
-          aria-label="Toggle fullscreen"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            {expanded ? (
-              <>
-                <path d="M8 3H3v5" />
-                <path d="M16 21h5v-5" />
-                <path d="M3 21h5v-5" />
-                <path d="M21 3h-5v5" />
-              </>
-            ) : (
-              <>
-                <path d="M8 3H3v5" />
-                <path d="M16 21h5v-5" />
-                <path d="M3 21h5v-5" />
-                <path d="M21 3h-5v5" />
-              </>
-            )}
-          </svg>
-        </button>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.5}
-          maxZoom={1.5}
-          nodesConnectable={false}
-          nodesDraggable
-          elementsSelectable
-          selectionOnDrag
-          proOptions={{ hideAttribution: true }}
-          defaultEdgeOptions={{
-            type: "smoothstep",
-            animated: false,
-            style: { stroke: "rgba(148, 163, 184, 0.6)", strokeWidth: 1.5 },
-          }}
-        >
-          <Background color="rgba(255,255,255,0.06)" gap={24} />
-          <Controls showInteractive={false} className="reactflow-controls" />
-        </ReactFlow>
+    <div className={`${s.nodeCard} ${s.accentGray} ${data.selected ? s.nodeCardSelected : ""}`}>
+      <Handle type="source" position={Position.Bottom} style={hStyle} />
+      <div className={s.nodeHeader}>
+        <span className={`${s.nodeName} ${s.nameGray}`}>{data.label}</span>
+        <div className={s.statusDot} style={{ background: "#6b7280", boxShadow: "0 0 5px #6b728080" }} />
       </div>
     </div>
   );
@@ -236,227 +170,26 @@ const nodeTypes = {
    HELPERS
    ════════════════════════════════════════════════════════════════════ */
 
-type UpstreamNodeData = {
-  label: string;
-  detail?: string;
-};
-
-function UpstreamNode({ data }: NodeProps<UpstreamNodeData>) {
-  return (
-    <div className="w-[220px] rounded-full border border-amber-500/[0.15] bg-black/60 px-5 py-3 text-sm text-[var(--text)] shadow-card">
-      <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
-      <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: "var(--primary)" }} />
-      <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">Upstream</div>
-      <div className="mt-2 text-base text-[var(--text)]">{data.label}</div>
-      {data.detail ? <div className="text-xs text-[var(--text-muted)]">{data.detail}</div> : null}
-    </div>
-  );
+function ip4(str: string): number {
+  const p = (str || "").split(".");
+  return (((+p[0]) << 24) | ((+p[1]) << 16) | ((+p[2]) << 8) | +p[3]) >>> 0;
+}
+function ipInCidr(ip: string, cidr: string): boolean {
+  if (!cidr || !ip) return false;
+  const [base, bits] = cidr.split("/");
+  if (!bits) return ip === base;
+  const mask = (-1 << (32 - parseInt(bits))) >>> 0;
+  return (ip4(ip) & mask) === (ip4(base) & mask);
 }
 
-type GatewayNodeData = {
-  name: string;
-  address?: string;
-  iface?: string;
-};
-
-function GatewayNode({ data }: NodeProps<GatewayNodeData>) {
-  return (
-    <div className="flex w-[240px] items-center gap-3 rounded-sm border border-amber-500/[0.15] bg-black/60 px-3 py-2 text-xs text-[var(--text)]">
-      <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
-      <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
-      <div className="h-7 w-7 rotate-45 rounded border border-white/20 bg-black/70" />
-      <div>
-        <div className="mb-1 h-1 w-8 rounded-full" style={{ backgroundColor: "var(--teal)" }} />
-        <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
-          Gateway
-        </div>
-        <div className="text-sm text-[var(--text)]">{data.name}</div>
-        <div className="text-[11px] text-[var(--text-muted)]">
-          {data.address ?? "address unset"}
-        </div>
-        <div className="text-[11px] text-[var(--text-muted)]">
-          {data.iface ? `via ${data.iface}` : "interface unset"}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type FirewallNodeData = {
-  label: string;
-  detail?: string;
-};
-
-function FirewallNode({ data }: NodeProps<FirewallNodeData>) {
-  return (
-    <div className="w-[260px] rounded-2xl border border-amber-500/[0.15] bg-black/70 px-4 py-4 text-sm text-[var(--text)] shadow-card backdrop-blur">
-      <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
-      <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
-      <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
-      <div className="mb-2 h-1 w-12 rounded-full" style={{ backgroundColor: "var(--success)" }} />
-      <div className="flex items-center gap-3">
-        <img
-          src="/icons/firewall.svg"
-          alt=""
-          className="h-10 w-10 opacity-90 grayscale"
-        />
-        <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
-            Firewall
-          </div>
-          <div className="mt-1 text-lg text-[var(--text)]">{data.label}</div>
-        </div>
-      </div>
-      {data.detail ? <div className="text-xs text-[var(--text-muted)]">{data.detail}</div> : null}
-    </div>
-  );
-}
-
-type ZoneNodeData = {
-  name: string;
-  alias?: string;
-  count: number;
-};
-
-function ZoneNode({ data }: NodeProps<ZoneNodeData>) {
-  const accent = zoneAccent(data.name);
-  return (
-    <div className="rounded-2xl border border-amber-500/[0.15] bg-black/70 px-4 py-3 text-sm text-[var(--text)] shadow-card">
-      <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
-      <Handle type="source" position={Position.Bottom} id="bottom" style={handleStyle} />
-      <div className="mb-2 h-1 w-12 rounded-full" style={{ backgroundColor: accent.color }} />
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
-            Zone
-          </div>
-          <div className="text-base text-[var(--text)]">{data.name}</div>
-          {data.alias ? (
-            <div className="text-xs text-[var(--text-muted)]">{data.alias}</div>
-          ) : null}
-        </div>
-        <div
-          className="rounded-full border border-amber-500/[0.15] bg-black/40 px-2 py-1 text-xs text-[var(--text)]"
-          style={{ color: accent.color }}
-        >
-          {data.count} nodes
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type InterfaceNodeData = {
-  name: string;
-  device?: string;
-  alias?: string;
-  addressMode?: string;
-  addresses?: string[];
-  up?: boolean;
-  zone?: string;
-};
-
-function InterfaceNode({ data }: NodeProps<InterfaceNodeData>) {
-  const accent = zoneAccent(data.zone);
-  return (
-    <div
-      className="w-[230px] rounded-sm border border-amber-500/[0.15] bg-black/70 px-3 py-2 text-xs text-[var(--text)]"
-      style={{ borderLeft: `3px solid ${accent.color}` }}
-    >
-      <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
-      <Handle type="source" position={Position.Right} id="right" style={handleStyle} />
-      <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <span className="inline-flex h-3 w-3 rounded-sm border border-white/20 bg-black/60" />
-          {data.name}
-        </div>
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-            data.up ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
-          }`}
-        >
-          {data.up ? "up" : "down"}
-        </span>
-      </div>
-      <div className="mt-1 inline-flex items-center rounded-full border border-amber-500/[0.15] px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-[var(--text)]">
-        {data.zone || "unassigned"}
-      </div>
-      <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-        {data.device ? `dev ${data.device}` : "device unset"}
-      </div>
-      <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-        {data.addressMode ? data.addressMode.toUpperCase() : "static"}
-        {data.addresses?.length ? ` • ${data.addresses.join(", ")}` : ""}
-      </div>
-    </div>
-  );
-}
-
-type AssetNodeData = {
-  name: string;
-  type?: string;
-  criticality?: string;
-  ips?: string[];
-};
-
-function AssetNode({ data }: NodeProps<AssetNodeData>) {
-  return (
-    <div className="w-[230px] rounded-sm border border-amber-500/[0.15] bg-black/60 px-3 py-2 text-xs text-[var(--text)]">
-      <Handle type="target" position={Position.Left} id="left" style={handleStyle} />
-      <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500/60" />
-          {data.name}
-        </div>
-        <span className="rounded-full border border-amber-500/[0.15] bg-black/40 px-2 py-0.5 text-[10px] text-[var(--text)]">
-          {data.criticality ?? "standard"}
-        </span>
-      </div>
-      <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-        {data.type ?? "asset"}
-      </div>
-      <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-        {data.ips?.length ? data.ips.join(", ") : "no IPs listed"}
-      </div>
-    </div>
-  );
-}
-
-type RoutesNodeData = {
-  items: string[];
-};
-
-function RoutesNode({ data }: NodeProps<RoutesNodeData>) {
-  return (
-    <div className="w-[280px] rounded-2xl border border-amber-500/[0.15] bg-black/70 px-4 py-3 text-xs text-[var(--text)]">
-      <Handle type="target" position={Position.Top} id="top" style={handleStyle} />
-      <div className="mb-2 h-1 w-10 rounded-full" style={{ backgroundColor: "var(--purple)" }} />
-      <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">Routes</div>
-      <ul className="mt-2 space-y-1 text-[11px] text-[var(--text)]">
-        {data.items.length === 0 ? (
-          <li>no routes configured</li>
-        ) : (
-          data.items.map((item) => <li key={item}>{item}</li>)
-        )}
-      </ul>
-    </div>
-  );
-}
-
-function buildTopologyNodes(
-  zones: Zone[],
-  interfaces: Interface[],
-  assets: Asset[],
-  ifaceState: InterfaceState[],
-  routing: RoutingConfig | null,
-  osRouting: OSRoutingSnapshot | null,
-): { nodes: Node[]; edges: Edge[] } {
-  const zoneOrder = ["wan", "dmz", "lan", "mgmt"];
-  const zoneMap = new Map<string, Zone>();
-  for (const z of zones) {
-    if (z?.name) zoneMap.set(z.name, z);
+/* Edge style by type */
+function edgeStyle(type: string): Partial<Edge> {
+  switch (type) {
+    case "wan": return { type: "straight", style: { stroke: "rgba(107,114,128,0.5)", strokeWidth: 1 }, animated: false };
+    case "gw": return { type: "straight", style: { stroke: "rgba(6,182,212,0.5)", strokeWidth: 1.5 }, animated: false };
+    case "zone": return { type: "straight", style: { stroke: "rgba(34,197,94,0.4)", strokeWidth: 1.2 }, animated: false };
+    case "iface": return { type: "straight", style: { stroke: "rgba(168,85,247,0.4)", strokeWidth: 1 }, animated: false };
+    default: return { type: "straight", style: { stroke: "rgba(107,114,128,0.3)", strokeWidth: 1 }, animated: false };
   }
 }
 
@@ -665,7 +398,6 @@ function TopologyInner() {
   const [nodes, setNodes] = useState<Node<TopoNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
   const [syncTime, setSyncTime] = useState("\u2014");
   const [currentView, setCurrentView] = useState("logical");
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
@@ -728,7 +460,6 @@ function TopologyInner() {
   // ── Handle node click ──
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedId(node.id);
-    setPanelOpen(true);
   }, []);
 
   const onPaneClick = useCallback(() => {
@@ -773,10 +504,8 @@ function TopologyInner() {
       {/* WORKSPACE — switches between views */}
       {currentView === "physical" ? (
         <PhysicalView />
-      ) : currentView === "security" ? (
-        <SecurityView />
       ) : (
-        <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
+        <div className={s.workspace}>
           <div className={s.flowWrap}>
             <ReactFlow
               nodes={nodes}
@@ -818,27 +547,23 @@ function TopologyInner() {
               <div className={s.legendItem}><div className={s.legendLine} style={{ background: "#a855f7", opacity: 0.7 }} />Interface / VLAN</div>
               <div className={s.legendItem}><div className={s.legendLine} style={{ background: "#6b7280", opacity: 0.7, borderTop: "1px dashed #6b7280", height: 0 }} />External / WAN</div>
             </div>
-
-            {!panelOpen && <button className={s.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
           </div>
 
           {/* DETAIL PANEL */}
-          {panelOpen && (
-            <div className={s.detailPanel}>
-              <div className={s.panelHeader}>
-                <span className={s.panelTitle}>{selectedData?.label || "TOPOLOGY"}</span>
-                <button className={s.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
-              </div>
-              <div className={s.panelBody}>
-                {selectedData ? <DetailContent data={selectedData} /> : (
-                  <div className={s.panelEmpty}>
-                    <div className={s.panelEmptyIcon}>&#x2B21;</div>
-                    <div>Select any node to inspect its configuration, interfaces, routes, and active rules.</div>
-                  </div>
-                )}
-              </div>
+          <div className={s.detailPanel}>
+            <div className={s.panelHeader}>
+              <span className={s.panelTitle}>{selectedData?.label || "TOPOLOGY"}</span>
+              {selectedData && <button className={s.panelClose} onClick={() => setSelectedId(null)}>&#x2715;</button>}
             </div>
-          )}
+            <div className={s.panelBody}>
+              {selectedData ? <DetailContent data={selectedData} /> : (
+                <div className={s.panelEmpty}>
+                  <div className={s.panelEmptyIcon}>&#x2B21;</div>
+                  <div>Select any node to inspect its configuration, interfaces, routes, and active rules.</div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

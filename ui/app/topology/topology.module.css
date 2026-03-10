@@ -19,8 +19,8 @@
   --topo-surface2: #0e130e;
   --topo-border: rgba(245,158,11,0.14);
   --topo-text: #e8d5a3;
-  --text-dim: #6b5f4a;
-  --text-mid: #a89870;
+  --text-dim: #4a4030;
+  --text-mid: #8a7a5a;
   --mono: 'Share Tech Mono', monospace;
   --display: 'Orbitron', monospace;
   --ui: 'Rajdhani', sans-serif;
@@ -264,34 +264,3 @@
   padding: 24px; text-align: center; min-height: 200px;
 }
 .panelEmptyIcon { font-size: 28px; opacity: .3; }
-
-/* ── Panel toggle ── */
-.panelToggle {
-  position: absolute; top: 12px; right: 12px; z-index: 10;
-  width: 28px; height: 28px;
-  border: 1px solid var(--topo-border); background: var(--topo-surface);
-  color: var(--text-dim); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--mono); font-size: 11px;
-  transition: all .15s;
-}
-.panelToggle:hover { border-color: var(--amber); color: var(--amber); }
-
-/* ── Zoom controls ── */
-.zoomControls {
-  position: absolute; bottom: 16px; right: 16px; z-index: 10;
-  display: flex; flex-direction: column; gap: 2px;
-}
-.zoomBtn {
-  width: 28px; height: 28px;
-  border: 1px solid var(--topo-border); background: var(--topo-surface);
-  color: var(--text-dim); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--mono); font-size: 14px; font-weight: 700;
-  transition: all .15s; line-height: 1;
-}
-.zoomBtn:hover { border-color: var(--amber); color: var(--amber); }
-.zoomLevel {
-  text-align: center; font-family: var(--mono); font-size: 8px;
-  color: var(--text-dim); padding: 2px 0; letter-spacing: 1px;
-}
