@@ -18,12 +18,13 @@
 2) Selective capture (NFQUEUE/AF_PACKET) for DPI/IDS flows.
 3) Flow tracker (5-tuple + direction, timestamps, state) for enrichment and IDS.
 4) Rule evaluation against immutable snapshot; actions: allow/drop/reset, tag, rate-limit; IPS verdicts update nftables sets and conntrack.
-5) DPI decoders (15 protocols via `DefaultDecoders()`):
+5) DPI decoders (15 protocols via `DefaultDecoders()`, filtered by per-protocol enable/disable settings):
    - ICS: Modbus, DNP3, CIP/EtherNet/IP (with full EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA.
    - IT: DNS (with compression pointer support), TLS (SNI/JA3), HTTP, SSH, SMB, NTP, SNMP, RDP.
    - TCP reassembly with out-of-order handling feeds protocol parsers.
    - Protocol-specific parsers emit `dpi.Event` structs.
    - Same decoder set is shared between live engine and offline PCAP analysis.
+   - DPI operates in **learn** mode (passive observation) or **enforce** mode (active policy enforcement). See [ICS DPI](ics-dpi.md#dpi-modes).
 6) IDS/IPS engine consuming DPI events and flow context for signatures/behavioral rules.
 7) ICS asset auto-discovery builds inventory from observed traffic.
 8) Anomaly detection identifies malformed frames, protocol violations, and rate anomalies.

@@ -60,3 +60,13 @@ The following environment variables control runtime behavior. They are read at s
 |----------|---------|-------------|
 | `CONTAIND_CAPTURE_IFACES` | *(empty)* | Comma-separated list of interfaces to capture on |
 | `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable) |
+| `CONTAIND_DPI_MOCK` | `0` | Enable synthetic DPI event generation for testing (`1` to enable) |
+
+### DPI Configuration (Runtime)
+
+DPI mode and per-protocol settings are configured at runtime via the API or UI, not environment variables. Use `POST /api/v1/engine/config` with:
+
+- `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy enforcement)
+- `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)
+
+See [ICS DPI](ics-dpi.md) for details.
