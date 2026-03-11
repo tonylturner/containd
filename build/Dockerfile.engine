@@ -3,7 +3,7 @@
 # Optional: standalone engine image for split mgmt/engine deployments.
 # For most users, use build/Dockerfile.mgmt which builds the combined appliance.
 
-FROM golang:1.25.8-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown

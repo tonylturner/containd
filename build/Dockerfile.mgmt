@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM python:3.12-alpine AS docs-builder
+FROM --platform=$BUILDPLATFORM python:3.12-alpine AS docs-builder
 WORKDIR /src
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY docs/mkdocs.yml ./mkdocs.yml
@@ -9,7 +9,7 @@ COPY docs/mkdocs ./mkdocs
 RUN pip install --no-cache-dir -r ./requirements-mkdocs.txt
 RUN mkdocs build -f ./mkdocs.yml -d /out/docs
 
-FROM node:20-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:20-alpine AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
@@ -100,7 +100,7 @@ RUN set -eux; \
     > /out/etc/clamav/freshclam.conf; \
   chown -R 65532:65532 /out/var/lib/clamav /out/var/run/clamav
 
-FROM alpine:3.20 AS tini
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS tini
 ARG TARGETARCH
 RUN set -eux; \
     apk add --no-cache curl; \
@@ -113,7 +113,7 @@ RUN set -eux; \
     echo "${TINI_SHA}  /tini" | sha256sum -c; \
     chmod +x /tini
 
-FROM golang:1.25.8-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
