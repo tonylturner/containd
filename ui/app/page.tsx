@@ -28,19 +28,6 @@ type ServiceInfo = {
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
 
-// ── Types ──────────────────────────────────────────────────────────────
-
-type ServiceInfo = {
-  name: string;
-  active: boolean;
-  detail: string;
-  href: string;
-  sparkline?: number[];
-  errorRate?: number;
-};
-
-// ── Main Dashboard ─────────────────────────────────────────────────────
-
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
