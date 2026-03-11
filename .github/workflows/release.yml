@@ -26,6 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -44,6 +48,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.mgmt
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_MGMT }}:${{ steps.meta.outputs.version }}
@@ -60,6 +65,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.engine
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_ENGINE }}:${{ steps.meta.outputs.version }}
