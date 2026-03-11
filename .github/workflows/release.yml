@@ -104,6 +104,15 @@ jobs:
       - name: Attach SBOM to engine image
         run: cosign attach sbom --sbom sbom-engine.cdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
+      - name: Write release image manifest
+        run: |
+          cat > release-images.txt <<EOF
+          mgmt_image=${{ env.IMAGE_MGMT }}:${{ steps.meta.outputs.version }}
+          mgmt_digest=${{ steps.build-mgmt.outputs.digest }}
+          engine_image=${{ env.IMAGE_ENGINE }}:${{ steps.meta.outputs.version }}
+          engine_digest=${{ steps.build-engine.outputs.digest }}
+          EOF
+
       - name: Upload SBOMs as release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -111,3 +120,14 @@ jobs:
           path: |
             sbom-mgmt.cdx.json
             sbom-engine.cdx.json
+            release-images.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
+          files: |
+            sbom-mgmt.cdx.json
+            sbom-engine.cdx.json
+            release-images.txt

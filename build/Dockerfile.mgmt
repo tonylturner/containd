@@ -113,7 +113,7 @@ RUN set -eux; \
     echo "${TINI_SHA}  /tini" | sha256sum -c; \
     chmod +x /tini
 
-FROM golang:1.25.7-alpine AS builder
+FROM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown

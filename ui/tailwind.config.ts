@@ -27,9 +27,9 @@ const config: Config = {
         "amber-glow": "0 0 12px rgba(245, 158, 11, 0.15), inset 0 0 8px rgba(245, 158, 11, 0.1)",
       },
       fontFamily: {
-        display: ["var(--font-orbitron)", "monospace"],
-        ui: ["var(--font-rajdhani)", "sans-serif"],
-        mono: ["var(--font-share-tech-mono)", "monospace"],
+        display: ["'Orbitron'", "monospace"],
+        ui: ["'Rajdhani'", "sans-serif"],
+        mono: ["'Share Tech Mono'", "monospace"],
       },
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],

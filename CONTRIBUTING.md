@@ -14,7 +14,7 @@ Thank you for your interest in contributing to containd. This document covers th
 
 ### Prerequisites
 
-- Go 1.25+ (see `go.mod` for exact version)
+- Go 1.25.8+ (see `go.mod` for exact version)
 - Node.js 20+ and npm
 - Docker and Docker Compose
 - Python 3.12+ (for docs builds only)
@@ -29,7 +29,7 @@ go build ./cmd/containd
 cd ui && npm ci && npm run build
 
 # Docker image
-docker build -f Dockerfile.mgmt -t containd/containd:dev .
+docker build -f build/Dockerfile.mgmt -t containd/containd:dev .
 
 # Full appliance via Compose
 cp .env.example .env
@@ -45,8 +45,8 @@ go test ./...
 # UI lint
 cd ui && npm run lint
 
-# Smoke tests (requires running Compose stack)
-bash scripts/smoke-forward.sh
+# Smoke tests (builds and validates the local appliance image)
+bash scripts/smoketest
 ```
 
 ## Code Standards

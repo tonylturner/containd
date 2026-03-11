@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5-beta] - 2026-03-11
+
+### Security
+- Bumped the Go toolchain and embedded stdlib to `1.25.8` across local builds, CI, and Docker images to address `CVE-2026-25679` and `CVE-2026-27142`.
+
+### Changed
+- Clarified the split between Dashboard and live Monitoring with first-run guidance on the dashboard and a telemetry-focused monitoring landing page.
+- Routed the in-app Help button to page-specific documentation instead of always opening the docs root.
+- Updated local font packaging to self-hosted npm dependencies instead of fetching Google fonts during the build.
+
+### Fixed
+- Restored exact candidate-vs-running config dirty detection in the global status bar.
+- Finished the Events page live/pause control and visibility-aware polling.
+- Made the Policy Wizard success state explicit about candidate config and commit requirements.
+- Updated release metadata and schema/build version to `v0.1.5-beta`.
+
 ### Added
 - Single-binary appliance (`containd all|mgmt|engine`) with combined management and data plane.
 - Zone-based firewall with nftables enforcement, NAT (SNAT masquerade + DNAT port forwarding), and default-deny posture.

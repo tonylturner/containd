@@ -87,6 +87,38 @@ const NAV_ICONS: Record<string, () => React.ReactNode> = {
   "System": IconSettings,
 };
 
+function docsHrefForPath(pathname: string): string {
+  const mappings: Array<{ prefix: string; href: string }> = [
+    { prefix: "/firewall/", href: "/docs/policy-model/" },
+    { prefix: "/wizard/", href: "/docs/policy-model/" },
+    { prefix: "/ics/", href: "/docs/ics-dpi/" },
+    { prefix: "/ids/", href: "/docs/ids-rules/" },
+    { prefix: "/templates/", href: "/docs/policy-model/" },
+    { prefix: "/zones/", href: "/docs/policy-model/" },
+    { prefix: "/interfaces/", href: "/docs/policy-model/" },
+    { prefix: "/routing/", href: "/docs/config-format/" },
+    { prefix: "/nat/", href: "/docs/policy-model/" },
+    { prefix: "/dhcp/", href: "/docs/services/" },
+    { prefix: "/vpn/", href: "/docs/services/" },
+    { prefix: "/monitoring/", href: "/docs/api-reference/" },
+    { prefix: "/topology/", href: "/docs/architecture/" },
+    { prefix: "/flows/", href: "/docs/api-reference/" },
+    { prefix: "/events/", href: "/docs/api-reference/" },
+    { prefix: "/alerts/", href: "/docs/ids-rules/" },
+    { prefix: "/assets/", href: "/docs/ics-dpi/" },
+    { prefix: "/diagnostics/", href: "/docs/api-reference/" },
+    { prefix: "/dataplane/", href: "/docs/dataplane/" },
+    { prefix: "/pcap/", href: "/docs/ics-dpi/" },
+    { prefix: "/system/services/", href: "/docs/services/" },
+    { prefix: "/proxies/", href: "/docs/services/" },
+    { prefix: "/config/", href: "/docs/config-format/" },
+    { prefix: "/system/settings/", href: "/docs/api-reference/" },
+    { prefix: "/system/users/", href: "/docs/api-reference/" },
+  ];
+  const match = mappings.find((entry) => pathname.startsWith(entry.prefix));
+  return match?.href ?? "/docs/";
+}
+
 function buildNavGroups(isAdmin: boolean): NavGroup[] {
   const groups: NavGroup[] = [
     {
@@ -115,7 +147,7 @@ function buildNavGroups(isAdmin: boolean): NavGroup[] {
     {
       label: "Monitoring",
       items: [
-        { href: "/monitoring/", label: "Overview" },
+        { href: "/monitoring/", label: "Telemetry" },
         { href: "/topology/", label: "Topology" },
         { href: "/flows/", label: "Active Flows" },
         { href: "/events/", label: "Events" },
@@ -183,6 +215,7 @@ export function Shell({
 
   const isAdmin = (me?.role ?? "") === "admin";
   const navGroups = React.useMemo(() => buildNavGroups(isAdmin), [isAdmin]);
+  const docsHref = React.useMemo(() => docsHrefForPath(pathname), [pathname]);
 
   // Auto-expand nav group containing the active page
   React.useEffect(() => {
@@ -505,7 +538,7 @@ export function Shell({
                   <div className="flex items-center gap-2">
                     {actions}
                     <a
-                      href="/docs/"
+                      href={docsHref}
                       target="_blank"
                       rel="noreferrer"
                       title="Help & documentation"

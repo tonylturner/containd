@@ -206,7 +206,16 @@ export default function MonitoringOverviewPage() {
     : [];
 
   return (
-    <Shell title="Operations Center">
+    <Shell title="Monitoring Overview">
+      <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-muted)]">
+        Live telemetry and service activity.
+        {" "}
+        <Link href="/" className="text-[var(--text)] hover:text-white">
+          Use Dashboard
+        </Link>
+        {" "}
+        for setup, policy workflow, and config state.
+      </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Flows">
           <div className="text-3xl font-bold text-[var(--text)]">{flows.length}</div>

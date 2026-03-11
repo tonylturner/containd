@@ -744,7 +744,16 @@ export default function WizardPage() {
         <div className="mt-6 rounded-sm border border-emerald-500/30 bg-emerald-500/10 p-6">
           <h3 className="mb-2 text-sm font-semibold text-emerald-400">Success</h3>
           <p className="mb-4 text-sm text-[var(--text)]">{success}</p>
+          <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+            These changes were saved to the candidate config. Review and commit them before expecting runtime behavior to change.
+          </div>
           <div className="flex flex-wrap gap-3 text-sm">
+            <Link
+              href="/config/?tab=diff"
+              className="rounded-sm bg-[var(--amber)] px-3 py-2 font-medium text-white transition-ui hover:brightness-110"
+            >
+              Review &amp; Commit
+            </Link>
             <Link
               href="/firewall/"
               className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
@@ -760,7 +769,7 @@ export default function WizardPage() {
             <button
               type="button"
               onClick={reset}
-              className="rounded-sm bg-[var(--amber)] px-3 py-2 font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
             >
               Run another wizard
             </button>

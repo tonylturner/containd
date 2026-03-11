@@ -126,6 +126,7 @@ function EventsInner() {
     }
 
     refresh();
+    if (!live) return () => controller.abort();
     const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
     const onVisible = () => { if (!document.hidden) refresh(); };
     document.addEventListener("visibilitychange", onVisible);
@@ -134,19 +135,29 @@ function EventsInner() {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [searchParams]);
+  }, [searchParams, live]);
 
   return (
     <Shell
       title="Events"
       actions={
         <div className="flex items-center gap-2">
-          {live && (
-            <span className="flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-400">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
-              Live
-            </span>
-          )}
+          <button
+            onClick={() => setLive((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium transition-colors ${
+              live
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                : "border-amber-500/[0.15] bg-[var(--surface2)] text-[var(--text-muted)] hover:bg-amber-500/[0.1]"
+            }`}
+          >
+            {live && (
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+            )}
+            {live ? "Live" : "Paused"}
+          </button>
           <button
             onClick={manualRefresh}
             className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"

@@ -1,6 +1,6 @@
 {
   "name": "containd-ui",
-  "version": "0.1.1-beta",
+  "version": "0.1.5-beta",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,10 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.7",
+    "@fontsource/orbitron": "^5.2.6",
+    "@fontsource/rajdhani": "^5.2.6",
+    "@fontsource/share-tech-mono": "^5.2.6",
     "next": "15.5.9",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

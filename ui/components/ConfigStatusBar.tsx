@@ -4,16 +4,6 @@ import * as React from "react";
 import Link from "next/link";
 import { api } from "../lib/api";
 
-/** Simple FNV-1a-inspired string hash — fast, no allocations beyond the string itself. */
-function fastHash(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
 /** Thin status bar shown when uncommitted config changes exist. */
 export function ConfigStatusBar() {
   const [dirty, setDirty] = React.useState(false);
@@ -30,13 +20,7 @@ export function ConfigStatusBar() {
       }
       const r = JSON.stringify(diff.running ?? null);
       const c = JSON.stringify(diff.candidate ?? null);
-      // Fast pre-check: different lengths means definitely dirty.
-      // Same length: compare hashes to avoid slow char-by-char string equality on large configs.
-      if (r.length !== c.length) {
-        setDirty(true);
-      } else {
-        setDirty(fastHash(r) !== fastHash(c));
-      }
+      setDirty(r !== c);
     } catch {
       setDirty(false);
     } finally {
@@ -67,13 +51,13 @@ export function ConfigStatusBar() {
         <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
           <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
         </svg>
-        <span>You have uncommitted configuration changes</span>
+        <span>Candidate config differs from running config</span>
       </div>
       <Link
         href="/config/?tab=diff"
         className="rounded-lg bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-300 transition-ui hover:bg-amber-500/30"
       >
-        Review &amp; Commit
+        Review Candidate Diff
       </Link>
     </div>
   );

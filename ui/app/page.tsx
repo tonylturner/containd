@@ -39,6 +39,7 @@ export default function Home() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
+  const [configDirty, setConfigDirty] = useState<boolean | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [clock, setClock] = useState("");
   const [simRunning, setSimRunning] = useState<boolean | null>(null);
@@ -64,6 +65,12 @@ export default function Home() {
       api.listFlows(100, signal).then((r) => r && setFlows(r)).catch(() => {});
       api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
       api.getSimulationStatus(signal).then((r) => r && setSimRunning(r.running)).catch(() => {});
+      api.diffConfig().then((r) => {
+        if (!r) return;
+        const running = JSON.stringify(r.running ?? null);
+        const candidate = JSON.stringify(r.candidate ?? null);
+        setConfigDirty(running !== candidate);
+      }).catch(() => {});
     };
     load();
     const id = setInterval(() => { if (!document.hidden) load(); }, 10_000);
@@ -128,7 +135,7 @@ export default function Home() {
           )}
           {health?.build && (
             <span className="hidden sm:inline text-2xs text-amber-500/60 font-mono">
-              {health.build === "dev" ? "v0.1.1-beta" : `v${health.build}`}
+              {health.build === "dev" ? "v0.1.5-beta" : `v${health.build}`}
             </span>
           )}
         </div>
@@ -171,6 +178,12 @@ export default function Home() {
           <span className="text-amber-500/80 tabular-nums">{clock}</span>
         </div>
       </div>
+
+      <SetupChecklist
+        counts={data?.counts}
+        configDirty={configDirty}
+        isAdmin={data?.user?.role === "admin"}
+      />
 
       {/* ── Needs attention ─────────────────────────────────── */}
       {hasAlerts && (
@@ -338,6 +351,102 @@ export default function Home() {
         )}
       </div>
     </Shell>
+  );
+}
+
+function SetupChecklist({
+  counts,
+  configDirty,
+  isAdmin,
+}: {
+  counts: DashboardData["counts"] | null | undefined;
+  configDirty: boolean | null;
+  isAdmin: boolean;
+}) {
+  const steps = [
+    {
+      title: "Create zones",
+      detail: counts && counts.zones > 0 ? `${counts.zones} configured` : "Start with WAN, DMZ, and LAN/OT zones.",
+      complete: !!counts && counts.zones > 0,
+      href: "/zones/",
+      cta: (counts?.zones ?? 0) > 0 ? "Review zones" : "Create zones",
+    },
+    {
+      title: "Bind interfaces",
+      detail: counts && counts.interfaces > 0 ? `${counts.interfaces} configured` : "Assign zones to interfaces so policy can attach to ports.",
+      complete: !!counts && counts.interfaces > 0,
+      href: "/interfaces/",
+      cta: (counts?.interfaces ?? 0) > 0 ? "Review interfaces" : "Bind interfaces",
+    },
+    {
+      title: "Create policy",
+      detail: counts && (counts.rules + counts.icsRules) > 0
+        ? `${counts.rules + counts.icsRules} rules ready`
+        : "Use the wizard for a first pass, then tighten with explicit rules.",
+      complete: !!counts && (counts.rules + counts.icsRules) > 0,
+      href: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "/firewall/" : "/wizard/",
+      cta: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "Review policy" : "Open wizard",
+    },
+    {
+      title: "Commit runtime changes",
+      detail: configDirty === null
+        ? "Checking running and candidate config state."
+        : configDirty
+        ? "Candidate config differs from running. Review and commit to apply."
+        : "No pending candidate changes.",
+      complete: configDirty === false,
+      href: "/config/?tab=diff",
+      cta: configDirty ? (isAdmin ? "Review & commit" : "Review diff") : "Open config",
+    },
+  ];
+
+  return (
+    <div className="mb-5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-card">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            First-Run Checklist
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Use Dashboard for setup and config state. Use Monitoring for live telemetry.
+          </p>
+        </div>
+        <Link
+          href="/monitoring/"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition-ui hover:bg-white/[0.08] hover:text-white"
+        >
+          Open Monitoring
+        </Link>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {steps.map((step) => (
+          <div
+            key={step.title}
+            className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3"
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-slate-100">{step.title}</span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
+                  step.complete
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-amber-500/15 text-amber-400"
+                }`}
+              >
+                {step.complete ? "Ready" : "Action"}
+              </span>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">{step.detail}</p>
+            <Link
+              href={step.href}
+              className="text-xs font-semibold text-amber-300 transition-colors hover:text-amber-200"
+            >
+              {step.cta} →
+            </Link>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

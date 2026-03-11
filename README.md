@@ -31,6 +31,14 @@ CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
 
 Default credentials: `containd` / `containd` -- change on first login.
 
+### First 5 Minutes
+
+1. Log in and change the default password.
+2. Create your first zones (`WAN`, `DMZ`, `LAN`/`OT`).
+3. Bind interfaces to those zones.
+4. Use the Policy Wizard or Firewall Rules page to create initial access policy.
+5. Review the candidate config diff and commit it so the runtime actually changes.
+
 <p align="center">
   <img src="docs/mkdocs/assets/images/containd_dashboard.png" alt="containd dashboard showing network topology, service health, traffic statistics, and zone status" width="800" />
   <br />
