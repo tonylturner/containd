@@ -24,7 +24,7 @@ The following environment variables control runtime behavior. They are read at s
 | `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | HTTPS listen address inside the container |
 | `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
 | `CONTAIND_ENGINE_ADDR` | `:8081` | Dataplane engine listen address |
-| `CONTAIND_ENGINE_URL` | `http://127.0.0.1:8081` | URL the management plane uses to reach the engine |
+| `CONTAIND_ENGINE_URL` | *(auto in combined mode)* | URL the management plane uses to reach the engine. In combined `all` mode, containd defaults this to `http://127.0.0.1:8081` when unset. |
 
 ### Persistence
 

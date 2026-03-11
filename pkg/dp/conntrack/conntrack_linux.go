@@ -7,6 +7,7 @@ package conntrack
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,11 +19,20 @@ import (
 func List(limit int) ([]Entry, error) {
 	path := "/proc/net/nf_conntrack"
 	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return []Entry{}, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("stat conntrack table: %w", err)
+		}
 		// Fallback for older kernels.
 		path = "/proc/net/ip_conntrack"
 	}
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+			return []Entry{}, nil
+		}
 		return nil, fmt.Errorf("open conntrack table: %w", err)
 	}
 	defer f.Close()
@@ -109,4 +119,3 @@ func parseLine(line string) Entry {
 	}
 	return e
 }
-

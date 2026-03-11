@@ -23,6 +23,8 @@ curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docke
 CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
 ```
 
+The published compose file runs the combined appliance (`containd all`) and wires the management plane to the local engine automatically.
+
 | Service | URL |
 |---------|-----|
 | Web UI / API | `http://localhost:8080` |
@@ -99,6 +101,8 @@ docker run -d \
   -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
   ghcr.io/tonylturner/containd:latest
 ```
+
+Combined mode auto-connects the management plane to the local dataplane engine. Set `CONTAIND_ENGINE_URL` only when you intentionally split mgmt and engine.
 
 ## From Source
 

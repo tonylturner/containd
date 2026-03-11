@@ -16,7 +16,7 @@ services:
       context: ..
       dockerfile: build/Dockerfile.mgmt
       args:
-        VERSION: 0.1.1-beta
+        VERSION: 0.1.6-beta
         COMMIT: local
     image: containd/containd:dev
     cap_add:
@@ -71,7 +71,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/containd", "healthcheck"]
+      test: ["CMD", "/usr/bin/containd", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

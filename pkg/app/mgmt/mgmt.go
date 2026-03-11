@@ -26,6 +26,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/gin-gonic/gin"
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
@@ -37,12 +38,13 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/users"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/mp/sshserver"
-	"github.com/gin-gonic/gin"
 )
 
-type Options struct{}
+type Options struct {
+	Combined bool
+}
 
-func Run(ctx context.Context, _ Options) error {
+func Run(ctx context.Context, opts Options) error {
 	logger := logging.NewService("mgmt")
 	logging.InstallSlogBridge(logger.Desugar())
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
@@ -96,11 +98,7 @@ func Run(ctx context.Context, _ Options) error {
 	enableHTTPS := boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true)
 
 	var engineClient httpapi.EngineClient
-	if engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", ""); engineURL != "" {
-		if !strings.Contains(engineURL, "://") {
-			engineURL = "http://" + engineURL
-			logger.Warnf("CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
-		}
+	if engineURL := resolveEngineURL(logger, opts); engineURL != "" {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, auditStore)
@@ -243,6 +241,48 @@ func Run(ctx context.Context, _ Options) error {
 		}
 		return nil
 	}
+}
+
+func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
+	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
+	if engineURL == "" && opts.Combined {
+		engineAddr := common.EnvTrimmed("CONTAIND_ENGINE_ADDR", "")
+		if engineAddr == "" {
+			engineAddr = ":8081"
+		}
+		if derived, ok := localEngineURL(engineAddr); ok {
+			engineURL = derived
+			logger.Infof("CONTAIND_ENGINE_URL not set; using local engine URL %q for combined mode", engineURL)
+		}
+	}
+	if engineURL == "" {
+		return ""
+	}
+	if !strings.Contains(engineURL, "://") {
+		engineURL = "http://" + engineURL
+		logger.Warnf("CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
+	}
+	return engineURL
+}
+
+func localEngineURL(addr string) (string, bool) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", false
+	}
+	if strings.Count(addr, ":") == 0 {
+		return "http://" + net.JoinHostPort("127.0.0.1", addr), true
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", false
+	}
+	host = strings.Trim(host, "[]")
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port), true
 }
 
 func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger, engineClient any, auditStore audit.Store) {
@@ -1066,13 +1106,23 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 		BaseURL:           baseURL,
 		HostKeyPath:       hostKeyPath,
 		AuthorizedKeysDir: authKeysDir,
-		AllowPassword:       allowPassword,
-		Banner:              func() string { if cfg != nil { return cfg.System.SSH.Banner }; return "" }(),
-		HostKeyRotationDays: func() int { if cfg != nil { return cfg.System.SSH.HostKeyRotationDays }; return 0 }(),
-		LabMode:             lab,
-		JWTSecret:         []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
-		UserStore:         userStore,
-		AuditStore:        auditStore,
+		AllowPassword:     allowPassword,
+		Banner: func() string {
+			if cfg != nil {
+				return cfg.System.SSH.Banner
+			}
+			return ""
+		}(),
+		HostKeyRotationDays: func() int {
+			if cfg != nil {
+				return cfg.System.SSH.HostKeyRotationDays
+			}
+			return 0
+		}(),
+		LabMode:    lab,
+		JWTSecret:  []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
+		UserStore:  userStore,
+		AuditStore: auditStore,
 		AllowLocalIP: func(ip net.IP) bool {
 			if ip == nil || ip.IsLoopback() {
 				return true

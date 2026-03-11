@@ -671,6 +671,9 @@ func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
+	if out.Entries == nil {
+		return []conntrack.Entry{}, nil
+	}
 	return out.Entries, nil
 }
 
@@ -743,6 +746,9 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
+	if out == nil {
+		return []dpevents.FlowSummary{}, nil
+	}
 	return out, nil
 }
 
@@ -753,6 +759,9 @@ type SimulationStatus struct {
 
 // SimulationStatus returns whether the synthetic traffic generator is running.
 func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, error) {
+	if c.BaseURL == "" {
+		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/simulation", nil)
 	if err != nil {
 		return SimulationStatus{}, err
@@ -762,13 +771,26 @@ func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, er
 		return SimulationStatus{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return SimulationStatus{}, fmt.Errorf("engine simulation status %d: %s", resp.StatusCode, detail)
+		}
+		return SimulationStatus{}, fmt.Errorf("engine simulation status %d", resp.StatusCode)
+	}
 	var st SimulationStatus
-	_ = json.NewDecoder(resp.Body).Decode(&st)
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return SimulationStatus{}, err
+	}
 	return st, nil
 }
 
 // SimulationControl sends a start or stop action to the synthetic traffic generator.
 func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (SimulationStatus, error) {
+	if c.BaseURL == "" {
+		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")
+	}
 	body, _ := json.Marshal(map[string]string{"action": action})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/simulation", bytes.NewReader(body))
 	if err != nil {
@@ -780,8 +802,18 @@ func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (Simu
 		return SimulationStatus{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		detail := strings.TrimSpace(string(b))
+		if detail != "" {
+			return SimulationStatus{}, fmt.Errorf("engine simulation control %d: %s", resp.StatusCode, detail)
+		}
+		return SimulationStatus{}, fmt.Errorf("engine simulation control %d", resp.StatusCode)
+	}
 	var st SimulationStatus
-	_ = json.NewDecoder(resp.Body).Decode(&st)
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return SimulationStatus{}, err
+	}
 	return st, nil
 }
 

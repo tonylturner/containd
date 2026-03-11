@@ -28,8 +28,9 @@ import (
 	"github.com/kballard/go-shellquote"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/tonylturner/containd/pkg/common"
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -38,7 +39,6 @@ import (
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/templates"
 	"github.com/tonylturner/containd/pkg/cp/users"
-	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
@@ -399,6 +399,9 @@ func listInventoryHandler(engine EngineClient) gin.HandlerFunc {
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
+		}
+		if assets == nil {
+			assets = []inventory.DiscoveredAsset{}
 		}
 		c.JSON(http.StatusOK, assets)
 	}
@@ -1964,7 +1967,7 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 			}
 		}
 
-		var out []dpevents.Event
+		out := []dpevents.Event{}
 		var engineErr error
 
 		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
@@ -2054,6 +2057,9 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		if flows == nil {
+			flows = []dpevents.FlowSummary{}
+		}
 		c.JSON(http.StatusOK, flows)
 	}
 }
@@ -2110,6 +2116,9 @@ func protoStatsHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		if result == nil {
+			result = []stats.ProtoStats{}
+		}
 		c.JSON(http.StatusOK, result)
 	}
 }
@@ -2132,6 +2141,9 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		if result == nil {
+			result = []stats.FlowStats{}
+		}
 		c.JSON(http.StatusOK, result)
 	}
 }
@@ -2153,6 +2165,9 @@ func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
+		}
+		if anomalies == nil {
+			anomalies = []anomaly.Anomaly{}
 		}
 		c.JSON(http.StatusOK, anomalies)
 	}
@@ -5416,6 +5431,9 @@ func learnProfilesHandler(engine EngineClient) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
+		if profiles == nil {
+			profiles = []learn.LearnedProfile{}
+		}
 		c.JSON(http.StatusOK, profiles)
 	}
 }
@@ -5507,6 +5525,9 @@ func listSignaturesHandler(engine EngineClient) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
+		if sigs == nil {
+			sigs = []signatures.Signature{}
+		}
 		c.JSON(http.StatusOK, sigs)
 	}
 }
@@ -5579,6 +5600,9 @@ func listSignatureMatchesHandler(engine EngineClient) gin.HandlerFunc {
 		if err != nil {
 			internalError(c, err)
 			return
+		}
+		if matches == nil {
+			matches = []signatures.Match{}
 		}
 		c.JSON(http.StatusOK, matches)
 	}

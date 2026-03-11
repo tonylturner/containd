@@ -33,7 +33,8 @@ Docker Compose automatically loads `.env` from the same directory as the compose
 The management plane talks to the dataplane engine over the engine’s HTTP API. In combined mode, both run in one container:
 
 - `CONTAIND_MODE`: `all` (default), `mgmt`, or `engine`.
-- `CONTAIND_ENGINE_URL`: base URL for the engine API (must include a scheme). Defaults to `http://127.0.0.1:8081` inside the combined container.
+- `CONTAIND_ENGINE_URL`: base URL for the engine API (must include a scheme). In combined `all` mode, containd auto-wires this to `http://127.0.0.1:8081` when it is unset.
+- `CONTAIND_IMAGE`: optional image override for the standalone compose file. Defaults to `ghcr.io/tonylturner/containd:latest`.
 
 If you run split mgmt/engine containers, point `CONTAIND_ENGINE_URL` at the engine host and optionally publish the engine port on the engine container.
 

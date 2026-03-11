@@ -90,6 +90,85 @@ jobs:
           tags: containd/containd:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Quickstart smoke (public compose)
+        env:
+          COMPOSE_PROJECT_NAME: containd-quickstart-ci
+          CONTAIND_IMAGE: containd/containd:ci
+          CONTAIND_JWT_SECRET: ci-quickstart-secret
+        run: |
+          set -euo pipefail
+          passed=0
+          api="http://localhost:8080/api/v1"
+
+          cleanup() {
+            if [ "$passed" -ne 1 ]; then
+              docker compose -f deploy/docker-compose.yml logs --no-color containd || true
+            fi
+            docker compose -f deploy/docker-compose.yml down -v || true
+            rm -f /tmp/containd-quickstart.cookie
+          }
+          trap cleanup EXIT
+
+          docker compose -f deploy/docker-compose.yml up -d
+          cid="$(docker compose -f deploy/docker-compose.yml ps -q containd)"
+          if [ -z "$cid" ]; then
+            echo "failed to resolve quickstart container id" >&2
+            exit 1
+          fi
+
+          status=""
+          for _ in $(seq 1 40); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid")"
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            sleep 3
+          done
+          if [ "$status" != "healthy" ]; then
+            echo "quickstart container never became healthy (status=$status)" >&2
+            exit 1
+          fi
+
+          curl -fsS "$api/health" | jq -e '.status == "ok"' >/dev/null
+          curl -fsS -c /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"containd","password":"containd"}' \
+            "$api/auth/login" >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"currentPassword":"containd","newPassword":"Containd2"}' \
+            "$api/auth/me/password" >/dev/null
+          curl -fsS -c /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"containd","password":"Containd2"}' \
+            "$api/auth/login" >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/interfaces/state" | jq -e 'type == "array" and length > 0' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/flows?limit=5" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/stats/protocols" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/stats/top-talkers?n=5" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/conntrack?limit=5" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/anomalies?limit=5" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/inventory" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/learn/profiles" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/signatures" | jq -e 'type == "array"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"action":"start"}' \
+            "$api/simulation" | jq -e '.running == true' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"action":"stop"}' \
+            "$api/simulation" | jq -e '.running == false' >/dev/null
+          passed=1
       - name: Trivy vulnerability scan
         run: |
           docker run --rm \

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6-beta] - 2026-03-11
+
+### Fixed
+- Auto-wired the management plane to the local engine in combined `all` mode so the public standalone appliance can commit config changes, drive simulation, and query runtime state without extra environment variables.
+- Fixed the published Docker Compose healthcheck to use `/usr/bin/containd`, matching the runtime image layout.
+- Made the engine HTTP client fail fast on missing base URLs and non-2xx simulation responses instead of silently pretending control succeeded.
+- Treated a missing `/proc/net/nf_conntrack` table as an empty conntrack view instead of a public quickstart error.
+
+### Changed
+- Added CI coverage for the documented standalone/public compose path, including health, login, interface state, and simulation control checks.
+- Updated README and MkDocs deployment docs to describe the real combined-mode defaults and the new standalone image override flow.
+- Updated release metadata and schema/build version to `v0.1.6-beta`.
+
 ## [0.1.5-beta] - 2026-03-11
 
 ### Security

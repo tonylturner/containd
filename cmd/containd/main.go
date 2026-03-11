@@ -98,7 +98,7 @@ func runAll(ctx context.Context) error {
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- engineapp.Run(ctx, engineapp.Options{}) }()
-	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{}) }()
+	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true}) }()
 
 	// If either plane exits, cancel the other and drain both results.
 	var firstErr error
