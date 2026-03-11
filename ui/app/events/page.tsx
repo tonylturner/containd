@@ -7,12 +7,39 @@ import { Suspense } from "react";
 import { api, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 
+type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy";
+
+const FILTER_OPTIONS: Array<{ value: EventFilter; label: string }> = [
+  { value: "all", label: "All activity" },
+  { value: "service", label: "Service health" },
+  { value: "proxy", label: "Proxy activity" },
+  { value: "dpi", label: "DPI / ICS" },
+  { value: "firewall", label: "Firewall decisions" },
+];
+
+function eventHeadline(ev: TelemetryEvent): string {
+  if (ev.kind === "service.av.detected") return "Antivirus detection";
+  if (ev.kind === "service.av.block_flow") return "Antivirus blocked flow";
+  if (ev.kind.startsWith("service.envoy.")) return "Envoy proxy event";
+  if (ev.kind.startsWith("service.nginx.")) return "Nginx proxy event";
+  if (ev.kind.startsWith("service.dhcp.")) return "DHCP service event";
+  if (ev.kind.startsWith("service.")) return "System service event";
+  if (ev.proto === "firewall") return "Firewall decision";
+  if (ev.proto) return `${ev.proto.toUpperCase()} telemetry`;
+  return "Telemetry event";
+}
+
+function eventSubtitle(ev: TelemetryEvent): string {
+  const parts = [ev.kind];
+  if (ev.proto && ev.proto !== "firewall") parts.push(ev.proto.toUpperCase());
+  if (ev.transport) parts.push(ev.transport.toUpperCase());
+  return parts.join(" · ");
+}
+
 function EventsInner() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "service" | "dpi" | "firewall" | "proxy">(
-    "all",
-  );
+  const [filter, setFilter] = useState<EventFilter>("all");
   const [kindPrefix, setKindPrefix] = useState<string>("");
   const [onlyDetections, setOnlyDetections] = useState(false);
   const searchParams = useSearchParams();
@@ -55,6 +82,18 @@ function EventsInner() {
           return ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow";
         }),
     [events, filter, kindPrefix, onlyDetections],
+  );
+  const detectionCount = useMemo(
+    () => events.filter((ev) => ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow").length,
+    [events],
+  );
+  const proxyCount = useMemo(
+    () => events.filter((ev) => ev.kind.startsWith("service.envoy.") || ev.kind.startsWith("service.nginx.")).length,
+    [events],
+  );
+  const serviceCount = useMemo(
+    () => events.filter((ev) => ev.kind.startsWith("service.")).length,
+    [events],
   );
 
   // Progressive rendering: show PAGE_SIZE items at a time
@@ -169,6 +208,22 @@ function EventsInner() {
     >
       {/* Filter bar */}
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
+        <div className="w-full text-xs text-[var(--text-muted)]">
+          Use Events for raw telemetry and service activity. Use Flows for active connections and Alerts for IDS triage.
+        </div>
+        {FILTER_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            onClick={() => setFilter(option.value)}
+            className={
+              filter === option.value
+                ? "transition-ui rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 text-xs text-[var(--text)]"
+                : "transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+            }
+          >
+            {option.label}
+          </button>
+        ))}
         <button
           onClick={() => {
             setFilter("proxy");
@@ -176,7 +231,7 @@ function EventsInner() {
           }}
           className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
         >
-          Envoy
+          Envoy only
         </button>
         <button
           onClick={() => {
@@ -185,22 +240,20 @@ function EventsInner() {
           }}
           className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
         >
-          Nginx
+          Nginx only
         </button>
         <select
           className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
           value={filter}
-          onChange={(e) => setFilter(e.target.value as any)}
+          onChange={(e) => setFilter(e.target.value as EventFilter)}
         >
-          <option value="all">All</option>
-          <option value="service">Service events</option>
-          <option value="proxy">Proxy</option>
-          <option value="dpi">DPI/IDS</option>
-          <option value="firewall">Firewall</option>
+          {FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </select>
         <input
           type="text"
-          placeholder="Filter by kind prefix (e.g., service.dhcp.reservation)"
+          placeholder="Event name starts with... (optional)"
           value={kindPrefix}
           onChange={(e) => setKindPrefix(e.target.value)}
           className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
@@ -214,6 +267,18 @@ function EventsInner() {
           />
           Show AV detections only
         </label>
+        {(filter !== "all" || kindPrefix.trim() || onlyDetections) && (
+          <button
+            onClick={() => {
+              setFilter("all");
+              setKindPrefix("");
+              setOnlyDetections(false);
+            }}
+            className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {error && (
@@ -223,13 +288,16 @@ function EventsInner() {
       )}
       <div className="mb-3 flex flex-wrap gap-2 text-xs text-[var(--text)]">
         <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
-          Envoy events: {events.filter((e) => e.kind.startsWith("service.envoy.")).length}
+          Showing: {visibleEvents.length} of {filteredEvents.length}
         </div>
         <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
-          Nginx events: {events.filter((e) => e.kind.startsWith("service.nginx.")).length}
+          Proxy events: {proxyCount}
         </div>
         <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
-          Service events: {events.filter((e) => e.kind.startsWith("service.")).length}
+          Service events: {serviceCount}
+        </div>
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
+          AV detections: {detectionCount}
         </div>
       </div>
 
@@ -253,11 +321,14 @@ function EventsInner() {
           >
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-[var(--text)]">
-                {ev.proto.toUpperCase()} / {ev.kind}
+                {eventHeadline(ev)}
               </div>
               <div className="text-xs text-[var(--text-muted)]">
                 {new Date(ev.timestamp).toLocaleString()}
               </div>
+            </div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">
+              {eventSubtitle(ev)}
             </div>
             <div className="mt-1 text-xs text-[var(--text)]">
               {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}

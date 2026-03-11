@@ -214,6 +214,50 @@
 .valAmber { color: var(--amber); }
 .valRed { color: var(--topo-red); }
 .valCyan { color: var(--topo-cyan); }
+.panelHint {
+  margin-top: 10px;
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.actionList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.actionLink {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--topo-border);
+  background: var(--topo-surface2);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .15s, background .15s;
+}
+
+.actionLink:hover {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.06);
+}
+
+.actionLabel {
+  color: var(--amber);
+  font-family: var(--ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.actionMeta {
+  color: var(--text-mid);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.4;
+}
 
 .ifaceList { display: flex; flex-direction: column; gap: 4px; }
 .ifaceItem {

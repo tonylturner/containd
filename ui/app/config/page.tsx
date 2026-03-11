@@ -30,6 +30,18 @@ type BlockKey =
 
 type DiffLine = { type: "add" | "del" | "same"; line: string };
 
+const TAB_META: Record<Tab, { label: string; description: string }> = {
+  overview: { label: "Overview", description: "Backups, restore, and config summary." },
+  running: { label: "Live config", description: "What is active on the appliance now." },
+  candidate: { label: "Staged config", description: "Saved changes waiting to be reviewed or applied." },
+  diff: { label: "Review changes", description: "Compare staged changes against the live config." },
+};
+
+const VIEWER_SOURCE_LABEL: Record<ViewerSource, string> = {
+  running: "Live",
+  candidate: "Staged",
+};
+
 function diffLines(aLines: string[], bLines: string[]): DiffLine[] {
   const n = aLines.length;
   const m = bLines.length;
@@ -529,13 +541,19 @@ function ConfigPage() {
     {
       id: "config:restore",
       title: "Restore carefully",
-      body: "Restore replaces the running config; use commit-confirmed to stay safe.",
+      body: "Restore replaces the live config; use commit-confirmed if you need a safe rollback window.",
       when: () => canEdit,
     },
     {
       id: "config:viewer",
       title: "Explore by block",
-      body: "Use the left list to jump between zones, interfaces, and policies.",
+      body: "Use the left list to jump between zones, interfaces, services, and policy blocks.",
+      when: () => true,
+    },
+    {
+      id: "config:apply",
+      title: "Staged changes do not apply automatically",
+      body: "Edit the staged config, review the diff, then commit or commit-confirmed to update runtime behavior.",
       when: () => true,
     },
   ];
@@ -563,15 +581,19 @@ function ConfigPage() {
           <button
             key={t}
             onClick={() => setTab(t)}
+            title={TAB_META[t].description}
             className={
               tab === t
                 ? "rounded-sm bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--text)] transition-ui"
                 : "rounded-sm px-3 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
             }
           >
-            {t}
+            {TAB_META[t].label}
           </button>
         ))}
+      </div>
+      <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text)]">
+        Workflow: edit the staged config, review the change summary, then commit or commit-confirmed to update the live appliance safely.
       </div>
 
       {status && (
@@ -598,7 +620,7 @@ function ConfigPage() {
                   <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                     Backup &amp; Restore
                   </div>
-                  <h2 className="text-lg font-semibold text-[var(--text)]">Config vault</h2>
+                  <h2 className="text-lg font-semibold text-[var(--text)]">Backup &amp; recovery</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -626,7 +648,7 @@ function ConfigPage() {
                   className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
                 />
                 <div className="text-xs text-[var(--text-muted)]">
-                  Restore replaces running config. Use redacted backups for sharing.
+                  Restore replaces the live config. Use redacted backups for sharing.
                 </div>
                 {canEdit && (
                   <button
@@ -718,7 +740,7 @@ function ConfigPage() {
             </Card>
             <Card padding="lg">
               <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                Config health
+                Config summary
               </div>
               <div className="mt-3 grid gap-3 text-sm">
                 <Stat label="Zones" value={zoneCount} />
@@ -733,7 +755,7 @@ function ConfigPage() {
                 </div>
               </div>
               <div className="mt-4 text-xs text-[var(--text-muted)]">
-                Build your config by defining zones, then binding interfaces, then adding policies.
+                Typical workflow: define zones, bind interfaces, add policy, review changes, then commit.
               </div>
             </Card>
           </div>
@@ -800,7 +822,7 @@ function ConfigPage() {
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
                   Config viewer
                 </div>
-                <h2 className="text-lg font-semibold text-[var(--text)]">Explore blocks</h2>
+                <h2 className="text-lg font-semibold text-[var(--text)]">Explore config blocks</h2>
               </div>
               <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>Source</span>
@@ -812,7 +834,7 @@ function ConfigPage() {
                       : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
-                  running
+                  {VIEWER_SOURCE_LABEL.running}
                 </button>
                 <button
                   onClick={() => setViewerSource("candidate")}
@@ -822,7 +844,7 @@ function ConfigPage() {
                       : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
                   }
                 >
-                  candidate
+                  {VIEWER_SOURCE_LABEL.candidate}
                 </button>
               </div>
             </div>
@@ -976,7 +998,7 @@ function ConfigPage() {
               </div>
             </div>
             <div className="mt-3 text-xs text-[var(--text-muted)]">
-              Select a block to jump to its JSON. Use running for live state, candidate for staged changes.
+              Select a block to jump to its JSON. Use Live for current runtime state and Staged for saved changes waiting to be applied.
             </div>
           </Card>
 
@@ -1032,7 +1054,7 @@ function ConfigPage() {
         <Card padding="md">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-[var(--text)]">Candidate JSON</h2>
+              <h2 className="text-sm font-semibold text-[var(--text)]">Staged config JSON</h2>
               <div className="text-xs text-[var(--text-muted)]">
                 {candidateLoadedAt
                   ? `Last saved ${candidateLoadedAt.toLocaleString()}`
@@ -1045,16 +1067,19 @@ function ConfigPage() {
                   onClick={copyRunningToCandidate}
                   className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
-                  Copy running → candidate
+                  Copy live → staged
                 </button>
                 <button
                   onClick={saveCandidate}
                   className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
-                  Save candidate
+                  Save staged config
                 </button>
               </div>
             )}
+          </div>
+          <div className="mb-3 text-xs text-[var(--text-muted)]">
+            Changes here are saved but not active until you review and commit them.
           </div>
           <textarea
             value={candidateText}
@@ -1069,8 +1094,11 @@ function ConfigPage() {
       {tab === "running" && (
         <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
           <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <div>Running config</div>
+            <div>Live config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
+          </div>
+          <div className="mb-3 text-xs text-[var(--text-muted)]">
+            This is the config currently applied on the appliance.
           </div>
           <pre>{runningText}</pre>
         </div>
@@ -1080,16 +1108,16 @@ function ConfigPage() {
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
             <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
-              Candidate looks older than running. Copy running → candidate to diff your latest changes.
+              Staged config looks older than live config. Copy live → staged first if you want to review your latest active state.
             </div>
           )}
           {!candidate ? (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
-              No candidate config to compare. Save a candidate to see a diff.
+              No staged config to compare. Save staged changes to review them here.
             </div>
           ) : diffBlocks.length === 0 ? (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
-              No differences between running and candidate.
+              No differences between live and staged config.
             </div>
           ) : (
             diffBlocks.map((block) => (

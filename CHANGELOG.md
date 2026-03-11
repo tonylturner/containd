@@ -16,12 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified the split between Dashboard and live Monitoring with first-run guidance on the dashboard and a telemetry-focused monitoring landing page.
 - Routed the in-app Help button to page-specific documentation instead of always opening the docs root.
 - Updated local font packaging to self-hosted npm dependencies instead of fetching Google fonts during the build.
+- Simplified monitoring language so Events and Flows read more like operator tools and less like internal telemetry surfaces.
+- Made topology and config details more action-oriented without changing the existing visual system.
 
 ### Fixed
 - Restored exact candidate-vs-running config dirty detection in the global status bar.
 - Finished the Events page live/pause control and visibility-aware polling.
 - Made the Policy Wizard success state explicit about candidate config and commit requirements.
 - Updated release metadata and schema/build version to `v0.1.5-beta`.
+- Added clearer next-step actions in topology detail panels and reframed config workflow copy around live, staged, and review/apply states.
 
 ### Added
 - Single-binary appliance (`containd all|mgmt|engine`) with combined management and data plane.

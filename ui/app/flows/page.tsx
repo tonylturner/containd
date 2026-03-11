@@ -24,6 +24,14 @@ function FlowsInner() {
     () => flows.filter((f) => (showAVOnly ? f.avDetected || f.avBlocked : true)),
     [flows, showAVOnly],
   );
+  const avDetectedCount = useMemo(
+    () => flows.filter((f) => f.avDetected && !f.avBlocked).length,
+    [flows],
+  );
+  const avBlockedCount = useMemo(
+    () => flows.filter((f) => f.avBlocked).length,
+    [flows],
+  );
 
   const visibleFlows = useMemo(
     () => showAll ? filteredFlows : filteredFlows.slice(0, PAGE_SIZE),
@@ -83,7 +91,7 @@ function FlowsInner() {
 
   return (
     <Shell
-      title="Flows"
+      title="Active Flows"
       actions={
         <div className="flex items-center gap-2">
           <button
@@ -110,10 +118,31 @@ function FlowsInner() {
         </div>
       )}
 
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text)]">
+        <div className="w-full text-[var(--text-muted)]">
+          Live flow summaries show active conversations and AV flags. Use Events for raw telemetry and Alerts for IDS investigations.
+        </div>
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5">
+          Total flows: {flows.length}
+        </div>
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5">
+          AV detected: {avDetectedCount}
+        </div>
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5">
+          AV blocked: {avBlockedCount}
+        </div>
+        <a
+          href="/events/?av=1"
+          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06] transition-ui"
+        >
+          Open AV events
+        </a>
+      </div>
+
       {!loading && flows.length === 0 ? (
         <EmptyState
           title="No flows yet"
-          description="Enable DPI capture or learning mode to generate events."
+          description="Enable DPI capture or learning mode to generate flow records."
         />
       ) : (
         <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
@@ -121,11 +150,11 @@ function FlowsInner() {
             <thead className="bg-[var(--surface)] text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">
               <tr>
                 <th className="px-4 py-3">Flow</th>
-                <th className="px-4 py-3">App/Proto</th>
-                <th className="px-4 py-3">Endpoints</th>
+                <th className="px-4 py-3">Detected app</th>
+                <th className="px-4 py-3">Source → Destination</th>
                 <th className="px-4 py-3">First Seen</th>
                 <th className="px-4 py-3">Last Seen</th>
-                <th className="px-4 py-3 text-right">Events</th>
+                <th className="px-4 py-3 text-right">Signals</th>
               </tr>
             </thead>
             <tbody>
@@ -148,7 +177,7 @@ function FlowsInner() {
                     {f.flowId.slice(0, 10)}…
                   </td>
                   <td className="px-4 py-3 text-slate-100">
-                    {f.application || f.transport || "-"}
+                    {f.application || f.transport || "Unknown"}
                   </td>
                   <td className="px-4 py-3 text-[var(--text)]">
                     {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}

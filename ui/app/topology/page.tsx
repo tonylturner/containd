@@ -78,6 +78,12 @@ interface TopoNodeData {
   selected?: boolean;
 }
 
+interface TopologyAction {
+  href: string;
+  label: string;
+  detail: string;
+}
+
 /* ════════════════════════════════════════════════════════════════════
    CONSTANTS
    ════════════════════════════════════════════════════════════════════ */
@@ -222,6 +228,51 @@ function edgeStyle(type: string): Partial<Edge> {
     case "zone": return { type: "straight", style: { stroke: "rgba(34,197,94,0.4)", strokeWidth: 1.2 }, animated: false };
     case "iface": return { type: "straight", style: { stroke: "rgba(168,85,247,0.4)", strokeWidth: 1 }, animated: false };
     default: return { type: "straight", style: { stroke: "rgba(107,114,128,0.3)", strokeWidth: 1 }, animated: false };
+  }
+}
+
+function nextActionsForNode(data: TopoNodeData): TopologyAction[] {
+  switch (data.nodeType) {
+    case "firewall":
+      return [
+        { href: "/interfaces/", label: "Review interfaces", detail: "Check port bindings, IPs, and zone mapping." },
+        { href: "/routing/", label: "Review routing", detail: "Inspect gateways and outbound path selection." },
+        { href: "/firewall/", label: "Review policy", detail: "Adjust allow/deny rules and ordering." },
+        { href: "/system/services/", label: "Check services", detail: "Inspect DNS, DHCP, NTP, proxy, and AV services." },
+      ];
+    case "zone":
+      return [
+        { href: "/zones/", label: "Edit zone", detail: "Rename or document this zone and review its purpose." },
+        { href: "/interfaces/", label: "Bind interfaces", detail: "Confirm the right interfaces are attached here." },
+        { href: "/firewall/", label: "Review policy", detail: "Adjust rules that allow or deny traffic for this zone." },
+      ];
+    case "gateway":
+      return [
+        { href: "/routing/", label: "Review routes", detail: "Check default route, metrics, and next hops." },
+        { href: "/interfaces/", label: "Inspect WAN interface", detail: "Verify the interface carrying upstream traffic." },
+      ];
+    case "internet":
+      return [
+        { href: "/monitoring/", label: "Open monitoring", detail: "Review overall health and traffic telemetry." },
+        { href: "/flows/", label: "Inspect active flows", detail: "See which sessions are currently traversing the edge." },
+      ];
+    default:
+      return [];
+  }
+}
+
+function nodeOperatorHint(data: TopoNodeData): string {
+  switch (data.nodeType) {
+    case "firewall":
+      return "This node represents the live appliance and its current policy, routes, and interface state.";
+    case "zone":
+      return "This node represents a policy zone. Use it to confirm subnet placement and decide whether policy or interface mapping needs attention.";
+    case "gateway":
+      return "This node represents the current upstream path. Use it to validate reachability and routing decisions.";
+    case "internet":
+      return "This node represents external connectivity beyond the appliance edge.";
+    default:
+      return "";
   }
 }
 
@@ -625,7 +676,7 @@ function TopologyInner() {
                 {selectedData ? <DetailContent data={selectedData} /> : (
                   <div className={s.panelEmpty}>
                     <div className={s.panelEmptyIcon}>&#x2B21;</div>
-                    <div>Select any node to inspect its configuration, interfaces, routes, and active rules.</div>
+                    <div>Select any node to inspect its state and jump to the most relevant config or monitoring page.</div>
                   </div>
                 )}
               </div>
@@ -658,6 +709,8 @@ export default function TopologyPage() {
 function DetailContent({ data }: { data: TopoNodeData }) {
   const sc = STATUS_COLORS[data.status || "ok"];
   const sl: Record<string, string> = { ok: "ONLINE", warn: "WARNING", crit: "CRITICAL", down: "OFFLINE" };
+  const actions = nextActionsForNode(data);
+  const hint = nodeOperatorHint(data);
 
   return (
     <>
@@ -687,7 +740,22 @@ function DetailContent({ data }: { data: TopoNodeData }) {
           <DRow k="Latency" v={data.latency || ""} cls={s.valGreen} />
           <DRow k="Packet loss" v={data.loss || ""} cls={s.valGreen} />
         </>}
+        {hint ? <div className={s.panelHint}>{hint}</div> : null}
       </div>
+
+      {actions.length > 0 && (
+        <div className={s.panelSection}>
+          <div className={s.panelSectionLabel}>Next Actions</div>
+          <div className={s.actionList}>
+            {actions.map((action) => (
+              <a key={action.href} href={action.href} className={s.actionLink}>
+                <span className={s.actionLabel}>{action.label}</span>
+                <span className={s.actionMeta}>{action.detail}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {data.nodeType === "firewall" && data.interfaces && (
         <div className={s.panelSection}>
