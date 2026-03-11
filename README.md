@@ -1,45 +1,26 @@
 # containd
 
-An open-source next-generation firewall purpose-built for ICS/OT environments.
+[![CI](https://github.com/tonylturner/containd/actions/workflows/ci.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/ci.yml)
+[![Release](https://github.com/tonylturner/containd/actions/workflows/release.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/release.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/tonylturner/containd)](https://go.dev/)
+[![License](https://img.shields.io/github/license/tonylturner/containd)](LICENSE)
+[![GHCR](https://img.shields.io/badge/GHCR-containd-blue?logo=github)](https://ghcr.io/tonylturner/containd)
+[![SBOM](https://img.shields.io/badge/SBOM-SPDX-green?logo=linux-foundation)](docs/mkdocs/sbom.md)
+[![Trivy](https://img.shields.io/badge/Trivy-no%20HIGH%2FCRIT-brightgreen?logo=aqua)](https://github.com/tonylturner/containd/actions/workflows/ci.yml)
+[![Cosign](https://img.shields.io/badge/Signed-Cosign-blueviolet?logo=sigstore)](https://github.com/tonylturner/containd/actions/workflows/release.yml)
+[![OT Segmentation](https://img.shields.io/badge/topic-OT%20Segmentation-orange)]()
+[![Secure by Design](https://img.shields.io/badge/Secure%20by%20Design-CISA-blue)]()
 
-containd is a single-image appliance that combines zone-based firewalling, ICS protocol inspection, embedded network services, and a full management UI into one deployable container. It is designed for industrial control system operators who need OT-aware security without cobbling together dozens of point tools.
+An open-source next-generation firewall purpose-built for **ICS/OT network segmentation**.
 
-## Key Features
-
-- **Zone-based firewall** with nftables enforcement, NAT (SNAT + DNAT), and default-deny posture
-- **ICS/OT deep packet inspection** — Modbus/TCP, DNP3, CIP/EtherNet/IP (with EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA; function code, register, and service-level visibility
-- **IT protocol DPI** — DNS (with compression pointer support), TLS (SNI/JA3), HTTP/2, SSH, RDP, SMB, SNMP, NTP
-- **ICS asset auto-discovery** — passive traffic analysis builds a live OT asset inventory
-- **Learn mode** — passive traffic learning generates allowlist firewall rules from observed behavior
-- **Protocol anomaly detection** — malformed frames, protocol violations, and rate anomalies
-- **Signature-based IDS** — 16 built-in ICS malware signatures plus Sigma-compatible rule evaluation across DPI events
-- **PCAP offline analysis** — upload capture files for DPI processing and automatic policy generation
-- **Event export** — CEF, JSON, and Syslog output formats to file, UDP, or TCP destinations
-- **Protocol statistics** — per-protocol traffic counters and top talkers
-- **Policy templates** — 7 ICS protocol templates (Purdue baseline, maintenance windows) for rapid deployment
-- **Schedule and identity predicates** on firewall rules for time-based and user-based access control
-- **Prometheus /metrics endpoint** for monitoring integration
-- **TCP reassembly** with out-of-order handling and per-flow verdict caching
-- **NFQUEUE selective DPI steering** — only inspect flows that match DPI criteria; fast path for allowed traffic
-- **Optional eBPF (XDP/TC) acceleration** for early drops and hardware counters
-- **Embedded services** — DNS resolver (Unbound), NTP (OpenNTPD), DHCP server, forward proxy (Envoy), reverse proxy (Nginx)
-- **VPN** — WireGuard and OpenVPN with managed config, PKI, and client profiles
-- **Antivirus** — ICAP pipeline with optional embedded ClamAV
-- **Config lifecycle** — candidate/running configs, diff, commit, commit-confirmed with auto-rollback, deterministic JSON export/import
-- **Management UI** — dashboard, topology, firewall rules, routing, NAT, services, monitoring, diagnostics, audit log, and in-browser CLI console
-- **SSH console** — full CLI shell with `show`, `set`, `diag` commands, setup wizard, and diagnostics
-- **Syslog forwarding** — UDP/TCP, RFC 5424 or JSON, with retry and backoff
+containd is a single-container appliance that combines zone-based firewalling, ICS protocol deep packet inspection, embedded network services, and a full management UI. Designed for industrial control system operators who need OT-aware security without assembling dozens of point tools.
 
 ## Quick Start
 
-### Deploy (recommended)
-
 ```bash
 curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
-docker compose up -d
+CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
 ```
-
-Once running:
 
 | Service | URL |
 |---------|-----|
@@ -47,15 +28,44 @@ Once running:
 | HTTPS | `https://localhost:8443` |
 | SSH console | `ssh -p 2222 containd@localhost` |
 
-Default admin credentials: `containd` / `containd` — change these on first login.
+Default credentials: `containd` / `containd` -- change on first login.
 
-For production, set a unique JWT secret:
+## What It Does
 
-```bash
-CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
-```
+**Firewall** -- Zone-based with nftables enforcement, NAT (SNAT + DNAT), default-deny posture, and optional eBPF XDP/TC acceleration.
 
-### Standalone Container
+**ICS/OT Deep Packet Inspection** -- Native Go decoders for 7 ICS protocols (Modbus, DNP3, CIP/EtherNet/IP, S7comm, IEC 61850 MMS, BACnet, OPC UA) and 8 IT protocols (DNS, TLS/JA3, HTTP, SSH, RDP, SMB, SNMP, NTP). Per-protocol enable/disable, learn-then-enforce workflow, function code and register-level visibility.
+
+**ICS Security** -- Asset auto-discovery, learn mode (passive traffic profiling to auto-generate allowlist rules), protocol anomaly detection, 16 built-in ICS malware signatures, Sigma-compatible IDS rules, PCAP offline analysis.
+
+**Embedded Services** -- DNS (Unbound), NTP (OpenNTPD), DHCP, forward proxy (Envoy), reverse proxy (Nginx), VPN (WireGuard + OpenVPN), antivirus (ClamAV via ICAP).
+
+**Management** -- Web UI with dashboard/topology/firewall/routing/NAT/services/monitoring views, SSH console with appliance-style CLI, REST API, Prometheus metrics, syslog forwarding, event export (CEF/JSON/Syslog).
+
+**Config Lifecycle** -- Candidate/running configs, commit-confirmed with auto-rollback, deterministic JSON export/import, schedule and identity predicates on firewall rules, 7 ICS policy templates.
+
+## Architecture
+
+Single Go binary, three logical planes:
+
+- **Data plane** -- nftables/conntrack, NFQUEUE selective DPI steering, TCP reassembly, per-flow verdict caching, IDS/IPS
+- **Control plane** -- SQLite persistence, policy compilation, service management, audit
+- **Management plane** -- REST API, web UI, SSH console, auth/RBAC
+
+Run modes: `containd all` (combined), `containd mgmt`, `containd engine`.
+
+## Lab Topology
+
+The root `docker-compose.yml` creates 8 isolated networks for development:
+
+| Network | Subnet | Interface |
+|---------|--------|-----------|
+| WAN | 192.168.240.0/24 | eth0 |
+| DMZ | 192.168.241.0/24 | eth1 |
+| LAN1 | 192.168.242.0/24 | eth2 |
+| LAN2--LAN6 | 192.168.243--247.0/24 | eth3--eth7 |
+
+## Standalone Container
 
 ```bash
 docker run -d \
@@ -67,109 +77,44 @@ docker run -d \
   ghcr.io/tonylturner/containd:latest
 ```
 
-### From Source (development)
+## From Source
 
 ```bash
-# Build the Go binary
 go build -o containd ./cmd/containd
-
-# Build the UI (static export)
 cd ui && npm ci && npm run build && cd ..
-
-# Run the combined appliance
 CONTAIND_UI_DIR=ui/out ./containd all
 ```
 
-## Architecture
+## Security
 
-containd runs as a single Go binary with three logical planes:
+- Default-deny firewall posture
+- Distroless container image, nonroot
+- JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login
+- TLS 1.2+ with hardened cipher suites, HSTS enabled by default
+- CORS wildcard rejection, SameSite=Strict cookies, path traversal protection
+- Rate limiting on auth endpoints, nftables injection prevention
+- Cosign-signed container images with SBOM attestation
+- Trivy vulnerability scanning in CI (zero HIGH/CRITICAL)
 
-- **Data plane** — nftables/conntrack enforcement, packet capture, flow tracking, DPI/IDS, verdict engine
-- **Control plane** — SQLite persistence, config lifecycle, policy compilation, service management (DNS/NTP/DHCP/VPN/AV/proxies), audit
-- **Management plane** — REST API, web UI, SSH console, authentication/RBAC
-
-The binary supports three modes: `containd all` (default, combined appliance), `containd mgmt` (management only), and `containd engine` (data plane only).
-
-## Docker Compose Lab Topology
-
-The included `docker-compose.yml` (at the repo root) creates a lab environment with 8 isolated networks representing firewall ports:
-
-| Network | Subnet | Interface |
-|---------|--------|-----------|
-| WAN | 192.168.240.0/24 | eth0 |
-| DMZ | 192.168.241.0/24 | eth1 |
-| LAN1 | 192.168.242.0/24 | eth2 |
-| LAN2–LAN6 | 192.168.243–247.0/24 | eth3–eth7 |
-
-Default zones: `wan`, `dmz`, `mgmt` (lan1), `lan` (lan2–lan6).
-
-## Configuration
-
-All runtime configuration is managed through the UI, CLI, or REST API and persisted in SQLite. No direct file editing required.
-
-```bash
-# CLI examples (via SSH or in-app console)
-show interfaces
-show zones
-show firewall rules
-set zone lan interface lan2
-set firewall rule allow --src-zone lan --dst-zone wan --action allow
-commit
-```
-
-Config can be exported and imported as deterministic JSON:
-
-```bash
-export config > backup.json
-import config < backup.json
-```
-
-### Live Config Reload
-
-The containd process supports `SIGHUP` for configuration reload. Sending the signal causes the process to re-read its environment and refresh runtime state without downtime:
-
-```bash
-kill -HUP $(pidof containd)
-```
+See [SECURITY.md](SECURITY.md) for production hardening and vulnerability reporting.
 
 ## Documentation
 
-Full product documentation is embedded in the appliance (accessible via the Help icon in the UI) and built from `docs/mkdocs/`:
+Full docs are embedded in the appliance (Help icon in UI) and built from `docs/mkdocs/`:
 
-- [Architecture](docs/mkdocs/architecture.md)
-- [Docker Compose Deployment](docs/mkdocs/docker-compose.md)
-- [CLI Reference](docs/mkdocs/cli.md)
-- [Configuration Format](docs/mkdocs/config-format.md)
-- [Services](docs/mkdocs/services.md)
-- [Dataplane & Enforcement](docs/mkdocs/dataplane.md)
-- [ICS/DPI](docs/mkdocs/ics-dpi.md)
-- [IDS Rules](docs/mkdocs/ids-rules.md)
-- [Third-Party Licenses](docs/mkdocs/SPDX.md)
+- [Architecture](docs/mkdocs/architecture.md) | [Dataplane](docs/mkdocs/dataplane.md) | [eBPF](docs/mkdocs/ebpf.md)
+- [Docker Compose Deployment](docs/mkdocs/docker-compose.md) | [Host Deploy](docs/mkdocs/deploy-host.md)
+- [CLI Reference](docs/mkdocs/cli.md) | [Config Format](docs/mkdocs/config-format.md)
+- [ICS DPI](docs/mkdocs/ics-dpi.md) | [IDS Rules](docs/mkdocs/ids-rules.md) | [Policy Model](docs/mkdocs/policy-model.md)
+- [Services](docs/mkdocs/services.md) | [API Reference](docs/mkdocs/api-reference.md)
+- [SBOM](docs/mkdocs/sbom.md) | [Third-Party Licenses](docs/mkdocs/SPDX.md)
 
-An [OpenAPI 3.0 specification](docs/openapi.yaml) is also available for the REST API.
-
-## Security
-
-- Default-deny firewall posture out of the box.
-- Distroless container image running as nonroot.
-- JWT-based auth with session invalidation; admin and view-only roles; MustChangePassword enforcement on first login.
-- JWT secret validation — a strong secret is required when lab mode is disabled (`CONTAIND_LAB_MODE=0`).
-- HTTPS with auto-generated self-signed certificate; custom cert install supported.
-- TLS 1.2+ with a hardened cipher suite list.
-- HSTS enabled by default.
-- CORS with wildcard origin rejection.
-- SameSite=Strict session cookies with path traversal protection.
-- Rate limiting on authentication and sensitive API endpoints.
-- nftables injection prevention on all firewall rule inputs.
-- Trusted-proxy awareness for deployments behind a reverse proxy (`CONTAIND_TRUSTED_PROXIES`).
-- SSH key auth supported; password auth for lab use.
-
-For production hardening guidance and vulnerability reporting, see [SECURITY.md](SECURITY.md).
+[OpenAPI 3.0 specification](docs/openapi.yaml) for the REST API.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0 -- see [LICENSE](LICENSE).

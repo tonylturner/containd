@@ -217,6 +217,33 @@ components:
             end: { type: string, format: date-time }
         total_events: { type: integer, description: Total events evaluated }
 
+    EngineConfig:
+      type: object
+      properties:
+        dpiMode:
+          type: string
+          enum: [learn, enforce]
+          description: >
+            DPI operational mode. "learn" passively observes traffic without blocking.
+            "enforce" actively blocks traffic that violates ICS policy rules.
+        dpiProtocols:
+          type: object
+          additionalProperties: { type: boolean }
+          description: IT protocol enable/disable map (e.g., {"dns": true, "tls": true})
+        dpiIcsProtocols:
+          type: object
+          additionalProperties: { type: boolean }
+          description: >
+            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua.
+          example:
+            modbus: true
+            dnp3: true
+            cip: false
+            s7comm: false
+            mms: true
+            bacnet: false
+            opcua: false
+
   parameters:
     pathId:
       name: id
@@ -699,3 +726,118 @@ paths:
       responses:
         "200": { description: Learned data cleared }
         "400": { description: Learn mode not available }
+
+  # ── Engine / DPI Configuration ─────────────────────────────────
+  /engine/config:
+    get:
+      summary: Get data plane engine configuration
+      tags: [Engine]
+      responses:
+        "200":
+          description: Current engine configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EngineConfig" }
+    post:
+      summary: Update data plane engine configuration (admin)
+      description: >
+        Configure DPI mode (learn/enforce) and per-protocol enable/disable
+        settings. Changes take effect immediately without a config commit.
+      tags: [Engine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EngineConfig" }
+      responses:
+        "200": { description: Engine configuration updated }
+        "400": { description: Invalid configuration }
+        "403": { description: Admin role required }
+
+  # ── ICS Inventory ──────────────────────────────────────────────
+  /inventory:
+    get:
+      summary: List discovered ICS assets
+      tags: [Inventory]
+      responses:
+        "200":
+          description: Array of discovered ICS assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
+  # ── Signatures ─────────────────────────────────────────────────
+  /signatures:
+    get:
+      summary: List loaded IDS signatures
+      tags: [Signatures]
+      responses:
+        "200":
+          description: Array of signatures
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+    post:
+      summary: Add a custom IDS signature (admin)
+      tags: [Signatures]
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses:
+        "200": { description: Signature added }
+
+  /signatures/{id}:
+    delete:
+      summary: Remove an IDS signature (admin)
+      tags: [Signatures]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: Signature removed }
+        "404": { description: Signature not found }
+
+  /signatures/matches:
+    get:
+      summary: List signature match events
+      tags: [Signatures]
+      responses:
+        "200":
+          description: Array of signature match events
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+
+  # ── Anomalies ──────────────────────────────────────────────────
+  /anomalies:
+    get:
+      summary: List detected protocol anomalies
+      tags: [Anomalies]
+      responses:
+        "200":
+          description: Array of anomaly events
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+
+  # ── Protocol Statistics ────────────────────────────────────────
+  /stats/protocols:
+    get:
+      summary: Protocol traffic breakdown
+      tags: [Statistics]
+      responses:
+        "200":
+          description: Per-protocol traffic counters
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: { type: integer } }
+
+  /stats/top-talkers:
+    get:
+      summary: Top source/destination pairs by traffic volume
+      tags: [Statistics]
+      responses:
+        "200":
+          description: Top talkers
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }

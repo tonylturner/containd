@@ -3,12 +3,12 @@
 High-level architecture overview.
 
 ## Planes
-- **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), NFQUEUE selective DPI steering, per-flow verdict caching, capture, flow tracking, TCP reassembly, rule evaluator, DPI (15 protocol decoders), IDS, ICS asset auto-discovery, anomaly detection, signature matching, optional eBPF XDP/TC fast path.
+- **Data plane (`containd engine`)**: kernel-assisted enforcement (nftables/conntrack), NFQUEUE selective DPI steering, per-flow verdict caching, capture, flow tracking, TCP reassembly, rule evaluator, DPI (15 protocol decoders with per-protocol enable/disable), learn/enforce DPI modes, IDS, ICS asset auto-discovery, anomaly detection, signature matching, optional eBPF XDP/TC fast path.
 - **Control plane (`pkg/cp`)**: config persistence (SQLite), services (syslog/DNS/NTP/DHCP/VPN/AV/proxies), policy compilation to rule snapshots/nftables sets, policy templates (Purdue baseline, maintenance windows), audit, identity predicates, embedded-daemon config generation.
 - **Management plane (`containd mgmt` + UI + CLI)**: REST API (`api/http`), Prometheus /metrics endpoint, UI serving, CLI/SSH, config lifecycle (candidate/commit/commit-confirmed/rollback/export/import/backups), PCAP offline analysis, learn mode, event export (CEF/JSON/Syslog), audit, dashboards.
 
 ## Integrated daemons
-The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), OpenNTPD (NTP), ClamAV (AV/Freshclam), WireGuard, and OpenVPN. containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. All DPI is implemented natively in Go decoders -- 7 ICS protocols (Modbus, DNP3, CIP/EtherNet/IP, S7comm, IEC 61850 MMS, BACnet, OPC UA) and 8 IT protocols (DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, RDP).
+The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), OpenNTPD (NTP), ClamAV (AV/Freshclam), WireGuard, and OpenVPN. containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. All DPI is implemented natively in Go decoders -- 7 ICS protocols (Modbus, DNP3, CIP/EtherNet/IP, S7comm, IEC 61850 MMS, BACnet, OPC UA) and 8 IT protocols (DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, RDP). ICS decoders can be individually enabled/disabled and operate in learn or enforce mode (see [ICS DPI](ics-dpi.md)).
 
 ## Packaging
 - Containers at repo root (`Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
