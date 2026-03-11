@@ -128,6 +128,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags "-s -w -X github.com/tonylturner/containd/pkg/cp/config.BuildVersion=${VERSION} -X github.com/tonylturner/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
     -o /out/containd ./cmd/containd
 
+FROM alpine:3.20 AS datadir
+RUN mkdir -p /data/tls /data/ssh /data/logs /data/services /data/config-backups \
+    && chown -R 65532:65532 /data
+
 # Final appliance image: distroless glibc base (public, minimal, nonroot).
 # Envoy (Apache-2.0) and Nginx (BSD-2-Clause) binaries are copied in from public images.
 FROM gcr.io/distroless/base-debian12:nonroot
@@ -147,6 +151,9 @@ COPY --from=openvpn /out/ /
 COPY --from=openntpd /out/ /
 COPY --from=clamav /out/ /
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
+COPY --from=datadir --chown=65532:65532 /data /data
+VOLUME /data
+
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/usr/bin/containd", "healthcheck"]
