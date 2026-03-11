@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made the Policy Wizard success state explicit about candidate config and commit requirements.
 - Updated release metadata and schema/build version to `v0.1.5-beta`.
 - Added clearer next-step actions in topology detail panels and reframed config workflow copy around live, staged, and review/apply states.
+- Fixed multi-arch release packaging so build-only Docker stages run on the native build platform instead of hanging in emulated arm64 `npm ci` and builder steps.
 
 ### Added
 - Single-binary appliance (`containd all|mgmt|engine`) with combined management and data plane.
