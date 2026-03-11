@@ -323,7 +323,7 @@ export function Shell({
 
       <div className="relative flex min-h-screen">
         {/* ── Sidebar ─────────────────────────────────────────── */}
-        <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm">
+        <aside aria-label="Sidebar" className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm">
           {/* Brand */}
           <Link href="/" className="flex items-center gap-3 px-4 py-4 border-b border-amber-500/[0.15] transition-ui hover:bg-amber-500/[0.03]">
             <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500/60" style={{ boxShadow: "0 0 12px rgba(245,158,11,0.15), inset 0 0 8px rgba(245,158,11,0.1)" }}>
@@ -341,6 +341,7 @@ export function Shell({
             <div className="mb-1 px-1">
               <Link
                 href="/"
+                aria-current={pathname === "/" ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-ui ${
                   pathname === "/"
                     ? "bg-amber-500/[0.12] text-amber-400 font-medium border-l-2 border-amber-500"
@@ -372,7 +373,7 @@ export function Shell({
                         : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"
                     }`}
                   >
-                    {IconFn && <span className="opacity-70">{IconFn()}</span>}
+                    {IconFn && <span aria-hidden="true" className="opacity-70">{IconFn()}</span>}
                     <span className="flex-1 text-left">{group.label}</span>
                     <svg
                       viewBox="0 0 24 24"
@@ -393,6 +394,7 @@ export function Shell({
                           <Link
                             key={item.href}
                             href={item.href}
+                            aria-current={active ? "page" : undefined}
                             className={`block rounded-lg px-2.5 py-1.5 transition-ui border-l-2 ${
                               active
                                 ? "bg-amber-500/[0.08] text-amber-400 font-medium border-amber-500"

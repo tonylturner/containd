@@ -690,7 +690,8 @@ function ConfigPage() {
                           <div className="font-semibold text-[var(--text)]">{backup.name}</div>
                           <div className="text-[11px] text-[var(--text-muted)]">
                             {new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.size)} ·{" "}
-                            {backup.redacted ? "Redacted" : "Full"} · ID {backup.id.slice(0, 6)}
+                            {backup.redacted ? "Redacted" : "Full"}
+                            {backup.idsRuleCount ? ` · ${backup.idsRuleCount} IDS rules` : ""} · ID {backup.id.slice(0, 6)}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -736,6 +737,62 @@ function ConfigPage() {
               </div>
             </Card>
           </div>
+
+          <Card padding="md">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">IDS Rules</div>
+                <div className="text-sm text-[var(--text)]">
+                  IDS rules are stored separately from the config ({idsRuleCount} rules loaded).
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={async () => {
+                    setStatus(null);
+                    const blob = await api.backupIDSRules();
+                    if (!blob) { setStatus("Failed to export IDS rules."); return; }
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "containd-ids-rules.json";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    setStatus("IDS rules downloaded.");
+                  }}
+                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                >
+                  Download rules
+                </button>
+                {canEdit && (
+                  <label className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui cursor-pointer">
+                    Restore rules
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setStatus(null);
+                        try {
+                          const text = await file.text();
+                          const rules = JSON.parse(text);
+                          if (!Array.isArray(rules)) { setStatus("Invalid IDS rules file (expected JSON array)."); return; }
+                          const res = await api.restoreIDSRules(rules);
+                          setStatus(res.ok ? `Restored ${res.data.count} IDS rules.` : `Restore failed: ${res.error}`);
+                          refresh();
+                        } catch {
+                          setStatus("Invalid JSON file.");
+                        }
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          </Card>
 
           <Card padding="lg">
             <div className="flex flex-wrap items-center justify-between gap-3">

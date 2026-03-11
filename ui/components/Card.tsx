@@ -18,7 +18,7 @@ const paddingMap = {
 
 export function Card({ title, titleRight, children, className = "", padding = "md" }: CardProps) {
   return (
-    <div className={`card-industrial rounded-sm border border-amber-500/[0.15] bg-[#0d110d] shadow-card ${paddingMap[padding]} ${className}`}>
+    <section aria-label={title} className={`card-industrial rounded-sm border border-amber-500/[0.15] bg-[#0d110d] shadow-card ${paddingMap[padding]} ${className}`}>
       {title && (
         <div className="card-label mb-3 text-[var(--text-dim)]">
           {title}
@@ -26,7 +26,7 @@ export function Card({ title, titleRight, children, className = "", padding = "m
         </div>
       )}
       {children}
-    </div>
+    </section>
   );
 }
 

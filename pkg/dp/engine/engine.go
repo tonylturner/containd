@@ -781,9 +781,51 @@ func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
 // DPI/IDS paths will later override this for selective inspection policies.
 func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 	start := time.Now()
-	v := verdict.FromRulesAction(e.Evaluate(ctx))
+	snap := e.ruleSnap.Load()
+	ev := rules.NewEvaluator(snap)
+	action, matched := ev.EvaluateMatch(ctx)
+	v := verdict.FromRulesAction(action)
 	metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
 	metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()
+
+	// Emit a telemetry event when the matched rule has logging enabled.
+	if matched != nil && matched.Log && e.eventStore != nil {
+		attrs := map[string]any{
+			"ruleId": matched.ID,
+			"action": string(matched.Action),
+		}
+		if ctx.Proto != "" {
+			attrs["proto"] = ctx.Proto
+		}
+		if ctx.Port != "" {
+			attrs["port"] = ctx.Port
+		}
+		if ctx.SrcZone != "" {
+			attrs["srcZone"] = ctx.SrcZone
+		}
+		if ctx.DstZone != "" {
+			attrs["dstZone"] = ctx.DstZone
+		}
+		logEvent := events.Event{
+			Kind:      "firewall.rule.hit",
+			Timestamp: time.Now().UTC(),
+			Transport: ctx.Proto,
+			Attributes: attrs,
+		}
+		if ctx.SrcIP != nil {
+			logEvent.SrcIP = ctx.SrcIP.String()
+		}
+		if ctx.DstIP != nil {
+			logEvent.DstIP = ctx.DstIP.String()
+		}
+		if ctx.Port != "" {
+			p, err := strconv.ParseUint(ctx.Port, 10, 16)
+			if err == nil {
+				logEvent.DstPort = uint16(p)
+			}
+		}
+		e.eventStore.Append(logEvent)
+	}
 	return v
 }
 

@@ -718,6 +718,7 @@ type Rule struct {
 	ICS          ICSPredicate    `json:"ics,omitempty"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`
+	Log          bool            `json:"log,omitempty"` // log matching traffic
 }
 
 type Protocol struct {

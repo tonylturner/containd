@@ -30,11 +30,11 @@ export function Breadcrumbs() {
         </li>
         {crumbs.map((crumb, i) => (
           <li key={crumb.href} className="flex items-center gap-1.5">
-            <svg viewBox="0 0 24 24" className="h-3 w-3 text-[var(--text-dim)]" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3 w-3 text-[var(--text-dim)]" fill="none" stroke="currentColor" strokeWidth={2}>
               <polyline points="9,6 15,12 9,18" />
             </svg>
             {i === crumbs.length - 1 ? (
-              <span className="text-[var(--text)]">{crumb.label}</span>
+              <span aria-current="page" className="text-[var(--text)]">{crumb.label}</span>
             ) : (
               <Link href={crumb.href} className="transition-ui hover:text-[var(--amber)]">
                 {crumb.label}

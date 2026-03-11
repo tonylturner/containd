@@ -182,19 +182,25 @@ func PreviewMatch(entry Entry, ctx EvalContext) bool {
 }
 
 func (e *Evaluator) Evaluate(ctx EvalContext) Action {
+	action, _ := e.EvaluateMatch(ctx)
+	return action
+}
+
+// EvaluateMatch returns the action and the matched Entry (or nil if no rule matched).
+func (e *Evaluator) EvaluateMatch(ctx EvalContext) (Action, *Entry) {
 	if e.snapshot == nil {
-		return ActionDeny
+		return ActionDeny, nil
 	}
 	for i := range e.compiled {
 		ce := &e.compiled[i]
 		if matchZones(ce.Entry, ctx) && matchCIDRs(ce.Entry, ctx) && matchProtoCompiled(ce, ctx) && matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce.Entry, ctx) {
-			return ce.Action
+			return ce.Action, &ce.Entry
 		}
 	}
 	if e.snapshot.Default != "" {
-		return e.snapshot.Default
+		return e.snapshot.Default, nil
 	}
-	return ActionDeny
+	return ActionDeny, nil
 }
 
 func matchZones(entry Entry, ctx EvalContext) bool {

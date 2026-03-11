@@ -44,6 +44,7 @@ type Options struct{}
 
 func Run(ctx context.Context, _ Options) error {
 	logger := logging.NewService("mgmt")
+	logging.InstallSlogBridge(logger.Desugar())
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
 	labMode := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	switch {

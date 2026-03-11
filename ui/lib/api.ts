@@ -129,7 +129,7 @@ async function captureAuthError(res: Response) {
   }
 }
 
-async function fetchWithSession(path: string, init: RequestInit): Promise<Response> {
+async function fetchWithSession(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
   const url = `${API_BASE}${path}`;
 
   // Attempt cookie-first (no Authorization) unless an explicit env token is configured.
@@ -139,6 +139,7 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
     credentials: "include",
     // Avoid stale UI after writes: these endpoints are dynamic appliance state.
     cache: "no-store",
+    signal,
   });
 
   if (res.status === 401 && !ENV_TOKEN) {
@@ -152,6 +153,7 @@ async function fetchWithSession(path: string, init: RequestInit): Promise<Respon
           headers: { ...h, Authorization: `Bearer ${fallback}` },
           credentials: "include",
           cache: "no-store",
+          signal,
         });
         await captureAuthError(retry);
         updateSessionTokenFromResponse(retry);
@@ -401,6 +403,7 @@ export type FirewallRule = {
   protocols?: Protocol[];
   ics?: ICSPredicate;
   action: "ALLOW" | "DENY";
+  log?: boolean;
 };
 
 export type NATConfig = {
@@ -947,16 +950,18 @@ export type ConfigBackup = {
   createdAt: string;
   redacted: boolean;
   size: number;
+  idsRuleCount?: number;
 };
 
-export async function fetchHealth(): Promise<HealthResponse | null> {
+export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse | null> {
   try {
     const res = await fetchWithSession("/api/v1/health", {
       cache: "no-store",
-    });
+    }, signal);
     if (!res.ok) return null;
     return (await res.json()) as HealthResponse;
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     return null;
   }
 }
@@ -1080,18 +1085,19 @@ export async function replayPcap(req: PcapReplayRequest): Promise<boolean> {
   }
 }
 
-async function getJSON<T>(path: string): Promise<T | null> {
+async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T | null> {
   try {
     const res = await fetchWithSession(path, {
       cache: "no-store",
       headers: authHeaders(),
-    });
+    }, signal);
     if (handleUnauthorized(res)) return null;
     // Any non-401 response means auth middleware passed — session is valid.
     clearAuthExpired();
     if (!res.ok) return null;
     return (await res.json()) as T;
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     return null;
   }
 }
@@ -1275,17 +1281,17 @@ export const api = {
   deleteUser: (id: string) =>
     deleteJSON(`/api/v1/users/${encodeURIComponent(id)}`),
 
-  listZones: () => getJSON<Zone[]>("/api/v1/zones"),
+  listZones: (signal?: AbortSignal) => getJSON<Zone[]>("/api/v1/zones", signal),
   createZone: (z: Zone) => postJSONResult<Zone>("/api/v1/zones", z),
   updateZone: (name: string, z: Partial<Zone>) =>
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
   deleteZone: (name: string) =>
     deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`),
-  getSecurityConduits: () =>
-    getJSON<ConduitMap>("/api/v1/security/conduits"),
+  getSecurityConduits: (signal?: AbortSignal) =>
+    getJSON<ConduitMap>("/api/v1/security/conduits", signal),
 
-  listInterfaces: () => getJSON<Interface[]>("/api/v1/interfaces"),
-  listInterfaceState: () => getJSON<InterfaceState[]>("/api/v1/interfaces/state"),
+  listInterfaces: (signal?: AbortSignal) => getJSON<Interface[]>("/api/v1/interfaces", signal),
+  listInterfaceState: (signal?: AbortSignal) => getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
   assignInterfaces: (mode: "auto" | "explicit", mappings?: Record<string, string>) =>
     postJSON<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
       mode,
@@ -1300,13 +1306,13 @@ export const api = {
   deleteInterface: (name: string) =>
     deleteJSON(`/api/v1/interfaces/${encodeURIComponent(name)}`),
 
-  getRouting: () => getJSON<RoutingConfig>("/api/v1/routing"),
-  getOSRouting: () => getJSON<OSRoutingSnapshot>("/api/v1/routing/os"),
+  getRouting: (signal?: AbortSignal) => getJSON<RoutingConfig>("/api/v1/routing", signal),
+  getOSRouting: (signal?: AbortSignal) => getJSON<OSRoutingSnapshot>("/api/v1/routing/os", signal),
   setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
   reconcileRoutingReplace: () =>
     postJSON<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
 
-  listFirewallRules: () => getJSON<FirewallRule[]>("/api/v1/firewall/rules"),
+  listFirewallRules: (signal?: AbortSignal) => getJSON<FirewallRule[]>("/api/v1/firewall/rules", signal),
   createFirewallRule: (r: FirewallRule) =>
     postJSONResult<FirewallRule>("/api/v1/firewall/rules", r),
   updateFirewallRule: (id: string, r: Partial<FirewallRule>) =>
@@ -1411,6 +1417,16 @@ export const api = {
     if (handleUnauthorized(res) || !res.ok) return null;
     return await res.blob();
   },
+  backupIDSRules: async () => {
+    const res = await fetchWithSession("/api/v1/ids/backup", {
+      headers: { ...authHeaders() },
+      cache: "no-store",
+    });
+    if (handleUnauthorized(res) || !res.ok) return null;
+    return await res.blob();
+  },
+  restoreIDSRules: async (rules: unknown[]) =>
+    postJSONResult<{ status: string; count: number }>("/api/v1/ids/restore", rules),
   commit: () => postJSONResult<{ status: string }>("/api/v1/config/commit", {}),
   commitConfirmed: (ttlSeconds?: number) =>
     postJSONResult<{ status: string }>(
@@ -1425,7 +1441,7 @@ export const api = {
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
 
   // Dashboard (aggregated)
-  getDashboard: () => getJSON<DashboardData>("/api/v1/dashboard"),
+  getDashboard: (signal?: AbortSignal) => getJSON<DashboardData>("/api/v1/dashboard", signal),
 
   // System TLS
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
@@ -1443,12 +1459,12 @@ export const api = {
     getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
   setReverseProxy: (cfg: ReverseProxyConfig) =>
     postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
-  getServicesStatus: () =>
-    getJSON<ServicesStatus>("/api/v1/services/status"),
-  getSystemStats: () =>
-    getJSON<SystemStats>("/api/v1/system/stats"),
-  getSystemInspection: () =>
-    getJSON<SystemInspection>("/api/v1/system/inspection"),
+  getServicesStatus: (signal?: AbortSignal) =>
+    getJSON<ServicesStatus>("/api/v1/services/status", signal),
+  getSystemStats: (signal?: AbortSignal) =>
+    getJSON<SystemStats>("/api/v1/system/stats", signal),
+  getSystemInspection: (signal?: AbortSignal) =>
+    getJSON<SystemInspection>("/api/v1/system/inspection", signal),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
@@ -1493,16 +1509,16 @@ export const api = {
     ),
 
   // Telemetry
-  listEvents: (limit = 500) =>
-    getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`),
-  listFlows: (limit = 200) =>
-    getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`),
+  listEvents: (limit = 500, signal?: AbortSignal) =>
+    getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`, signal),
+  listFlows: (limit = 200, signal?: AbortSignal) =>
+    getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`, signal),
   getEvent: (id: number) =>
     getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
 
   // Simulation
-  getSimulationStatus: () =>
-    getJSON<{ running: boolean }>("/api/v1/simulation"),
+  getSimulationStatus: (signal?: AbortSignal) =>
+    getJSON<{ running: boolean }>("/api/v1/simulation", signal),
   startSimulation: () =>
     postJSON<{ running: boolean }>("/api/v1/simulation", { action: "start" }),
   stopSimulation: () =>

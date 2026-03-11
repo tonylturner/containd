@@ -63,19 +63,20 @@ export default function Home() {
 
   // Data fetching
   useEffect(() => {
-    let alive = true;
+    const controller = new AbortController();
+    const { signal } = controller;
     const load = () => {
-      api.getDashboard().then((r) => alive && r && setData(r));
-      api.listZones().then((r) => alive && r && setZones(r));
-      api.listEvents(50).then((r) => alive && r && setEvents(r));
-      api.listFlows(100).then((r) => alive && r && setFlows(r));
-      api.getSystemStats().then((r) => alive && r && setStats(r));
-      api.getSimulationStatus().then((r) => alive && r && setSimRunning(r.running));
+      api.getDashboard(signal).then((r) => r && setData(r)).catch(() => {});
+      api.listZones(signal).then((r) => r && setZones(r)).catch(() => {});
+      api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
+      api.listFlows(100, signal).then((r) => r && setFlows(r)).catch(() => {});
+      api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
+      api.getSimulationStatus(signal).then((r) => r && setSimRunning(r.running)).catch(() => {});
     };
     load();
     const id = setInterval(load, 10_000);
     return () => {
-      alive = false;
+      controller.abort();
       clearInterval(id);
     };
   }, []);

@@ -6,7 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,10 +17,13 @@ import (
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func main() {
+	logging.SetupGlobalLogger("containd")
+
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("CONTAIND_MODE")))
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
 		mode = strings.ToLower(strings.TrimSpace(os.Args[1]))
@@ -37,7 +40,7 @@ func main() {
 	signal.Notify(sighupCh, syscall.SIGHUP)
 	go func() {
 		for range sighupCh {
-			log.Println("received SIGHUP, config reload not yet fully implemented")
+			slog.Info("received SIGHUP, config reload not yet fully implemented")
 		}
 	}()
 
@@ -62,7 +65,8 @@ func main() {
 		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|version|healthcheck)", mode)
 	}
 	if err != nil {
-		log.Fatalf("%v", err)
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
 	}
 }
 

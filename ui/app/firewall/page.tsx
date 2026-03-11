@@ -573,13 +573,14 @@ export default function FirewallPage() {
               <th className="px-4 py-3">Protocols</th>
               <th className="px-4 py-3">ICS Filter</th>
               <th className="px-4 py-3">Action</th>
+              <th className="px-4 py-3">Log</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4" colSpan={7}>
+                <td className="px-4 py-4" colSpan={8}>
                   <EmptyState
                     title="No firewall rules configured"
                     description="Create rules below to control traffic between zones."
@@ -614,6 +615,13 @@ export default function FirewallPage() {
                   <StatusBadge variant={r.action === "ALLOW" ? "success" : "error"}>
                     {r.action}
                   </StatusBadge>
+                </td>
+                <td className="px-4 py-3">
+                  {r.log ? (
+                    <StatusBadge variant="info">log</StatusBadge>
+                  ) : (
+                    <span className="text-xs text-[var(--text-muted)]">&mdash;</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin() && (
@@ -668,6 +676,7 @@ function EditRuleModal({
 }) {
   const [description, setDescription] = useState(rule.description ?? "");
   const [action, setAction] = useState<"ALLOW" | "DENY">(rule.action);
+  const [log, setLog] = useState(rule.log ?? false);
   const [srcZone, setSrcZone] = useState((rule.sourceZones ?? [])[0] ?? "");
   const [dstZone, setDstZone] = useState((rule.destZones ?? [])[0] ?? "");
   const [sources, setSources] = useState((rule.sources ?? []).join(", "));
@@ -712,6 +721,7 @@ function EditRuleModal({
     onSave({
       description: description.trim() || undefined,
       action,
+      log: log || undefined,
       sourceZones: srcZone ? [srcZone] : undefined,
       destZones: dstZone ? [dstZone] : undefined,
       sources: splitCSV(sources),
@@ -748,6 +758,11 @@ function EditRuleModal({
             <option value="ALLOW">ALLOW</option>
             <option value="DENY">DENY</option>
           </select>
+          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+            Log hits
+            <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
+          </label>
           <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
           <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
           <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
@@ -791,6 +806,7 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
   const [id, setId] = useState("");
   const [description, setDescription] = useState("");
   const [action, setAction] = useState<"ALLOW" | "DENY">("ALLOW");
+  const [log, setLog] = useState(false);
   const [srcZone, setSrcZone] = useState("");
   const [dstZone, setDstZone] = useState("");
   const [sources, setSources] = useState("");
@@ -854,6 +870,7 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
       protocols,
       ics,
       action,
+      log: log || undefined,
     };
     setSaving(true);
     await onCreate(rule);
@@ -901,6 +918,11 @@ function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: F
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
         </select>
+        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          Log hits
+          <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
+        </label>
         <label className="flex items-center gap-2 text-sm text-[var(--text)]">
           <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
           ICS Protocol Filter

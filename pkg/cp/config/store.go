@@ -38,6 +38,12 @@ type Store interface {
 	CommitConfirmed(ctx context.Context, ttl time.Duration) error
 	ConfirmCommit(ctx context.Context) error
 	Rollback(ctx context.Context) error
+
+	// IDS rules are stored separately from the config to avoid bloating
+	// the config blob with potentially thousands of imported rules.
+	SaveIDSRules(ctx context.Context, rules []IDSRule) error
+	LoadIDSRules(ctx context.Context) ([]IDSRule, error)
+
 	Close() error
 }
 
@@ -107,14 +113,22 @@ func tuneSQLite(db *sql.DB) error {
 }
 
 func bootstrapSchema(db *sql.DB) error {
-	schema := `
-CREATE TABLE IF NOT EXISTS configs (
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS configs (
   key TEXT PRIMARY KEY,
   data TEXT NOT NULL,
   updated_at INTEGER NOT NULL
-);`
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("create schema: %w", err)
+);`,
+		`CREATE TABLE IF NOT EXISTS ids_rules (
+  id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create schema: %w", err)
+		}
 	}
 	return nil
 }
@@ -352,6 +366,94 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 		return err
 	}
 	return s.saveKind(ctx, configKeyRunning, prev)
+}
+
+// SaveIDSRules replaces all stored IDS rules.
+func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ids_rules`); err != nil {
+		return fmt.Errorf("clear ids_rules: %w", err)
+	}
+	now := time.Now().Unix()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO ids_rules (id, data, updated_at) VALUES (?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare ids_rules insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, r := range rules {
+		blob, err := json.Marshal(r)
+		if err != nil {
+			return fmt.Errorf("marshal ids rule %s: %w", r.ID, err)
+		}
+		if _, err := stmt.ExecContext(ctx, r.ID, string(blob), now); err != nil {
+			return fmt.Errorf("insert ids rule %s: %w", r.ID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// LoadIDSRules returns all stored IDS rules. If the ids_rules table is empty
+// but the running config contains legacy embedded rules, they are migrated
+// to the separate table automatically.
+func (s *SQLiteStore) LoadIDSRules(ctx context.Context) ([]IDSRule, error) {
+	rules, err := s.loadIDSRulesRaw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(rules) > 0 {
+		return rules, nil
+	}
+
+	// Migration: check if running config has embedded IDS rules to migrate.
+	cfg, err := s.Load(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(cfg.IDS.Rules) == 0 {
+		return nil, nil
+	}
+	slog.Info("migrating IDS rules from config to separate storage", "count", len(cfg.IDS.Rules))
+	if err := s.SaveIDSRules(ctx, cfg.IDS.Rules); err != nil {
+		return nil, fmt.Errorf("migrate ids rules: %w", err)
+	}
+	// Clear rules from the config blob to avoid duplication.
+	cfg.IDS.Rules = nil
+	_ = s.saveKind(ctx, configKeyRunning, cfg)
+	return s.loadIDSRulesRaw(ctx)
+}
+
+func (s *SQLiteStore) loadIDSRulesRaw(ctx context.Context) ([]IDSRule, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT data FROM ids_rules ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query ids_rules: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []IDSRule
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan ids_rule: %w", err)
+		}
+		var r IDSRule
+		if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			return nil, fmt.Errorf("unmarshal ids_rule: %w", err)
+		}
+		rules = append(rules, r)
+	}
+	return rules, rows.Err()
 }
 
 func (s *SQLiteStore) checkAndSchedulePending() error {

@@ -177,6 +177,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
+		if c.Request != nil && c.Request.TLS != nil {
+			c.Header("Strict-Transport-Security", "max-age=31536000")
+		}
 		c.Next()
 	})
 	// Avoid trusting all proxies by default; this prevents spoofed ClientIP via X-Forwarded-For.
@@ -351,6 +354,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/ids/import", requireAdmin(), idsImportHandler(store, engine, services))
 		protected.POST("/ids/export", idsExportHandler(store))
 		protected.GET("/ids/sources", idsSourcesHandler())
+		protected.GET("/ids/backup", idsBackupHandler(store))
+		protected.POST("/ids/restore", requireAdmin(), idsRestoreHandler(store, engine, services))
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
 		protected.GET("/cli/complete", cliCompleteHandler(store))
@@ -641,18 +646,20 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 }
 
 type configBackupMeta struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Redacted  bool      `json:"redacted"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Redacted     bool      `json:"redacted"`
+	IDSRuleCount int       `json:"idsRuleCount,omitempty"`
 }
 
 type configBackupInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Redacted  bool      `json:"redacted"`
-	Size      int64     `json:"size"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Redacted     bool      `json:"redacted"`
+	Size         int64     `json:"size"`
+	IDSRuleCount int       `json:"idsRuleCount,omitempty"`
 }
 
 type configBackupRequest struct {
@@ -754,11 +761,12 @@ func listConfigBackupsHandler(store config.Store) gin.HandlerFunc {
 				continue
 			}
 			backups = append(backups, configBackupInfo{
-				ID:        meta.ID,
-				Name:      meta.Name,
-				CreatedAt: meta.CreatedAt,
-				Redacted:  meta.Redacted,
-				Size:      info.Size(),
+				ID:           meta.ID,
+				Name:         meta.Name,
+				CreatedAt:    meta.CreatedAt,
+				Redacted:     meta.Redacted,
+				Size:         info.Size(),
+				IDSRuleCount: meta.IDSRuleCount,
 			})
 		}
 		sort.Slice(backups, func(i, j int) bool {
@@ -801,15 +809,20 @@ func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
 		if name == "" {
 			name = fmt.Sprintf("Backup %s", now.Format("2006-01-02 15:04 UTC"))
 		}
+		// Also capture IDS rules count for metadata.
+		idsRules, _ := store.LoadIDSRules(c.Request.Context())
 		meta := configBackupMeta{
-			ID:        id,
-			Name:      name,
-			CreatedAt: now,
-			Redacted:  req.Redacted,
+			ID:           id,
+			Name:         name,
+			CreatedAt:    now,
+			Redacted:     req.Redacted,
+			IDSRuleCount: len(idsRules),
 		}
 		jsonPath, metaPath := configBackupPaths(id)
+		idsPath := jsonPath[:len(jsonPath)-len(".json")] + ".ids.json"
 		tmpJSON := jsonPath + ".tmp"
 		tmpMeta := metaPath + ".tmp"
+		tmpIDS := idsPath + ".tmp"
 		payload, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
 			apiError(c, http.StatusInternalServerError, "failed to serialize config")
@@ -842,14 +855,22 @@ func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusInternalServerError, "failed to persist backup metadata")
 			return
 		}
+		// Write IDS rules as separate file alongside config backup.
+		if len(idsRules) > 0 {
+			idsPayload, _ := json.MarshalIndent(idsRules, "", "  ")
+			if err := os.WriteFile(tmpIDS, idsPayload, 0o600); err == nil {
+				_ = os.Rename(tmpIDS, idsPath)
+			}
+		}
 		info, _ := os.Stat(jsonPath)
 		auditLog(c, audit.Record{Action: "config.backup.create", Target: "running"})
 		c.JSON(http.StatusOK, configBackupInfo{
-			ID:        meta.ID,
-			Name:      meta.Name,
-			CreatedAt: meta.CreatedAt,
-			Redacted:  meta.Redacted,
-			Size:      info.Size(),
+			ID:           meta.ID,
+			Name:         meta.Name,
+			CreatedAt:    meta.CreatedAt,
+			Redacted:     meta.Redacted,
+			Size:         info.Size(),
+			IDSRuleCount: meta.IDSRuleCount,
 		})
 	}
 }
@@ -907,6 +928,7 @@ func deleteConfigBackupHandler() gin.HandlerFunc {
 			return
 		}
 		jsonPath, metaPath := configBackupPaths(id)
+		idsPath := jsonPath[:len(jsonPath)-len(".json")] + ".ids.json"
 		if err := os.Remove(metaPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			internalError(c, err)
 			return
@@ -915,6 +937,7 @@ func deleteConfigBackupHandler() gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
+		_ = os.Remove(idsPath) // best-effort cleanup of IDS rules file
 		auditLog(c, audit.Record{Action: "config.backup.delete", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
@@ -1064,6 +1087,13 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 			if _, err := engine.StopPcap(ctx); err != nil {
 				infraErrs = append(infraErrs, fmt.Errorf("pcap stop: %w", err))
 			}
+		}
+		// Load IDS rules from separate storage and inject for compilation.
+		idsRules, idsErr := store.LoadIDSRules(ctx)
+		if idsErr != nil {
+			infraErrs = append(infraErrs, fmt.Errorf("ids rules: %w", idsErr))
+		} else {
+			cfg.IDS.Rules = idsRules
 		}
 		// Always compile and push rules regardless of infrastructure errors.
 		snap, err := compile.CompileSnapshot(cfg)
@@ -2310,7 +2340,14 @@ func getIDSHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.IDS)
+		rules, err := store.LoadIDSRules(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		resp := cfg.IDS
+		resp.Rules = rules
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -2321,12 +2358,20 @@ func setIDSHandler(store config.Store, engine EngineClient, services ServicesApp
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		// Save rules to separate storage.
+		if err := store.SaveIDSRules(c.Request.Context(), idsCfg.Rules); err != nil {
+			apiError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Save IDS settings (enabled, rule groups) in config without rules.
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		cfg.IDS = idsCfg
+		cfg.IDS.Enabled = idsCfg.Enabled
+		cfg.IDS.RuleGroups = idsCfg.RuleGroups
+		cfg.IDS.Rules = nil // rules are in separate storage
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
@@ -2334,7 +2379,8 @@ func setIDSHandler(store config.Store, engine EngineClient, services ServicesApp
 		// Push updated rules to the engine so IDS evaluation takes effect immediately.
 		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
-		c.JSON(http.StatusOK, cfg.IDS)
+		idsCfg.Rules = nil // don't echo all rules back
+		c.JSON(http.StatusOK, idsCfg)
 	}
 }
 
@@ -2390,14 +2436,14 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 			return
 		}
 
-		// Merge into existing config.
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		// Merge into existing rules (stored separately from config).
+		existingRules, err := store.LoadIDSRules(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		existing := make(map[string]bool, len(cfg.IDS.Rules))
-		for _, r := range cfg.IDS.Rules {
+		existing := make(map[string]bool, len(existingRules))
+		for _, r := range existingRules {
 			existing[r.ID] = true
 		}
 		added := 0
@@ -2407,11 +2453,11 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 				skipped++
 				continue
 			}
-			cfg.IDS.Rules = append(cfg.IDS.Rules, r)
+			existingRules = append(existingRules, r)
 			existing[r.ID] = true
 			added++
 		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
+		if err := store.SaveIDSRules(c.Request.Context(), existingRules); err != nil {
 			apiError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -2421,7 +2467,7 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 		c.JSON(http.StatusOK, gin.H{
 			"imported": added,
 			"skipped":  skipped,
-			"total":    len(cfg.IDS.Rules),
+			"total":    len(existingRules),
 			"format":   format,
 		})
 	}
@@ -2436,12 +2482,12 @@ func idsExportHandler(store config.Store) gin.HandlerFunc {
 			format = "suricata"
 		}
 
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		rules, err := store.LoadIDSRules(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		data, err := cpids.ExportRules(cfg.IDS.Rules, format)
+		data, err := cpids.ExportRules(rules, format)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
@@ -2468,6 +2514,47 @@ func idsExportHandler(store config.Store) gin.HandlerFunc {
 func idsSourcesHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(http.StatusOK, cpids.BuiltinSources)
+	}
+}
+
+// idsBackupHandler exports all IDS rules as a standalone JSON file.
+func idsBackupHandler(store config.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rules, err := store.LoadIDSRules(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=containd-ids-rules.json")
+		c.JSON(http.StatusOK, rules)
+	}
+}
+
+// idsRestoreHandler replaces all IDS rules from an uploaded JSON file.
+func idsRestoreHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		const maxSize = 50 << 20 // 50 MB — rule sets can be large
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxSize+1))
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read body")
+			return
+		}
+		if int64(len(body)) > maxSize {
+			apiError(c, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		var rules []config.IDSRule
+		if err := json.Unmarshal(body, &rules); err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		if err := store.SaveIDSRules(c.Request.Context(), rules); err != nil {
+			internalError(c, err)
+			return
+		}
+		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		auditLog(c, audit.Record{Action: "ids.rules.restore", Target: "running"})
+		c.JSON(http.StatusOK, gin.H{"status": "restored", "count": len(rules)})
 	}
 }
 

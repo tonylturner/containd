@@ -64,6 +64,7 @@ func Run(ctx context.Context, opts Options) error {
 		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
 	}
 	logger := logging.NewService("engine")
+	logging.InstallSlogBridge(logger.Desugar())
 	ownership := newOwnershipManager(logger)
 
 	ifaces := opts.CaptureInterfaces
