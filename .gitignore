@@ -41,6 +41,7 @@ bin/
 
 # MkDocs build output
 site/
+docs/public/
 public/docs/
 ui/public/docs/
 
