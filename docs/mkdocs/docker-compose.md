@@ -1,6 +1,6 @@
 # Docker Compose
 
-This repo ships a `docker-compose.yml` for running the combined appliance (`containd all`) with a `.env`-driven configuration. You can still run mgmt-only or engine-only by overriding the entrypoint/command or `CONTAIND_MODE`.
+This repo ships `deploy/docker-compose.yml` for running the combined appliance (`containd all`) with a `.env`-driven configuration. You can still run mgmt-only or engine-only by overriding the entrypoint/command or `CONTAIND_MODE`.
 
 ## Quickstart
 
@@ -17,7 +17,7 @@ Tip: `bash scripts/containd up` wraps `docker compose up -d --build` and prints 
 
 ## Configuration via `.env`
 
-Docker Compose automatically loads `.env` from the same directory as `docker-compose.yml`.
+Docker Compose automatically loads `.env` from the same directory as the compose file.
 
 - `.env` is ignored by git (do not commit secrets).
 - `.env.example` is the committed template.
@@ -41,7 +41,7 @@ If you run split mgmt/engine containers, point `CONTAIND_ENGINE_URL` at the engi
 
 Some appliance services traditionally bind to privileged ports (e.g. DNS on `53/udp,tcp`).
 
-In Docker lab mode, `docker-compose.yml` grants `CAP_NET_BIND_SERVICE` so embedded services can bind to low ports
+In Docker lab mode, `deploy/docker-compose.yml` grants `CAP_NET_BIND_SERVICE` so embedded services can bind to low ports
 without running as root.
 
 ## Interface mapping (Docker lab mode)
@@ -50,12 +50,12 @@ When the `engine` service is attached to multiple Docker networks, Docker create
 The kernel device names (`eth0`, `eth1`, …) are not guaranteed to correspond to `wan/dmz/lan1…` in a stable order,
 because Docker network attach order can vary.
 
-In this repo’s `docker-compose.yml`, we explicitly pin:
+In this repo’s `deploy/docker-compose.yml`, we explicitly pin:
 - `wan` as the default-gateway network (`gw_priority`) so the kernel default route is via WAN.
 - interface names (`interface_name`) so `wan/dmz/lan1..lan6` reliably map to `eth0..eth7`.
 
 To keep the appliance UI/CLI stable in Docker labs, `Interfaces → Auto-assign` prefers matching interface roles by
-the IPv4 subnets present on each interface (defaults match this repo’s `docker-compose.yml`):
+the IPv4 subnets present on each interface (defaults match this repo’s `deploy/docker-compose.yml`):
 
 - `wan`: `192.168.240.0/24`
 - `dmz`: `192.168.241.0/24`
@@ -73,7 +73,7 @@ To override subnet matching (for custom lab topologies), set:
 - `CONTAIND_PUBLISH_SSH_PORT`: host port for SSH → container `2222`.
 - `CONTAIND_PUBLISH_ENGINE_PORT`: optional host port for engine API → container `8081` (only if you need external access to engine).
 
-Smoke harness: `docker-compose.smoke.yml` publishes the engine API on host `18081` to avoid collisions and drives the mgmt API on `18080`.
+Smoke harness: `deploy/docker-compose.smoke.yml` publishes the engine API on host `18081` to avoid collisions and drives the mgmt API on `18080`.
 
 ### Persistent data paths (inside container)
 

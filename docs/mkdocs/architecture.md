@@ -11,7 +11,7 @@ High-level architecture overview.
 The appliance optionally embeds Envoy (explicit forward proxy), Nginx (reverse proxy), Unbound (DNS), OpenNTPD (NTP), ClamAV (AV/Freshclam), WireGuard, and OpenVPN. containd owns lifecycle, config generation, and normalizes events into a unified schema for UI/CLI. All DPI is implemented natively in Go decoders -- 7 ICS protocols (Modbus, DNP3, CIP/EtherNet/IP, S7comm, IEC 61850 MMS, BACnet, OPC UA) and 8 IT protocols (DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, RDP). ICS decoders can be individually enabled/disabled and operate in learn or enforce mode (see [ICS DPI](ics-dpi.md)).
 
 ## Packaging
-- Containers at repo root (`Dockerfile.mgmt`, `docker-compose.yml`). Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
+- Containers: `build/Dockerfile.mgmt`, `deploy/docker-compose.yml`. Single-container appliance by default; `containd` binary has `all|mgmt|engine` subcommands for split deployments.
 - Host deployment to run `containd all` (or split commands); config DB default `data/config.db` (env `CONTAIND_CONFIG_DB`).
 
 ## Module boundaries

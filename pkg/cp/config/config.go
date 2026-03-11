@@ -221,6 +221,20 @@ type DHCPReservation struct {
 	IP    string `json:"ip"`    // IPv4 address
 }
 
+// RedactedVPNCopy returns a copy of v with secrets removed.
+func (v VPNConfig) RedactedVPNCopy() VPNConfig {
+	v.WireGuard.PrivateKey = ""
+	if v.OpenVPN.Managed != nil {
+		m := *v.OpenVPN.Managed
+		m.CA = ""
+		m.Cert = ""
+		m.Key = ""
+		m.Password = ""
+		v.OpenVPN.Managed = &m
+	}
+	return v
+}
+
 // VPNConfig defines VPN services managed by containd.
 type VPNConfig struct {
 	WireGuard WireGuardConfig `json:"wireguard,omitempty"`

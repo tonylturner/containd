@@ -9,15 +9,15 @@ case "${cmd}" in
     # Starts in detached mode and prints connection info immediately after.
     # For local development, rebuild images so UI/API changes are reflected without needing
     # the user to remember `--build`.
-    docker compose up -d --build "$@"
+    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" up -d --build "$@"
     echo ""
     bash "$(dirname "$0")/containd-connect" containd || true
     ;;
   down)
-    docker compose down "$@"
+    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" down "$@"
     ;;
   logs)
-    docker compose logs -f "$@"
+    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" logs -f "$@"
     ;;
   connect)
     bash "$(dirname "$0")/containd-connect" "${1:-containd}"

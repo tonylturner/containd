@@ -543,7 +543,10 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg)
+		// Always redact secrets from the runtime config read endpoint.
+		// Admins who need unredacted secrets should use the export endpoint
+		// with ?redacted=false.
+		c.JSON(http.StatusOK, cfg.RedactedCopy())
 	}
 }
 
@@ -954,7 +957,7 @@ func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg)
+		c.JSON(http.StatusOK, cfg.RedactedCopy())
 	}
 }
 
@@ -1123,8 +1126,8 @@ func diffConfigHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"running":   running,
-			"candidate": candidate,
+			"running":   running.RedactedCopy(),
+			"candidate": candidate.RedactedCopy(),
 		})
 	}
 }
@@ -1467,7 +1470,9 @@ func getVPNHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Services.VPN)
+		// Redact VPN secrets (WireGuard private keys, OpenVPN credentials/PEM).
+		redacted := cfg.Services.VPN.RedactedVPNCopy()
+		c.JSON(http.StatusOK, redacted)
 	}
 }
 

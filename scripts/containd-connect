@@ -8,7 +8,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-ps_out="$(docker compose ps -q "$service" 2>/dev/null || true)"
+ps_out="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" ps -q "$service" 2>/dev/null || true)"
 # Some Docker/Compose builds print warnings to stdout; only keep container IDs.
 cid="$(printf '%s\n' "$ps_out" | tr -d '\r' | grep -E '^[0-9a-f]{12,64}$' | head -n 1 || true)"
 if [[ -z "${cid}" ]]; then
@@ -17,10 +17,10 @@ if [[ -z "${cid}" ]]; then
   exit 1
 fi
 
-http_map="$(docker compose port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-https_map="$(docker compose port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-ssh_map="$(docker compose port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-engine_map="$(docker compose port "$service" 8081 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+http_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+https_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+ssh_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+engine_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8081 2>/dev/null | tr -d '\r' | head -n 1 || true)"
 
 ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
 
@@ -57,7 +57,7 @@ fi
 echo ""
 if [[ -n "${ssh_map}" ]]; then
   echo "SSH CLI (host published):"
-  # docker compose port prints host:port; assume host is localhost-like.
+  # docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port prints host:port; assume host is localhost-like.
   host="${ssh_map%:*}"
   port="${ssh_map##*:}"
   if [[ "${host}" == "0.0.0.0" ]]; then
@@ -91,5 +91,5 @@ fi
 
 echo ""
 echo "Logs:"
-echo "  docker compose logs -f ${service}"
+echo "  docker compose -f deploy/docker-compose.yml logs -f ${service}"
 echo "------------------------------------------------------------"

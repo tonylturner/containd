@@ -38,7 +38,7 @@ The following environment variables control runtime behavior. They are read at s
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTAIND_LAB_MODE` | `1` | Enable lab/dev defaults. Set to `0` for production (enforces strong JWT secret). |
+| `CONTAIND_LAB_MODE` | `0` | Enable lab/dev defaults (`1` to enable). When disabled (default), enforces a strong JWT secret. |
 | `CONTAIND_JWT_SECRET` | `containd-dev-secret-change-me` | HMAC secret for JWT signing. **Must** be changed when `LAB_MODE=0`. Generate with `openssl rand -hex 32`. |
 | `CONTAIND_COOKIE_SECURE` | `0` | Force the `Secure` flag on session cookies. Set to `1` when serving behind TLS. |
 | `CONTAIND_TRUSTED_PROXIES` | *(empty)* | Comma-separated CIDRs/IPs of reverse proxies trusted for `X-Forwarded-For` headers. |

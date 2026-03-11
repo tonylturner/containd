@@ -15,7 +15,7 @@ Welcome to the containd documentation. This content is rendered in-app (Help ico
 - **API**: An [OpenAPI 3.0 spec](https://github.com/tonylturner/containd/blob/main/docs/openapi.yaml) is available. See [API Reference](api-reference.md) for details and environment variable documentation.
 - **Supply chain**: [SBOM](sbom.md) -- software bill of materials, image signing, vulnerability scanning.
 - **Licensing**: [Third-Party Licenses](SPDX.md) -- component-level SPDX license tracking.
-- **Config reload**: The containd process supports `SIGHUP` for live configuration reload without downtime.
+- **Config reload**: The containd process accepts `SIGHUP` for configuration reload (partial -- not all subsystems reload yet).
 
 ## Documentation notes
 

@@ -27,7 +27,7 @@ function collectFiles(dir) {
 function buildHash() {
   const hasher = crypto.createHash("sha256");
   const inputs = [
-    path.join(repoRoot, "mkdocs.yml"),
+    path.join(repoRoot, "docs", "mkdocs.yml"),
     path.join(repoRoot, "docs", "requirements-mkdocs.txt"),
     path.join(repoRoot, "linear-dashboard-cursor-rule.md"),
     ...collectFiles(docsDir),
@@ -66,7 +66,7 @@ function runMkdocs() {
   }
   const result = spawnSync(
     "mkdocs",
-    ["build", "-f", "../mkdocs.yml", "-d", "./public/docs"],
+    ["build", "-f", "../docs/mkdocs.yml", "-d", "./public/docs"],
     {
       cwd: uiRoot,
       stdio: "inherit",

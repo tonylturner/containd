@@ -11,9 +11,9 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: read
+  contents: write   # needed to attach SBOMs to GitHub releases
   packages: write
-  id-token: write  # needed for Cosign keyless signing
+  id-token: write   # needed for Cosign keyless signing
 
 env:
   REGISTRY: ghcr.io

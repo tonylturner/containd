@@ -3,10 +3,9 @@
 Outlines installation and systemd service setup for running `containd engine` and `containd mgmt` on a host. Host-mode guidance is still minimal; use Docker Compose for the default appliance workflow.
 
 Container builds:
-- Appliance Dockerfile: `Dockerfile.mgmt` at repo root (builds single image).
-- Optional engine-only Dockerfile: `Dockerfile.engine` at repo root.
-- Compose: `docker-compose.yml` at repo root for single-container appliance.
-- The previous `deploy/` directory was removed; all packaging assets live at repo root.
+- Appliance Dockerfile: `build/Dockerfile.mgmt` (builds single image).
+- Optional engine-only Dockerfile: `build/Dockerfile.engine`.
+- Compose: `deploy/docker-compose.yml` for single-container appliance.
 
 Registry publishing (recommended workflow):
 - Tag the appliance image to your registry: `docker tag containd/containd:dev ghcr.io/you/containd:dev`
