@@ -135,7 +135,7 @@ export default function Home() {
           )}
           {health?.build && (
             <span className="hidden sm:inline text-2xs text-amber-500/60 font-mono">
-              {health.build === "dev" ? "v0.1.6-beta" : `v${health.build}`}
+              {health.build === "dev" ? "v0.1.6" : `v${health.build}`}
             </span>
           )}
         </div>

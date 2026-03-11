@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	SchemaVersionCurrent = "0.1.6-beta"
+	SchemaVersionCurrent = "0.1.6"
 )
 
 // Build metadata injected at compile time via -ldflags.

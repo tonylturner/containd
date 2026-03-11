@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.6-beta] - 2026-03-11
+## [0.1.6] - 2026-03-11
 
 ### Fixed
 - Auto-wired the management plane to the local engine in combined `all` mode so the public standalone appliance can commit config changes, drive simulation, and query runtime state without extra environment variables.
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Added CI coverage for the documented standalone/public compose path, including health, login, interface state, and simulation control checks.
 - Updated README and MkDocs deployment docs to describe the real combined-mode defaults and the new standalone image override flow.
-- Updated release metadata and schema/build version to `v0.1.6-beta`.
+- Updated release metadata and schema/build version to `v0.1.6`.
 
 ## [0.1.5-beta] - 2026-03-11
 
