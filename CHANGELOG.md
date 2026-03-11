@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Single-sourced release versioning via the repo `VERSION` file and separated it from `SchemaVersionCurrent`, so future releases no longer need manual version edits across unrelated files.
+
 ## [0.1.6] - 2026-03-11
 
 ### Fixed
@@ -18,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Added CI coverage for the documented standalone/public compose path, including health, login, interface state, and simulation control checks.
 - Updated README and MkDocs deployment docs to describe the real combined-mode defaults and the new standalone image override flow.
-- Updated release metadata and schema/build version to `v0.1.6`.
+- Updated release metadata and build version to `v0.1.6`.
 
 ## [0.1.5-beta] - 2026-03-11
 

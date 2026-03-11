@@ -40,7 +40,15 @@ jobs:
 
       - name: Extract version from tag
         id: meta
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(tr -d '\n' < VERSION)"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "tag version $tag_version does not match VERSION file $file_version" >&2
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
 
       - name: Build and push mgmt image
         id: build-mgmt

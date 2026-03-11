@@ -5,7 +5,7 @@
 
 FROM --platform=$BUILDPLATFORM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
-ARG VERSION=dev
+ARG VERSION
 ARG COMMIT=unknown
 
 WORKDIR /src
@@ -14,8 +14,9 @@ COPY go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath \
-    -ldflags "-s -w -X github.com/tonylturner/containd/pkg/cp/config.BuildVersion=${VERSION} -X github.com/tonylturner/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
+RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags "-s -w -X github.com/tonylturner/containd/pkg/cp/config.BuildVersion=${version} -X github.com/tonylturner/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
     -o /out/containd ./cmd/containd
 
 FROM debian:bookworm-slim AS nft

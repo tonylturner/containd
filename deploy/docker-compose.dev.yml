@@ -16,7 +16,6 @@ services:
       context: ..
       dockerfile: build/Dockerfile.mgmt
       args:
-        VERSION: 0.1.6
         COMMIT: local
     image: containd/containd:dev
     cap_add:

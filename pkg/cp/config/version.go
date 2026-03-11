@@ -14,8 +14,9 @@ const (
 )
 
 // Build metadata injected at compile time via -ldflags.
+// Release builds should set BuildVersion from the repo VERSION file or release tag.
 var (
-	BuildVersion = SchemaVersionCurrent
+	BuildVersion = "dev"
 	BuildCommit  = "local"
 )
 
