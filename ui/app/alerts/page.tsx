@@ -31,18 +31,39 @@ export default function AlertsPage() {
   const [search, setSearch] = useState("");
   const [sevFilter, setSevFilter] = useState("");
 
-  async function refresh() {
+  async function manualRefresh() {
     setError(null);
-    const list = await api.listEvents(2000);
-    if (!list) { setError("Failed to load alerts."); return; }
-    setEvents(list);
+    try {
+      const list = await api.listEvents(2000);
+      if (!list) { setError("Failed to load alerts."); return; }
+      setEvents(list);
+    } catch {
+      setError("Failed to load alerts.");
+    }
   }
 
   useEffect(() => {
+    const controller = new AbortController();
+
+    async function refresh() {
+      setError(null);
+      try {
+        const list = await api.listEvents(2000, controller.signal);
+        if (!list) { setError("Failed to load alerts."); return; }
+        setEvents(list);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError("Failed to load alerts.");
+      }
+    }
+
     refresh();
-    if (!live) return;
+    if (!live) return () => controller.abort();
     const id = setInterval(refresh, 10000);
-    return () => clearInterval(id);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
   }, [live]);
 
   const alerts = useMemo(() => {
@@ -97,7 +118,7 @@ export default function AlertsPage() {
             )}
             {live ? "Live" : "Paused"}
           </button>
-          <button onClick={refresh}
+          <button onClick={manualRefresh}
             className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs font-medium text-[var(--text)] transition-colors hover:bg-amber-500/[0.1]">
             Refresh
           </button>

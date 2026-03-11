@@ -79,29 +79,29 @@ jobs:
       - name: Sign engine image
         run: cosign sign --yes ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
-      # SBOM generation with Syft, attached to the signed images
+      # SBOM generation with Syft (CycloneDX 1.6), attached to the signed images
       - uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
-          output-file: sbom-mgmt.spdx.json
-          format: spdx-json
+          output-file: sbom-mgmt.cdx.json
+          format: cyclonedx-json
 
       - uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
-          output-file: sbom-engine.spdx.json
-          format: spdx-json
+          output-file: sbom-engine.cdx.json
+          format: cyclonedx-json
 
       - name: Attach SBOM to mgmt image
-        run: cosign attach sbom --sbom sbom-mgmt.spdx.json ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+        run: cosign attach sbom --sbom sbom-mgmt.cdx.json ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
 
       - name: Attach SBOM to engine image
-        run: cosign attach sbom --sbom sbom-engine.spdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
+        run: cosign attach sbom --sbom sbom-engine.cdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
       - name: Upload SBOMs as release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sboms
           path: |
-            sbom-mgmt.spdx.json
-            sbom-engine.spdx.json
+            sbom-mgmt.cdx.json
+            sbom-engine.cdx.json

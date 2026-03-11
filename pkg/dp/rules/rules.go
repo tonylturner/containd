@@ -64,6 +64,7 @@ type Entry struct {
 	Destinations []string
 	Protocols    []Protocol
 	Action       Action
+	Log          bool // log matching traffic
 	// Future predicates
 	Identities []string // user/group roles
 	ICS        ICSPredicate

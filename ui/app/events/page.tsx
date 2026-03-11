@@ -19,6 +19,20 @@ function EventsInner() {
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(true);
 
+  async function manualRefresh() {
+    setError(null);
+    setLoading(true);
+    try {
+      const list = await api.listEvents();
+      if (!list) { setError("Failed to load events."); setLoading(false); return; }
+      setEvents(list);
+      setLoading(false);
+    } catch {
+      setError("Failed to load events.");
+      setLoading(false);
+    }
+  }
+
   const filteredEvents = useMemo(
     () =>
       events
@@ -43,19 +57,6 @@ function EventsInner() {
     [events, filter, kindPrefix, onlyDetections],
   );
 
-  async function refresh() {
-    setError(null);
-    setLoading(true);
-    const list = await api.listEvents();
-    if (!list) {
-      setError("Failed to load events.");
-      setLoading(false);
-      return;
-    }
-    setEvents(list);
-    setLoading(false);
-  }
-
   useEffect(() => {
     const type = searchParams.get("filter");
     const avOnly = searchParams.get("av") === "1";
@@ -67,9 +68,34 @@ function EventsInner() {
       setKindPrefix(kindPref);
     }
     if (avOnly) setOnlyDetections(true);
+
+    const controller = new AbortController();
+
+    async function refresh() {
+      setError(null);
+      setLoading(true);
+      try {
+        const list = await api.listEvents(500, controller.signal);
+        if (!list) {
+          setError("Failed to load events.");
+          setLoading(false);
+          return;
+        }
+        setEvents(list);
+        setLoading(false);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError("Failed to load events.");
+        setLoading(false);
+      }
+    }
+
     refresh();
     const id = setInterval(refresh, 10000);
-    return () => clearInterval(id);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
   }, [searchParams]);
 
   return (
@@ -84,7 +110,7 @@ function EventsInner() {
             </span>
           )}
           <button
-            onClick={refresh}
+            onClick={manualRefresh}
             className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"
           >
             Refresh

@@ -88,8 +88,14 @@ func (m *mockStore) CommitConfirmed(ctx context.Context, ttl time.Duration) erro
 	return nil
 }
 func (m *mockStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *mockStore) Rollback(ctx context.Context) error      { return nil }
-func (m *mockStore) Close() error                            { return nil }
+func (m *mockStore) Rollback(ctx context.Context) error { return nil }
+func (m *mockStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
+	return nil
+}
+func (m *mockStore) LoadIDSRules(ctx context.Context) ([]config.IDSRule, error) {
+	return nil, nil
+}
+func (m *mockStore) Close() error { return nil }
 
 type mockEngine struct {
 	applied bool

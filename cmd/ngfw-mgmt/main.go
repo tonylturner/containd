@@ -6,13 +6,18 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
+	"github.com/tonylturner/containd/pkg/common/logging"
 )
 
 func main() {
+	logging.SetupGlobalLogger("ngfw-mgmt")
+
 	if err := mgmtapp.Run(context.Background(), mgmtapp.Options{}); err != nil {
-		log.Fatalf("%v", err)
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
 	}
 }

@@ -21,8 +21,8 @@ type StatusBadgeProps = {
 
 export function StatusBadge({ variant, children, dot, className = "" }: StatusBadgeProps) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[9px] tracking-wider uppercase ${variantClasses[variant]} ${className}`}>
-      {dot && <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+    <span role="status" className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[9px] tracking-wider uppercase ${variantClasses[variant]} ${className}`}>
+      {dot && <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${
         variant === "success" ? "bg-[var(--green)]" :
         variant === "warning" ? "bg-[var(--amber)]" :
         variant === "error" ? "bg-[var(--red)]" :
@@ -52,8 +52,8 @@ export function StatusIndicator({
   };
 
   return (
-    <div className="flex items-center gap-2.5">
-      <span className={`h-2.5 w-2.5 rounded-full ${colors[status]}`} />
+    <div role="status" aria-label={`${label}: ${status}`} className="flex items-center gap-2.5">
+      <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${colors[status]}`} />
       <div>
         <span className="text-sm font-medium text-[var(--text)]">{label}</span>
         {sublabel && <span className="ml-2 text-xs text-[var(--text-dim)]">{sublabel}</span>}

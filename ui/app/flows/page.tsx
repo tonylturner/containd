@@ -22,25 +22,50 @@ function FlowsInner() {
     [flows, showAVOnly],
   );
 
-  async function refresh() {
+  async function manualRefresh() {
     setError(null);
     setLoading(true);
-    const list = await api.listFlows();
-    if (!list) {
+    try {
+      const list = await api.listFlows();
+      if (!list) { setError("Failed to load flows."); setLoading(false); return; }
+      setFlows(list);
+      setLoading(false);
+    } catch {
       setError("Failed to load flows.");
       setLoading(false);
-      return;
     }
-    setFlows(list);
-    setLoading(false);
   }
 
   useEffect(() => {
     const avOnly = searchParams.get("av") === "1";
     if (avOnly) setShowAVOnly(true);
+    const controller = new AbortController();
+
+    async function refresh() {
+      setError(null);
+      setLoading(true);
+      try {
+        const list = await api.listFlows(200, controller.signal);
+        if (!list) {
+          setError("Failed to load flows.");
+          setLoading(false);
+          return;
+        }
+        setFlows(list);
+        setLoading(false);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError("Failed to load flows.");
+        setLoading(false);
+      }
+    }
+
     refresh();
-    const id = setInterval(refresh, 5000);
-    return () => clearInterval(id);
+    const id = setInterval(refresh, 10000);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
   }, [searchParams]);
 
   return (
@@ -49,7 +74,7 @@ function FlowsInner() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={manualRefresh}
             className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"
           >
             Refresh

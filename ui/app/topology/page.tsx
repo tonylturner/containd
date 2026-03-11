@@ -402,35 +402,50 @@ function TopologyInner() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [syncTime, setSyncTime] = useState("\u2014");
   const [currentView, setCurrentView] = useState("logical");
+  const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
   const sparkRef = useRef<Record<string, number[]>>({});
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
   const fetchData = useCallback(async () => {
-    const result = await buildTopology();
-    if (!result) return;
+    try {
+      const result = await buildTopology();
+      if (!result) {
+        setTopoError("Failed to load topology data. Check API connectivity.");
+        return;
+      }
 
-    // Merge sparkline history
-    for (const n of result.nodes) {
-      if (!sparkRef.current[n.id]) sparkRef.current[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
-      n.data.spark = sparkRef.current[n.id];
+      setTopoError(null);
+
+      // Merge sparkline history
+      for (const n of result.nodes) {
+        if (!sparkRef.current[n.id]) sparkRef.current[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
+        n.data.spark = sparkRef.current[n.id];
+      }
+
+      nodeDataRef.current = result.nodeDataMap;
+      setNodes(result.nodes);
+      setEdges(result.edges);
+      setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setTopoError("Failed to load topology data. Check API connectivity.");
     }
-
-    nodeDataRef.current = result.nodeDataMap;
-    setNodes(result.nodes);
-    setEdges(result.edges);
-    setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
   }, []);
 
   const initialFitDone = useRef(false);
   useEffect(() => {
+    const controller = new AbortController();
     fetchData().then(() => {
       // Delay fitView to let ReactFlow measure nodes
       setTimeout(() => { fitView({ padding: 0.15, duration: 400 }); initialFitDone.current = true; }, 200);
     });
     const iv = setInterval(fetchData, 30000);
-    return () => clearInterval(iv);
+    return () => {
+      controller.abort();
+      clearInterval(iv);
+    };
   }, [fetchData, fitView]);
 
   // ── Sparkline traffic simulation ──
@@ -503,6 +518,14 @@ function TopologyInner() {
           <button className={s.iconBtn} title="Refresh" onClick={() => fetchData()}>&#x21bb;</button>
         </div>
       </div>
+
+      {/* Error banner */}
+      {topoError && (
+        <div role="alert" style={{ margin: "8px 12px 0", padding: "8px 14px", fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 2 }}>
+          {topoError}
+          <button onClick={() => fetchData()} style={{ marginLeft: 12, color: "#f59e0b", background: "transparent", border: "1px solid rgba(245,158,11,0.3)", padding: "2px 10px", cursor: "pointer", fontFamily: "var(--mono)", fontSize: 9 }}>Retry</button>
+        </div>
+      )}
 
       {/* WORKSPACE — switches between views */}
       {currentView === "physical" ? (

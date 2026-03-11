@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -105,6 +106,7 @@ func (s *Store) spillWriter() {
 
 	f, err := os.OpenFile(s.spillPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		slog.Error("spill writer: failed to open spill file", "path", s.spillPath, "err", err)
 		return
 	}
 	defer f.Close()
@@ -118,30 +120,42 @@ func (s *Store) spillWriter() {
 		case ev, ok := <-s.spillCh:
 			if !ok {
 				// Channel closed — flush and return.
-				_ = w.Flush()
+				if err := w.Flush(); err != nil {
+					slog.Error("spill writer: final flush failed", "path", s.spillPath, "err", err)
+				}
 				return
 			}
 			data, jerr := json.Marshal(ev)
 			if jerr != nil {
+				slog.Warn("spill writer: failed to marshal event", "id", ev.ID, "err", jerr)
 				continue
 			}
-			_, _ = w.Write(data)
-			_ = w.WriteByte('\n')
+			if _, werr := w.Write(data); werr != nil {
+				slog.Error("spill writer: write failed", "path", s.spillPath, "err", werr)
+			}
+			if werr := w.WriteByte('\n'); werr != nil {
+				slog.Error("spill writer: write newline failed", "path", s.spillPath, "err", werr)
+			}
 			s.SpillCount.Add(1)
 
 			// Check file size for rotation.
 			if info, serr := f.Stat(); serr == nil && info.Size()+int64(w.Buffered()) >= spillMaxFileSize {
-				_ = w.Flush()
+				if err := w.Flush(); err != nil {
+					slog.Error("spill writer: pre-rotation flush failed", "path", s.spillPath, "err", err)
+				}
 				f.Close()
 				s.rotateSpillFiles()
 				f, err = os.OpenFile(s.spillPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 				if err != nil {
+					slog.Error("spill writer: failed to reopen spill file after rotation", "path", s.spillPath, "err", err)
 					return
 				}
 				w.Reset(f)
 			}
 		case <-ticker.C:
-			_ = w.Flush()
+			if err := w.Flush(); err != nil {
+				slog.Error("spill writer: periodic flush failed", "path", s.spillPath, "err", err)
+			}
 		}
 	}
 }

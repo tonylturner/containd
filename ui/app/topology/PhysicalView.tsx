@@ -198,40 +198,61 @@ export default function PhysicalView() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    const [stats, inspection, health, interfaces, ifaceState, flows, services] =
-      await Promise.all([
-        api.getSystemStats().catch(() => null),
-        api.getSystemInspection().catch(() => null),
-        fetchHealth().catch(() => null),
-        api.listInterfaces().catch(() => []),
-        api.listInterfaceState().catch(() => []),
-        api.listFlows().catch(() => []),
-        api.getServicesStatus().catch(() => null),
-      ]);
-    setData({
-      stats: stats as SystemStats | null,
-      inspection: inspection as SystemInspection | null,
-      health,
-      interfaces: (interfaces as Interface[]) || [],
-      ifaceState: (ifaceState as InterfaceState[]) || [],
-      flows: (flows as FlowSummary[]) || [],
-      services: services as ServicesStatus | null,
-    });
-    setLoading(false);
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [stats, inspection, health, interfaces, ifaceState, flows, services] =
+        await Promise.all([
+          api.getSystemStats(signal).catch(() => null),
+          api.getSystemInspection(signal).catch(() => null),
+          fetchHealth(signal).catch(() => null),
+          api.listInterfaces(signal).catch(() => []),
+          api.listInterfaceState(signal).catch(() => []),
+          api.listFlows(200, signal).catch(() => []),
+          api.getServicesStatus(signal).catch(() => null),
+        ]);
+      setData({
+        stats: stats as SystemStats | null,
+        inspection: inspection as SystemInspection | null,
+        health,
+        interfaces: (interfaces as Interface[]) || [],
+        ifaceState: (ifaceState as InterfaceState[]) || [],
+        flows: (flows as FlowSummary[]) || [],
+        services: services as ServicesStatus | null,
+      });
+      setError(null);
+      setLoading(false);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError("Failed to load physical view data.");
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    fetchData();
-    const iv = setInterval(fetchData, 30000);
-    return () => clearInterval(iv);
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    const iv = setInterval(() => fetchData(controller.signal), 30000);
+    return () => {
+      controller.abort();
+      clearInterval(iv);
+    };
   }, [fetchData]);
 
   if (loading || !data) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>
-        Loading inspection data...
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
+        {error ? (
+          <>
+            <div role="alert" style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444" }}>{error}</div>
+            <button onClick={() => fetchData()} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "4px 12px", border: "1px solid rgba(245,158,11,0.3)", background: "transparent", color: "#f59e0b", cursor: "pointer" }}>Retry</button>
+          </>
+        ) : (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>
+            Loading inspection data...
+          </div>
+        )}
       </div>
     );
   }

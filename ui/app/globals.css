@@ -48,7 +48,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scanline overlay */
+/* Scanline overlay — promoted to own compositing layer to avoid
+   triggering repaints on the rest of the page. */
 body::before {
   content: "";
   position: fixed;
@@ -62,6 +63,8 @@ body::before {
   );
   pointer-events: none;
   z-index: 9999;
+  will-change: transform;
+  contain: strict;
 }
 
 a {

@@ -6,13 +6,18 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
+	"github.com/tonylturner/containd/pkg/common/logging"
 )
 
 func main() {
+	logging.SetupGlobalLogger("ngfw-engine")
+
 	if err := engineapp.Run(context.Background(), engineapp.Options{}); err != nil {
-		log.Fatalf("%v", err)
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
 	}
 }

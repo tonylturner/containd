@@ -45,7 +45,12 @@ func (m *memStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error
 }
 func (m *memStore) ConfirmCommit(ctx context.Context) error { return nil }
 func (m *memStore) Rollback(ctx context.Context) error { return nil }
-
+func (m *memStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
+	return nil
+}
+func (m *memStore) LoadIDSRules(ctx context.Context) ([]config.IDSRule, error) {
+	return nil, nil
+}
 func (m *memStore) Close() error { return nil }
 
 func TestShowVersion(t *testing.T) {

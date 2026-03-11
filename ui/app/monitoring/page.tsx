@@ -14,21 +14,30 @@ export default function MonitoringOverviewPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [services, setServices] = useState<Record<string, unknown> | null>(null);
 
-  async function refresh() {
-    const [f, e, s] = await Promise.all([
-      api.listFlows(200),
-      api.listEvents(500),
-      api.getServicesStatus(),
-    ]);
-    setFlows(f ?? []);
-    setEvents(e ?? []);
-    setServices(s);
-  }
-
   useEffect(() => {
+    const controller = new AbortController();
+
+    async function refresh() {
+      try {
+        const [f, e, s] = await Promise.all([
+          api.listFlows(200, controller.signal),
+          api.listEvents(500, controller.signal),
+          api.getServicesStatus(controller.signal),
+        ]);
+        setFlows(f ?? []);
+        setEvents(e ?? []);
+        setServices(s);
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+
     refresh();
-    const id = setInterval(refresh, 5000);
-    return () => clearInterval(id);
+    const id = setInterval(refresh, 10000);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
   }, []);
 
   const alertCount = events.filter(
