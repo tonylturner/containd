@@ -6,9 +6,9 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 [![Releases](https://img.shields.io/github/v/release/tonylturner/containd?label=Release&logo=github)](https://github.com/tonylturner/containd/releases)
 [![GHCR](https://img.shields.io/badge/GHCR-containd-blue?logo=github)](https://github.com/tonylturner/containd/pkgs/container/containd)
-[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-green?logo=owasp)](https://github.com/tonylturner/containd/releases)
-[![Trivy](https://img.shields.io/badge/Trivy-no%20HIGH%2FCRIT-brightgreen?logo=aqua)](https://github.com/tonylturner/containd/actions/workflows/ci.yml)
-[![Cosign](https://img.shields.io/badge/Signed-Cosign-blueviolet?logo=sigstore)](https://github.com/tonylturner/containd/actions/workflows/release.yml)
+[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-green?logo=owasp)](docs/mkdocs/sbom.md)
+[![Trivy](https://img.shields.io/badge/Trivy-no%20HIGH%2FCRIT-brightgreen?logo=aqua)](https://github.com/tonylturner/containd/actions/workflows/ci.yml?query=branch%3Amain)
+[![Cosign](https://img.shields.io/badge/Signed-Cosign-blueviolet?logo=sigstore)](docs/mkdocs/sbom.md#verifying-image-signatures)
 [![OT Segmentation](https://img.shields.io/badge/topic-OT%20Segmentation-orange)](https://github.com/topics/ot-security)
 [![Secure by Design](https://img.shields.io/badge/Secure%20by%20Design-CISA-blue)](https://www.cisa.gov/securebydesign)
 
