@@ -33,10 +33,13 @@ export default function MonitoringOverviewPage() {
     }
 
     refresh();
-    const id = setInterval(refresh, 10000);
+    const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       controller.abort();
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

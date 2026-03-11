@@ -42,7 +42,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Rajdhani", "Inter", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-rajdhani), var(--font-inter), system-ui, -apple-system, sans-serif;
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -106,7 +106,7 @@ a {
 
 /* Card label with trailing rule */
 .card-label {
-  font-family: "Share Tech Mono", monospace;
+  font-family: var(--font-share-tech-mono), monospace;
   font-size: 9px;
   letter-spacing: 3px;
   text-transform: uppercase;
@@ -182,7 +182,7 @@ a {
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 8px 12px;
-  font-family: "Share Tech Mono", monospace;
+  font-family: var(--font-share-tech-mono), monospace;
   font-size: 13px;
   color: var(--text);
   transition: border-color 150ms ease, box-shadow 150ms ease;

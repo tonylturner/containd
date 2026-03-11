@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
@@ -57,6 +57,41 @@ function EventsInner() {
     [events, filter, kindPrefix, onlyDetections],
   );
 
+  // Progressive rendering: show PAGE_SIZE items at a time
+  const PAGE_SIZE = 50;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [filter, kindPrefix, onlyDetections]);
+
+  const visibleEvents = useMemo(
+    () => filteredEvents.slice(0, visibleCount),
+    [filteredEvents, visibleCount],
+  );
+
+  const hasMore = visibleCount < filteredEvents.length;
+
+  const loadMore = useCallback(() => {
+    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredEvents.length));
+  }, [filteredEvents.length]);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore]);
+
   useEffect(() => {
     const type = searchParams.get("filter");
     const avOnly = searchParams.get("av") === "1";
@@ -91,10 +126,13 @@ function EventsInner() {
     }
 
     refresh();
-    const id = setInterval(refresh, 10000);
+    const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       controller.abort();
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [searchParams]);
 
@@ -191,7 +229,12 @@ function EventsInner() {
             No events yet. Enable DPI capture or learning mode to generate events.
           </div>
         )}
-        {!loading && filteredEvents
+        {!loading && filteredEvents.length > 0 && (
+          <div className="mb-2 text-xs text-[var(--text-muted)]">
+            Showing {visibleEvents.length} of {filteredEvents.length} events
+          </div>
+        )}
+        {!loading && visibleEvents
           .map((ev) => (
           <div
             key={ev.id}
@@ -216,6 +259,17 @@ function EventsInner() {
             )}
           </div>
         ))}
+        {/* Infinite scroll sentinel */}
+        {hasMore && (
+          <div ref={sentinelRef} className="flex items-center justify-center py-4">
+            <button
+              onClick={loadMore}
+              className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-amber-500/[0.06]"
+            >
+              Load more ({filteredEvents.length - visibleCount} remaining)
+            </button>
+          </div>
+        )}
       </div>
     </Shell>
   );

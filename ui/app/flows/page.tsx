@@ -17,10 +17,20 @@ function FlowsInner() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
 
+  const PAGE_SIZE = 100;
+  const [showAll, setShowAll] = useState(false);
+
   const filteredFlows = useMemo(
     () => flows.filter((f) => (showAVOnly ? f.avDetected || f.avBlocked : true)),
     [flows, showAVOnly],
   );
+
+  const visibleFlows = useMemo(
+    () => showAll ? filteredFlows : filteredFlows.slice(0, PAGE_SIZE),
+    [filteredFlows, showAll],
+  );
+
+  const hasMore = filteredFlows.length > PAGE_SIZE && !showAll;
 
   async function manualRefresh() {
     setError(null);
@@ -61,10 +71,13 @@ function FlowsInner() {
     }
 
     refresh();
-    const id = setInterval(refresh, 10000);
+    const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       controller.abort();
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [searchParams]);
 
@@ -123,7 +136,7 @@ function FlowsInner() {
                   </td>
                 </tr>
               )}
-              {!loading && filteredFlows
+              {!loading && visibleFlows
                 .map((f) => (
                 <tr
                   key={f.flowId}
@@ -163,6 +176,27 @@ function FlowsInner() {
               ))}
             </tbody>
           </table>
+          {!loading && filteredFlows.length > 0 && (
+            <div className="flex items-center justify-between border-t border-amber-500/[0.1] px-4 py-2 text-xs text-[var(--text-muted)]">
+              <span>Showing {visibleFlows.length} of {filteredFlows.length} flows</span>
+              {hasMore && (
+                <button
+                  onClick={() => setShowAll(true)}
+                  className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+                >
+                  Show all {filteredFlows.length} flows
+                </button>
+              )}
+              {showAll && filteredFlows.length > PAGE_SIZE && (
+                <button
+                  onClick={() => setShowAll(false)}
+                  className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+                >
+                  Show first {PAGE_SIZE}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </Shell>

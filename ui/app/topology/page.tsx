@@ -1,13 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactFlow, {
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import {
   applyNodeChanges,
-  Background,
-  Controls,
   Edge,
   Handle,
-  MiniMap,
   Node,
   NodeChange,
   NodeProps,
@@ -15,9 +13,33 @@ import ReactFlow, {
   useReactFlow,
   ReactFlowProvider,
 } from "reactflow";
+import type { BackgroundProps, ControlProps, MiniMapProps } from "reactflow";
 import "reactflow/dist/style.css";
-import PhysicalView from "./PhysicalView";
-import SecurityView from "./SecurityView";
+
+const ReactFlow = dynamic(
+  () => import("reactflow").then((m) => m.default),
+  { ssr: false, loading: () => <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading topology...</div> },
+);
+const Background = dynamic(
+  () => import("reactflow").then((m) => m.Background as React.ComponentType<BackgroundProps>),
+  { ssr: false },
+);
+const Controls = dynamic(
+  () => import("reactflow").then((m) => m.Controls as React.ComponentType<ControlProps>),
+  { ssr: false },
+);
+const MiniMap = dynamic(
+  () => import("reactflow").then((m) => m.MiniMap as React.ComponentType<MiniMapProps>),
+  { ssr: false },
+);
+const PhysicalView = dynamic(() => import("./PhysicalView"), {
+  ssr: false,
+  loading: () => <div style={{ padding: 24, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading physical view...</div>,
+});
+const SecurityView = dynamic(() => import("./SecurityView"), {
+  ssr: false,
+  loading: () => <div style={{ padding: 24, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading security view...</div>,
+});
 import { Shell } from "../../components/Shell";
 import {
   api,
@@ -64,6 +86,11 @@ const STATUS_COLORS: Record<string, string> = {
   ok: "#22c55e", warn: "#f59e0b", crit: "#ef4444", down: "#6b7280",
 };
 
+/* Shared sparkline data store — mutated in-place by the interval,
+   read by Spark components which subscribe to sparkTick via context. */
+const sparkStore: { data: Record<string, number[]>; tick: number } = { data: {}, tick: 0 };
+const SparkTickContext = React.createContext(0);
+
 /* Hidden handle style for ReactFlow connection points */
 const hStyle: React.CSSProperties = { opacity: 0, width: 1, height: 1, border: "none", pointerEvents: "none" };
 
@@ -83,7 +110,7 @@ function InternetNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function GatewayNode({ data }: NodeProps<TopoNodeData>) {
+function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
   const sc = STATUS_COLORS[data.status || "ok"];
   return (
     <div className={`${s.nodeCard} ${s.accentCyan} ${data.selected ? s.nodeCardSelected : ""}`}>
@@ -96,13 +123,13 @@ function GatewayNode({ data }: NodeProps<TopoNodeData>) {
       <div className={s.nodeBody}>
         <NRow k="ip" v={data.ip || "\u2014"} />
         <NRow k="latency" v={data.latency || "\u2014"} />
-        <Spark data={data.spark} color="#06b6d4" />
+        <Spark nodeId={id} color="#06b6d4" />
       </div>
     </div>
   );
 }
 
-function FirewallNode({ data }: NodeProps<TopoNodeData>) {
+function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
   return (
     <div className={`${s.nodeCard} ${s.accentAmber} ${data.selected ? s.nodeCardSelected : ""}`} style={{ minWidth: 160 }}>
       <Handle type="target" position={Position.Top} style={hStyle} />
@@ -115,13 +142,13 @@ function FirewallNode({ data }: NodeProps<TopoNodeData>) {
         <NRow k="sessions" v={String(data.sessions ?? 0)} />
         <NRow k="cpu" v={`${data.cpu ?? 0}%`} />
         <NRow k="mem" v={`${data.mem ?? 0}%`} />
-        <Spark data={data.spark} color="#f59e0b" />
+        <Spark nodeId={id} color="#f59e0b" />
       </div>
     </div>
   );
 }
 
-function ZoneNode({ data }: NodeProps<TopoNodeData>) {
+function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
   const st = data.status || "ok";
   const sc = STATUS_COLORS[st];
   const accentCls = st === "crit" ? s.accentRed : st === "warn" ? s.accentAmber : s.accentGreen;
@@ -139,7 +166,7 @@ function ZoneNode({ data }: NodeProps<TopoNodeData>) {
         <NRow k="subnet" v={data.subnet || "\u2014"} />
         <NRow k="hosts" v={String(data.hosts ?? 0)} />
         <NRow k="flows" v={String(data.flows ?? 0)} />
-        <Spark data={data.spark} color={sparkColor} />
+        <Spark nodeId={id} color={sparkColor} />
       </div>
     </div>
   );
@@ -149,7 +176,11 @@ function NRow({ k, v }: { k: string; v: string }) {
   return <div className={s.nodeRow}><span className={s.nodeRowKey}>{k}</span><span className={s.nodeRowVal}>{v}</span></div>;
 }
 
-function Spark({ data, color }: { data?: number[]; color: string }) {
+function Spark({ nodeId, color }: { nodeId?: string; color: string }) {
+  // Subscribe to sparkTick context to re-render when sparkline data updates,
+  // without causing ReactFlow node object replacement.
+  useContext(SparkTickContext);
+  const data = nodeId ? sparkStore.data[nodeId] : undefined;
   if (!data?.length) return null;
   return (
     <div className={s.sparkline}>
@@ -404,7 +435,7 @@ function TopologyInner() {
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
-  const sparkRef = useRef<Record<string, number[]>>({});
+  const [sparkTick, setSparkTick] = useState(0);
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
@@ -418,10 +449,9 @@ function TopologyInner() {
 
       setTopoError(null);
 
-      // Merge sparkline history
+      // Merge sparkline history into shared store (not on node data)
       for (const n of result.nodes) {
-        if (!sparkRef.current[n.id]) sparkRef.current[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
-        n.data.spark = sparkRef.current[n.id];
+        if (!sparkStore.data[n.id]) sparkStore.data[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
       }
 
       nodeDataRef.current = result.nodeDataMap;
@@ -441,31 +471,34 @@ function TopologyInner() {
       // Delay fitView to let ReactFlow measure nodes
       setTimeout(() => { fitView({ padding: 0.15, duration: 400 }); initialFitDone.current = true; }, 200);
     });
-    const iv = setInterval(fetchData, 30000);
+    const wrappedFetch = () => { if (!document.hidden) fetchData(); };
+    const iv = setInterval(wrappedFetch, 30000);
+    const onVisible = () => { if (!document.hidden) fetchData(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       controller.abort();
       clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [fetchData, fitView]);
 
   // ── Sparkline traffic simulation ──
+  // Mutate sparkStore data in-place; Spark components re-render via
+  // SparkTickContext without causing ReactFlow node object replacement.
   useEffect(() => {
     const iv = setInterval(() => {
-      const hist = sparkRef.current;
+      if (document.hidden) return;
+      const hist = sparkStore.data;
       for (const id of Object.keys(hist)) {
         hist[id].shift();
         hist[id].push(Math.max(0.05, Math.min(1, hist[id][hist[id].length - 1] + (Math.random() - 0.5) * 0.2)));
       }
-      // Update node data with new spark values + selection state
-      setNodes((prev) =>
-        prev.map((n) => ({
-          ...n,
-          data: { ...n.data, spark: [...(hist[n.id] || [])], selected: n.id === selectedId },
-        })),
-      );
+      sparkStore.tick += 1;
+      // Bump state to propagate via context — does NOT touch ReactFlow nodes
+      setSparkTick((t) => t + 1);
     }, 2000);
     return () => clearInterval(iv);
-  }, [selectedId]);
+  }, []);
 
   // ── Update selection highlight on nodes ──
   useEffect(() => {
@@ -535,6 +568,7 @@ function TopologyInner() {
       ) : (
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
+            <SparkTickContext.Provider value={sparkTick}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -566,6 +600,7 @@ function TopologyInner() {
                 style={{ background: "#0a0e0a", border: "1px solid rgba(245,158,11,0.14)", borderRadius: 0 }}
               />
             </ReactFlow>
+            </SparkTickContext.Provider>
 
             {/* Legend overlay */}
             <div className={s.canvasLegend}>

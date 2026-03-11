@@ -4,6 +4,16 @@ import * as React from "react";
 import Link from "next/link";
 import { api } from "../lib/api";
 
+/** Simple FNV-1a-inspired string hash — fast, no allocations beyond the string itself. */
+function fastHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
 /** Thin status bar shown when uncommitted config changes exist. */
 export function ConfigStatusBar() {
   const [dirty, setDirty] = React.useState(false);
@@ -20,7 +30,13 @@ export function ConfigStatusBar() {
       }
       const r = JSON.stringify(diff.running ?? null);
       const c = JSON.stringify(diff.candidate ?? null);
-      setDirty(r !== c);
+      // Fast pre-check: different lengths means definitely dirty.
+      // Same length: compare hashes to avoid slow char-by-char string equality on large configs.
+      if (r.length !== c.length) {
+        setDirty(true);
+      } else {
+        setDirty(fastHash(r) !== fastHash(c));
+      }
     } catch {
       setDirty(false);
     } finally {

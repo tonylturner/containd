@@ -12,7 +12,12 @@ import {
   api,
 } from "../lib/api";
 import { Shell } from "../components/Shell";
-import { Console } from "../components/Console";
+import dynamic from "next/dynamic";
+
+const Console = dynamic(
+  () => import("../components/Console").then((m) => m.Console),
+  { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
+);
 import { Skeleton } from "../components/Skeleton";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -61,10 +66,13 @@ export default function Home() {
       api.getSimulationStatus(signal).then((r) => r && setSimRunning(r.running)).catch(() => {});
     };
     load();
-    const id = setInterval(load, 10_000);
+    const id = setInterval(() => { if (!document.hidden) load(); }, 10_000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       controller.abort();
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -567,13 +575,25 @@ function NetworkPulseCanvas({
         ctx!.fillText(nd.id, nx, ny + nd.r + 14);
       });
 
-      animRef.current = requestAnimationFrame(draw);
+      if (!document.hidden) {
+        animRef.current = requestAnimationFrame(draw);
+      }
     }
 
     animRef.current = requestAnimationFrame(draw);
 
+    // Resume rAF when tab becomes visible again
+    const onVisibility = () => {
+      if (!document.hidden) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = requestAnimationFrame(draw);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", onVisibility);
       cancelAnimationFrame(animRef.current);
     };
   }, [buildNodes]);
@@ -819,13 +839,25 @@ function TrafficChart({ events }: { events: TelemetryEvent[] }) {
         ctx!.fillText("24h baseline", w - 4, 12);
       }
 
-      animRef.current = requestAnimationFrame(draw);
+      if (!document.hidden) {
+        animRef.current = requestAnimationFrame(draw);
+      }
     }
 
     animRef.current = requestAnimationFrame(draw);
 
+    // Resume rAF when tab becomes visible again
+    const onVisibility = () => {
+      if (!document.hidden) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = requestAnimationFrame(draw);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", onVisibility);
       cancelAnimationFrame(animRef.current);
     };
   }, []);
