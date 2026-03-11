@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # Optional: standalone engine image for split mgmt/engine deployments.
-# For most users, use Dockerfile.mgmt which builds the combined appliance.
+# For most users, use build/Dockerfile.mgmt which builds the combined appliance.
 
 FROM golang:1.25.7-alpine AS builder
 ARG TARGETARCH

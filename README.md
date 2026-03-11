@@ -67,7 +67,7 @@ Run modes: `containd all` (combined), `containd mgmt`, `containd engine`.
 
 ## Lab Topology
 
-The root `docker-compose.yml` creates 8 isolated networks for development:
+The dev compose file (`deploy/docker-compose.dev.yml`) creates 8 isolated networks for development:
 
 | Network | Subnet | Interface |
 |---------|--------|-----------|

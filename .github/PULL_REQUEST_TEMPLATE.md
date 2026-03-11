@@ -10,7 +10,7 @@ Brief description of the change.
 
 - [ ] Unit tests pass (`go test ./...`)
 - [ ] UI lint passes (`cd ui && npm run lint`)
-- [ ] Docker image builds (`docker build -f Dockerfile.mgmt -t containd/containd:dev .`)
+- [ ] Docker image builds (`docker build -f build/Dockerfile.mgmt -t containd/containd:dev .`)
 - [ ] Manual verification (describe steps):
 
 ## Related Issues

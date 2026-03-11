@@ -3,10 +3,10 @@
 FROM python:3.12-alpine AS docs-builder
 WORKDIR /src
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY mkdocs.yml ./mkdocs.yml
-COPY docs/requirements-mkdocs.txt ./docs/requirements-mkdocs.txt
-COPY docs/mkdocs ./docs/mkdocs
-RUN pip install --no-cache-dir -r ./docs/requirements-mkdocs.txt
+COPY docs/mkdocs.yml ./mkdocs.yml
+COPY docs/requirements-mkdocs.txt ./requirements-mkdocs.txt
+COPY docs/mkdocs ./mkdocs
+RUN pip install --no-cache-dir -r ./requirements-mkdocs.txt
 RUN mkdocs build -f ./mkdocs.yml -d /out/docs
 
 FROM node:20-alpine AS ui-builder

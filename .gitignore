@@ -39,8 +39,9 @@ bin/
 /ngfw-mgmt
 /smoketest
 
-# MkDocs
+# MkDocs build output
 site/
+public/docs/
 ui/public/docs/
 
 # Node/Next.js

@@ -4,7 +4,7 @@ set -euo pipefail
 # Smoke-test forwarding + NAT using the simplified compose harness.
 # Requirements: docker compose, jq, curl.
 
-COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.smoke.yml}
+COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"

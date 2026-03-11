@@ -1,8 +1,8 @@
 services:
   engine:
     build:
-      context: .
-      dockerfile: Dockerfile.mgmt
+      context: ..
+      dockerfile: build/Dockerfile.mgmt
     image: containd/containd:dev
     user: "0"
     cap_add:
@@ -22,8 +22,8 @@ services:
       - CONTAIND_AUDIT_DB=/data/audit.db
       - CONTAIND_USERS_DB=/data/users.db
     volumes:
-      - ./data-smoke:/data
-      - ./ui/out:/var/lib/ngfw/ui:ro
+      - ../test/data-smoke:/data
+      - ../ui/out:/var/lib/ngfw/ui:ro
     networks:
       wan_net:
         ipv4_address: 172.30.0.2

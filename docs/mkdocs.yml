@@ -2,12 +2,12 @@ site_name: containd
 site_url: ""
 repo_url: ""
 
-docs_dir: docs/mkdocs
-site_dir: site
+docs_dir: mkdocs
+site_dir: ../site
 
 theme:
   name: material
-  custom_dir: docs/mkdocs/overrides
+  custom_dir: mkdocs/overrides
   features:
     - navigation.instant
     - navigation.sections

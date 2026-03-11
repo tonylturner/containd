@@ -47,7 +47,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.mgmt
+          file: build/Dockerfile.mgmt
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -64,7 +64,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.engine
+          file: build/Dockerfile.engine
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |

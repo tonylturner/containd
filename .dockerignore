@@ -34,10 +34,14 @@ data
 # Local env files (compose reads these; image builds should not)
 .env
 
-# Docs not required for image builds (keep MkDocs source used by Dockerfile.mgmt)
+# Docs not required for image builds (keep MkDocs source used by build/Dockerfile.mgmt)
 docs
 !docs/mkdocs
+!docs/mkdocs.yml
 !docs/requirements-mkdocs.txt
+
+# Test fixtures
+test
 
 # Internal development files
 agents.md
