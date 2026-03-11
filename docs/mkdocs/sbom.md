@@ -4,9 +4,12 @@ containd generates and publishes a Software Bill of Materials for every release.
 
 ## Format and Standard
 
-- **Format**: SPDX JSON (`spdx-json`)
+- **Format**: CycloneDX JSON (`cyclonedx-json`)
+- **Version**: CycloneDX 1.6 (latest stable, as produced by Syft)
 - **Generator**: [Anchore Syft](https://github.com/anchore/syft) via the `anchore/sbom-action` GitHub Action
-- **Standard**: [SPDX 2.3](https://spdx.dev/specifications/v2.3/) -- an ISO/IEC 5962:2021 international standard
+- **Standard**: [CycloneDX](https://cyclonedx.org/) -- an OWASP standard for software supply chain component analysis
+
+CycloneDX was chosen over SPDX for its richer vulnerability correlation support (VEX), broader tooling ecosystem, and first-class support in dependency-track, Grype, and other supply chain security tools.
 
 ## What the SBOM Covers
 
@@ -14,8 +17,8 @@ Each release produces two SBOMs:
 
 | Image | SBOM Artifact | Description |
 |-------|---------------|-------------|
-| `ghcr.io/tonylturner/containd` | `sbom-mgmt.spdx.json` | Management appliance (Go binary, UI, embedded services, base image) |
-| `ghcr.io/tonylturner/containd-engine` | `sbom-engine.spdx.json` | Data plane engine (Go binary, nftables, base image) |
+| `ghcr.io/tonylturner/containd` | `sbom-mgmt.cdx.json` | Management appliance (Go binary, UI, embedded services, base image) |
+| `ghcr.io/tonylturner/containd-engine` | `sbom-engine.cdx.json` | Data plane engine (Go binary, nftables, base image) |
 
 The SBOMs enumerate:
 
@@ -30,7 +33,7 @@ SBOMs are generated and attached as part of the [release workflow](https://githu
 
 1. Container images are built and pushed to GHCR.
 2. Images are signed with [Cosign](https://github.com/sigstore/cosign) (keyless, GitHub OIDC).
-3. Syft generates SPDX JSON SBOMs for each image.
+3. Syft generates CycloneDX JSON SBOMs for each image.
 4. SBOMs are attached to the signed images via `cosign attach sbom`.
 5. SBOMs are uploaded as GitHub Actions artifacts for each release.
 
@@ -43,8 +46,8 @@ SBOMs are generated and attached as part of the [release workflow](https://githu
 brew install cosign  # or see https://github.com/sigstore/cosign#installation
 
 # Download the attached SBOM
-cosign download sbom ghcr.io/tonylturner/containd:latest > sbom-mgmt.spdx.json
-cosign download sbom ghcr.io/tonylturner/containd-engine:latest > sbom-engine.spdx.json
+cosign download sbom ghcr.io/tonylturner/containd:latest > sbom-mgmt.cdx.json
+cosign download sbom ghcr.io/tonylturner/containd-engine:latest > sbom-engine.cdx.json
 ```
 
 ### From GitHub Actions artifacts
@@ -55,7 +58,19 @@ Navigate to the [Releases](https://github.com/tonylturner/containd/actions/workf
 
 ```bash
 # Scan the local image
-syft ghcr.io/tonylturner/containd:latest -o spdx-json > sbom-local.spdx.json
+syft ghcr.io/tonylturner/containd:latest -o cyclonedx-json > sbom-local.cdx.json
+```
+
+### Analyze with OWASP Dependency-Track
+
+CycloneDX SBOMs can be imported directly into [Dependency-Track](https://dependencytrack.org/) for continuous vulnerability monitoring:
+
+```bash
+# Upload to Dependency-Track API
+curl -X POST https://dtrack.example.com/api/v1/bom \
+  -H "X-Api-Key: $DTRACK_API_KEY" \
+  -F "project=$PROJECT_UUID" \
+  -F "bom=@sbom-mgmt.cdx.json"
 ```
 
 ## Verifying Image Signatures
@@ -77,6 +92,12 @@ You can scan locally:
 
 ```bash
 trivy image ghcr.io/tonylturner/containd:latest
+```
+
+You can also use [Grype](https://github.com/anchore/grype) directly against the CycloneDX SBOM:
+
+```bash
+grype sbom:sbom-mgmt.cdx.json
 ```
 
 ## Related

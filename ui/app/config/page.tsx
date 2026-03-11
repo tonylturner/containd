@@ -20,9 +20,12 @@ type BlockKey =
   | "nat"
   | "portForwards"
   | "assets"
+  | "objects"
   | "ids"
   | "services"
   | "dataPlane"
+  | "dpi"
+  | "export"
   | "pcap";
 
 type DiffLine = { type: "add" | "del" | "same"; line: string };
@@ -30,30 +33,64 @@ type DiffLine = { type: "add" | "del" | "same"; line: string };
 function diffLines(aLines: string[], bLines: string[]): DiffLine[] {
   const n = aLines.length;
   const m = bLines.length;
-  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
-  for (let i = 1; i <= n; i += 1) {
-    for (let j = 1; j <= m; j += 1) {
-      if (aLines[i - 1] === bLines[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+  // Fast path: skip common prefix and suffix to reduce DP matrix size.
+  let prefix = 0;
+  while (prefix < n && prefix < m && aLines[prefix] === bLines[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < n - prefix && suffix < m - prefix && aLines[n - 1 - suffix] === bLines[m - 1 - suffix]) suffix++;
+  const aSlice = aLines.slice(prefix, n - suffix);
+  const bSlice = bLines.slice(prefix, m - suffix);
+  const sn = aSlice.length;
+  const sm = bSlice.length;
+  // If one side is empty after trimming, fast path.
+  if (sn === 0 && sm === 0) {
+    return aLines.map((line) => ({ type: "same" as const, line }));
+  }
+  const prefixLines: DiffLine[] = aLines.slice(0, prefix).map((line) => ({ type: "same" as const, line }));
+  const suffixLines: DiffLine[] = aLines.slice(n - suffix).map((line) => ({ type: "same" as const, line }));
+  if (sn === 0) {
+    return [...prefixLines, ...bSlice.map((line) => ({ type: "add" as const, line })), ...suffixLines];
+  }
+  if (sm === 0) {
+    return [...prefixLines, ...aSlice.map((line) => ({ type: "del" as const, line })), ...suffixLines];
+  }
+  // Use space-efficient two-row DP instead of full n*m matrix.
+  let prev = new Array(sm + 1).fill(0);
+  let curr = new Array(sm + 1).fill(0);
+  for (let i = 1; i <= sn; i += 1) {
+    for (let j = 1; j <= sm; j += 1) {
+      if (aSlice[i - 1] === bSlice[j - 1]) curr[j] = prev[j - 1] + 1;
+      else curr[j] = Math.max(prev[j], curr[j - 1]);
+    }
+    [prev, curr] = [curr, prev];
+    curr.fill(0);
+  }
+  // Backtrack needs full matrix — but only for the trimmed portion which is much smaller.
+  const dp: number[][] = Array.from({ length: sn + 1 }, () => new Array(sm + 1).fill(0));
+  for (let i = 1; i <= sn; i += 1) {
+    for (let j = 1; j <= sm; j += 1) {
+      if (aSlice[i - 1] === bSlice[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
       else dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
     }
   }
-  const out: DiffLine[] = [];
-  let i = n;
-  let j = m;
+  const mid: DiffLine[] = [];
+  let i = sn;
+  let j = sm;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && aLines[i - 1] === bLines[j - 1]) {
-      out.push({ type: "same", line: aLines[i - 1] });
+    if (i > 0 && j > 0 && aSlice[i - 1] === bSlice[j - 1]) {
+      mid.push({ type: "same", line: aSlice[i - 1] });
       i -= 1;
       j -= 1;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      out.push({ type: "add", line: bLines[j - 1] });
+      mid.push({ type: "add", line: bSlice[j - 1] });
       j -= 1;
     } else if (i > 0) {
-      out.push({ type: "del", line: aLines[i - 1] });
+      mid.push({ type: "del", line: aSlice[i - 1] });
       i -= 1;
     }
   }
-  return out.reverse();
+  mid.reverse();
+  return [...prefixLines, ...mid, ...suffixLines];
 }
 
 export default function ConfigPageWrapper() {
@@ -326,9 +363,12 @@ function ConfigPage() {
       { key: "nat", label: "NAT", running: (r as any).firewall?.nat, candidate: (c as any).firewall?.nat },
       { key: "portForwards", label: "Port forwards", running: (r as any).firewall?.portForwards, candidate: (c as any).firewall?.portForwards },
       { key: "assets", label: "Assets", running: (r as any).assets, candidate: (c as any).assets },
+      { key: "objects", label: "Objects", running: (r as any).objects, candidate: (c as any).objects },
       { key: "ids", label: "IDS", running: (r as any).ids, candidate: (c as any).ids },
       { key: "services", label: "Services", running: (r as any).services, candidate: (c as any).services },
       { key: "dataPlane", label: "Data plane", running: (r as any).dataplane, candidate: (c as any).dataplane },
+      { key: "dpi", label: "DPI", running: { dpiMode: (r as any).dataplane?.dpiMode, dpiIcsProtocols: (r as any).dataplane?.dpiIcsProtocols, dpiProtocols: (r as any).dataplane?.dpiProtocols, dpiEnabled: (r as any).dataplane?.dpiEnabled, dpiExclusions: (r as any).dataplane?.dpiExclusions }, candidate: { dpiMode: (c as any).dataplane?.dpiMode, dpiIcsProtocols: (c as any).dataplane?.dpiIcsProtocols, dpiProtocols: (c as any).dataplane?.dpiProtocols, dpiEnabled: (c as any).dataplane?.dpiEnabled, dpiExclusions: (c as any).dataplane?.dpiExclusions } },
+      { key: "export", label: "Export", running: (r as any).export, candidate: (c as any).export },
       { key: "pcap", label: "PCAP", running: (r as any).pcap, candidate: (c as any).pcap },
     ];
     return blocks
@@ -384,6 +424,18 @@ function ConfigPage() {
           label: String(a.name || a.id),
           meta: a.zone || a.type || "Asset",
         }));
+      case "objects":
+        return (cfg.objects ?? []).map((o: any): BlockItem => ({
+          id: String(o.id || o.name),
+          label: String(o.name || o.id),
+          meta: o.type || "Object",
+        }));
+      case "ids":
+        return (cfg.ids?.rules ?? []).map((r: any): BlockItem => ({
+          id: String(r.id || r.title),
+          label: String(r.title || r.id),
+          meta: r.severity || "Rule",
+        }));
       default:
         return [];
     }
@@ -402,6 +454,14 @@ function ConfigPage() {
       case "assets":
         return (cfg.assets ?? []).find(
           (a: any) => (a.id || a.name) === selectedItemId,
+        ) ?? null;
+      case "objects":
+        return (cfg.objects ?? []).find(
+          (o: any) => (o.id || o.name) === selectedItemId,
+        ) ?? null;
+      case "ids":
+        return (cfg.ids?.rules ?? []).find(
+          (r: any) => (r.id || r.title) === selectedItemId,
         ) ?? null;
       default:
         return null;
@@ -433,12 +493,18 @@ function ConfigPage() {
         return cfg.firewall?.nat?.portForwards;
       case "assets":
         return cfg.assets;
+      case "objects":
+        return cfg.objects;
       case "ids":
         return cfg.ids;
       case "services":
         return cfg.services;
       case "dataPlane":
-        return cfg.dataPlane;
+        return cfg.dataplane;
+      case "dpi":
+        return { dpiMode: cfg.dataplane?.dpiMode, dpiEnabled: cfg.dataplane?.dpiEnabled, dpiIcsProtocols: cfg.dataplane?.dpiIcsProtocols, dpiProtocols: cfg.dataplane?.dpiProtocols, dpiExclusions: cfg.dataplane?.dpiExclusions };
+      case "export":
+        return cfg.export;
       case "pcap":
         return cfg.pcap;
       default:
@@ -450,6 +516,9 @@ function ConfigPage() {
   const ifaceCount = running?.interfaces?.length ?? 0;
   const ruleCount = running?.firewall?.rules?.length ?? 0;
   const assetCount = running?.assets?.length ?? 0;
+  const idsRuleCount = (running as any)?.ids?.rules?.length ?? 0;
+  const objectCount = running?.objects?.length ?? 0;
+  const dpiMode = (running as any)?.dataplane?.dpiMode ?? "off";
   const tips: Tip[] = [
     {
       id: "config:backup",
@@ -655,6 +724,12 @@ function ConfigPage() {
                 <Stat label="Interfaces" value={ifaceCount} />
                 <Stat label="Firewall rules" value={ruleCount} />
                 <Stat label="Assets" value={assetCount} />
+                <Stat label="Objects" value={objectCount} />
+                <Stat label="IDS rules" value={idsRuleCount} />
+                <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+                  <span className="text-[var(--text)]">DPI mode</span>
+                  <span className={dpiMode === "enforce" ? "text-emerald-400" : dpiMode === "learn" ? "text-amber-400" : "text-[var(--text-muted)]"}>{dpiMode}</span>
+                </div>
               </div>
               <div className="mt-4 text-xs text-[var(--text-muted)]">
                 Build your config by defining zones, then binding interfaces, then adding policies.
@@ -706,9 +781,12 @@ function ConfigPage() {
                     { key: "nat", label: "NAT", help: "SNAT/DNAT settings for egress and port forwards." },
                     { key: "portForwards", label: "Port forwards", help: "Inbound DNAT mappings." },
                     { key: "assets", label: "Assets", help: "OT/ICS asset inventory and tags." },
-                    { key: "ids", label: "IDS", help: "Detection rules and settings." },
-                    { key: "services", label: "Services", help: "DNS, proxy, VPN, and system services." },
-                    { key: "dataPlane", label: "Data plane", help: "Enforcement toggles and capture." },
+                    { key: "objects", label: "Objects", help: "Named address/service objects for reuse in rules." },
+                    { key: "ids", label: "IDS", help: "Detection rules, Sigma/YARA imports, and settings." },
+                    { key: "services", label: "Services", help: "DNS, NTP, DHCP, proxy, VPN, AV, and syslog." },
+                    { key: "dataPlane", label: "Data plane", help: "Enforcement, capture interfaces, nftables." },
+                    { key: "dpi", label: "DPI", help: "DPI mode (learn/enforce), protocol enable/disable, exclusions." },
+                    { key: "export", label: "Export", help: "Event export targets (CEF, JSON, Syslog)." },
                     { key: "pcap", label: "PCAP", help: "Capture settings and forwarding." },
                   ] as { key: BlockKey; label: string; help: string }[]
                 ).map((item) => (
@@ -778,6 +856,11 @@ function ConfigPage() {
                           {selectedBlock === "assets" && (
                             <a href="/assets/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                               Open Assets
+                            </a>
+                          )}
+                          {selectedBlock === "ids" && (
+                            <a href="/ids/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
+                              Open IDS
                             </a>
                           )}
                         </div>

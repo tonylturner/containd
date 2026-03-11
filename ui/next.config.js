@@ -9,6 +9,12 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Suppress CSS chunk preload hints that cause "preloaded but not used" console
+  // warnings. In static export mode Next.js preloads all CSS chunks in the shared
+  // layout, but only the current page's styles are needed.
+  experimental: {
+    cssChunking: "strict",
+  },
 };
 
 module.exports = nextConfig;

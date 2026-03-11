@@ -927,12 +927,17 @@ export type ConfigBundle = {
   zones?: Zone[];
   interfaces?: Interface[];
   assets?: Asset[];
+  objects?: Array<{ id?: string; name?: string; type?: string; [k: string]: unknown }>;
+  routing?: { gateways?: unknown[]; routes?: unknown[]; policyRouting?: unknown[] };
   dataplane?: DataPlaneConfig;
+  export?: { targets?: Array<{ name?: string; format?: string; destination?: string; [k: string]: unknown }> };
+  pcap?: { enabled?: boolean; filter?: unknown; forwardTargets?: unknown[] };
   firewall?: {
     defaultAction?: "ALLOW" | "DENY";
     rules?: FirewallRule[];
     nat?: NATConfig;
   };
+  ids?: { rules?: unknown[]; enabled?: boolean; [k: string]: unknown };
   services?: unknown;
 };
 
