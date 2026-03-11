@@ -40,6 +40,7 @@ docker compose up -d --build
 
 - `VERSION` is the canonical release version for the repo.
 - Release tags must match `VERSION` exactly, for example `VERSION=0.1.7` pairs with tag `v0.1.7`.
+- Add a matching `CHANGELOG.md` section before tagging a release. The release workflow publishes that section as the GitHub release notes.
 - `pkg/cp/config.SchemaVersionCurrent` is the config schema version, not the release version. Bump it only when stored config compatibility changes.
 - Local `go build` defaults to `dev` build metadata. Docker builds read `VERSION` automatically unless you override `--build-arg VERSION=...`.
 

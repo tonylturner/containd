@@ -121,6 +121,20 @@ jobs:
           engine_digest=${{ steps.build-engine.outputs.digest }}
           EOF
 
+      - name: Extract release notes from CHANGELOG
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          awk -v version="$version" '
+            $0 ~ "^## \\[" version "\\]" { in_section=1; next }
+            in_section && /^## \[/ { exit }
+            in_section { print }
+          ' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "missing CHANGELOG entry for ${version}" >&2
+            exit 1
+          fi
+
       - name: Upload SBOMs as release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -133,7 +147,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
           prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
           files: |
             sbom-mgmt.cdx.json
