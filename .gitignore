@@ -61,7 +61,7 @@ pnpm-debug.log*
 # Runtime data (docker-compose volumes)
 data/
 
-# Smoke-test generated fixtures (keys, certs, databases)
+# Smoke-test generated fixtures (keys, certs, databases, logs)
 test/data-smoke/ssh/host_key
 test/data-smoke/ssh/host_key.pub
 test/data-smoke/tls/server.key
@@ -69,6 +69,7 @@ test/data-smoke/tls/server.crt
 test/data-smoke/*.db
 test/data-smoke/*.db-shm
 test/data-smoke/*.db-wal
+test/data-smoke/logs/
 
 # Internal development files (kept locally, not published)
 agents.md

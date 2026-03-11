@@ -968,6 +968,11 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		// Restore secrets that were redacted in the read response so
+		// round-tripping redacted config doesn't wipe stored secrets.
+		if existing, err := store.Load(c.Request.Context()); err == nil {
+			cfg.RestoreRedactedSecrets(existing)
+		}
 		if err := store.SaveCandidate(c.Request.Context(), &cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
@@ -1488,6 +1493,7 @@ func setVPNHandler(store config.Store, services ServicesApplier, engine EngineCl
 			internalError(c, err)
 			return
 		}
+		vpnCfg.RestoreRedactedSecrets(cfg.Services.VPN)
 		cfg.Services.VPN = vpnCfg
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())

@@ -221,6 +221,38 @@ type DHCPReservation struct {
 	IP    string `json:"ip"`    // IPv4 address
 }
 
+// RestoreRedactedSecrets fills in empty secret fields in c from existing.
+// This prevents round-tripping redacted config from wiping stored secrets.
+func (c *Config) RestoreRedactedSecrets(existing *Config) {
+	if c == nil || existing == nil {
+		return
+	}
+	c.Services.VPN.RestoreRedactedSecrets(existing.Services.VPN)
+}
+
+// RestoreRedactedSecrets fills in empty secret fields in v from existing.
+func (v *VPNConfig) RestoreRedactedSecrets(existing VPNConfig) {
+	if v.WireGuard.PrivateKey == "" {
+		v.WireGuard.PrivateKey = existing.WireGuard.PrivateKey
+	}
+	if v.OpenVPN.Managed != nil && existing.OpenVPN.Managed != nil {
+		m := v.OpenVPN.Managed
+		e := existing.OpenVPN.Managed
+		if m.CA == "" {
+			m.CA = e.CA
+		}
+		if m.Cert == "" {
+			m.Cert = e.Cert
+		}
+		if m.Key == "" {
+			m.Key = e.Key
+		}
+		if m.Password == "" {
+			m.Password = e.Password
+		}
+	}
+}
+
 // RedactedVPNCopy returns a copy of v with secrets removed.
 func (v VPNConfig) RedactedVPNCopy() VPNConfig {
 	v.WireGuard.PrivateKey = ""
