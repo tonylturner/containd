@@ -205,6 +205,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	}
 
 	api := r.Group("/api/v1")
+	api.Use(limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit))
 	// Health is always unauthenticated for liveness.
 	api.GET("/health", healthHandler)
 	// Prometheus metrics endpoint (unauthenticated for scraping).
@@ -218,6 +219,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	// All other endpoints require auth (unless lab mode).
 	protected := api.Group("")
 	protected.Use(authMiddleware(userStore))
+	protected.Use(enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()))
 	{
 		protected.GET("/auth/me", meHandler(userStore))
 		protected.GET("/auth/session", authSessionHandler(userStore))

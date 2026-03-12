@@ -6,6 +6,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -290,6 +291,23 @@ func jwtAuthedRequest(method, path string, body *bytes.Buffer, token string) *ht
 	return r
 }
 
+func cookieAuthedRequest(method, path string, body *bytes.Buffer, token string, origin string) *http.Request {
+	var r *http.Request
+	if body != nil {
+		r, _ = http.NewRequest(method, path, body)
+	} else {
+		r, _ = http.NewRequest(method, path, nil)
+	}
+	r.AddCookie(&http.Cookie{Name: "containd_token", Value: token})
+	if method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut {
+		r.Header.Set("Content-Type", "application/json")
+	}
+	if origin != "" {
+		r.Header.Set("Origin", origin)
+	}
+	return r
+}
+
 // addTestAdmin adds an admin user to the mock store and returns a valid JWT + session.
 func addTestAdmin(us *mockUserStore, secret []byte) (token string, userID string) {
 	return addTestUser(us, secret, "admin-1", "containd", "admin", false)
@@ -449,6 +467,138 @@ func TestLoginSuccess(t *testing.T) {
 	}
 	if resp.Token == "" {
 		t.Fatal("expected non-empty token in login response")
+	}
+}
+
+func TestLoginRejectsOversizedBody(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	body := loginBody("admin", testPassword)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = defaultJSONBodyLimit + 1
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized login body, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCookieAuthedWriteAllowsNonBrowserAutomation(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "")
+	req.Host = "containd.local"
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for non-browser cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCookieAuthedWriteAllowsSameOrigin(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://containd.local")
+	req.Host = "containd.local"
+	req.TLS = &tls.ConnectionState{}
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for same-origin cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCookieAuthedWriteRejectsCrossOrigin(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://portal.example.com")
+	req.Host = "containd.local"
+	req.TLS = &tls.ConnectionState{}
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-origin cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCookieAuthedWriteAllowsConfiguredOrigin(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	t.Setenv("CONTAIND_ALLOWED_ORIGINS", "https://portal.example.com")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://portal.example.com")
+	req.Host = "containd.local"
+	req.TLS = &tls.ConnectionState{}
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for allowlisted origin, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCookieAuthedWriteRejectsCrossSiteFetch(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "")
+	req.Host = "containd.local"
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-site cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBearerAuthedWriteDoesNotRequireOrigin(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	s := setupJWTServer(&mockStore{}, us)
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token)
+	req.Host = "containd.local"
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for bearer-authenticated write without origin, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
