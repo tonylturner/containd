@@ -65,6 +65,7 @@ nav:
   - Reference:
       - Config Format: config-format.md
       - API Reference: api-reference.md
+      - Secure by Design: secure-by-design.md
   - Supply Chain:
       - SBOM: sbom.md
       - Third-Party Licenses: SPDX.md
