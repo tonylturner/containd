@@ -76,19 +76,21 @@ Project stance:
 
 Current alignment:
 
-- containd already has authenticated local accounts, short-lived JWT sessions, role enforcement, forced password change, and session invalidation.
+- containd already has authenticated local accounts, short-lived JWT sessions, role enforcement, forced password change, session invalidation, and optional app-based TOTP MFA for local accounts.
 - authentication is part of the base product, not a paid add-on.
 
-Current gap:
+Current caveat:
 
-- containd does not yet ship end-user MFA in the production auth path.
+- the current MFA implementation is local-account TOTP only;
+- SMS is intentionally not supported;
+- broader external identity integration and richer auth policy are still future work.
 
 Roadmap:
 
-- add optional **app-based MFA** for local accounts, focused on authenticator apps such as Google Authenticator and Microsoft Authenticator;
-- do **not** add SMS-based MFA;
-- keep the UI lightweight: enrollment QR code, recovery codes, clear enabled/disabled state, and minimal extra friction;
-- start with admin accounts and let operators decide whether MFA is optional or required in their environment.
+- keep MFA focused on authenticator apps such as Google Authenticator and Microsoft Authenticator;
+- keep the UI lightweight and avoid mandatory friction for lab users who do not need MFA on every account;
+- add stronger external identity options later, especially OIDC;
+- expand beyond the current `admin` and `view` roles into more robust role management.
 
 ### 2. Default Passwords
 
@@ -135,12 +137,12 @@ Current alignment:
 Current caveat:
 
 - containd is a self-hosted appliance, so patch adoption still depends on operator action today;
-- the project does not yet publish aggregate patch-adoption data or a more formal patch support policy beyond the supported-version statement in `SECURITY.md`.
+- the project does not publish aggregate patch-adoption telemetry.
 
-Roadmap:
+Implemented direction:
 
-- document patch expectations more explicitly: supported release line, update cadence, and what users should do when a security release lands;
-- keep release notes and advisories clear enough that instructors and lab operators can update quickly.
+- [`Update Policy`](update-policy.md) now documents the supported release posture, operator update expectations, and the secure update workflow for lab and production-style environments;
+- release notes, changelog entries, and machine-readable artifacts are meant to stay aligned so operators can update quickly.
 
 ### 5. Vulnerability Disclosure Policy (VDP)
 
@@ -166,15 +168,15 @@ Current alignment:
 - containd already publishes versioned releases, signed images, SBOMs, and changelogs;
 - security-sensitive dependency fixes are called out in release notes when they occur.
 
-Current gap:
+Current alignment:
 
-- the project does not yet publish a dedicated CVE issuance/completeness policy describing when advisories or CVEs are created and what metadata will be included.
+- containd now documents a lightweight advisory, CVE, and CSAF process in [`Advisories and CSAF`](advisories.md);
+- the project publishes provider metadata and repository layout for machine-readable advisory artifacts.
 
-Roadmap:
+Ongoing work:
 
-- publish a lightweight policy for GitHub Security Advisories and CVE handling;
-- include CWE/root-cause information when possible;
-- keep changelog and advisory language aligned so operators can understand impact quickly.
+- include CWE/root-cause information whenever practical;
+- keep changelog, GitHub advisories, and CSAF documents aligned as real advisories are published.
 
 ### 7. Evidence of Intrusions
 
@@ -183,14 +185,12 @@ Current alignment:
 - containd already includes audit logs, runtime service events, firewall and DPI telemetry, syslog forwarding, event export in CEF/JSON/Syslog, monitoring views, and Prometheus metrics;
 - those capabilities are part of the base product and do not require a paid tier.
 
-Current gap:
+Current alignment:
 
-- the project should document logging coverage and retention expectations more explicitly for operators who want to treat containd as a secure teaching environment as well as a firewall.
+- [`Logging and Evidence`](logging-evidence.md) now documents the major evidence surfaces, forwarding options, retention expectations, and recommended lab posture.
 
-Roadmap:
+Ongoing work:
 
-- document which security-relevant events are available by default;
-- document retention expectations and recommended forwarding for labs and production-style environments;
 - continue improving event quality for identity, configuration, and policy-change visibility.
 
 ## How containd Already Reflects the Broader Guidance
@@ -230,7 +230,7 @@ Because containd is often used to teach segmentation and secure operations, a "g
 - keep default-deny policy and commit only the minimum required allow rules
 - enable audit/event forwarding when the lab design supports it
 - stay on a current supported release
-- when app-based MFA ships, enable it for instructor and administrative accounts
+- enable app-based MFA for instructor and administrative accounts
 
 The goal is not only to teach traffic segmentation. It is also to train students to recognize what a secure appliance posture looks like.
 
@@ -238,11 +238,8 @@ The goal is not only to teach traffic segmentation. It is also to train students
 
 ### Near Term
 
-- publish this Secure by Design position openly
-- formalize VDP discoverability with `security.txt`
-- publish a lightweight advisory/CVE handling policy
-- document logging and patching expectations more explicitly
-- add optional app-based MFA for local accounts, with a simple authenticator-app UX and no SMS dependency
+- keep the disclosure, CSAF, logging, and update-policy documents current as releases and advisories evolve
+- gather operational feedback on the local-account TOTP MFA flow and keep it lightweight
 
 ### Medium Term
 
@@ -263,4 +260,4 @@ containd uses the Secure by Design badge to signal a real engineering direction:
 - document tradeoffs openly;
 - make classroom and lab deployments teach secure habits instead of insecure shortcuts.
 
-The project already aligns with much of the CISA Secure by Design posture. The bootstrap password remains the clearest current caveat, and MFA plus more mature auth/process documentation are the most important next steps.
+The project already aligns with much of the CISA Secure by Design posture. The bootstrap password remains the clearest current caveat, while external auth maturity and richer role management are the main next steps.

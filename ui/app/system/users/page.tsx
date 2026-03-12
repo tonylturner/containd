@@ -151,7 +151,34 @@ export default function UsersPage() {
         const ok = await api.deleteUser(user.id);
         if (!ok.ok) {
           setSaveState("error");
-          setError(ok.error || "Failed to delete user. Ensure at least one admin remains.");
+          setError(
+            ok.error ||
+              "Failed to delete user. Ensure at least one admin remains.",
+          );
+          setTimeout(() => setSaveState("idle"), 5000);
+          return;
+        }
+        await refresh();
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      },
+    });
+  }
+
+  function onDisableUserMFA(user: User) {
+    if (!isAdmin()) return;
+    confirm.open({
+      title: "Disable MFA",
+      message: `Disable MFA for ${user.username}? They will be able to sign in with only their password until they re-enable MFA.`,
+      confirmLabel: "Disable MFA",
+      variant: "warning",
+      onConfirm: async () => {
+        setError(null);
+        setSaveState("saving");
+        const ok = await api.disableUserMFA(user.id);
+        if (!ok.ok) {
+          setSaveState("error");
+          setError(ok.error || "Failed to disable MFA.");
           setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
@@ -168,9 +195,15 @@ export default function UsersPage() {
 
       {/* Reset password modal */}
       {resetPwUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" role="dialog" aria-modal="true">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="w-full max-w-sm rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 shadow-card-lg animate-slide-down">
-            <h2 className="text-base font-semibold text-[var(--text)]">Reset Password</h2>
+            <h2 className="text-base font-semibold text-[var(--text)]">
+              Reset Password
+            </h2>
             <div className="mt-3">
               <input
                 type="password"
@@ -184,7 +217,10 @@ export default function UsersPage() {
             <div className="mt-5 flex items-center justify-end gap-3">
               <button
                 type="button"
-                onClick={() => { setResetPwUserId(null); setResetPwValue(""); }}
+                onClick={() => {
+                  setResetPwUserId(null);
+                  setResetPwValue("");
+                }}
                 className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
               >
                 Cancel
@@ -237,6 +273,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">MFA</th>
                   <th className="px-4 py-3">Updated</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
@@ -244,14 +281,20 @@ export default function UsersPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
+                    <td
+                      className="px-4 py-4 text-[var(--text-muted)]"
+                      colSpan={7}
+                    >
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!loading && users.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
+                    <td
+                      className="px-4 py-4 text-[var(--text-muted)]"
+                      colSpan={7}
+                    >
                       No users found.
                     </td>
                   </tr>
@@ -273,120 +316,150 @@ export default function UsersPage() {
                     return hay.includes(q);
                   })
                   .map((u) => (
-                  <tr key={u.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                    <td className="px-4 py-3 text-[var(--text)]">{u.username}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">
-                      {editingUserId === u.id && editDraft ? (
-                        <div className="grid gap-1">
+                    <tr
+                      key={u.id}
+                      className="border-t border-amber-500/[0.1] table-row-hover transition-ui"
+                    >
+                      <td className="px-4 py-3 text-[var(--text)]">
+                        {u.username}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text)]">
+                        {editingUserId === u.id && editDraft ? (
+                          <div className="grid gap-1">
+                            <input
+                              value={editDraft.firstName}
+                              onChange={(e) =>
+                                setEditDraft((d) =>
+                                  d ? { ...d, firstName: e.target.value } : d,
+                                )
+                              }
+                              disabled={!isAdmin()}
+                              placeholder="first name"
+                              className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            />
+                            <input
+                              value={editDraft.lastName}
+                              onChange={(e) =>
+                                setEditDraft((d) =>
+                                  d ? { ...d, lastName: e.target.value } : d,
+                                )
+                              }
+                              disabled={!isAdmin()}
+                              placeholder="last name"
+                              className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            />
+                          </div>
+                        ) : (
+                          (u.firstName || "") + " " + (u.lastName || "")
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text)]">
+                        {editingUserId === u.id && editDraft ? (
                           <input
-                            value={editDraft.firstName}
+                            value={editDraft.email}
                             onChange={(e) =>
-                              setEditDraft((d) => d ? { ...d, firstName: e.target.value } : d)
+                              setEditDraft((d) =>
+                                d ? { ...d, email: e.target.value } : d,
+                              )
                             }
                             disabled={!isAdmin()}
-                            placeholder="first name"
-                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            placeholder="email"
+                            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
                           />
-                          <input
-                            value={editDraft.lastName}
+                        ) : (
+                          (u.email ?? "")
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {editingUserId === u.id && editDraft ? (
+                          <select
+                            value={editDraft.role}
                             onChange={(e) =>
-                              setEditDraft((d) => d ? { ...d, lastName: e.target.value } : d)
+                              setEditDraft((d) =>
+                                d
+                                  ? { ...d, role: e.target.value as UserRole }
+                                  : d,
+                              )
                             }
                             disabled={!isAdmin()}
-                            placeholder="last name"
-                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                          />
-                        </div>
-                      ) : (
-                        (u.firstName || "") + " " + (u.lastName || "")
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--text)]">
-                      {editingUserId === u.id && editDraft ? (
-                        <input
-                          value={editDraft.email}
-                          onChange={(e) =>
-                            setEditDraft((d) => d ? { ...d, email: e.target.value } : d)
-                          }
-                          disabled={!isAdmin()}
-                          placeholder="email"
-                          className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                        />
-                      ) : (
-                        u.email ?? ""
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {editingUserId === u.id && editDraft ? (
-                        <select
-                          value={editDraft.role}
-                          onChange={(e) =>
-                            setEditDraft((d) => d ? { ...d, role: e.target.value as UserRole } : d)
-                          }
-                          disabled={!isAdmin()}
-                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                          >
+                            <option value="view">view-only</option>
+                            <option value="admin">admin</option>
+                          </select>
+                        ) : (
+                          <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-[var(--text)]">
+                            {u.role}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/[0.1] text-emerald-400" : "bg-white/[0.06] text-[var(--text-muted)]"}`}
                         >
-                          <option value="view">view-only</option>
-                          <option value="admin">admin</option>
-                        </select>
-                      ) : (
-                        <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-[var(--text)]">
-                          {u.role}
+                          {u.mfaEnabled ? "enabled" : "disabled"}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
-                      {formatTimestamp(u.updatedAt ?? u.createdAt)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {editingUserId === u.id ? (
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => saveEdit(u.id)}
-                            disabled={!isAdmin()}
-                            className="rounded-md bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={cancelEdit}
-                            className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => startEdit(u)}
-                            disabled={!isAdmin()}
-                            className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => onResetPassword(u.id)}
-                            disabled={!isAdmin()}
-                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-                          >
-                            Reset password
-                          </button>
-                          <button
-                            onClick={() => onDeleteUser(u)}
-                            disabled={!isAdmin()}
-                            className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
+                        {formatTimestamp(u.updatedAt ?? u.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {editingUserId === u.id ? (
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => saveEdit(u.id)}
+                              disabled={!isAdmin()}
+                              className="rounded-md bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEdit}
+                              className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => startEdit(u)}
+                              disabled={!isAdmin()}
+                              className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => onResetPassword(u.id)}
+                              disabled={!isAdmin()}
+                              className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                            >
+                              Reset password
+                            </button>
+                            {u.mfaEnabled && (
+                              <button
+                                onClick={() => onDisableUserMFA(u)}
+                                disabled={!isAdmin()}
+                                className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                              >
+                                Disable MFA
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onDeleteUser(u)}
+                              disabled={!isAdmin()}
+                              className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
-
         </Card>
 
         <Card padding="lg">
@@ -442,7 +515,8 @@ export default function UsersPage() {
               <option value="admin">admin</option>
             </select>
             <p className="text-xs text-[var(--text-muted)]">
-              Admins can manage users and system settings; view-only accounts have read access.
+              Admins can manage users and system settings; view-only accounts
+              have read access.
             </p>
             <input
               type="password"

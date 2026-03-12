@@ -14,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -127,6 +129,26 @@ func (m *mockUserStore) SetPassword(_ context.Context, id string, password strin
 	return nil
 }
 
+func (m *mockUserStore) SetTOTP(_ context.Context, id string, secret string) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	u.TOTPSecret = secret
+	u.MFAEnabled = secret != ""
+	return nil
+}
+
+func (m *mockUserStore) DisableTOTP(_ context.Context, id string) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	u.TOTPSecret = ""
+	u.MFAEnabled = false
+	return nil
+}
+
 func (m *mockUserStore) EnsureDefaultAdmin(_ context.Context) error { return nil }
 
 func (m *mockUserStore) CreateSession(_ context.Context, userID string, idleTTL time.Duration, maxTTL time.Duration) (*users.Session, error) {
@@ -215,6 +237,20 @@ func signTestJWT(secret []byte, userID, username, role, jti string, exp time.Tim
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	s, _ := tok.SignedString(secret)
 	return s
+}
+
+func currentTOTPCode(t *testing.T, secret string) string {
+	t.Helper()
+	code, err := totp.GenerateCodeCustom(secret, time.Now().UTC(), totp.ValidateOpts{
+		Period:    users.TOTPPeriod,
+		Skew:      users.TOTPSkew,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
+	})
+	if err != nil {
+		t.Fatalf("GenerateCodeCustom: %v", err)
+	}
+	return code
 }
 
 // setupJWTServer creates a gin engine wired with JWT auth via the given user store.
@@ -397,6 +433,66 @@ func TestLoginSuccess(t *testing.T) {
 	}
 	if resp.Token == "" {
 		t.Fatal("expected non-empty token in login response")
+	}
+}
+
+func TestLoginRequiresMFA(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	hash, _ := bcrypt.GenerateFromPassword([]byte(testPassword), 4) //nolint:gosec
+	enrollment, err := users.GenerateTOTPEnrollment("containd", "admin")
+	if err != nil {
+		t.Fatalf("GenerateTOTPEnrollment: %v", err)
+	}
+	us.users["u1"] = &users.StoredUser{
+		User: users.User{
+			ID:         "u1",
+			Username:   "admin",
+			Role:       "admin",
+			MFAEnabled: true,
+		},
+		PasswordHash: string(hash),
+		TOTPSecret:   enrollment.Secret,
+	}
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	body := loginBody("admin", testPassword)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for MFA challenge, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var challenge mfaLoginChallengeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &challenge); err != nil {
+		t.Fatalf("invalid mfa challenge response: %v", err)
+	}
+	if !challenge.MFARequired || challenge.MFAChallengeToken == "" {
+		t.Fatalf("expected MFA challenge response, got %+v", challenge)
+	}
+
+	verifyBody, _ := json.Marshal(map[string]string{
+		"challengeToken": challenge.MFAChallengeToken,
+		"code":           currentTOTPCode(t, enrollment.Secret),
+	})
+	rec = httptest.NewRecorder()
+	req, _ = http.NewRequest(http.MethodPost, "/api/v1/auth/login/mfa", bytes.NewBuffer(verifyBody))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for MFA verify login, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp loginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid login response JSON: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("expected non-empty token after MFA verification")
 	}
 }
 
@@ -623,6 +719,85 @@ func TestUserCRUD(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete user expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSelfMFAEnrollEnableDisable(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	tok, uid := addTestAdmin(us, secret)
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enroll mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var enrollment mfaEnrollResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &enrollment); err != nil {
+		t.Fatalf("invalid enroll response: %v", err)
+	}
+	if enrollment.Secret == "" || enrollment.ChallengeToken == "" {
+		t.Fatalf("expected enrollment secret and challenge token, got %+v", enrollment)
+	}
+
+	enableBody, _ := json.Marshal(map[string]string{
+		"challengeToken": enrollment.ChallengeToken,
+		"code":           currentTOTPCode(t, enrollment.Secret),
+	})
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enable", bytes.NewBuffer(enableBody), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !us.users[uid].MFAEnabled {
+		t.Fatal("expected MFA to be enabled")
+	}
+
+	disableBody, _ := json.Marshal(map[string]string{
+		"currentPassword": testPassword,
+		"code":            currentTOTPCode(t, us.users[uid].TOTPSecret),
+	})
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/disable", bytes.NewBuffer(disableBody), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if us.users[uid].MFAEnabled {
+		t.Fatal("expected MFA to be disabled")
+	}
+}
+
+func TestAdminCanDisableUserMFA(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	adminTok, _ := addTestAdmin(us, secret)
+	_, userID := addTestUser(us, secret, "viewer-2", "viewer2", "view", false)
+	us.users[userID].MFAEnabled = true
+	us.users[userID].TOTPSecret = "JBSWY3DPEHPK3PXP"
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/disable", bytes.NewBufferString(`{}`), adminTok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if us.users[userID].MFAEnabled {
+		t.Fatal("expected target MFA to be disabled by admin")
 	}
 }
 

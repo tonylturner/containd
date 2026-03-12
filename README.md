@@ -136,14 +136,14 @@ CONTAIND_UI_DIR=ui/out ./containd all
 
 - Default-deny firewall posture
 - Distroless container image; the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
-- JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login
+- JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login, and optional app-based TOTP MFA for local accounts
 - TLS 1.2+ with hardened cipher suites, HSTS enabled by default
 - CORS wildcard rejection, SameSite=Strict cookies, path traversal protection
 - Rate limiting on auth endpoints, nftables injection prevention
 - Cosign-signed container images with CycloneDX SBOM attestation
 - Trivy vulnerability scanning in CI (zero HIGH/CRITICAL)
 
-See [SECURITY.md](SECURITY.md) for production hardening and vulnerability reporting.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for the CISA alignment roadmap, and [Advisories and CSAF](docs/mkdocs/advisories.md) for the public advisory process.
 
 ## Documentation
 
@@ -153,7 +153,8 @@ Full docs are embedded in the appliance (Help icon in UI) and built from `docs/m
 - [Docker Compose Deployment](docs/mkdocs/docker-compose.md) | [Customizing Lab Compose](docs/mkdocs/lab-compose.md) | [Windows / WSL Notes](docs/mkdocs/windows-wsl.md) | [Host Deploy](docs/mkdocs/deploy-host.md)
 - [CLI Reference](docs/mkdocs/cli.md) | [Config Format](docs/mkdocs/config-format.md)
 - [ICS DPI](docs/mkdocs/ics-dpi.md) | [IDS Rules](docs/mkdocs/ids-rules.md) | [Policy Model](docs/mkdocs/policy-model.md)
-- [Services](docs/mkdocs/services.md) | [API Reference](docs/mkdocs/api-reference.md) | [Secure by Design](docs/mkdocs/secure-by-design.md)
+- [Services](docs/mkdocs/services.md) | [API Reference](docs/mkdocs/api-reference.md) | [Secure by Design](docs/mkdocs/secure-by-design.md) | [Advisories and CSAF](docs/mkdocs/advisories.md)
+- [Logging and Evidence](docs/mkdocs/logging-evidence.md) | [Update Policy](docs/mkdocs/update-policy.md)
 - [SBOM](docs/mkdocs/sbom.md) | [Third-Party Licenses](docs/mkdocs/SPDX.md)
 
 [OpenAPI 3.0 specification](docs/openapi.yaml) for the REST API.

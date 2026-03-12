@@ -44,6 +44,43 @@ components:
         expiresAt: { type: string, format: date-time }
         user: { $ref: "#/components/schemas/User" }
 
+    MFALoginChallenge:
+      type: object
+      properties:
+        mfaRequired: { type: boolean, enum: [true] }
+        mfaMethod: { type: string, example: totp }
+        mfaChallengeToken: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+
+    MFAVerifyLoginRequest:
+      type: object
+      required: [challengeToken, code]
+      properties:
+        challengeToken: { type: string }
+        code: { type: string }
+
+    MFAEnrollResponse:
+      type: object
+      properties:
+        secret: { type: string }
+        otpauthURL: { type: string, format: uri }
+        qrDataURL: { type: string }
+        challengeToken: { type: string }
+
+    MFAEnableRequest:
+      type: object
+      required: [challengeToken, code]
+      properties:
+        challengeToken: { type: string }
+        code: { type: string }
+
+    MFADisableRequest:
+      type: object
+      required: [currentPassword, code]
+      properties:
+        currentPassword: { type: string, format: password }
+        code: { type: string }
+
     User:
       type: object
       properties:
@@ -54,6 +91,7 @@ components:
         email: { type: string }
         role: { type: string, enum: [admin, view] }
         mustChangePassword: { type: boolean }
+        mfaEnabled: { type: boolean }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -278,10 +316,13 @@ paths:
             schema: { $ref: "#/components/schemas/LoginRequest" }
       responses:
         "200":
-          description: Login successful
+          description: Login successful or MFA challenge required
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/LoginResponse" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/LoginResponse" }
+                  - { $ref: "#/components/schemas/MFALoginChallenge" }
         "401":
           description: Invalid credentials
           content:
@@ -291,6 +332,28 @@ paths:
           description: Rate-limited
           headers:
             Retry-After: { schema: { type: integer } }
+
+  /auth/login/mfa:
+    post:
+      summary: Complete login with an MFA code
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MFAVerifyLoginRequest" }
+      responses:
+        "200":
+          description: MFA verified and session created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401":
+          description: Invalid or expired challenge token or authentication code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /auth/logout:
     post:
@@ -325,6 +388,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
+
+  /auth/me/mfa/enroll:
+    post:
+      summary: Start TOTP MFA enrollment for the current user
+      tags: [Auth]
+      responses:
+        "200":
+          description: Enrollment material for a new authenticator app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MFAEnrollResponse" }
+        "409": { description: MFA already enabled }
+
+  /auth/me/mfa/enable:
+    post:
+      summary: Enable TOTP MFA for the current user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MFAEnableRequest" }
+      responses:
+        "200": { description: MFA enabled }
+        "401": { description: Invalid or expired challenge token or authentication code }
+        "409": { description: MFA already enabled }
+
+  /auth/me/mfa/disable:
+    post:
+      summary: Disable TOTP MFA for the current user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MFADisableRequest" }
+      responses:
+        "200": { description: MFA disabled }
+        "401": { description: Current password or authentication code invalid }
 
   # ── Dashboard ─────────────────────────────────────────────────────
   /dashboard:
@@ -429,6 +531,16 @@ paths:
         - $ref: "#/components/parameters/pathId"
       responses:
         "200": { description: User deleted }
+        "404": { description: User not found }
+
+  /users/{id}/mfa/disable:
+    post:
+      summary: Disable MFA for a user (admin)
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: MFA disabled }
         "404": { description: User not found }
 
   # ── Services ──────────────────────────────────────────────────────

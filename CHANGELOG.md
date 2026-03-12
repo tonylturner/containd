@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-03-12
+
+### Added
+- Added optional app-based TOTP MFA for local accounts, including login challenge/verification, self-service enrollment in the UI, and admin-side MFA reset support for local users.
+- Added a documented public advisory process with CSAF provider metadata, advisory authoring templates, and release packaging for machine-readable security materials.
+- Added dedicated documentation for logging/evidence surfaces and update policy so operators and instructors can explain what containd records, forwards, and expects during secure updates.
+
+### Fixed
+- Removed the hardcoded password value from the quickstart CI smoke by generating a fresh password at runtime instead of committing a scanner-visible credential string.
+- Removed the secret-looking JWT placeholder from `.env.example` so starter guidance no longer ships a committed fake secret value that looks like a real disclosure.
+
+### Changed
+- Tightened `SECURITY.md`, `security.txt`, and the Secure by Design docs to reflect the actual vulnerability disclosure workflow, advisory/CVE expectations, machine-readable publication points, and the current bootstrap-password caveat.
+- Updated the API schema and local user-management surfaces to expose MFA state and the new MFA flows cleanly.
+
 ## [0.1.10] - 2026-03-12
 
 ### Fixed

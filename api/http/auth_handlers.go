@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tonylturner/containd/pkg/common/ratelimit"
-	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tonylturner/containd/pkg/common/ratelimit"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/users"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -58,32 +59,44 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		u, err := userStore.GetByUsername(c.Request.Context(), req.Username)
 		if err != nil {
 			loginLimiter.Fail(key)
+			auditLog(c, audit.Record{
+				Actor:  req.Username,
+				Action: "auth.login",
+				Target: req.Username,
+				Result: "denied",
+				Detail: "invalid credentials",
+			})
 			apiError(c, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
 			loginLimiter.Fail(key)
+			auditLog(c, audit.Record{
+				Actor:  req.Username,
+				Action: "auth.login",
+				Target: req.Username,
+				Result: "denied",
+				Detail: "invalid credentials",
+			})
 			apiError(c, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 		loginLimiter.Success(key)
-		sess, err := userStore.CreateSession(c.Request.Context(), u.ID, idleTTL, maxTTL)
-		if err != nil {
-			internalError(c, err)
+		if u.MFAEnabled && strings.TrimSpace(u.TOTPSecret) != "" {
+			challengeToken, err := signMFAChallenge(jwtSecret(), mfaChallengePurposeLogin, u.ID, "")
+			if err != nil {
+				apiError(c, http.StatusInternalServerError, "failed to create MFA challenge")
+				return
+			}
+			c.JSON(http.StatusOK, mfaLoginChallengeResponse{
+				MFARequired:       true,
+				MFAMethod:         "totp",
+				MFAChallengeToken: challengeToken,
+				User:              u.User,
+			})
 			return
 		}
-		secret := jwtSecret()
-		token, err := signJWT(secret, u.ID, u.Username, u.Role, sess.ID, sess.ExpiresAt)
-		if err != nil {
-			apiError(c, http.StatusInternalServerError, "failed to sign token")
-			return
-		}
-		setAuthCookie(c, token, sess.ExpiresAt)
-		c.JSON(http.StatusOK, loginResponse{
-			Token:     token,
-			ExpiresAt: sess.ExpiresAt.Format(time.RFC3339Nano),
-			User:      u.User,
-		})
+		issueLoginResponse(c, userStore, u)
 	}
 }
 
@@ -152,6 +165,9 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		}
 		if u.Email != "" {
 			resp["email"] = u.Email
+		}
+		if u.MFAEnabled {
+			resp["mfaEnabled"] = true
 		}
 		if u.MustChangePassword {
 			resp["mustChangePassword"] = true

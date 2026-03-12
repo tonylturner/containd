@@ -104,6 +104,7 @@ When the project publishes a security fix, the preferred public artifacts are:
 - a GitHub release with clear release notes
 - a GitHub Security Advisory when appropriate
 - a CVE record when appropriate and available
+- a CSAF document when the issue warrants a machine-readable advisory record
 
 Project goals for advisories and CVE publication:
 
@@ -111,6 +112,12 @@ Project goals for advisories and CVE publication:
 - include mitigation guidance when a fix is not immediately available
 - include root-cause information such as CWE when practical
 - keep changelog, advisory text, and release notes aligned
+
+Machine-readable publication points:
+
+- `/.well-known/security.txt`
+- `/.well-known/csaf/provider-metadata.json`
+- `security/csaf/advisories/` in the repository for published CSAF documents
 
 The presence of CVEs is not treated as a failure by itself. The project cares more about root-cause reduction, clarity, and remediation quality than raw counts.
 
@@ -136,6 +143,7 @@ For production-style deployments and serious training environments:
 
 - set a unique `CONTAIND_JWT_SECRET`
 - change the bootstrap password immediately on first login
+- enable app-based MFA for administrative accounts when practical
 - prefer HTTPS and restrict plain HTTP where possible
 - use SSH keys and disable SSH password auth when feasible
 - keep `CONTAIND_LAB_MODE=0`
@@ -150,6 +158,6 @@ Project rationale:
 
 - containd is frequently deployed in offline classroom, lab, and demo environments where first-access reliability matters
 - the product already enforces password change on first login
-- stronger auth improvements, especially optional app-based MFA and later OIDC support, are on the roadmap
+- containd now supports optional app-based TOTP MFA for local accounts; stronger external auth and richer role management remain on the roadmap
 
 This is a documented caveat, not a hidden one.

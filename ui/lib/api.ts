@@ -6,11 +6,14 @@ export type HealthResponse = {
 };
 
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
-export type ApiResult<T> = { ok: true; data: T; warning?: string } | { ok: false; error: string };
+export type ApiResult<T> =
+  | { ok: true; data: T; warning?: string }
+  | { ok: false; error: string };
 
 // In the browser we always use same-origin relative URLs so cookies/localStorage
 // are scoped consistently (localhost vs 127.0.0.1 vs 0.0.0.0 can otherwise break auth).
-const API_BASE = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_BASE || "") : "";
+const API_BASE =
+  typeof window === "undefined" ? process.env.NEXT_PUBLIC_API_BASE || "" : "";
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 // Deprecated: we no longer rely on localStorage JWTs for browser auth (cookie-only),
 // but we still clear this key for users upgrading from older builds.
@@ -122,14 +125,20 @@ async function captureAuthError(res: Response) {
     // When the server returns 403 "password change required", notify the UI
     // so Shell can force-open the password modal even if detected mid-session.
     if (res.status === 403 && msg && /password change required/i.test(msg)) {
-      window.dispatchEvent(new CustomEvent("containd:auth:password_change_required"));
+      window.dispatchEvent(
+        new CustomEvent("containd:auth:password_change_required"),
+      );
     }
   } catch {
     // ignore
   }
 }
 
-async function fetchWithSession(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+async function fetchWithSession(
+  path: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
   const url = `${API_BASE}${path}`;
 
   // Attempt cookie-first (no Authorization) unless an explicit env token is configured.
@@ -146,7 +155,9 @@ async function fetchWithSession(path: string, init: RequestInit, signal?: AbortS
     const fallback = getSessionToken();
     if (fallback) {
       const h = (init.headers ?? {}) as Record<string, string>;
-      const hasAuth = Object.keys(h).some((k) => k.toLowerCase() === "authorization");
+      const hasAuth = Object.keys(h).some(
+        (k) => k.toLowerCase() === "authorization",
+      );
       if (!hasAuth) {
         const retry = await fetch(url, {
           ...init,
@@ -440,8 +451,20 @@ export type Asset = {
 
 export type DashboardData = {
   health: HealthResponse & { commit?: string; hostname?: string };
-  counts: { assets: number; zones: number; interfaces: number; rules: number; icsRules: number };
-  eventStats: { total: number; idsAlerts: number; modbusWrites: number; avDetections: number; avBlocks: number };
+  counts: {
+    assets: number;
+    zones: number;
+    interfaces: number;
+    rules: number;
+    icsRules: number;
+  };
+  eventStats: {
+    total: number;
+    idsAlerts: number;
+    modbusWrites: number;
+    avDetections: number;
+    avBlocks: number;
+  };
   services: Record<string, unknown> | null;
   user: User | null;
   lastActivity: AuditRecord | null;
@@ -503,6 +526,7 @@ export type User = {
   email?: string;
   role: UserRole;
   mustChangePassword?: boolean;
+  mfaEnabled?: boolean;
   labMode?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -512,6 +536,22 @@ export type LoginResponse = {
   token: string;
   expiresAt: string;
   user: User;
+};
+
+export type MFALoginChallenge = {
+  mfaRequired: true;
+  mfaMethod: string;
+  mfaChallengeToken: string;
+  user: User;
+};
+
+export type LoginStartResponse = LoginResponse | MFALoginChallenge;
+
+export type MFAEnrollResponse = {
+  secret: string;
+  otpauthURL: string;
+  qrDataURL: string;
+  challengeToken: string;
 };
 
 export type TLSInfo = {
@@ -537,6 +577,11 @@ export type UpdateMeRequest = {
 export type ChangePasswordRequest = {
   currentPassword: string;
   newPassword: string;
+};
+
+export type MFADisableRequest = {
+  currentPassword: string;
+  code: string;
 };
 
 export type DNSConfig = {
@@ -930,10 +975,26 @@ export type ConfigBundle = {
   zones?: Zone[];
   interfaces?: Interface[];
   assets?: Asset[];
-  objects?: Array<{ id?: string; name?: string; type?: string; [k: string]: unknown }>;
-  routing?: { gateways?: unknown[]; routes?: unknown[]; policyRouting?: unknown[] };
+  objects?: Array<{
+    id?: string;
+    name?: string;
+    type?: string;
+    [k: string]: unknown;
+  }>;
+  routing?: {
+    gateways?: unknown[];
+    routes?: unknown[];
+    policyRouting?: unknown[];
+  };
   dataplane?: DataPlaneConfig;
-  export?: { targets?: Array<{ name?: string; format?: string; destination?: string; [k: string]: unknown }> };
+  export?: {
+    targets?: Array<{
+      name?: string;
+      format?: string;
+      destination?: string;
+      [k: string]: unknown;
+    }>;
+  };
   pcap?: { enabled?: boolean; filter?: unknown; forwardTargets?: unknown[] };
   firewall?: {
     defaultAction?: "ALLOW" | "DENY";
@@ -953,11 +1014,17 @@ export type ConfigBackup = {
   idsRuleCount?: number;
 };
 
-export async function fetchHealth(signal?: AbortSignal): Promise<HealthResponse | null> {
+export async function fetchHealth(
+  signal?: AbortSignal,
+): Promise<HealthResponse | null> {
   try {
-    const res = await fetchWithSession("/api/v1/health", {
-      cache: "no-store",
-    }, signal);
+    const res = await fetchWithSession(
+      "/api/v1/health",
+      {
+        cache: "no-store",
+      },
+      signal,
+    );
     if (!res.ok) return null;
     return (await res.json()) as HealthResponse;
   } catch (e) {
@@ -981,7 +1048,7 @@ export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
 
 export async function setDataPlane(
   cfg: DataPlaneConfig,
-) : Promise<ApiResult<DataPlaneConfig>> {
+): Promise<ApiResult<DataPlaneConfig>> {
   return await postJSONResult<DataPlaneConfig>("/api/v1/dataplane", cfg);
 }
 
@@ -989,11 +1056,15 @@ export async function getPcapConfig(): Promise<PcapConfig | null> {
   return await getJSON<PcapConfig>("/api/v1/pcap/config");
 }
 
-export async function setPcapConfig(cfg: PcapConfig): Promise<ApiResult<PcapConfig>> {
+export async function setPcapConfig(
+  cfg: PcapConfig,
+): Promise<ApiResult<PcapConfig>> {
   return await postJSONResult<PcapConfig>("/api/v1/pcap/config", cfg);
 }
 
-export async function startPcap(cfg: PcapConfig): Promise<ApiResult<PcapStatus>> {
+export async function startPcap(
+  cfg: PcapConfig,
+): Promise<ApiResult<PcapStatus>> {
   return await postJSONResult<PcapStatus>("/api/v1/pcap/start", cfg);
 }
 
@@ -1026,9 +1097,16 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: (await res.json()) as PcapItem, warning: parseWarningHeader(res) };
+    return {
+      ok: true,
+      data: (await res.json()) as PcapItem,
+      warning: parseWarningHeader(res),
+    };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
 
@@ -1040,20 +1118,31 @@ export async function deletePcap(name: string): Promise<ApiResult<void>> {
   return await deleteJSONResult(`/api/v1/pcap/${encodeURIComponent(name)}`);
 }
 
-export async function tagPcap(req: PcapTagRequest): Promise<ApiResult<{ status?: string }>> {
+export async function tagPcap(
+  req: PcapTagRequest,
+): Promise<ApiResult<{ status?: string }>> {
   return await postJSONResult<{ status?: string }>("/api/v1/pcap/tag", req);
 }
 
-export async function replayPcap(req: PcapReplayRequest): Promise<ApiResult<{ status?: string }>> {
+export async function replayPcap(
+  req: PcapReplayRequest,
+): Promise<ApiResult<{ status?: string }>> {
   return await postJSONResult<{ status?: string }>("/api/v1/pcap/replay", req);
 }
 
-async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T | null> {
+async function getJSON<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T | null> {
   try {
-    const res = await fetchWithSession(path, {
-      cache: "no-store",
-      headers: authHeaders(),
-    }, signal);
+    const res = await fetchWithSession(
+      path,
+      {
+        cache: "no-store",
+        headers: authHeaders(),
+      },
+      signal,
+    );
     if (handleUnauthorized(res)) return null;
     // Any non-401 response means auth middleware passed — session is valid.
     clearAuthExpired();
@@ -1065,7 +1154,9 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T | null>
   }
 }
 
-async function getJSONWithStatus<T>(path: string): Promise<{ status: number; data: T | null }> {
+async function getJSONWithStatus<T>(
+  path: string,
+): Promise<{ status: number; data: T | null }> {
   try {
     const res = await fetchWithSession(path, {
       cache: "no-store",
@@ -1127,12 +1218,12 @@ async function deleteJSON(path: string): Promise<boolean> {
 }
 
 async function parseErrorBody(res: Response): Promise<string> {
-	try {
-		const body = await res.json();
-		return body.error || body.message || res.statusText;
-	} catch {
-		return res.statusText;
-	}
+  try {
+    const body = await res.json();
+    return body.error || body.message || res.statusText;
+  } catch {
+    return res.statusText;
+  }
 }
 
 async function parseSuccessBody<T>(res: Response): Promise<T> {
@@ -1148,7 +1239,10 @@ function parseWarningHeader(res: Response): string | undefined {
   return warning || undefined;
 }
 
-async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+async function postJSONResult<T>(
+  path: string,
+  payload: unknown,
+): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "POST",
@@ -1158,13 +1252,23 @@ async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiRes
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
+    return {
+      ok: true,
+      data: await parseSuccessBody<T>(res),
+      warning: parseWarningHeader(res),
+    };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
 
-async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
+async function patchJSONResult<T>(
+  path: string,
+  payload: unknown,
+): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "PATCH",
@@ -1174,9 +1278,16 @@ async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiRe
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
+    return {
+      ok: true,
+      data: await parseSuccessBody<T>(res),
+      warning: parseWarningHeader(res),
+    };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
 
@@ -1191,22 +1302,38 @@ async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
     return { ok: true, data: undefined, warning: parseWarningHeader(res) };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
 
 export const api = {
   // Auth
   login: async (username: string, password: string) => {
-    const res = await postJSON<LoginResponse>("/api/v1/auth/login", {
+    const res = await postJSON<LoginStartResponse>("/api/v1/auth/login", {
       username,
       password,
     });
     // Store token tab-scoped as a fallback if cookies are blocked; cookie remains primary.
+    if (res && "token" in res && res.token) setSessionToken(res.token);
+    if (res && "token" in res && res.user?.role) setStoredRole(res.user.role);
+    if (res) {
+      // Allow future session-expired notifications after a successful login.
+      clearAuthExpired();
+      setLastAuthError(null);
+    }
+    return res;
+  },
+  verifyLoginMFA: async (challengeToken: string, code: string) => {
+    const res = await postJSON<LoginResponse>("/api/v1/auth/login/mfa", {
+      challengeToken,
+      code,
+    });
     if (res?.token) setSessionToken(res.token);
     if (res?.user?.role) setStoredRole(res.user.role);
     if (res) {
-      // Allow future session-expired notifications after a successful login.
       clearAuthExpired();
       setLastAuthError(null);
     }
@@ -1242,6 +1369,18 @@ export const api = {
       currentPassword,
       newPassword,
     } as ChangePasswordRequest),
+  startMFAEnrollment: () =>
+    postJSONResult<MFAEnrollResponse>("/api/v1/auth/me/mfa/enroll", {}),
+  enableMFA: (challengeToken: string, code: string) =>
+    postJSONResult<{ status: string }>("/api/v1/auth/me/mfa/enable", {
+      challengeToken,
+      code,
+    }),
+  disableMFA: (currentPassword: string, code: string) =>
+    postJSONResult<{ status: string }>("/api/v1/auth/me/mfa/disable", {
+      currentPassword,
+      code,
+    } as MFADisableRequest),
 
   // Users
   listUsers: () => getJSON<User[]>("/api/v1/users"),
@@ -1253,6 +1392,11 @@ export const api = {
     postJSONResult<{ status: string }>(
       `/api/v1/users/${encodeURIComponent(id)}/password`,
       { password },
+    ),
+  disableUserMFA: (id: string) =>
+    postJSONResult<{ status: string }>(
+      `/api/v1/users/${encodeURIComponent(id)}/mfa/disable`,
+      {},
     ),
   deleteUser: (id: string) =>
     deleteJSONResult(`/api/v1/users/${encodeURIComponent(id)}`),
@@ -1266,37 +1410,57 @@ export const api = {
   getSecurityConduits: (signal?: AbortSignal) =>
     getJSON<ConduitMap>("/api/v1/security/conduits", signal),
 
-  listInterfaces: (signal?: AbortSignal) => getJSON<Interface[]>("/api/v1/interfaces", signal),
-  listInterfaceState: (signal?: AbortSignal) => getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
-  assignInterfaces: (mode: "auto" | "explicit", mappings?: Record<string, string>) =>
+  listInterfaces: (signal?: AbortSignal) =>
+    getJSON<Interface[]>("/api/v1/interfaces", signal),
+  listInterfaceState: (signal?: AbortSignal) =>
+    getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
+  assignInterfaces: (
+    mode: "auto" | "explicit",
+    mappings?: Record<string, string>,
+  ) =>
     postJSONResult<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
       mode,
       mappings: mappings ?? {},
     }),
   reconcileInterfacesReplace: () =>
-    postJSONResult<{ status: string }>("/api/v1/interfaces/reconcile", { confirm: "REPLACE" }),
+    postJSONResult<{ status: string }>("/api/v1/interfaces/reconcile", {
+      confirm: "REPLACE",
+    }),
   createInterface: (i: Interface) =>
     postJSONResult<Interface>("/api/v1/interfaces", i),
   updateInterface: (name: string, i: Partial<Interface>) =>
-    patchJSONResult<Interface>(`/api/v1/interfaces/${encodeURIComponent(name)}`, i),
+    patchJSONResult<Interface>(
+      `/api/v1/interfaces/${encodeURIComponent(name)}`,
+      i,
+    ),
   deleteInterface: (name: string) =>
     deleteJSONResult(`/api/v1/interfaces/${encodeURIComponent(name)}`),
 
-  getRouting: (signal?: AbortSignal) => getJSON<RoutingConfig>("/api/v1/routing", signal),
-  getOSRouting: (signal?: AbortSignal) => getJSON<OSRoutingSnapshot>("/api/v1/routing/os", signal),
-  setRouting: (cfg: RoutingConfig) => postJSONResult<RoutingConfig>("/api/v1/routing", cfg),
+  getRouting: (signal?: AbortSignal) =>
+    getJSON<RoutingConfig>("/api/v1/routing", signal),
+  getOSRouting: (signal?: AbortSignal) =>
+    getJSON<OSRoutingSnapshot>("/api/v1/routing/os", signal),
+  setRouting: (cfg: RoutingConfig) =>
+    postJSONResult<RoutingConfig>("/api/v1/routing", cfg),
   reconcileRoutingReplace: () =>
-    postJSONResult<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
+    postJSONResult<{ status: string }>("/api/v1/routing/reconcile", {
+      confirm: "REPLACE",
+    }),
 
-  listFirewallRules: (signal?: AbortSignal) => getJSON<FirewallRule[]>("/api/v1/firewall/rules", signal),
+  listFirewallRules: (signal?: AbortSignal) =>
+    getJSON<FirewallRule[]>("/api/v1/firewall/rules", signal),
   createFirewallRule: (r: FirewallRule) =>
     postJSONResult<FirewallRule>("/api/v1/firewall/rules", r),
   updateFirewallRule: (id: string, r: Partial<FirewallRule>) =>
-    patchJSONResult<FirewallRule>(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, r),
+    patchJSONResult<FirewallRule>(
+      `/api/v1/firewall/rules/${encodeURIComponent(id)}`,
+      r,
+    ),
   deleteFirewallRule: (id: string) =>
     deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
-  setNAT: (cfg: NATConfig) => postJSONResult<NATConfig>("/api/v1/firewall/nat", cfg),
+  setNAT: (cfg: NATConfig) =>
+    postJSONResult<NATConfig>("/api/v1/firewall/nat", cfg),
   blockHostTemp: (ip: string, ttlSeconds?: number) =>
     postJSONResult<{ status: string }>("/api/v1/dataplane/blocks/host", {
       ip,
@@ -1320,10 +1484,14 @@ export const api = {
 
   // IDS / Rules
   getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
-  setIDS: (cfg: IDSConfig) => postJSONResult<IDSConfig>("/api/v1/ids/rules", cfg),
+  setIDS: (cfg: IDSConfig) =>
+    postJSONResult<IDSConfig>("/api/v1/ids/rules", cfg),
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
-  importIDSRules: async (file: File, format?: string): Promise<ApiResult<IDSImportResult>> => {
+  importIDSRules: async (
+    file: File,
+    format?: string,
+  ): Promise<ApiResult<IDSImportResult>> => {
     const form = new FormData();
     form.append("file", file);
     if (format) form.append("format", format);
@@ -1339,17 +1507,28 @@ export const api = {
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
       return { ok: true, data: (await res.json()) as IDSImportResult };
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "Network error",
+      };
     }
   },
   exportIDSRules: async (format: string): Promise<boolean> => {
-    const res = await fetch(`${API_BASE}/api/v1/ids/export?format=${encodeURIComponent(format)}`, {
-      credentials: "include",
-      headers: authHeaders(),
-    });
+    const res = await fetch(
+      `${API_BASE}/api/v1/ids/export?format=${encodeURIComponent(format)}`,
+      {
+        credentials: "include",
+        headers: authHeaders(),
+      },
+    );
     if (!res.ok) return false;
     const blob = await res.blob();
-    const ext: Record<string, string> = { suricata: ".rules", snort: ".rules", yara: ".yar", sigma: ".yml" };
+    const ext: Record<string, string> = {
+      suricata: ".rules",
+      snort: ".rules",
+      yara: ".yar",
+      sigma: ".yml",
+    };
     const now = new Date();
     const yy = String(now.getFullYear()).slice(2);
     const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -1383,7 +1562,9 @@ export const api = {
       "/api/v1/config/diff",
     ),
   exportConfig: (redacted = true) =>
-    getJSON<ConfigBundle>(`/api/v1/config/export?redacted=${redacted ? "1" : "0"}`),
+    getJSON<ConfigBundle>(
+      `/api/v1/config/export?redacted=${redacted ? "1" : "0"}`,
+    ),
   importConfig: (cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/import", cfg),
   listConfigBackups: () => getJSON<ConfigBackup[]>("/api/v1/config/backups"),
@@ -1392,10 +1573,13 @@ export const api = {
   deleteConfigBackup: (id: string) =>
     deleteJSONResult(`/api/v1/config/backups/${encodeURIComponent(id)}`),
   downloadConfigBackup: async (id: string) => {
-    const res = await fetchWithSession(`/api/v1/config/backups/${encodeURIComponent(id)}`, {
-      headers: { ...authHeaders() },
-      cache: "no-store",
-    });
+    const res = await fetchWithSession(
+      `/api/v1/config/backups/${encodeURIComponent(id)}`,
+      {
+        headers: { ...authHeaders() },
+        cache: "no-store",
+      },
+    );
     if (handleUnauthorized(res) || !res.ok) return null;
     return await res.blob();
   },
@@ -1408,7 +1592,10 @@ export const api = {
     return await res.blob();
   },
   restoreIDSRules: async (rules: unknown[]) =>
-    postJSONResult<{ status: string; count: number }>("/api/v1/ids/restore", rules),
+    postJSONResult<{ status: string; count: number }>(
+      "/api/v1/ids/restore",
+      rules,
+    ),
   commit: () => postJSONResult<{ status: string }>("/api/v1/config/commit", {}),
   commitConfirmed: (ttlSeconds?: number) =>
     postJSONResult<{ status: string }>(
@@ -1417,20 +1604,27 @@ export const api = {
     ),
   confirmCommit: () =>
     postJSONResult<{ status: string }>("/api/v1/config/confirm", {}),
-  rollback: () => postJSONResult<{ status: string }>("/api/v1/config/rollback", {}),
+  rollback: () =>
+    postJSONResult<{ status: string }>("/api/v1/config/rollback", {}),
 
   // Audit
   listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
 
   // Dashboard (aggregated)
-  getDashboard: (signal?: AbortSignal) => getJSON<DashboardData>("/api/v1/dashboard", signal),
+  getDashboard: (signal?: AbortSignal) =>
+    getJSON<DashboardData>("/api/v1/dashboard", signal),
 
   // System TLS
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
   setTLSCert: (certPEM: string, keyPEM: string) =>
-    postJSONResult<{ status: string }>("/api/v1/system/tls/cert", { certPEM, keyPEM }),
+    postJSONResult<{ status: string }>("/api/v1/system/tls/cert", {
+      certPEM,
+      keyPEM,
+    }),
   setTrustedCA: (pem: string) =>
-    postJSONResult<{ status: string }>("/api/v1/system/tls/trusted-ca", { pem }),
+    postJSONResult<{ status: string }>("/api/v1/system/tls/trusted-ca", {
+      pem,
+    }),
 
   // Proxies
   getForwardProxy: () =>
@@ -1451,10 +1645,15 @@ export const api = {
   setSyslog: (cfg: SyslogConfig) =>
     postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg),
   getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
-  setAV: (cfg: AVConfig) => postJSONResult<AVConfig>("/api/v1/services/av", cfg),
-  runAVUpdate: () => postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
-  listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
-  uploadAVDef: async (file: File): Promise<ApiResult<{ status: string; file: string }>> => {
+  setAV: (cfg: AVConfig) =>
+    postJSONResult<AVConfig>("/api/v1/services/av", cfg),
+  runAVUpdate: () =>
+    postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
+  listAVDefs: () =>
+    getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
+  uploadAVDef: async (
+    file: File,
+  ): Promise<ApiResult<{ status: string; file: string }>> => {
     const form = new FormData();
     form.append("file", file);
     try {
@@ -1466,41 +1665,67 @@ export const api = {
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-      return { ok: true, data: (await res.json()) as { status: string; file: string } };
+      return {
+        ok: true,
+        data: (await res.json()) as { status: string; file: string },
+      };
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "Network error",
+      };
     }
   },
-  deleteAVDef: async (file: string): Promise<ApiResult<{ status: string; file: string }>> => {
+  deleteAVDef: async (
+    file: string,
+  ): Promise<ApiResult<{ status: string; file: string }>> => {
     const params = new URLSearchParams({ file });
     try {
-      const res = await fetchWithSession(`/api/v1/services/av/defs?${params.toString()}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
+      const res = await fetchWithSession(
+        `/api/v1/services/av/defs?${params.toString()}`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        },
+      );
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-      return { ok: true, data: (await res.json()) as { status: string; file: string } };
+      return {
+        ok: true,
+        data: (await res.json()) as { status: string; file: string },
+      };
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "Network error",
+      };
     }
   },
   getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
-  setDNS: (cfg: DNSConfig) => postJSONResult<DNSConfig>("/api/v1/services/dns", cfg),
+  setDNS: (cfg: DNSConfig) =>
+    postJSONResult<DNSConfig>("/api/v1/services/dns", cfg),
   getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
-  setNTP: (cfg: NTPConfig) => postJSONResult<NTPConfig>("/api/v1/services/ntp", cfg),
+  setNTP: (cfg: NTPConfig) =>
+    postJSONResult<NTPConfig>("/api/v1/services/ntp", cfg),
   getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
-  setDHCP: (cfg: DHCPConfig) => postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
+  setDHCP: (cfg: DHCPConfig) =>
+    postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
   listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
   getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
-  setVPN: (cfg: VPNConfig) => postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
+  setVPN: (cfg: VPNConfig) =>
+    postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
   uploadOpenVPNProfile: (name: string, ovpn: string) =>
-    postJSONResult<OpenVPNProfileUploadResponse>("/api/v1/services/vpn/openvpn/profile", { name, ovpn }),
+    postJSONResult<OpenVPNProfileUploadResponse>(
+      "/api/v1/services/vpn/openvpn/profile",
+      { name, ovpn },
+    ),
   listOpenVPNClients: () =>
     getJSON<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients"),
   createOpenVPNClient: (name: string) =>
-    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", { name }),
+    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", {
+      name,
+    }),
   downloadOpenVPNClientURL: (name: string) =>
     `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
   getWireGuardStatus: (iface?: string) =>
@@ -1513,8 +1738,7 @@ export const api = {
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`, signal),
   listFlows: (limit = 200, signal?: AbortSignal) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`, signal),
-  getEvent: (id: number) =>
-    getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
+  getEvent: (id: number) => getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
 
   // Simulation
   getSimulationStatus: (signal?: AbortSignal) =>
@@ -1527,6 +1751,11 @@ export const api = {
   // Sessions / Conntrack
   listConntrack: (limit = 200) =>
     getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
-  killConntrack: (req: { proto: string; src: string; dst: string; sport?: number; dport?: number }) =>
-    postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
+  killConntrack: (req: {
+    proto: string;
+    src: string;
+    dst: string;
+    sport?: number;
+    dport?: number;
+  }) => postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
 };

@@ -135,6 +135,16 @@ jobs:
             exit 1
           fi
 
+      - name: Package CSAF materials
+        run: |
+          set -euo pipefail
+          mkdir -p release-csaf
+          cp ui/public/.well-known/csaf/provider-metadata.json release-csaf/provider-metadata.json
+          if ls security/csaf/advisories/*.json >/dev/null 2>&1; then
+            cp security/csaf/advisories/*.json release-csaf/
+          fi
+          tar -czf csaf-documents.tgz -C release-csaf .
+
       - name: Upload SBOMs as release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -143,6 +153,7 @@ jobs:
             sbom-mgmt.cdx.json
             sbom-engine.cdx.json
             release-images.txt
+            csaf-documents.tgz
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -153,3 +164,4 @@ jobs:
             sbom-mgmt.cdx.json
             sbom-engine.cdx.json
             release-images.txt
+            csaf-documents.tgz

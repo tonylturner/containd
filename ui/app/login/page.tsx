@@ -6,7 +6,7 @@ import { Suspense } from "react";
 
 import { api, clearLocalAuth, getLastAuthError } from "../../lib/api";
 
-type State = "idle" | "logging_in" | "error";
+type State = "idle" | "logging_in" | "verifying_mfa" | "error";
 
 export default function LoginPage() {
   return (
@@ -26,6 +26,8 @@ function LoginInner() {
   const [info, setInfo] = useState<string | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [alreadyLoggedIn, setAlreadyLoggedIn] = useState(false);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
 
   useEffect(() => {
     const sp = new URLSearchParams(paramsKey);
@@ -53,17 +55,7 @@ function LoginInner() {
     })();
   }, [paramsKey]);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setState("logging_in");
-    const res = await api.login(username, password);
-    if (!res) {
-      setState("error");
-      setError("Invalid username or password.");
-      setTimeout(() => setState("idle"), 1500);
-      return;
-    }
+  async function completeLoginRedirect() {
     // Verify we can see an authenticated session before navigating away. This avoids a confusing
     // redirect loop if the browser blocks cookies; the API layer will fall back to a tab-scoped
     // bearer token, but if *that* fails too we surface a clear error.
@@ -82,12 +74,53 @@ function LoginInner() {
     }
   }
 
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setState("logging_in");
+    const res = await api.login(username, password);
+    if (!res) {
+      setState("error");
+      setError("Invalid username or password.");
+      setTimeout(() => setState("idle"), 1500);
+      return;
+    }
+    if ("mfaRequired" in res && res.mfaRequired) {
+      setChallengeToken(res.mfaChallengeToken);
+      setMfaCode("");
+      setPassword("");
+      setState("idle");
+      setInfo(
+        "Enter the 6-digit code from your authenticator app to finish signing in.",
+      );
+      return;
+    }
+    await completeLoginRedirect();
+  }
+
+  async function onVerifyMFA(e: React.FormEvent) {
+    e.preventDefault();
+    if (!challengeToken) return;
+    setError(null);
+    setState("verifying_mfa");
+    const res = await api.verifyLoginMFA(challengeToken, mfaCode);
+    if (!res) {
+      setState("error");
+      setError("Invalid authentication code.");
+      setTimeout(() => setState("idle"), 1500);
+      return;
+    }
+    await completeLoginRedirect();
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-[var(--text)]">
       <div className="w-full max-w-md rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-8 shadow-card-lg">
         <div className="mb-6 flex items-center gap-3">
           <div className="h-2 w-2 rounded-full bg-amber-500" />
-          <h1 className="text-xl font-semibold text-[var(--text)]">containd login</h1>
+          <h1 className="text-xl font-semibold text-[var(--text)]">
+            containd login
+          </h1>
         </div>
 
         {error && (
@@ -123,40 +156,92 @@ function LoginInner() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="grid gap-4">
-          <div>
-            <label htmlFor="login-username" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              Username
-            </label>
-            <input
-              id="login-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full input-industrial"
-              autoComplete="username"
-            />
-          </div>
-          <div>
-            <label htmlFor="login-password" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full input-industrial"
-              autoComplete="current-password"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={state === "logging_in"}
-            className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
-          >
-            {state === "logging_in" ? "Logging in..." : "Login"}
-          </button>
-        </form>
+        {!challengeToken ? (
+          <form onSubmit={onSubmit} className="grid gap-4">
+            <div>
+              <label
+                htmlFor="login-username"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+              >
+                Username
+              </label>
+              <input
+                id="login-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full input-industrial"
+                autoComplete="username"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="login-password"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+              >
+                Password
+              </label>
+              <input
+                id="login-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full input-industrial"
+                autoComplete="current-password"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={state === "logging_in"}
+              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+            >
+              {state === "logging_in" ? "Logging in..." : "Login"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onVerifyMFA} className="grid gap-4">
+            <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+              Password verified. Finish sign-in with the 6-digit code from your
+              authenticator app.
+            </div>
+            <div>
+              <label
+                htmlFor="login-mfa-code"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+              >
+                Authentication Code
+              </label>
+              <input
+                id="login-mfa-code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                className="w-full input-industrial"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                placeholder="123456"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={state === "verifying_mfa"}
+              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+            >
+              {state === "verifying_mfa" ? "Verifying..." : "Verify code"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setChallengeToken(null);
+                setMfaCode("");
+                setInfo(null);
+                setError(null);
+                setState("idle");
+              }}
+              className="rounded-sm border border-amber-500/[0.15] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            >
+              Back
+            </button>
+          </form>
+        )}
 
         <p className="mt-4 text-xs text-[var(--text-muted)]">
           Default credentials on fresh installs: containd / containd.

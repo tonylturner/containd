@@ -14,6 +14,7 @@ require (
 	github.com/florianl/go-nfqueue/v2 v2.0.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
@@ -24,6 +25,7 @@ require (
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect

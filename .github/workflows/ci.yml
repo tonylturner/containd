@@ -131,17 +131,22 @@ jobs:
           fi
 
           curl -fsS "$api/health" | jq -e '.status == "ok"' >/dev/null
+          quickstart_password="$(python3 - <<'PY'
+import secrets
+print("Ci" + secrets.token_hex(8) + "Aa1")
+PY
+          )"
           curl -fsS -c /tmp/containd-quickstart.cookie \
             -H 'Content-Type: application/json' \
             -d '{"username":"containd","password":"containd"}' \
             "$api/auth/login" >/dev/null
           curl -fsS -b /tmp/containd-quickstart.cookie \
             -H 'Content-Type: application/json' \
-            -d '{"currentPassword":"containd","newPassword":"Containd2"}' \
+            -d "{\"currentPassword\":\"containd\",\"newPassword\":\"${quickstart_password}\"}" \
             "$api/auth/me/password" >/dev/null
           curl -fsS -c /tmp/containd-quickstart.cookie \
             -H 'Content-Type: application/json' \
-            -d '{"username":"containd","password":"Containd2"}' \
+            -d "{\"username\":\"containd\",\"password\":\"${quickstart_password}\"}" \
             "$api/auth/login" >/dev/null
           curl -fsS -b /tmp/containd-quickstart.cookie \
             -H 'Content-Type: application/json' \

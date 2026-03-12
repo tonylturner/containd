@@ -13,7 +13,7 @@ Welcome to the containd documentation. This content is rendered in-app (Help ico
 ## Additional references
 
 - **API**: An [OpenAPI 3.0 spec](https://github.com/tonylturner/containd/blob/main/docs/openapi.yaml) is available. See [API Reference](api-reference.md) for details and environment variable documentation.
-- **Security posture**: [Secure by Design](secure-by-design.md) explains how containd aligns with CISA Secure by Design goals, including the current bootstrap-password caveat and roadmap.
+- **Security posture**: [Secure by Design](secure-by-design.md) explains how containd aligns with CISA Secure by Design goals, [Advisories and CSAF](advisories.md) documents the disclosure process, and [Logging and Evidence](logging-evidence.md) plus [Update Policy](update-policy.md) describe operational expectations.
 - **Supply chain**: [SBOM](sbom.md) -- software bill of materials, image signing, vulnerability scanning.
 - **Licensing**: [Third-Party Licenses](SPDX.md) -- component-level SPDX license tracking.
 - **Config reload**: The containd process accepts `SIGHUP` for configuration reload (partial -- not all subsystems reload yet).

@@ -1,0 +1,151 @@
+{
+  "document": {
+    "aggregate_severity": {
+      "namespace": "https://www.first.org/cvss/v3.1",
+      "text": "PLACEHOLDER"
+    },
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "lang": "en-US",
+    "notes": [
+      {
+        "category": "summary",
+        "text": "Replace this summary with a concise description of the vulnerability and its impact.",
+        "title": "Summary"
+      }
+    ],
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "Email tony@defendics.com and follow SECURITY.md in the containd repository.",
+      "issuing_authority": "The containd project publishes advisories for vulnerabilities affecting the containd codebase, official images, and directly maintained release artifacts.",
+      "name": "containd project",
+      "namespace": "https://github.com/tonylturner/containd"
+    },
+    "references": [
+      {
+        "category": "self",
+        "summary": "Published advisory URL",
+        "url": "https://raw.githubusercontent.com/tonylturner/containd/main/security/csaf/advisories/PLACEHOLDER.json"
+      }
+    ],
+    "title": "PLACEHOLDER advisory title",
+    "tracking": {
+      "current_release_date": "2026-03-12T00:00:00Z",
+      "generator": {
+        "date": "2026-03-12T00:00:00Z",
+        "engine": {
+          "name": "manual"
+        }
+      },
+      "id": "PLACEHOLDER-ID",
+      "initial_release_date": "2026-03-12T00:00:00Z",
+      "revision_history": [
+        {
+          "date": "2026-03-12T00:00:00Z",
+          "number": "1",
+          "summary": "Initial publication"
+        }
+      ],
+      "status": "final",
+      "version": "1"
+    }
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "vendor",
+        "name": "containd",
+        "branches": [
+          {
+            "category": "product_name",
+            "name": "containd management appliance",
+            "product": {
+              "name": "containd",
+              "product_id": "containd"
+            }
+          },
+          {
+            "category": "product_name",
+            "name": "containd engine appliance",
+            "product": {
+              "name": "containd-engine",
+              "product_id": "containd-engine"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "acknowledgments": [
+        {
+          "organization": "PLACEHOLDER",
+          "summary": "Replace with discoverer acknowledgment if applicable."
+        }
+      ],
+      "cve": "CVE-PLACEHOLDER",
+      "cwe": {
+        "id": "CWE-PLACEHOLDER",
+        "name": "PLACEHOLDER"
+      },
+      "ids": [
+        {
+          "system_name": "GitHub Security Advisory",
+          "text": "GHSA-PLACEHOLDER"
+        }
+      ],
+      "notes": [
+        {
+          "category": "description",
+          "text": "Describe the vulnerable behavior, prerequisites, and impact here.",
+          "title": "Description"
+        },
+        {
+          "category": "general",
+          "text": "Describe operator mitigation or workaround guidance here.",
+          "title": "Mitigations"
+        }
+      ],
+      "product_status": {
+        "first_affected": [
+          "containd"
+        ],
+        "fixed": [
+          "containd"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "Primary reference",
+          "url": "https://github.com/tonylturner/containd/releases"
+        }
+      ],
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade to the fixed release listed in this advisory.",
+          "product_ids": [
+            "containd"
+          ],
+          "url": "https://github.com/tonylturner/containd/releases"
+        }
+      ],
+      "scores": [
+        {
+          "cvss_v3": {
+            "baseScore": 0.0,
+            "baseSeverity": "NONE",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+            "version": "3.1"
+          },
+          "products": [
+            "containd"
+          ]
+        }
+      ],
+      "title": "PLACEHOLDER vulnerability title"
+    }
+  ]
+}

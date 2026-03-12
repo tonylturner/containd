@@ -2,4 +2,5 @@ Contact: mailto:tony@defendics.com
 Expires: 2027-03-12T03:51:45Z
 Preferred-Languages: en
 Policy: https://github.com/tonylturner/containd/blob/main/SECURITY.md
+CSAF: https://raw.githubusercontent.com/tonylturner/containd/main/ui/public/.well-known/csaf/provider-metadata.json
 Acknowledgments: https://github.com/tonylturner/containd/releases

@@ -211,6 +211,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
 	api.POST("/auth/login", rateLimitSensitive(), loginHandler(userStore))
+	api.POST("/auth/login/mfa", rateLimitSensitive(), loginMFAHandler(userStore))
 	// Logout is intentionally unauthenticated so clients can always clear cookies
 	// even if their session expired or local token state is gone.
 	api.POST("/auth/logout", logoutHandler(userStore))
@@ -222,6 +223,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/auth/session", authSessionHandler(userStore))
 		protected.PATCH("/auth/me", updateMeHandler(userStore))
 		protected.POST("/auth/me/password", rateLimitSensitive(), changeMyPasswordHandler(userStore))
+		protected.POST("/auth/me/mfa/enroll", rateLimitSensitive(), enrollMyMFAHandler(userStore))
+		protected.POST("/auth/me/mfa/enable", rateLimitSensitive(), enableMyMFAHandler(userStore))
+		protected.POST("/auth/me/mfa/disable", rateLimitSensitive(), disableMyMFAHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
 		protected.GET("/system/stats", systemStatsHandler())
 		protected.GET("/system/inspection", systemInspectionHandler())
@@ -365,6 +369,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/users", requireAdmin(), rateLimitSensitive(), createUserHandler(userStore))
 		protected.PATCH("/users/:id", requireAdmin(), rateLimitSensitive(), updateUserHandler(userStore))
 		protected.POST("/users/:id/password", requireAdmin(), rateLimitSensitive(), setUserPasswordHandler(userStore))
+		protected.POST("/users/:id/mfa/disable", requireAdmin(), rateLimitSensitive(), disableUserMFAHandler(userStore))
 		protected.DELETE("/users/:id", requireAdmin(), rateLimitSensitive(), deleteUserHandler(userStore))
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)

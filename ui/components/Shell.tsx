@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type User, api } from "../lib/api";
+import { type MFAEnrollResponse, type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
 
@@ -35,56 +36,109 @@ function appendRedirectTrace(entry: {
 /* ── Navigation icons (inline SVGs for zero-dep) ──────────── */
 function IconShield() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   );
 }
 function IconNetwork() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="6" height="6" rx="1" /><rect x="16" y="2" width="6" height="6" rx="1" /><rect x="9" y="16" width="6" height="6" rx="1" />
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="2" width="6" height="6" rx="1" />
+      <rect x="16" y="2" width="6" height="6" rx="1" />
+      <rect x="9" y="16" width="6" height="6" rx="1" />
       <path d="M5 8v3a3 3 0 003 3h8a3 3 0 003-3V8M12 14v2" />
     </svg>
   );
 }
 function IconMonitor() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
     </svg>
   );
 }
 function IconWrench() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
     </svg>
   );
 }
 function IconServer() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" />
-      <circle cx="6" cy="6" r="1" fill="currentColor" /><circle cx="6" cy="18" r="1" fill="currentColor" />
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="2" width="20" height="8" rx="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" />
+      <circle cx="6" cy="6" r="1" fill="currentColor" />
+      <circle cx="6" cy="18" r="1" fill="currentColor" />
     </svg>
   );
 }
 function IconSettings() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   );
 }
 
 const NAV_ICONS: Record<string, () => React.ReactNode> = {
   "Policy & Rules": IconShield,
-  "Network": IconNetwork,
-  "Monitoring": IconMonitor,
-  "Operations": IconWrench,
-  "Services": IconServer,
-  "System": IconSettings,
+  Network: IconNetwork,
+  Monitoring: IconMonitor,
+  Operations: IconWrench,
+  Services: IconServer,
+  System: IconSettings,
 };
 
 function docsHrefForPath(pathname: string): string {
@@ -210,7 +264,9 @@ export function Shell({
   const [me, setMe] = React.useState<User | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
-  const [profileTab, setProfileTab] = React.useState<"profile" | "password">("profile");
+  const [profileTab, setProfileTab] = React.useState<"profile" | "password">(
+    "profile",
+  );
   const redirectingRef = React.useRef(false);
 
   const isAdmin = (me?.role ?? "") === "admin";
@@ -232,7 +288,13 @@ export function Shell({
   }, [pathname, navGroups]);
 
   const redirectToLogin = React.useCallback(
-    (reason: "expired" | "logout" | "forbidden" | "unauthenticated" = "unauthenticated") => {
+    (
+      reason:
+        | "expired"
+        | "logout"
+        | "forbidden"
+        | "unauthenticated" = "unauthenticated",
+    ) => {
       if (typeof window === "undefined") return;
       if (pathname.startsWith("/login")) return;
       if (redirectingRef.current) return;
@@ -275,8 +337,15 @@ export function Shell({
       }
       redirectToLogin("expired");
     };
-    window.addEventListener("containd:auth:expired", onExpired as EventListener);
-    return () => window.removeEventListener("containd:auth:expired", onExpired as EventListener);
+    window.addEventListener(
+      "containd:auth:expired",
+      onExpired as EventListener,
+    );
+    return () =>
+      window.removeEventListener(
+        "containd:auth:expired",
+        onExpired as EventListener,
+      );
   }, [redirectToLogin]);
 
   React.useEffect(() => {
@@ -284,10 +353,17 @@ export function Shell({
     const onPasswordRequired = () => {
       setProfileTab("password");
       setProfileOpen(true);
-      setMe((prev) => prev ? { ...prev, mustChangePassword: true } : prev);
+      setMe((prev) => (prev ? { ...prev, mustChangePassword: true } : prev));
     };
-    window.addEventListener("containd:auth:password_change_required", onPasswordRequired as EventListener);
-    return () => window.removeEventListener("containd:auth:password_change_required", onPasswordRequired as EventListener);
+    window.addEventListener(
+      "containd:auth:password_change_required",
+      onPasswordRequired as EventListener,
+    );
+    return () =>
+      window.removeEventListener(
+        "containd:auth:password_change_required",
+        onPasswordRequired as EventListener,
+      );
   }, []);
 
   React.useEffect(() => {
@@ -315,7 +391,11 @@ export function Shell({
         setProfileTab("password");
         setProfileOpen(true);
       }
-      if ((data?.role ?? "") !== "admin" && pathname.startsWith("/system/") && typeof window !== "undefined") {
+      if (
+        (data?.role ?? "") !== "admin" &&
+        pathname.startsWith("/system/") &&
+        typeof window !== "undefined"
+      ) {
         window.location.href = "/forbidden";
         return;
       }
@@ -330,11 +410,14 @@ export function Shell({
   // stay fresh while the user is actively viewing any page.
   React.useEffect(() => {
     if (pathname.startsWith("/login")) return;
-    const interval = setInterval(() => {
-      api.meStatus().then(({ status }) => {
-        if (status === 401) redirectToLogin("expired");
-      });
-    }, 4 * 60 * 1000); // every 4 minutes
+    const interval = setInterval(
+      () => {
+        api.meStatus().then(({ status }) => {
+          if (status === 401) redirectToLogin("expired");
+        });
+      },
+      4 * 60 * 1000,
+    ); // every 4 minutes
     return () => clearInterval(interval);
   }, [pathname, redirectToLogin]);
 
@@ -350,26 +433,53 @@ export function Shell({
 
   return (
     <div className="relative min-h-screen bg-[#080a0f] text-slate-100">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white"
+      >
         Skip to main content
       </a>
 
       <div className="relative flex min-h-screen">
         {/* ── Sidebar ─────────────────────────────────────────── */}
-        <aside aria-label="Sidebar" className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm">
+        <aside
+          aria-label="Sidebar"
+          className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm"
+        >
           {/* Brand */}
-          <Link href="/" className="flex items-center gap-3 px-4 py-4 border-b border-amber-500/[0.15] transition-ui hover:bg-amber-500/[0.03]">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500/60" style={{ boxShadow: "0 0 12px rgba(245,158,11,0.15), inset 0 0 8px rgba(245,158,11,0.1)" }}>
+          <Link
+            href="/"
+            className="flex items-center gap-3 px-4 py-4 border-b border-amber-500/[0.15] transition-ui hover:bg-amber-500/[0.03]"
+          >
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500/60"
+              style={{
+                boxShadow:
+                  "0 0 12px rgba(245,158,11,0.15), inset 0 0 8px rgba(245,158,11,0.1)",
+              }}
+            >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                 <circle cx="7" cy="7" r="3" fill="#f59e0b" />
-                <circle cx="7" cy="7" r="6" stroke="#f59e0b" strokeWidth="1" strokeDasharray="3 2" />
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="6"
+                  stroke="#f59e0b"
+                  strokeWidth="1"
+                  strokeDasharray="3 2"
+                />
               </svg>
             </div>
-            <span className="text-sm font-bold tracking-[2px] uppercase text-amber-500">containd</span>
+            <span className="text-sm font-bold tracking-[2px] uppercase text-amber-500">
+              containd
+            </span>
           </Link>
 
           {/* Navigation */}
-          <nav aria-label="Main navigation" className="flex-1 overflow-y-auto px-2 py-3 pb-4 text-[13px]">
+          <nav
+            aria-label="Main navigation"
+            className="flex-1 overflow-y-auto px-2 py-3 pb-4 text-[13px]"
+          >
             {/* Dashboard link */}
             <div className="mb-1 px-1">
               <Link
@@ -381,16 +491,27 @@ export function Shell({
                     : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border-l-2 border-transparent"
                 }`}
               >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9,22 9,12 15,12 15,22" />
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                  <polyline points="9,22 9,12 15,12 15,22" />
                 </svg>
                 Dashboard
               </Link>
             </div>
 
             {navGroups.map((group) => {
-              const isGroupActive = group.items.some(
-                (item) => item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+              const isGroupActive = group.items.some((item) =>
+                item.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(item.href),
               );
               const IconFn = NAV_ICONS[group.label];
 
@@ -406,12 +527,18 @@ export function Shell({
                         : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"
                     }`}
                   >
-                    {IconFn && <span aria-hidden="true" className="opacity-70">{IconFn()}</span>}
+                    {IconFn && (
+                      <span aria-hidden="true" className="opacity-70">
+                        {IconFn()}
+                      </span>
+                    )}
                     <span className="flex-1 text-left">{group.label}</span>
                     <svg
                       viewBox="0 0 24 24"
                       className={`h-3 w-3 transition-transform duration-200 ${collapsed[group.label] ? "" : "rotate-90"}`}
-                      fill="none" stroke="currentColor" strokeWidth={2}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
                     >
                       <polyline points="9,6 15,12 9,18" />
                     </svg>
@@ -459,10 +586,18 @@ export function Shell({
                   {(me.username?.[0] ?? "U").toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-[13px] font-medium text-white">{me.username}</div>
+                  <div className="truncate text-[13px] font-medium text-white">
+                    {me.username}
+                  </div>
                   <div className="text-xs text-slate-500">{me.role}</div>
                 </div>
-                <svg viewBox="0 0 24 24" className={`h-3 w-3 text-slate-500 transition-transform duration-200 ${menuOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-3 w-3 text-slate-500 transition-transform duration-200 ${menuOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <polyline points="6,9 12,15 18,9" />
                 </svg>
               </button>
@@ -470,14 +605,22 @@ export function Shell({
                 <div className="mt-1 rounded-lg border border-white/[0.08] bg-surface-raised p-1 animate-fade-in">
                   <button
                     type="button"
-                    onClick={() => { setProfileTab("profile"); setProfileOpen(true); setMenuOpen(false); }}
+                    onClick={() => {
+                      setProfileTab("profile");
+                      setProfileOpen(true);
+                      setMenuOpen(false);
+                    }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/[0.06]"
                   >
                     Profile
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setProfileTab("password"); setProfileOpen(true); setMenuOpen(false); }}
+                    onClick={() => {
+                      setProfileTab("password");
+                      setProfileOpen(true);
+                      setMenuOpen(false);
+                    }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/[0.06]"
                   >
                     Change password
@@ -485,7 +628,11 @@ export function Shell({
                   <div className="my-1 border-t border-white/[0.06]" />
                   <button
                     type="button"
-                    onClick={async () => { await api.logout(); if (typeof window !== "undefined") window.location.href = "/login?reason=logout"; }}
+                    onClick={async () => {
+                      await api.logout();
+                      if (typeof window !== "undefined")
+                        window.location.href = "/login?reason=logout";
+                    }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-red-400 transition-ui hover:bg-red-500/10"
                   >
                     Sign out
@@ -497,7 +644,11 @@ export function Shell({
         </aside>
 
         {/* ── Main content ────────────────────────────────────── */}
-        <main id="main-content" aria-label={title} className="flex-1 overflow-y-auto bg-[#080a0f] px-6 py-6">
+        <main
+          id="main-content"
+          aria-label={title}
+          className="flex-1 overflow-y-auto bg-[#080a0f] px-6 py-6"
+        >
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
               <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-slate-300">
@@ -506,7 +657,10 @@ export function Shell({
                     <div>{authError}</div>
                     <button
                       type="button"
-                      onClick={() => { if (typeof window !== "undefined") window.location.reload(); }}
+                      onClick={() => {
+                        if (typeof window !== "undefined")
+                          window.location.reload();
+                      }}
                       className="rounded-lg bg-white/[0.08] px-3 py-1.5 text-xs text-white transition-ui hover:bg-white/[0.12]"
                     >
                       Reload
@@ -524,16 +678,29 @@ export function Shell({
               <>
                 {me?.labMode && (
                   <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-400">
-                    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
                     </svg>
-                    <span><strong>Lab mode</strong> — Authentication is relaxed. Not suitable for production.</span>
+                    <span>
+                      <strong>Lab mode</strong> — Authentication is relaxed. Not
+                      suitable for production.
+                    </span>
                   </div>
                 )}
                 <ConfigStatusBar />
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>
-                    <h1 className="text-lg font-semibold tracking-wide text-white">{title}</h1>
+                    <h1 className="text-lg font-semibold tracking-wide text-white">
+                      {title}
+                    </h1>
                   </div>
                   <div className="flex items-center gap-2">
                     {actions}
@@ -545,8 +712,19 @@ export function Shell({
                       aria-label="Help & documentation"
                       className="inline-flex items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] p-2 text-slate-400 transition-ui hover:bg-white/[0.08] hover:text-slate-200"
                     >
-                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 115.83 1c0 2-3 2-3 4" /><path d="M12 18h.01" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M9.09 9a3 3 0 115.83 1c0 2-3 2-3 4" />
+                        <path d="M12 18h.01" />
                       </svg>
                     </a>
                   </div>
@@ -564,9 +742,15 @@ export function Shell({
           me={me}
           initialTab={profileTab}
           forcePassword={!!me.mustChangePassword}
-          onClose={() => { if (!me.mustChangePassword) setProfileOpen(false); }}
+          onClose={() => {
+            if (!me.mustChangePassword) setProfileOpen(false);
+          }}
           onSaved={(u) => setMe(u)}
-          onPasswordChanged={() => setMe((prev) => prev ? { ...prev, mustChangePassword: false } : prev)}
+          onPasswordChanged={() =>
+            setMe((prev) =>
+              prev ? { ...prev, mustChangePassword: false } : prev,
+            )
+          }
         />
       )}
     </div>
@@ -582,7 +766,7 @@ function ProfileModal({
   onPasswordChanged,
 }: {
   me: User;
-  initialTab: "profile" | "password";
+  initialTab: "profile" | "password" | "mfa";
   forcePassword?: boolean;
   onClose: () => void;
   onSaved: (u: User) => void;
@@ -594,9 +778,19 @@ function ProfileModal({
   const [email, setEmail] = React.useState(me.email ?? "");
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
+  const [mfaEnabled, setMfaEnabled] = React.useState(!!me.mfaEnabled);
+  const [mfaEnrollment, setMfaEnrollment] =
+    React.useState<MFAEnrollResponse | null>(null);
+  const [mfaCode, setMfaCode] = React.useState("");
+  const [mfaDisablePassword, setMfaDisablePassword] = React.useState("");
+  const [mfaDisableCode, setMfaDisableCode] = React.useState("");
   const [state, setState] = React.useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = React.useState<string | null>(null);
   const passwordRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    setMfaEnabled(!!me.mfaEnabled);
+  }, [me.mfaEnabled]);
 
   React.useEffect(() => {
     if (initialTab === "password") {
@@ -605,7 +799,9 @@ function ProfileModal({
   }, [initialTab]);
 
   React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !forcePassword) onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !forcePassword) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [forcePassword, onClose]);
@@ -625,14 +821,25 @@ function ProfileModal({
 
   async function changePassword() {
     setError(null);
-    if (!currentPassword) { setError("Current password required."); return; }
-    if (!newPassword) { setError("New password required."); return; }
-    if (newPassword.length < 8) { setError("New password must be at least 8 characters."); return; }
+    if (!currentPassword) {
+      setError("Current password required.");
+      return;
+    }
+    if (!newPassword) {
+      setError("New password required.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
     setState("saving");
     const ok = await api.changeMyPassword(currentPassword, newPassword);
     if (!ok.ok) {
       setState("error");
-      setError(ok.error || "Failed to change password. Check your current password.");
+      setError(
+        ok.error || "Failed to change password. Check your current password.",
+      );
       return;
     }
     setCurrentPassword("");
@@ -642,23 +849,116 @@ function ProfileModal({
     onClose();
   }
 
-  const inputClass = "w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none";
+  async function startMFAEnrollment() {
+    setError(null);
+    setState("saving");
+    const res = await api.startMFAEnrollment();
+    if (!res.ok) {
+      setState("error");
+      setError(res.error || "Failed to start MFA setup.");
+      return;
+    }
+    setMfaEnrollment(res.data);
+    setMfaCode("");
+    setState("idle");
+  }
+
+  async function enableMFA() {
+    if (!mfaEnrollment) return;
+    setError(null);
+    if (!mfaCode.trim()) {
+      setError("Authentication code required.");
+      return;
+    }
+    setState("saving");
+    const res = await api.enableMFA(mfaEnrollment.challengeToken, mfaCode);
+    if (!res.ok) {
+      setState("error");
+      setError(res.error || "Failed to enable MFA.");
+      return;
+    }
+    setMfaEnabled(true);
+    setMfaEnrollment(null);
+    setMfaCode("");
+    setState("idle");
+    onSaved({ ...me, mfaEnabled: true });
+  }
+
+  async function disableMFA() {
+    setError(null);
+    if (!mfaDisablePassword) {
+      setError("Current password required.");
+      return;
+    }
+    if (!mfaDisableCode.trim()) {
+      setError("Authentication code required.");
+      return;
+    }
+    setState("saving");
+    const res = await api.disableMFA(mfaDisablePassword, mfaDisableCode);
+    if (!res.ok) {
+      setState("error");
+      setError(res.error || "Failed to disable MFA.");
+      return;
+    }
+    setMfaEnabled(false);
+    setMfaEnrollment(null);
+    setMfaCode("");
+    setMfaDisablePassword("");
+    setMfaDisableCode("");
+    setState("idle");
+    onSaved({ ...me, mfaEnabled: false });
+  }
+
+  const inputClass =
+    "w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" role="dialog" aria-labelledby="profile-modal-title">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+      role="dialog"
+      aria-labelledby="profile-modal-title"
+    >
       <div className="w-full max-w-lg rounded-xl border border-white/[0.08] bg-surface-raised p-6 shadow-card-lg animate-slide-down">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="profile-modal-title" className="text-base font-semibold text-white">Account</h2>
+          <h2
+            id="profile-modal-title"
+            className="text-base font-semibold text-white"
+          >
+            Account
+          </h2>
           {!forcePassword && (
-            <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-white">
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 6L6 18M6 6l12 12" /></svg>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-white"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
             </button>
           )}
         </div>
 
         {forcePassword && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
-            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
             You must change the default password before continuing.
           </div>
         )}
@@ -686,27 +986,77 @@ function ProfileModal({
           >
             Password
           </button>
+          {!forcePassword && (
+            <button
+              type="button"
+              onClick={() => setTab("mfa")}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "mfa" ? "bg-white/[0.08] text-white" : "text-slate-400 hover:text-slate-200"}`}
+            >
+              MFA
+            </button>
+          )}
         </div>
 
         {tab === "profile" && (
           <div>
             <div className="grid gap-3 md:grid-cols-2">
               <div>
-                <label htmlFor="profile-firstName" className="mb-1 block text-xs font-medium text-slate-400">First name</label>
-                <input id="profile-firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name" className={inputClass} />
+                <label
+                  htmlFor="profile-firstName"
+                  className="mb-1 block text-xs font-medium text-slate-400"
+                >
+                  First name
+                </label>
+                <input
+                  id="profile-firstName"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="First name"
+                  className={inputClass}
+                />
               </div>
               <div>
-                <label htmlFor="profile-lastName" className="mb-1 block text-xs font-medium text-slate-400">Last name</label>
-                <input id="profile-lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name" className={inputClass} />
+                <label
+                  htmlFor="profile-lastName"
+                  className="mb-1 block text-xs font-medium text-slate-400"
+                >
+                  Last name
+                </label>
+                <input
+                  id="profile-lastName"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last name"
+                  className={inputClass}
+                />
               </div>
               <div className="md:col-span-2">
-                <label htmlFor="profile-email" className="mb-1 block text-xs font-medium text-slate-400">Email</label>
-                <input id="profile-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" type="email" className={inputClass} />
+                <label
+                  htmlFor="profile-email"
+                  className="mb-1 block text-xs font-medium text-slate-400"
+                >
+                  Email
+                </label>
+                <input
+                  id="profile-email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="email@example.com"
+                  type="email"
+                  className={inputClass}
+                />
               </div>
             </div>
-            <div className="mt-2 text-xs text-slate-500">Role: {me.role} (managed by admins)</div>
+            <div className="mt-2 text-xs text-slate-500">
+              Role: {me.role} (managed by admins)
+            </div>
             <div className="mt-4 flex items-center gap-3">
-              <button type="button" onClick={saveProfile} disabled={state === "saving"} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50">
+              <button
+                type="button"
+                onClick={saveProfile}
+                disabled={state === "saving"}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+              >
                 {state === "saving" ? "Saving..." : "Save profile"}
               </button>
             </div>
@@ -716,16 +1066,214 @@ function ProfileModal({
         {tab === "password" && (
           <div className="grid gap-3">
             <div>
-              <label htmlFor="profile-current-pw" className="mb-1 block text-xs font-medium text-slate-400">Current password</label>
-              <input id="profile-current-pw" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Current password" autoComplete="current-password" className={inputClass} />
+              <label
+                htmlFor="profile-current-pw"
+                className="mb-1 block text-xs font-medium text-slate-400"
+              >
+                Current password
+              </label>
+              <input
+                id="profile-current-pw"
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Current password"
+                autoComplete="current-password"
+                className={inputClass}
+              />
             </div>
             <div>
-              <label htmlFor="profile-new-pw" className="mb-1 block text-xs font-medium text-slate-400">New password</label>
-              <input id="profile-new-pw" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password (min 8 chars)" autoComplete="new-password" ref={passwordRef} className={inputClass} />
+              <label
+                htmlFor="profile-new-pw"
+                className="mb-1 block text-xs font-medium text-slate-400"
+              >
+                New password
+              </label>
+              <input
+                id="profile-new-pw"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password (min 8 chars)"
+                autoComplete="new-password"
+                ref={passwordRef}
+                className={inputClass}
+              />
             </div>
-            <button type="button" onClick={changePassword} disabled={state === "saving"} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={changePassword}
+              disabled={state === "saving"}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+            >
               {state === "saving" ? "Updating..." : "Update password"}
             </button>
+          </div>
+        )}
+
+        {tab === "mfa" && !forcePassword && (
+          <div className="grid gap-4">
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-3 text-sm text-slate-300">
+              <div className="font-medium text-white">
+                Authenticator app MFA
+              </div>
+              <div className="mt-1 text-xs text-slate-400">
+                Optional TOTP-based MFA for local accounts. Recommended for
+                admin and instructor accounts. SMS is intentionally not
+                supported.
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-white">Status</div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    {mfaEnabled
+                      ? "Enabled for this account."
+                      : "Disabled for this account."}
+                  </div>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-1 text-[11px] ${mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/[0.06] text-slate-300"}`}
+                >
+                  {mfaEnabled ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+            </div>
+
+            {!mfaEnabled && !mfaEnrollment && (
+              <div className="grid gap-3">
+                <div className="text-xs text-slate-400">
+                  Start setup to scan a QR code in Google Authenticator,
+                  Microsoft Authenticator, or another TOTP-compatible app.
+                </div>
+                <button
+                  type="button"
+                  onClick={startMFAEnrollment}
+                  disabled={state === "saving"}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+                >
+                  {state === "saving" ? "Preparing..." : "Set up MFA"}
+                </button>
+              </div>
+            )}
+
+            {!mfaEnabled && mfaEnrollment && (
+              <div className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-[220px,1fr]">
+                  <div className="rounded-lg border border-white/[0.08] bg-white p-2">
+                    <Image
+                      src={mfaEnrollment.qrDataURL}
+                      alt="MFA enrollment QR code"
+                      width={220}
+                      height={220}
+                      unoptimized
+                      className="h-[220px] w-[220px]"
+                    />
+                  </div>
+                  <div className="grid gap-3">
+                    <div>
+                      <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Manual entry secret
+                      </div>
+                      <div className="mt-1 rounded-md border border-white/[0.08] bg-black/20 px-3 py-2 font-mono text-sm text-white break-all">
+                        {mfaEnrollment.secret}
+                      </div>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="profile-mfa-code"
+                        className="mb-1 block text-xs font-medium text-slate-400"
+                      >
+                        Enter the 6-digit code from your app
+                      </label>
+                      <input
+                        id="profile-mfa-code"
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value)}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="123456"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={enableMFA}
+                        disabled={state === "saving"}
+                        className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+                      >
+                        {state === "saving" ? "Enabling..." : "Enable MFA"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMfaEnrollment(null);
+                          setMfaCode("");
+                          setError(null);
+                          setState("idle");
+                        }}
+                        className="rounded-lg border border-white/[0.08] px-4 py-2 text-sm text-white transition-ui hover:bg-white/[0.06]"
+                      >
+                        Cancel setup
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {mfaEnabled && (
+              <div className="grid gap-3">
+                <div className="text-xs text-slate-400">
+                  Disabling MFA requires your current password and a current
+                  authenticator code.
+                </div>
+                <div>
+                  <label
+                    htmlFor="profile-mfa-disable-password"
+                    className="mb-1 block text-xs font-medium text-slate-400"
+                  >
+                    Current password
+                  </label>
+                  <input
+                    id="profile-mfa-disable-password"
+                    type="password"
+                    value={mfaDisablePassword}
+                    onChange={(e) => setMfaDisablePassword(e.target.value)}
+                    autoComplete="current-password"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="profile-mfa-disable-code"
+                    className="mb-1 block text-xs font-medium text-slate-400"
+                  >
+                    Authentication code
+                  </label>
+                  <input
+                    id="profile-mfa-disable-code"
+                    value={mfaDisableCode}
+                    onChange={(e) => setMfaDisableCode(e.target.value)}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="123456"
+                    className={inputClass}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={disableMFA}
+                  disabled={state === "saving"}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-red-500 disabled:opacity-50"
+                >
+                  {state === "saving" ? "Disabling..." : "Disable MFA"}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
