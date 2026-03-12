@@ -244,6 +244,177 @@ func TestRecordDPIEventsEmitsIDSAlert(t *testing.T) {
 	if !foundAlert {
 		t.Fatalf("expected ids alert in events, got %+v", list)
 	}
+	protoStats := e.ProtoStats()
+	if len(protoStats) == 0 || protoStats[0].Protocol != "modbus" || protoStats[0].EventCount == 0 {
+		t.Fatalf("expected modbus protocol stats, got %+v", protoStats)
+	}
+	assets := e.Inventory().List()
+	if len(assets) != 2 {
+		t.Fatalf("expected two inventory assets, got %+v", assets)
+	}
+}
+
+func TestEnforceDPIEventsBlocksDeniedICSFlow(t *testing.T) {
+	up := &recordingUpdater{}
+	e, err := New(Config{
+		Capture: capture.Config{Interfaces: []string{"lo"}},
+		Enforce: EnforceConfig{
+			Enabled: true,
+			Updater: up,
+		},
+		DPIMode: "enforce",
+	})
+	if err != nil {
+		e, err = New(Config{
+			Capture: capture.Config{Interfaces: []string{"lo0"}},
+			Enforce: EnforceConfig{
+				Enabled: true,
+				Updater: up,
+			},
+			DPIMode: "enforce",
+		})
+	}
+	if err != nil {
+		t.Skipf("loopback interface not found or unavailable: %v", err)
+	}
+	snap := rules.Snapshot{
+		Default: rules.ActionAllow,
+		Firewall: []rules.Entry{
+			{
+				ID:           "deny-write",
+				Sources:      []string{"10.0.0.1/32"},
+				Destinations: []string{"10.0.0.2/32"},
+				Protocols:    []rules.Protocol{{Name: "tcp", Port: "502"}},
+				ICS: rules.ICSPredicate{
+					Protocol:     "modbus",
+					FunctionCode: []uint8{6},
+					WriteOnly:    true,
+				},
+				Action: rules.ActionDeny,
+				Log:    true,
+			},
+		},
+	}
+	e.LoadRules(snap)
+	state := flow.NewState(flow.Key{
+		SrcIP:   net.ParseIP("10.0.0.1"),
+		DstIP:   net.ParseIP("10.0.0.2"),
+		SrcPort: 12345,
+		DstPort: 502,
+		Proto:   6,
+		Dir:     flow.DirForward,
+	}, time.Now())
+	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 502}
+	evs := []dpi.Event{{
+		FlowID: "f-write",
+		Proto:  "modbus",
+		Kind:   "request",
+		Attributes: map[string]any{
+			"function_code": uint8(6),
+			"unit_id":       uint8(1),
+			"is_write":      true,
+			"address":       uint16(1),
+		},
+		Timestamp: time.Now().UTC(),
+	}}
+
+	v, enforced := e.enforceDPIEvents(state, pkt, evs)
+	if !enforced {
+		t.Fatal("expected enforcement verdict")
+	}
+	if v.Action != verdict.BlockFlowTemp {
+		t.Fatalf("expected block-flow verdict, got %s", v.Action)
+	}
+	if up.flowKey != "10.0.0.1->10.0.0.2/tcp:502" {
+		t.Fatalf("unexpected blocked flow key %q", up.flowKey)
+	}
+	if up.ttl != dpiEnforceBlockTTL {
+		t.Fatalf("ttl=%s want %s", up.ttl, dpiEnforceBlockTTL)
+	}
+
+	list := e.Events().List(10)
+	foundRuleHit := false
+	for _, ev := range list {
+		if ev.Kind == "firewall.rule.hit" && ev.Attributes["ruleId"] == "deny-write" {
+			foundRuleHit = true
+			break
+		}
+	}
+	if !foundRuleHit {
+		t.Fatalf("expected firewall rule hit event, got %+v", list)
+	}
+}
+
+func TestHandlePacketDoesNotLetEmptyTCPPacketSuppressLaterDPI(t *testing.T) {
+	e, err := New(Config{
+		Capture:    capture.Config{Interfaces: []string{"lo"}},
+		DPIEnabled: true,
+	})
+	if err != nil {
+		e, err = New(Config{
+			Capture:    capture.Config{Interfaces: []string{"lo0"}},
+			DPIEnabled: true,
+		})
+	}
+	if err != nil {
+		t.Skipf("loopback interface not found or unavailable: %v", err)
+	}
+	e.LoadRules(rules.Snapshot{
+		Default: rules.ActionAllow,
+		Firewall: []rules.Entry{
+			{
+				ID:        "inspect-modbus",
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				ICS: rules.ICSPredicate{
+					Protocol: "modbus",
+				},
+				Action: rules.ActionAllow,
+			},
+		},
+	})
+
+	base := capture.Packet{
+		Timestamp: time.Now().UTC(),
+		Interface: "lo",
+		SrcIP:     net.ParseIP("10.0.0.1"),
+		DstIP:     net.ParseIP("10.0.0.2"),
+		SrcPort:   42000,
+		DstPort:   502,
+		Proto:     6,
+		Transport: "tcp",
+	}
+	e.handlePacket(base)
+	e.handlePacket(capture.Packet{
+		Timestamp: time.Now().UTC(),
+		Interface: base.Interface,
+		SrcIP:     base.SrcIP,
+		DstIP:     base.DstIP,
+		SrcPort:   base.SrcPort,
+		DstPort:   base.DstPort,
+		Proto:     base.Proto,
+		Transport: base.Transport,
+		Payload: []byte{
+			0x00, 0x01,
+			0x00, 0x00,
+			0x00, 0x06,
+			0x01,
+			0x03,
+			0x00, 0x00,
+			0x00, 0x02,
+		},
+	})
+
+	list := e.Events().List(10)
+	found := false
+	for _, ev := range list {
+		if ev.Proto == "modbus" && ev.Kind == "request" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected modbus event after payload packet, got %+v", list)
+	}
 }
 
 func TestShouldInspectICSHeuristics(t *testing.T) {

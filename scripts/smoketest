@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Convenience wrapper to build the smoke harness and run the smoke-forward test.
+# Convenience wrapper to build the smoke harness and run forwarding + DPI smoke.
+# Set SMOKE_INCLUDE_DPI=0 to skip the live-DPI phase.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,4 +10,7 @@ export COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
 export BASE=${BASE:-http://localhost:18080/api/v1}
 export TOKEN=${TOKEN:-devtoken}
 
-./scripts/smoke-forward.sh
+bash ./scripts/smoke-forward.sh
+if [[ "${SMOKE_INCLUDE_DPI:-1}" != "0" ]]; then
+  SMOKE_SKIP_UP=1 SMOKE_BUILD=0 bash ./scripts/smoke-dpi.sh
+fi

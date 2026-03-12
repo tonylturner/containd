@@ -382,7 +382,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/templates/apply", requireAdmin(), applyTemplateHandler(store))
 		// ICS protocol templates.
 		protected.GET("/templates/ics", listICSTemplatesHandler())
-		protected.POST("/templates/ics/apply", requireAdmin(), applyICSTemplateHandler())
+		protected.POST("/templates/ics/apply", requireAdmin(), applyICSTemplateHandler(store))
 		// Identity resolver routes (optional).
 		for _, o := range opts {
 			if resolver, ok := o.(*identity.Resolver); ok && resolver != nil {
@@ -4229,35 +4229,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
-		deviceSet := map[string]struct{}{}
-		type candidate struct {
-			name   string
-			index  int
-			hasMAC bool
-		}
-		candidates := make([]candidate, 0, len(state))
-		for _, st := range state {
-			if strings.TrimSpace(st.Name) == "" {
-				continue
-			}
-			deviceSet[st.Name] = struct{}{}
-			if st.Name != "lo" && isAutoAssignableDevice(st.Name, st.MAC) {
-				mac := strings.TrimSpace(strings.ToLower(st.MAC))
-				hasMAC := mac != "" && mac != "00:00:00:00:00:00"
-				candidates = append(candidates, candidate{name: st.Name, index: st.Index, hasMAC: hasMAC})
-			}
-		}
-		sort.SliceStable(candidates, func(i, j int) bool {
-			// Prefer NICs with a real MAC if we have it.
-			if candidates[i].hasMAC != candidates[j].hasMAC {
-				return candidates[i].hasMAC
-			}
-			// Prefer kernel index ordering when available; fall back to name.
-			if candidates[i].index > 0 && candidates[j].index > 0 && candidates[i].index != candidates[j].index {
-				return candidates[i].index < candidates[j].index
-			}
-			return candidates[i].name < candidates[j].name
-		})
+		deviceSet := interfaceDeviceSet(state)
 
 		ifaceByName := map[string]*config.Interface{}
 		for i := range cfg.Interfaces {
@@ -4267,127 +4239,13 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 		assignments := map[string]string{}
 		switch mode {
 		case "auto":
-			// Assign default logical interfaces to detected kernel interfaces.
-			//
-			// Note: In Docker-based lab mode, interface numbering (eth0/eth1/...) can vary depending
-			// on network attach order. To keep the appliance UX stable, try to match interface roles
-			// by the IPv4 subnets currently present on each interface (configurable via env vars,
-			// defaulting to this repo's docker-compose subnets). Fall back to index ordering.
-			order := []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"}
-			subnetByLogical := map[string]string{
-				"wan":  envOrDefault("CONTAIND_AUTO_WAN_SUBNET", "192.168.240.0/24"),
-				"dmz":  envOrDefault("CONTAIND_AUTO_DMZ_SUBNET", "192.168.241.0/24"),
-				"lan1": envOrDefault("CONTAIND_AUTO_LAN1_SUBNET", "192.168.242.0/24"),
-				"lan2": envOrDefault("CONTAIND_AUTO_LAN2_SUBNET", "192.168.243.0/24"),
-				"lan3": envOrDefault("CONTAIND_AUTO_LAN3_SUBNET", "192.168.244.0/24"),
-				"lan4": envOrDefault("CONTAIND_AUTO_LAN4_SUBNET", "192.168.245.0/24"),
-				"lan5": envOrDefault("CONTAIND_AUTO_LAN5_SUBNET", "192.168.246.0/24"),
-				"lan6": envOrDefault("CONTAIND_AUTO_LAN6_SUBNET", "192.168.247.0/24"),
-			}
-			needed := 0
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; ok {
-					needed++
-				}
-			}
-			if needed == 0 {
-				apiError(c, http.StatusBadRequest, "no default interfaces present")
+			assignments, err = computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+				AllowFallback:     true,
+				DefaultRouteIface: detectKernelDefaultRouteIface(),
+			})
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
 				return
-			}
-			if len(candidates) < needed {
-				apiError(c, http.StatusBadRequest, fmt.Sprintf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed))
-				return
-			}
-
-			stateByName := map[string]config.InterfaceState{}
-			for _, st := range state {
-				if strings.TrimSpace(st.Name) == "" {
-					continue
-				}
-				stateByName[st.Name] = st
-			}
-			usedDev := map[string]bool{}
-
-			// If Docker Compose provides stable interface names (e.g. "wan", "dmz", "lan1"...),
-			// prefer those exact/prefix matches first.
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; !ok {
-					continue
-				}
-				for _, cand := range candidates {
-					if usedDev[cand.name] {
-						continue
-					}
-					if cand.name == logical || strings.HasPrefix(cand.name, logical) {
-						assignments[logical] = cand.name
-						usedDev[cand.name] = true
-						break
-					}
-				}
-			}
-
-			// Match by IPv4 subnet on the interface (e.g. docker-compose lab subnets).
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; !ok {
-					continue
-				}
-				if _, already := assignments[logical]; already {
-					continue
-				}
-				cidr := strings.TrimSpace(subnetByLogical[logical])
-				if cidr == "" {
-					continue
-				}
-				for _, cand := range candidates {
-					if usedDev[cand.name] {
-						continue
-					}
-					st, ok := stateByName[cand.name]
-					if !ok {
-						continue
-					}
-					if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
-						assignments[logical] = cand.name
-						usedDev[cand.name] = true
-						break
-					}
-				}
-			}
-
-			// Fall back: use the kernel's default-route egress device for WAN if still unassigned.
-			if _, ok := ifaceByName["wan"]; ok {
-				if _, already := assignments["wan"]; !already {
-					defDev := strings.TrimSpace(detectKernelDefaultRouteIface())
-					if defDev != "" && !usedDev[defDev] {
-						if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
-							assignments["wan"] = defDev
-							usedDev[defDev] = true
-						}
-					}
-				}
-			}
-
-			remaining := make([]candidate, 0, len(candidates))
-			for _, cand := range candidates {
-				if usedDev[cand.name] {
-					continue
-				}
-				remaining = append(remaining, cand)
-			}
-			idx := 0
-			for _, logical := range order {
-				if _, ok := ifaceByName[logical]; !ok {
-					continue
-				}
-				if _, already := assignments[logical]; already {
-					continue
-				}
-				if idx >= len(remaining) {
-					apiError(c, http.StatusBadRequest, "not enough eligible kernel interfaces to complete auto-assign")
-					return
-				}
-				assignments[logical] = remaining[idx].name
-				idx++
 			}
 		case "explicit":
 			if len(req.Mappings) == 0 {
@@ -4450,6 +4308,178 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 	}
 }
 
+type autoAssignOptions struct {
+	AllowFallback     bool
+	DefaultRouteIface string
+}
+
+type autoAssignCandidate struct {
+	name   string
+	index  int
+	hasMAC bool
+}
+
+func defaultInterfaceOrder() []string {
+	return config.DefaultPhysicalInterfaces()
+}
+
+func defaultAutoAssignSubnets() map[string]string {
+	return map[string]string{
+		"wan":  envAnyOrDefault("192.168.240.0/24", "CONTAIND_AUTO_WAN_SUBNET", "CONTAIND_WAN_SUBNET"),
+		"dmz":  envAnyOrDefault("192.168.241.0/24", "CONTAIND_AUTO_DMZ_SUBNET", "CONTAIND_DMZ_SUBNET"),
+		"lan1": envAnyOrDefault("192.168.242.0/24", "CONTAIND_AUTO_LAN1_SUBNET", "CONTAIND_LAN1_SUBNET"),
+		"lan2": envAnyOrDefault("192.168.243.0/24", "CONTAIND_AUTO_LAN2_SUBNET", "CONTAIND_LAN2_SUBNET"),
+		"lan3": envAnyOrDefault("192.168.244.0/24", "CONTAIND_AUTO_LAN3_SUBNET", "CONTAIND_LAN3_SUBNET"),
+		"lan4": envAnyOrDefault("192.168.245.0/24", "CONTAIND_AUTO_LAN4_SUBNET", "CONTAIND_LAN4_SUBNET"),
+		"lan5": envAnyOrDefault("192.168.246.0/24", "CONTAIND_AUTO_LAN5_SUBNET", "CONTAIND_LAN5_SUBNET"),
+		"lan6": envAnyOrDefault("192.168.247.0/24", "CONTAIND_AUTO_LAN6_SUBNET", "CONTAIND_LAN6_SUBNET"),
+	}
+}
+
+func interfaceDeviceSet(state []config.InterfaceState) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, st := range state {
+		if strings.TrimSpace(st.Name) == "" {
+			continue
+		}
+		out[st.Name] = struct{}{}
+	}
+	return out
+}
+
+func buildAutoAssignCandidates(state []config.InterfaceState) ([]autoAssignCandidate, map[string]config.InterfaceState) {
+	candidates := make([]autoAssignCandidate, 0, len(state))
+	stateByName := make(map[string]config.InterfaceState, len(state))
+	for _, st := range state {
+		name := strings.TrimSpace(st.Name)
+		if name == "" {
+			continue
+		}
+		stateByName[name] = st
+		if name == "lo" || !isAutoAssignableDevice(name, st.MAC) {
+			continue
+		}
+		mac := strings.TrimSpace(strings.ToLower(st.MAC))
+		hasMAC := mac != "" && mac != "00:00:00:00:00:00"
+		candidates = append(candidates, autoAssignCandidate{name: name, index: st.Index, hasMAC: hasMAC})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].hasMAC != candidates[j].hasMAC {
+			return candidates[i].hasMAC
+		}
+		if candidates[i].index > 0 && candidates[j].index > 0 && candidates[i].index != candidates[j].index {
+			return candidates[i].index < candidates[j].index
+		}
+		return candidates[i].name < candidates[j].name
+	})
+	return candidates, stateByName
+}
+
+func computeDefaultInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, opts autoAssignOptions) (map[string]string, error) {
+	order := defaultInterfaceOrder()
+	ifaceByName := map[string]config.Interface{}
+	needed := 0
+	for _, iface := range ifaces {
+		ifaceByName[iface.Name] = iface
+	}
+	for _, logical := range order {
+		if _, ok := ifaceByName[logical]; ok {
+			needed++
+		}
+	}
+	if needed == 0 {
+		return nil, fmt.Errorf("no default interfaces present")
+	}
+
+	candidates, stateByName := buildAutoAssignCandidates(state)
+	if len(candidates) < needed {
+		return nil, fmt.Errorf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)
+	}
+
+	assignments := map[string]string{}
+	usedDev := map[string]bool{}
+
+	for _, logical := range order {
+		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		for _, cand := range candidates {
+			if usedDev[cand.name] {
+				continue
+			}
+			if cand.name == logical || strings.HasPrefix(cand.name, logical) {
+				assignments[logical] = cand.name
+				usedDev[cand.name] = true
+				break
+			}
+		}
+	}
+
+	subnetByLogical := defaultAutoAssignSubnets()
+	for _, logical := range order {
+		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		if _, already := assignments[logical]; already {
+			continue
+		}
+		cidr := strings.TrimSpace(subnetByLogical[logical])
+		if cidr == "" {
+			continue
+		}
+		for _, cand := range candidates {
+			if usedDev[cand.name] {
+				continue
+			}
+			st, ok := stateByName[cand.name]
+			if !ok {
+				continue
+			}
+			if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
+				assignments[logical] = cand.name
+				usedDev[cand.name] = true
+				break
+			}
+		}
+	}
+
+	if _, ok := ifaceByName["wan"]; ok {
+		if _, already := assignments["wan"]; !already {
+			defDev := strings.TrimSpace(opts.DefaultRouteIface)
+			if defDev != "" && !usedDev[defDev] {
+				if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+					assignments["wan"] = defDev
+					usedDev[defDev] = true
+				}
+			}
+		}
+	}
+
+	for _, logical := range order {
+		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		if _, already := assignments[logical]; already {
+			continue
+		}
+		if !opts.AllowFallback {
+			return nil, fmt.Errorf("unable to safely auto-bind default interfaces")
+		}
+		for _, cand := range candidates {
+			if usedDev[cand.name] {
+				continue
+			}
+			assignments[logical] = cand.name
+			usedDev[cand.name] = true
+			break
+		}
+		if _, ok := assignments[logical]; !ok {
+			return nil, fmt.Errorf("not enough eligible kernel interfaces to complete auto-assign")
+		}
+	}
+	return assignments, nil
+}
+
 func isAutoAssignableDevice(name string, mac string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" || name == "lo" {
@@ -4480,6 +4510,15 @@ func envOrDefault(key, def string) string {
 		return def
 	}
 	return v
+}
+
+func envAnyOrDefault(def string, keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return def
 }
 
 func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
@@ -5155,87 +5194,122 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 	if cfg.Firewall.DefaultAction == "" {
 		cfg.Firewall.DefaultAction = config.ActionDeny
 	}
-	// If this is a pre-bind config using default interface names, opportunistically bind.
-	// This helps keep config and OS reality aligned in appliance-style setups.
-	hadAnyDevice := false
-	for _, iface := range cfg.Interfaces {
-		if strings.TrimSpace(iface.Device) != "" {
-			hadAnyDevice = true
-			break
-		}
-	}
-	if !hadAnyDevice {
-		autoBindDefaultInterfaceDevices(cfg)
-		hasAnyDevice := false
-		for _, iface := range cfg.Interfaces {
-			if strings.TrimSpace(iface.Device) != "" {
-				hasAnyDevice = true
-				break
-			}
-		}
-		if hasAnyDevice {
-			_ = store.Save(ctx, cfg)
-		}
+	if autoBindDefaultInterfaceDevices(cfg) {
+		_ = store.Save(ctx, cfg)
 	}
 	return cfg, nil
 }
 
-func autoBindDefaultInterfaceDevices(cfg *config.Config) {
+func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
-		return
+		return false
 	}
-	// Only auto-bind for the default appliance interface names, and only if not already bound.
-	defaultNames := config.DefaultPhysicalInterfaces()
-	defaultSet := map[string]struct{}{}
-	for _, n := range defaultNames {
-		defaultSet[n] = struct{}{}
+	state, err := collectLocalInterfaceState()
+	if err != nil {
+		return false
 	}
-	for _, iface := range cfg.Interfaces {
-		if _, ok := defaultSet[iface.Name]; !ok {
-			return
-		}
-		if strings.TrimSpace(iface.Device) != "" {
-			return
-		}
-	}
+	return autoBindDefaultInterfaceDevicesFromState(cfg, state, detectKernelDefaultRouteIface())
+}
 
+func autoBindDefaultInterfaceDevicesFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string) bool {
+	if cfg == nil || len(cfg.Interfaces) == 0 {
+		return false
+	}
+	assignments, err := computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+		AllowFallback:     false,
+		DefaultRouteIface: defaultRouteIface,
+	})
+	if err != nil || len(assignments) == 0 {
+		return false
+	}
+	if !shouldRepairDefaultInterfaceBindings(cfg.Interfaces, state, assignments) {
+		return false
+	}
+	changed := false
+	for i := range cfg.Interfaces {
+		if dev, ok := assignments[cfg.Interfaces[i].Name]; ok && strings.TrimSpace(cfg.Interfaces[i].Device) != dev {
+			cfg.Interfaces[i].Device = dev
+			changed = true
+		}
+	}
+	return changed
+}
+
+func collectLocalInterfaceState() ([]config.InterfaceState, error) {
 	sysIfaces, err := net.Interfaces()
 	if err != nil {
-		return
+		return nil, err
 	}
-	type sysIface struct {
-		idx  int
-		name string
-	}
-	candidates := make([]sysIface, 0, len(sysIfaces))
+	out := make([]config.InterfaceState, 0, len(sysIfaces))
 	for _, si := range sysIfaces {
-		if si.Name == "lo" {
-			continue
+		addrs, _ := si.Addrs()
+		ss := make([]string, 0, len(addrs))
+		for _, a := range addrs {
+			ss = append(ss, a.String())
 		}
-		if len(si.HardwareAddr) == 0 {
-			continue
-		}
-		// Keep the same "no tunnels/virtual" approach as interfaces auto-assign.
-		// (We don't have MAC strings here; HardwareAddr presence already helps.)
-		if !isAutoAssignableDevice(si.Name, si.HardwareAddr.String()) {
-			continue
-		}
-		candidates = append(candidates, sysIface{idx: si.Index, name: si.Name})
+		out = append(out, config.InterfaceState{
+			Name:  si.Name,
+			Index: si.Index,
+			Up:    si.Flags&net.FlagUp != 0,
+			MTU:   si.MTU,
+			MAC:   si.HardwareAddr.String(),
+			Addrs: ss,
+		})
 	}
-	if len(candidates) < len(defaultNames) {
-		return
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].idx < candidates[j].idx })
+	return out, nil
+}
 
-	nameToDev := map[string]string{}
-	for i, n := range defaultNames {
-		nameToDev[n] = candidates[i].name
+func shouldRepairDefaultInterfaceBindings(ifaces []config.Interface, state []config.InterfaceState, assignments map[string]string) bool {
+	defaultNames := defaultInterfaceOrder()
+	defaultSet := map[string]struct{}{}
+	ifaceByName := map[string]config.Interface{}
+	for _, name := range defaultNames {
+		defaultSet[name] = struct{}{}
 	}
-	for i := range cfg.Interfaces {
-		if dev, ok := nameToDev[cfg.Interfaces[i].Name]; ok {
-			cfg.Interfaces[i].Device = dev
+	for _, iface := range ifaces {
+		if _, ok := defaultSet[iface.Name]; !ok {
+			return false
+		}
+		ifaceByName[iface.Name] = iface
+	}
+
+	// If any default interface is unbound, apply the safe mapping immediately.
+	for _, name := range defaultNames {
+		if iface, ok := ifaceByName[name]; ok && strings.TrimSpace(iface.Device) == "" {
+			return true
 		}
 	}
+
+	candidates, _ := buildAutoAssignCandidates(state)
+	idxOrder := map[string]string{}
+	idx := 0
+	for _, name := range defaultNames {
+		if _, ok := ifaceByName[name]; !ok {
+			continue
+		}
+		if idx >= len(candidates) {
+			return false
+		}
+		idxOrder[name] = candidates[idx].name
+		idx++
+	}
+
+	looksLikeLegacyIndexBinding := true
+	needsRepair := false
+	for _, name := range defaultNames {
+		iface, ok := ifaceByName[name]
+		if !ok {
+			continue
+		}
+		cur := strings.TrimSpace(iface.Device)
+		if cur != idxOrder[name] {
+			looksLikeLegacyIndexBinding = false
+		}
+		if want := strings.TrimSpace(assignments[name]); want != "" && cur != want {
+			needsRepair = true
+		}
+	}
+	return looksLikeLegacyIndexBinding && needsRepair
 }
 
 func withAuditStore(store audit.Store) gin.HandlerFunc {
@@ -5364,15 +5438,37 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 
 // icsTemplateInfo describes an available ICS protocol template for the API.
 type icsTemplateInfo struct {
+	Name        string                     `json:"name"`
+	Description string                     `json:"description"`
+	Protocol    string                     `json:"protocol"`
+	Parameters  []icsTemplateParameterInfo `json:"parameters,omitempty"`
+}
+
+type icsTemplateParameterInfo struct {
 	Name        string `json:"name"`
-	Description string `json:"description"`
-	Protocol    string `json:"protocol"`
+	Label       string `json:"label"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Help        string `json:"help,omitempty"`
 }
 
 func listICSTemplatesHandler() gin.HandlerFunc {
 	infos := []icsTemplateInfo{
 		{Name: "modbus_read_only", Description: "Allow Modbus read operations only (FC 1-4), deny all writes", Protocol: "modbus"},
-		{Name: "modbus_register_guard", Description: "Allow Modbus access to specific register address ranges only (requires params.ranges)", Protocol: "modbus"},
+		{
+			Name:        "modbus_register_guard",
+			Description: "Allow Modbus access to specific register address ranges only",
+			Protocol:    "modbus",
+			Parameters: []icsTemplateParameterInfo{{
+				Name:        "ranges",
+				Label:       "Register Ranges",
+				Type:        "text",
+				Required:    true,
+				Placeholder: "0-99,400-499",
+				Help:        "Comma- or newline-separated Modbus register ranges such as 0-99 or 400-499.",
+			}},
+		},
 		{Name: "dnp3_secure_operations", Description: "Allow normal DNP3 reads, deny dangerous function codes (restart, stop)", Protocol: "dnp3"},
 		{Name: "s7comm_read_only", Description: "Allow S7comm read variable, deny write and PLC control", Protocol: "s7comm"},
 		{Name: "cip_monitor_only", Description: "Allow CIP read services, deny writes and control commands", Protocol: "cip"},
@@ -5384,15 +5480,19 @@ func listICSTemplatesHandler() gin.HandlerFunc {
 	}
 }
 
-func applyICSTemplateHandler() gin.HandlerFunc {
+func applyICSTemplateHandler(store config.Store) gin.HandlerFunc {
 	type icsParams struct {
 		Ranges []string `json:"ranges,omitempty"`
 	}
 	type icsReq struct {
-		Template    string    `json:"template"`
-		SourceZones []string  `json:"source_zones,omitempty"`
-		DestZones   []string  `json:"dest_zones,omitempty"`
-		Params      icsParams `json:"params,omitempty"`
+		Template          string            `json:"template"`
+		SourceZones       []string          `json:"sourceZones,omitempty"`
+		SourceZonesLegacy []string          `json:"source_zones,omitempty"`
+		DestZones         []string          `json:"destZones,omitempty"`
+		DestZonesLegacy   []string          `json:"dest_zones,omitempty"`
+		Parameters        map[string]string `json:"parameters,omitempty"`
+		Params            icsParams         `json:"params,omitempty"`
+		Preview           bool              `json:"preview,omitempty"`
 	}
 	return func(c *gin.Context) {
 		var r icsReq
@@ -5401,45 +5501,132 @@ func applyICSTemplateHandler() gin.HandlerFunc {
 			return
 		}
 
-		var rules []config.Rule
+		sourceZones := r.SourceZones
+		if len(sourceZones) == 0 {
+			sourceZones = r.SourceZonesLegacy
+		}
+		destZones := r.DestZones
+		if len(destZones) == 0 {
+			destZones = r.DestZonesLegacy
+		}
+		ranges := r.Params.Ranges
+		if len(ranges) == 0 {
+			ranges = parseDelimitedTemplateValues(r.Parameters["ranges"])
+		}
+
+		var generated []config.Rule
 		switch r.Template {
 		case "modbus_read_only":
-			rules = templates.ModbusReadOnly()
+			generated = templates.ModbusReadOnly()
 		case "modbus_register_guard":
-			if len(r.Params.Ranges) == 0 {
-				apiError(c, http.StatusBadRequest, "params.ranges is required for modbus_register_guard")
+			if len(ranges) == 0 {
+				apiError(c, http.StatusBadRequest, "parameters.ranges is required for modbus_register_guard")
 				return
 			}
-			rules = templates.ModbusRegisterGuard(r.Params.Ranges)
+			generated = templates.ModbusRegisterGuard(ranges)
 		case "dnp3_secure_operations":
-			rules = templates.DNP3SecureOperations()
+			generated = templates.DNP3SecureOperations()
 		case "s7comm_read_only":
-			rules = templates.S7commReadOnly()
+			generated = templates.S7commReadOnly()
 		case "cip_monitor_only":
-			rules = templates.CIPMonitorOnly()
+			generated = templates.CIPMonitorOnly()
 		case "bacnet_read_only":
-			rules = templates.BACnetReadOnly()
+			generated = templates.BACnetReadOnly()
 		case "opcua_monitor_only":
-			rules = templates.OPCUAMonitorOnly()
+			generated = templates.OPCUAMonitorOnly()
 		default:
 			apiError(c, http.StatusBadRequest, fmt.Sprintf("unknown ICS template %q", r.Template))
 			return
 		}
 
 		// Apply source/dest zones if provided.
-		if len(r.SourceZones) > 0 || len(r.DestZones) > 0 {
-			for i := range rules {
-				if len(r.SourceZones) > 0 {
-					rules[i].SourceZones = r.SourceZones
+		if len(sourceZones) > 0 || len(destZones) > 0 {
+			for i := range generated {
+				if len(sourceZones) > 0 {
+					generated[i].SourceZones = append([]string(nil), sourceZones...)
 				}
-				if len(r.DestZones) > 0 {
-					rules[i].DestZones = r.DestZones
+				if len(destZones) > 0 {
+					generated[i].DestZones = append([]string(nil), destZones...)
 				}
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"template": r.Template, "rules": rules})
+		if r.Preview {
+			c.JSON(http.StatusOK, gin.H{"template": r.Template, "preview": true, "rules": generated})
+			return
+		}
+
+		ctx := c.Request.Context()
+		cfg, err := loadOrInitConfig(ctx, store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		created, updated := upsertFirewallRulesByID(cfg.Firewall.Rules, generated)
+		cfg.Firewall.Rules = appendFirewallRulesUpsert(cfg.Firewall.Rules, generated)
+		if err := store.Save(ctx, cfg); err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"template":  r.Template,
+			"applied":   true,
+			"created":   created,
+			"updated":   updated,
+			"ruleCount": len(cfg.Firewall.Rules),
+			"rules":     generated,
+		})
 	}
+}
+
+func parseDelimitedTemplateValues(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func upsertFirewallRulesByID(existing, generated []config.Rule) (created int, updated int) {
+	index := make(map[string]struct{}, len(existing))
+	for _, rule := range existing {
+		index[rule.ID] = struct{}{}
+	}
+	for _, rule := range generated {
+		if _, ok := index[rule.ID]; ok {
+			updated++
+		} else {
+			created++
+		}
+	}
+	return created, updated
+}
+
+func appendFirewallRulesUpsert(existing, generated []config.Rule) []config.Rule {
+	index := make(map[string]int, len(existing))
+	for i, rule := range existing {
+		index[rule.ID] = i
+	}
+	for _, rule := range generated {
+		if i, ok := index[rule.ID]; ok {
+			existing[i] = rule
+			continue
+		}
+		index[rule.ID] = len(existing)
+		existing = append(existing, rule)
+	}
+	return existing
 }
 
 func deleteIdentityHandler(resolver *identity.Resolver) gin.HandlerFunc {

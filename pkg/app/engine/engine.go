@@ -31,9 +31,11 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ids"
+	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/stats"
 	"github.com/tonylturner/containd/pkg/dp/synth"
 )
 
@@ -158,6 +160,10 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
+	mux.HandleFunc("/internal/stats/protocols", protoStatsHandler(dpEngine))
+	mux.HandleFunc("/internal/stats/top-talkers", topTalkersHandler(dpEngine))
+	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
+	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
@@ -1192,6 +1198,88 @@ func flowsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 		limit := parseLimit(r, 200)
 		list := dpEngine.Events().Flows(limit)
 		writeJSON(w, list)
+	}
+}
+
+func protoStatsHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		list := dpEngine.ProtoStats()
+		if list == nil {
+			list = []stats.ProtoStats{}
+		}
+		writeJSON(w, list)
+	}
+}
+
+func topTalkersHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		n := 10
+		if q := r.URL.Query().Get("n"); q != "" {
+			if v, err := strconv.Atoi(q); err == nil && v > 0 {
+				n = v
+			}
+		}
+		list := dpEngine.TopTalkers(n)
+		if list == nil {
+			list = []stats.FlowStats{}
+		}
+		writeJSON(w, list)
+	}
+}
+
+func inventoryHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			var list []inventory.DiscoveredAsset
+			if inv := dpEngine.Inventory(); inv != nil {
+				list = inv.List()
+			}
+			if list == nil {
+				list = []inventory.DiscoveredAsset{}
+			}
+			writeJSON(w, list)
+		case http.MethodDelete:
+			if inv := dpEngine.Inventory(); inv != nil {
+				inv.Clear()
+			}
+			writeJSON(w, map[string]string{"status": "cleared"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func inventoryItemHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ip := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/internal/inventory/"))
+		if ip == "" {
+			http.Error(w, "missing asset ip", http.StatusBadRequest)
+			return
+		}
+		inv := dpEngine.Inventory()
+		if inv == nil {
+			http.Error(w, "inventory unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		asset, ok := inv.Get(ip)
+		if !ok {
+			http.Error(w, "asset not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, asset)
 	}
 }
 

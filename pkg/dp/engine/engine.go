@@ -21,11 +21,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/bacnet"
 	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
-	"github.com/tonylturner/containd/pkg/dp/ics/bacnet"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec61850"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/ics/opcua"
@@ -33,35 +32,40 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
+	"github.com/tonylturner/containd/pkg/dp/stats"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
+const dpiEnforceBlockTTL = 10 * time.Minute
+
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture       *capture.Manager
-	ruleSnap      atomic.Pointer[rules.Snapshot]
-	started       atomic.Bool
-	compiler      *enforce.Compiler
-	applier       enforce.Applier
-	updater       enforce.Updater
-	dpiMgr        *dpi.Manager
-	eventStore    *events.Store
-	rulesetStatus atomic.Pointer[RulesetStatus]
-	avSink        AVSink
-	inspectAll    bool
-	dpiEnabled    bool            // master DPI on/off
-	dpiMode       string          // "learn" or "enforce"
-	dpiExclusions []DPIExclusion  // IPs/domains excluded from DPI
-	flowMu        sync.Mutex
-	flows         map[string]*flow.State
-	lastSweep     time.Time
-	verdictCache     *VerdictCache
-	inventory        *inventory.Inventory
-	anomalyDetector  *anomaly.Detector
-	learner          *learn.Learner
-	sigEngine        *signatures.Engine
+	capture         *capture.Manager
+	ruleSnap        atomic.Pointer[rules.Snapshot]
+	started         atomic.Bool
+	compiler        *enforce.Compiler
+	applier         enforce.Applier
+	updater         enforce.Updater
+	dpiMgr          *dpi.Manager
+	eventStore      *events.Store
+	rulesetStatus   atomic.Pointer[RulesetStatus]
+	avSink          AVSink
+	inspectAll      bool
+	dpiEnabled      bool           // master DPI on/off
+	dpiMode         string         // "learn" or "enforce"
+	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
+	flowMu          sync.Mutex
+	flows           map[string]*flow.State
+	lastSweep       time.Time
+	verdictCache    *VerdictCache
+	inventory       *inventory.Inventory
+	anomalyDetector *anomaly.Detector
+	learner         *learn.Learner
+	sigEngine       *signatures.Engine
+	stats           *stats.Tracker
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -79,9 +83,9 @@ type EnforceConfig struct {
 }
 
 type Config struct {
-	Capture       capture.Config
-	Enforce       EnforceConfig
-	InspectAll    bool
+	Capture         capture.Config
+	Enforce         EnforceConfig
+	InspectAll      bool
 	DPIEnabled      bool            // master DPI toggle
 	DPIMode         string          // "learn" or "enforce"
 	DPIProtocols    map[string]bool // per-IT-protocol enable/disable
@@ -196,6 +200,7 @@ func New(cfg Config) (*Engine, error) {
 	e.learner = learn.New()
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
+	e.stats = stats.New()
 	e.eventStore = events.NewStore(4096)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	if cfg.Enforce.Enabled {
@@ -231,6 +236,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.inventory = fresh.inventory
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
+	e.stats = fresh.stats
 	e.avSink = fresh.avSink
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
@@ -404,20 +410,29 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 		return
 	}
 
-	// Check verdict cache — if this flow already has a cached verdict,
-	// skip DPI re-inspection. This is critical for NFQUEUE performance.
-	flowHash := state.Key.Hash()
-	if _, cached := e.verdictCache.Get(flowHash); cached {
-		return
-	}
-
 	parsed := dpi.ParsedPacket{
 		Payload: pkt.Payload,
 		Proto:   pkt.Transport,
 		SrcPort: pkt.SrcPort,
 		DstPort: pkt.DstPort,
 	}
-	if !e.ShouldInspect(state, &parsed) {
+
+	flowHash := state.Key.Hash()
+	shouldInspect := e.ShouldInspect(state, &parsed)
+	if cached, ok := e.verdictCache.Get(flowHash); ok {
+		// Permanent or temporary enforcement verdicts can short-circuit the flow.
+		if cached.Action != verdict.AllowContinue {
+			return
+		}
+		// For non-inspected flows we cache ALLOW to avoid re-checking every packet.
+		// Inspectable flows must continue through DPI so later payload-bearing
+		// packets are decoded; otherwise a SYN/ACK can suppress the whole flow.
+		if !shouldInspect {
+			return
+		}
+	}
+
+	if !shouldInspect {
 		// Cache an ALLOW verdict for non-inspected flows so we don't
 		// re-evaluate ShouldInspect on every packet.
 		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
@@ -429,9 +444,10 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	}
 	e.RecordDPIEvents(state, &parsed, events)
 
-	// Cache the inspected verdict. For now we ACCEPT after inspection;
-	// the DPI/IDS path may override via dynamic enforcement (nftables sets).
-	e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue, Reason: "inspected"})
+	if v, enforced := e.enforceDPIEvents(state, &parsed, events); enforced {
+		e.verdictCache.Put(flowHash, v)
+		return
+	}
 }
 
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
@@ -524,6 +540,230 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 		}
 	}
 	return false
+}
+
+func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, bool) {
+	if e == nil || state == nil || pkt == nil || len(evs) == 0 || !strings.EqualFold(e.dpiMode, "enforce") {
+		return verdict.Verdict{}, false
+	}
+	snap := e.ruleSnap.Load()
+	if snap == nil {
+		return verdict.Verdict{}, false
+	}
+	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
+	for _, ev := range evs {
+		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
+		if !ok {
+			continue
+		}
+		v := e.EvaluateVerdict(ctx)
+		if v.Action == verdict.AllowContinue {
+			continue
+		}
+		if v.Action == verdict.DenyDrop {
+			v.Action = verdict.BlockFlowTemp
+			if v.TTL <= 0 {
+				v.TTL = dpiEnforceBlockTTL
+			}
+		}
+		if err := e.ApplyVerdict(context.Background(), v, ctx); err != nil {
+			continue
+		}
+		return v, true
+	}
+	return verdict.Verdict{}, false
+}
+
+func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
+	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) {
+		return rules.EvalContext{}, false
+	}
+	service := servicePort(state, pkt)
+	ctx := rules.EvalContext{
+		SrcZone: srcZone,
+		DstZone: dstZone,
+		SrcIP:   state.Key.SrcIP,
+		DstIP:   state.Key.DstIP,
+		Proto:   strings.ToLower(pkt.Proto),
+		Port:    strconv.Itoa(int(service)),
+		ICS: &rules.ICSContext{
+			Protocol:  strings.ToLower(ev.Proto),
+			Address:   attrString(ev.Attributes, "address"),
+			ReadOnly:  !attrBool(ev.Attributes, "is_write"),
+			WriteOnly: attrBool(ev.Attributes, "is_write"),
+			Direction: eventDirection(ev.Kind),
+		},
+	}
+	if fc, ok := attrUint8(ev.Attributes, "function_code"); ok {
+		ctx.ICS.FunctionCode = fc
+	}
+	if unitID, ok := attrUint8(ev.Attributes, "unit_id"); ok {
+		unit := unitID
+		ctx.ICS.UnitID = &unit
+	}
+	if objectClass, ok := attrUint16(ev.Attributes, "object_class"); ok {
+		ctx.ICS.ObjectClass = objectClass
+	}
+	return ctx, true
+}
+
+func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, string) {
+	if snap == nil || len(snap.ZoneIfaces) == 0 {
+		return "", ""
+	}
+	type zoneNets struct {
+		name string
+		nets []*net.IPNet
+	}
+	var zones []zoneNets
+	for zone, ifaces := range snap.ZoneIfaces {
+		zn := zoneNets{name: zone}
+		for _, ifaceName := range ifaces {
+			iface, err := net.InterfaceByName(ifaceName)
+			if err != nil {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				switch v := addr.(type) {
+				case *net.IPNet:
+					zn.nets = append(zn.nets, v)
+				case *net.IPAddr:
+					bits := 32
+					if v.IP.To4() == nil {
+						bits = 128
+					}
+					zn.nets = append(zn.nets, &net.IPNet{IP: v.IP, Mask: net.CIDRMask(bits, bits)})
+				}
+			}
+		}
+		if len(zn.nets) > 0 {
+			zones = append(zones, zn)
+		}
+	}
+	zoneForIP := func(ip net.IP) string {
+		if ip == nil {
+			return ""
+		}
+		for _, zone := range zones {
+			for _, network := range zone.nets {
+				if network.Contains(ip) {
+					return zone.name
+				}
+			}
+		}
+		return ""
+	}
+	return zoneForIP(srcIP), zoneForIP(dstIP)
+}
+
+func isRuleEvaluableICSEvent(proto string) bool {
+	switch strings.ToLower(strings.TrimSpace(proto)) {
+	case "modbus", "dnp3", "cip", "s7comm", "mms", "bacnet", "opcua":
+		return true
+	default:
+		return false
+	}
+}
+
+func eventDirection(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "response", "exception":
+		return "response"
+	default:
+		return "request"
+	}
+}
+
+func attrBool(attrs map[string]any, key string) bool {
+	if attrs == nil {
+		return false
+	}
+	switch v := attrs[key].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	default:
+		return false
+	}
+}
+
+func attrUint8(attrs map[string]any, key string) (uint8, bool) {
+	if attrs == nil {
+		return 0, false
+	}
+	switch v := attrs[key].(type) {
+	case uint8:
+		return v, true
+	case uint16:
+		if v <= 255 {
+			return uint8(v), true
+		}
+	case int:
+		if v >= 0 && v <= 255 {
+			return uint8(v), true
+		}
+	case int64:
+		if v >= 0 && v <= 255 {
+			return uint8(v), true
+		}
+	case float64:
+		if v >= 0 && v <= 255 {
+			return uint8(v), true
+		}
+	}
+	return 0, false
+}
+
+func attrUint16(attrs map[string]any, key string) (uint16, bool) {
+	if attrs == nil {
+		return 0, false
+	}
+	switch v := attrs[key].(type) {
+	case uint16:
+		return v, true
+	case uint8:
+		return uint16(v), true
+	case int:
+		if v >= 0 && v <= 65535 {
+			return uint16(v), true
+		}
+	case int64:
+		if v >= 0 && v <= 65535 {
+			return uint16(v), true
+		}
+	case float64:
+		if v >= 0 && v <= 65535 {
+			return uint16(v), true
+		}
+	}
+	return 0, false
+}
+
+func attrString(attrs map[string]any, key string) string {
+	if attrs == nil {
+		return ""
+	}
+	switch v := attrs[key].(type) {
+	case string:
+		return v
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	default:
+		return ""
+	}
 }
 
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
@@ -670,6 +910,14 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 			delete(ev.Attributes, "preview")
 		}
 	}
+	if e.stats != nil && state != nil {
+		srcIP := state.Key.SrcIP.String()
+		dstIP := state.Key.DstIP.String()
+		for _, ev := range evs {
+			e.stats.Record(ev, len(pkt.Payload))
+			e.stats.RecordFlow(srcIP, dstIP, ev.Proto, 1, int64(len(pkt.Payload)))
+		}
+	}
 	e.eventStore.Record(state, pkt, evs)
 	// Evaluate IDS rules over DPI events and record alerts.
 	snap := e.ruleSnap.Load()
@@ -705,6 +953,22 @@ func (e *Engine) Inventory() *inventory.Inventory {
 		return nil
 	}
 	return e.inventory
+}
+
+// ProtoStats returns current per-protocol statistics derived from DPI events.
+func (e *Engine) ProtoStats() []stats.ProtoStats {
+	if e == nil || e.stats == nil {
+		return nil
+	}
+	return e.stats.Stats()
+}
+
+// TopTalkers returns the top N observed flows by byte count.
+func (e *Engine) TopTalkers(n int) []stats.FlowStats {
+	if e == nil || e.stats == nil {
+		return nil
+	}
+	return e.stats.TopTalkers(n)
 }
 
 // AnomalyDetector returns the protocol anomaly detector.
@@ -807,9 +1071,9 @@ func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 			attrs["dstZone"] = ctx.DstZone
 		}
 		logEvent := events.Event{
-			Kind:      "firewall.rule.hit",
-			Timestamp: time.Now().UTC(),
-			Transport: ctx.Proto,
+			Kind:       "firewall.rule.hit",
+			Timestamp:  time.Now().UTC(),
+			Transport:  ctx.Proto,
 			Attributes: attrs,
 		}
 		if ctx.SrcIP != nil {

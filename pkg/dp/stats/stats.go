@@ -75,6 +75,8 @@ func (t *Tracker) Record(ev dpi.Event, bytes int) {
 	switch {
 	case strings.Contains(kind, "alert"):
 		ps.AlertCount++
+	case attrBool(ev.Attributes, "is_write"):
+		ps.WriteCount++
 	case strings.Contains(kind, "write"):
 		ps.WriteCount++
 	default:
@@ -170,4 +172,22 @@ func attrStr(attrs map[string]any, key string) string {
 		return ""
 	}
 	return s
+}
+
+func attrBool(attrs map[string]any, key string) bool {
+	if attrs == nil {
+		return false
+	}
+	v, ok := attrs[key]
+	if !ok {
+		return false
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		return strings.EqualFold(strings.TrimSpace(b), "true")
+	default:
+		return false
+	}
 }

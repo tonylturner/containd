@@ -72,6 +72,34 @@ services:
     depends_on:
       - engine
 
+  ot_client:
+    image: python:3-alpine
+    command: ["sleep", "infinity"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/modbus:/opt/modbus:ro
+    networks:
+      lan_net:
+        ipv4_address: 172.31.0.5
+    depends_on:
+      - engine
+
+  modbus_server:
+    image: python:3-alpine
+    command: ["python", "/opt/modbus/server.py"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/modbus:/opt/modbus:ro
+    networks:
+      wan_net:
+        ipv4_address: 172.30.0.4
+    depends_on:
+      - engine
+
 networks:
   wan_net:
     ipam:

@@ -21,9 +21,11 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
 // HTTPClient applies runtime config and snapshots to the engine via internal HTTP.
@@ -655,6 +657,123 @@ func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Even
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListProtoStats fetches protocol counters derived from live DPI events.
+func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/stats/protocols", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, engineStatusError(resp, "engine protocol stats status")
+	}
+	var out []stats.ProtoStats
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return []stats.ProtoStats{}, nil
+	}
+	return out, nil
+}
+
+// ListTopTalkers fetches top flow summaries derived from live DPI events.
+func (c *HTTPClient) ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error) {
+	u := c.BaseURL + "/internal/stats/top-talkers"
+	if n > 0 {
+		u += "?n=" + url.QueryEscape(fmt.Sprintf("%d", n))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, engineStatusError(resp, "engine top-talkers status")
+	}
+	var out []stats.FlowStats
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return []stats.FlowStats{}, nil
+	}
+	return out, nil
+}
+
+// ListInventory fetches discovered ICS assets from the engine.
+func (c *HTTPClient) ListInventory(ctx context.Context) ([]inventory.DiscoveredAsset, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/inventory", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, engineStatusError(resp, "engine inventory status")
+	}
+	var out []inventory.DiscoveredAsset
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return []inventory.DiscoveredAsset{}, nil
+	}
+	return out, nil
+}
+
+// GetInventoryAsset fetches a discovered ICS asset by IP.
+func (c *HTTPClient) GetInventoryAsset(ctx context.Context, ip string) (*inventory.DiscoveredAsset, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/inventory/"+url.PathEscape(strings.TrimSpace(ip)), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, engineStatusError(resp, "engine inventory asset status")
+	}
+	var out inventory.DiscoveredAsset
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearInventory clears the engine-side discovered asset inventory.
+func (c *HTTPClient) ClearInventory(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/internal/inventory", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return engineStatusError(resp, "engine inventory clear status")
+	}
+	return nil
 }
 
 func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {

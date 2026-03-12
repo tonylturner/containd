@@ -35,6 +35,22 @@ services:
       - CONTAIND_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
       - CONTAIND_CAPTURE_IFACES=${CONTAIND_CAPTURE_IFACES:-}
       - CONTAIND_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-1}
+      - CONTAIND_WAN_SUBNET=${CONTAIND_WAN_SUBNET:-192.168.240.0/24}
+      - CONTAIND_DMZ_SUBNET=${CONTAIND_DMZ_SUBNET:-192.168.241.0/24}
+      - CONTAIND_LAN1_SUBNET=${CONTAIND_LAN1_SUBNET:-192.168.242.0/24}
+      - CONTAIND_LAN2_SUBNET=${CONTAIND_LAN2_SUBNET:-192.168.243.0/24}
+      - CONTAIND_LAN3_SUBNET=${CONTAIND_LAN3_SUBNET:-192.168.244.0/24}
+      - CONTAIND_LAN4_SUBNET=${CONTAIND_LAN4_SUBNET:-192.168.245.0/24}
+      - CONTAIND_LAN5_SUBNET=${CONTAIND_LAN5_SUBNET:-192.168.246.0/24}
+      - CONTAIND_LAN6_SUBNET=${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}
+      - CONTAIND_AUTO_WAN_SUBNET=${CONTAIND_AUTO_WAN_SUBNET:-}
+      - CONTAIND_AUTO_DMZ_SUBNET=${CONTAIND_AUTO_DMZ_SUBNET:-}
+      - CONTAIND_AUTO_LAN1_SUBNET=${CONTAIND_AUTO_LAN1_SUBNET:-}
+      - CONTAIND_AUTO_LAN2_SUBNET=${CONTAIND_AUTO_LAN2_SUBNET:-}
+      - CONTAIND_AUTO_LAN3_SUBNET=${CONTAIND_AUTO_LAN3_SUBNET:-}
+      - CONTAIND_AUTO_LAN4_SUBNET=${CONTAIND_AUTO_LAN4_SUBNET:-}
+      - CONTAIND_AUTO_LAN5_SUBNET=${CONTAIND_AUTO_LAN5_SUBNET:-}
+      - CONTAIND_AUTO_LAN6_SUBNET=${CONTAIND_AUTO_LAN6_SUBNET:-}
 
       # Persist config/audit/users DBs on the /data volume
       - CONTAIND_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
@@ -81,35 +97,35 @@ services:
     command: ["all"]
     networks:
       wan:
-        ipv4_address: 192.168.240.2
+        ipv4_address: ${CONTAIND_WAN_IP:-192.168.240.2}
         gw_priority: 100
         priority: 1000
       dmz:
-        ipv4_address: 192.168.241.2
+        ipv4_address: ${CONTAIND_DMZ_IP:-192.168.241.2}
         gw_priority: 0
         priority: 900
       lan1:
-        ipv4_address: 192.168.242.2
+        ipv4_address: ${CONTAIND_LAN1_IP:-192.168.242.2}
         gw_priority: 0
         priority: 800
       lan2:
-        ipv4_address: 192.168.243.2
+        ipv4_address: ${CONTAIND_LAN2_IP:-192.168.243.2}
         gw_priority: 0
         priority: 700
       lan3:
-        ipv4_address: 192.168.244.2
+        ipv4_address: ${CONTAIND_LAN3_IP:-192.168.244.2}
         gw_priority: 0
         priority: 600
       lan4:
-        ipv4_address: 192.168.245.2
+        ipv4_address: ${CONTAIND_LAN4_IP:-192.168.245.2}
         gw_priority: 0
         priority: 500
       lan5:
-        ipv4_address: 192.168.246.2
+        ipv4_address: ${CONTAIND_LAN5_IP:-192.168.246.2}
         gw_priority: 0
         priority: 400
       lan6:
-        ipv4_address: 192.168.247.2
+        ipv4_address: ${CONTAIND_LAN6_IP:-192.168.247.2}
         gw_priority: 0
         priority: 300
 
@@ -117,32 +133,32 @@ networks:
   wan:
     ipam:
       config:
-        - subnet: 192.168.240.0/24
+        - subnet: ${CONTAIND_WAN_SUBNET:-192.168.240.0/24}
   dmz:
     ipam:
       config:
-        - subnet: 192.168.241.0/24
+        - subnet: ${CONTAIND_DMZ_SUBNET:-192.168.241.0/24}
   lan1:
     ipam:
       config:
-        - subnet: 192.168.242.0/24
+        - subnet: ${CONTAIND_LAN1_SUBNET:-192.168.242.0/24}
   lan2:
     ipam:
       config:
-        - subnet: 192.168.243.0/24
+        - subnet: ${CONTAIND_LAN2_SUBNET:-192.168.243.0/24}
   lan3:
     ipam:
       config:
-        - subnet: 192.168.244.0/24
+        - subnet: ${CONTAIND_LAN3_SUBNET:-192.168.244.0/24}
   lan4:
     ipam:
       config:
-        - subnet: 192.168.245.0/24
+        - subnet: ${CONTAIND_LAN4_SUBNET:-192.168.245.0/24}
   lan5:
     ipam:
       config:
-        - subnet: 192.168.246.0/24
+        - subnet: ${CONTAIND_LAN5_SUBNET:-192.168.246.0/24}
   lan6:
     ipam:
       config:
-        - subnet: 192.168.247.0/24
+        - subnet: ${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}

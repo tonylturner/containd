@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-03-12
+
+### Added
+- Added a dedicated DPI smoke phase with a lightweight Modbus/TCP client/server harness so the default smoke suite now validates live protocol visibility, write detection, inventory population, and DPI enforcement behavior in addition to forwarding/NAT.
+
+### Changed
+- Updated the local development compose topology to honor the same `.env`-driven subnet and interface IP variables as the starter compose, so customized lab ranges and interface auto-assign hints stay aligned across both paths.
+
+### Fixed
+- Fixed first-boot/default interface binding and `Auto-assign` so interface-to-device mapping now follows subnet-aware matching instead of kernel index order, and can repair the old legacy default binding pattern when recognized.
+- Fixed ICS policy template apply so generated firewall rules are actually written into candidate config and appear in the firewall UI after apply/commit instead of remaining preview-only.
+- Fixed DPI flow handling so inspectable TCP flows are not prematurely cached as allowed before protocol decoders can inspect later packets, restoring reliable live protocol stats, top-talkers, and inventory updates.
+- Ignored Python cache artifacts produced by the new smoke fixture scripts so `__pycache__` and `*.pyc` files stop polluting the worktree during local test runs.
+
 ## [0.1.12] - 2026-03-12
 
 ### Added

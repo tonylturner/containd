@@ -44,6 +44,8 @@ type TemplateApplyRequest = {
 
 type TemplateApplyResponse = {
   rules: TemplateGeneratedRule[];
+  created?: number;
+  updated?: number;
 };
 
 /* ── API helpers ───────────────────────────────────────────────── */
@@ -280,9 +282,13 @@ function TemplateModal({
       onError("Failed to apply template.");
       return;
     }
-    onSuccess(
-      `Template "${template.name}" applied: ${res.rules.length} rule(s) created.`,
-    );
+    const created = res.created ?? res.rules.length;
+    const updated = res.updated ?? 0;
+    const parts = [];
+    if (created > 0) parts.push(`${created} created`);
+    if (updated > 0) parts.push(`${updated} updated`);
+    if (parts.length === 0) parts.push(`${res.rules.length} applied`);
+    onSuccess(`Template "${template.name}" applied: ${parts.join(", ")}.`);
   }
 
   function toggleZone(

@@ -9,6 +9,8 @@ BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 CURL="curl -sf --max-time 10 --connect-timeout 5"
+SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
+SMOKE_BUILD=${SMOKE_BUILD:-1}
 TESTS_PASSED=0
 TESTS_EXPECTED=9
 
@@ -53,8 +55,14 @@ discover_iface() {
 
 ensure_tools
 
-log "Bringing up smoke harness ($COMPOSE_FILE)..."
-docker compose -f "$COMPOSE_FILE" up -d --build
+if [[ "$SMOKE_SKIP_UP" != "1" ]]; then
+  log "Bringing up smoke harness ($COMPOSE_FILE)..."
+  if [[ "$SMOKE_BUILD" == "1" ]]; then
+    docker compose -f "$COMPOSE_FILE" up -d --build
+  else
+    docker compose -f "$COMPOSE_FILE" up -d
+  fi
+fi
 
 log "Waiting for management plane..."
 wait_for_http "${BASE}/health"

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -224,6 +225,149 @@ func TestGetConfigNotFound(t *testing.T) {
 	}
 	if cfg.System.Hostname != "containd" {
 		t.Fatalf("expected default hostname containd, got %q", cfg.System.Hostname)
+	}
+}
+
+func TestApplyICSTemplatePreviewDoesNotSave(t *testing.T) {
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_register_guard",
+		"sourceZones":["lan"],
+		"destZones":["wan"],
+		"parameters":{"ranges":"0-99,400-499"},
+		"preview":true
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.calls != 0 {
+		t.Fatalf("preview should not save config, save calls=%d", store.calls)
+	}
+	var resp struct {
+		Preview bool          `json:"preview"`
+		Rules   []config.Rule `json:"rules"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Preview {
+		t.Fatal("expected preview response")
+	}
+	if len(resp.Rules) != 1 {
+		t.Fatalf("expected 1 generated rule, got %d", len(resp.Rules))
+	}
+	rule := resp.Rules[0]
+	if got := strings.Join(rule.ICS.Addresses, ","); got != "0-99,400-499" {
+		t.Fatalf("unexpected ranges %q", got)
+	}
+	if got := strings.Join(rule.SourceZones, ","); got != "lan" {
+		t.Fatalf("unexpected source zones %q", got)
+	}
+	if got := strings.Join(rule.DestZones, ","); got != "wan" {
+		t.Fatalf("unexpected dest zones %q", got)
+	}
+}
+
+func TestApplyICSTemplatePersistsRules(t *testing.T) {
+	store := &mockStore{cfg: config.DefaultConfig()}
+	beforeCount := len(store.cfg.Firewall.Rules)
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_read_only",
+		"sourceZones":["lan"],
+		"destZones":["wan"]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.cfg == nil {
+		t.Fatal("expected config to be saved")
+	}
+	if len(store.cfg.Firewall.Rules) != beforeCount+2 {
+		t.Fatalf("expected 2 new persisted rules, got before=%d after=%d", beforeCount, len(store.cfg.Firewall.Rules))
+	}
+	foundAllow := false
+	foundDeny := false
+	for _, rule := range store.cfg.Firewall.Rules {
+		switch rule.ID {
+		case "tpl-modbus-allow-reads":
+			foundAllow = true
+		case "tpl-modbus-deny-writes":
+			foundDeny = true
+		default:
+			continue
+		}
+		if got := strings.Join(rule.SourceZones, ","); got != "lan" {
+			t.Fatalf("unexpected source zones %q for rule %s", got, rule.ID)
+		}
+		if got := strings.Join(rule.DestZones, ","); got != "wan" {
+			t.Fatalf("unexpected dest zones %q for rule %s", got, rule.ID)
+		}
+	}
+	if !foundAllow || !foundDeny {
+		t.Fatalf("expected template rules to be persisted, got %+v", store.cfg.Firewall.Rules)
+	}
+	var resp struct {
+		Applied bool          `json:"applied"`
+		Created int           `json:"created"`
+		Updated int           `json:"updated"`
+		Rules   []config.Rule `json:"rules"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Applied || resp.Created != 2 || resp.Updated != 0 || len(resp.Rules) != 2 {
+		t.Fatalf("unexpected response %+v", resp)
+	}
+}
+
+func TestApplyICSTemplateUpsertsExistingRules(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Firewall.Rules = []config.Rule{{
+		ID:          "tpl-modbus-register-allow",
+		Description: "old",
+		SourceZones: []string{"old-src"},
+		DestZones:   []string{"old-dst"},
+		Protocols:   []config.Protocol{{Name: "tcp", Port: "502"}},
+		ICS: config.ICSPredicate{
+			Protocol:  "modbus",
+			Addresses: []string{"1-9"},
+		},
+		Action: config.ActionAllow,
+	}}
+	store := &mockStore{cfg: cfg}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_register_guard",
+		"sourceZones":["lan"],
+		"destZones":["wan"],
+		"parameters":{"ranges":"100-199"}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(store.cfg.Firewall.Rules) != 1 {
+		t.Fatalf("expected upsert to keep 1 rule, got %d", len(store.cfg.Firewall.Rules))
+	}
+	rule := store.cfg.Firewall.Rules[0]
+	if got := strings.Join(rule.ICS.Addresses, ","); got != "100-199" {
+		t.Fatalf("expected updated ranges, got %q", got)
+	}
+	if got := strings.Join(rule.SourceZones, ","); got != "lan" {
+		t.Fatalf("expected updated source zones, got %q", got)
+	}
+	if got := strings.Join(rule.DestZones, ","); got != "wan" {
+		t.Fatalf("expected updated dest zones, got %q", got)
 	}
 }
 
@@ -476,6 +620,75 @@ func TestDefaultInterfacesSeeded(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"wan"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`"lan6"`)) {
 		t.Fatalf("expected default interfaces in response, got %s", rec.Body.String())
+	}
+}
+
+func TestAutoBindDefaultInterfaceDevicesFromStateUsesSubnetMapping(t *testing.T) {
+	cfg := config.DefaultConfig()
+	state := []config.InterfaceState{
+		{Name: "lo", Index: 1, Up: true},
+		{Name: "eth0", Index: 2, Up: true, MAC: "02:00:00:00:00:10", Addrs: []string{"192.168.245.2/24"}},
+		{Name: "eth1", Index: 3, Up: true, MAC: "02:00:00:00:00:11", Addrs: []string{"192.168.240.2/24"}},
+		{Name: "eth2", Index: 4, Up: true, MAC: "02:00:00:00:00:12", Addrs: []string{"192.168.241.2/24"}},
+		{Name: "eth3", Index: 5, Up: true, MAC: "02:00:00:00:00:13", Addrs: []string{"192.168.242.2/24"}},
+		{Name: "eth4", Index: 6, Up: true, MAC: "02:00:00:00:00:14", Addrs: []string{"192.168.243.2/24"}},
+		{Name: "eth5", Index: 7, Up: true, MAC: "02:00:00:00:00:15", Addrs: []string{"192.168.244.2/24"}},
+		{Name: "eth6", Index: 8, Up: true, MAC: "02:00:00:00:00:16", Addrs: []string{"192.168.246.2/24"}},
+		{Name: "eth7", Index: 9, Up: true, MAC: "02:00:00:00:00:17", Addrs: []string{"192.168.247.2/24"}},
+	}
+
+	if !autoBindDefaultInterfaceDevicesFromState(cfg, state, "eth1") {
+		t.Fatalf("expected safe default bindings to be applied")
+	}
+
+	got := map[string]string{}
+	for _, iface := range cfg.Interfaces {
+		got[iface.Name] = iface.Device
+	}
+	if got["wan"] != "eth1" {
+		t.Fatalf("expected wan to bind to eth1, got %q", got["wan"])
+	}
+	if got["dmz"] != "eth2" {
+		t.Fatalf("expected dmz to bind to eth2, got %q", got["dmz"])
+	}
+	if got["lan4"] != "eth0" {
+		t.Fatalf("expected lan4 to bind to eth0, got %q", got["lan4"])
+	}
+}
+
+func TestAutoBindDefaultInterfaceDevicesFromStateRepairsLegacyIndexBinding(t *testing.T) {
+	cfg := config.DefaultConfig()
+	for i := range cfg.Interfaces {
+		cfg.Interfaces[i].Device = fmt.Sprintf("eth%d", i)
+	}
+	state := []config.InterfaceState{
+		{Name: "lo", Index: 1, Up: true},
+		{Name: "eth0", Index: 2, Up: true, MAC: "02:00:00:00:00:10", Addrs: []string{"192.168.245.2/24"}},
+		{Name: "eth1", Index: 3, Up: true, MAC: "02:00:00:00:00:11", Addrs: []string{"192.168.246.2/24"}},
+		{Name: "eth2", Index: 4, Up: true, MAC: "02:00:00:00:00:12", Addrs: []string{"192.168.247.2/24"}},
+		{Name: "eth3", Index: 5, Up: true, MAC: "02:00:00:00:00:13", Addrs: []string{"192.168.240.2/24"}},
+		{Name: "eth4", Index: 6, Up: true, MAC: "02:00:00:00:00:14", Addrs: []string{"192.168.241.2/24"}},
+		{Name: "eth5", Index: 7, Up: true, MAC: "02:00:00:00:00:15", Addrs: []string{"192.168.242.2/24"}},
+		{Name: "eth6", Index: 8, Up: true, MAC: "02:00:00:00:00:16", Addrs: []string{"192.168.243.2/24"}},
+		{Name: "eth7", Index: 9, Up: true, MAC: "02:00:00:00:00:17", Addrs: []string{"192.168.244.2/24"}},
+	}
+
+	if !autoBindDefaultInterfaceDevicesFromState(cfg, state, "eth3") {
+		t.Fatalf("expected legacy index-order binding to be repaired")
+	}
+
+	got := map[string]string{}
+	for _, iface := range cfg.Interfaces {
+		got[iface.Name] = iface.Device
+	}
+	if got["wan"] != "eth3" {
+		t.Fatalf("expected wan to repair to eth3, got %q", got["wan"])
+	}
+	if got["dmz"] != "eth4" {
+		t.Fatalf("expected dmz to repair to eth4, got %q", got["dmz"])
+	}
+	if got["lan6"] != "eth2" {
+		t.Fatalf("expected lan6 to repair to eth2, got %q", got["lan6"])
 	}
 }
 

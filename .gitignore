@@ -58,6 +58,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+
 # Runtime data (docker-compose volumes)
 data/
 

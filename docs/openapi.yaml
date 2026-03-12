@@ -228,18 +228,36 @@ components:
         name: { type: string, example: modbus_read_only }
         description: { type: string }
         protocol: { type: string, example: modbus }
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              label: { type: string }
+              type: { type: string, enum: [text, number, select] }
+              required: { type: boolean }
+              placeholder: { type: string }
+              help: { type: string }
 
     ApplyICSTemplateRequest:
       type: object
       required: [template]
       properties:
         template: { type: string, description: "Template name (e.g. modbus_read_only, dnp3_secure_operations)" }
-        source_zones: { type: array, items: { type: string } }
-        dest_zones: { type: array, items: { type: string } }
+        sourceZones: { type: array, items: { type: string } }
+        destZones: { type: array, items: { type: string } }
+        source_zones: { type: array, items: { type: string }, deprecated: true }
+        dest_zones: { type: array, items: { type: string }, deprecated: true }
+        preview: { type: boolean, description: "When true, generate rules without saving them to candidate config" }
+        parameters:
+          type: object
+          additionalProperties: { type: string }
+          description: "Template parameter map used by the UI"
         params:
           type: object
           properties:
-            ranges: { type: array, items: { type: string }, description: Register address ranges (modbus_register_guard only) }
+            ranges: { type: array, items: { type: string }, description: Register address ranges (legacy modbus_register_guard shape) }
 
     RulePreviewResponse:
       type: object
@@ -804,13 +822,18 @@ paths:
             schema: { $ref: "#/components/schemas/ApplyICSTemplateRequest" }
       responses:
         "200":
-          description: Generated rules from the template
+          description: Previewed or applied rules from the template
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   template: { type: string }
+                  preview: { type: boolean }
+                  applied: { type: boolean }
+                  created: { type: integer }
+                  updated: { type: integer }
+                  ruleCount: { type: integer }
                   rules: { type: array, items: { type: object } }
         "400": { description: Unknown template or missing params }
 
