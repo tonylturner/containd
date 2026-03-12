@@ -129,42 +129,34 @@ services:
         ipv4_address: ${CONTAIND_WAN_IP:-192.168.240.2}
         gw_priority: 100
         priority: 1000
-        interface_name: eth0
       dmz:
         ipv4_address: ${CONTAIND_DMZ_IP:-192.168.241.2}
         gw_priority: 0
         priority: 900
-        interface_name: eth1
       lan1:
         ipv4_address: ${CONTAIND_LAN1_IP:-192.168.242.2}
         gw_priority: 0
         priority: 800
-        interface_name: eth2
       lan2:
         ipv4_address: ${CONTAIND_LAN2_IP:-192.168.243.2}
         gw_priority: 0
         priority: 700
-        interface_name: eth3
       lan3:
         ipv4_address: ${CONTAIND_LAN3_IP:-192.168.244.2}
         gw_priority: 0
         priority: 600
-        interface_name: eth4
       lan4:
         ipv4_address: ${CONTAIND_LAN4_IP:-192.168.245.2}
         gw_priority: 0
         priority: 500
-        interface_name: eth5
       lan5:
         ipv4_address: ${CONTAIND_LAN5_IP:-192.168.246.2}
         gw_priority: 0
         priority: 400
-        interface_name: eth6
       lan6:
         ipv4_address: ${CONTAIND_LAN6_IP:-192.168.247.2}
         gw_priority: 0
         priority: 300
-        interface_name: eth7
 
 networks:
   wan:

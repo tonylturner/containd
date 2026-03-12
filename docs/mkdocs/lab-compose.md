@@ -66,7 +66,7 @@ Edit the compose file when you need to change the lab topology itself:
 To add a new `ot-control` zone:
 
 1. Add a new network under `services.containd.networks`
-2. Pin its `interface_name`
+2. Optionally pin its `interface_name` if your Docker Engine supports that Compose feature
 3. Add the matching top-level network definition
 4. Add matching subnet/IP variables to your `.env`
 5. Add the matching `CONTAIND_AUTO_*_SUBNET` hint if you want auto-assign to stay deterministic
@@ -81,7 +81,6 @@ services:
         ipv4_address: ${CONTAIND_OT_CONTROL_IP:-192.168.248.2}
         gw_priority: 0
         priority: 200
-        interface_name: eth8
 
 networks:
   ot_control:
@@ -91,6 +90,8 @@ networks:
       config:
         - subnet: ${CONTAIND_OT_CONTROL_SUBNET:-192.168.248.0/24}
 ```
+
+If you need older Docker Engine compatibility, rely on the subnet-based auto-assign hints and omit `interface_name`.
 
 ## Example: Add Student Workloads
 

@@ -104,7 +104,7 @@ because Docker network attach order can vary.
 
 In this repo’s `deploy/docker-compose.yml`, we explicitly pin:
 - `wan` as the default-gateway network (`gw_priority`) so the kernel default route is via WAN.
-- interface names (`interface_name`) so `wan/dmz/lan1..lan6` reliably map to `eth0..eth7`.
+- stable per-network subnets and IPs so `Interfaces -> Auto-assign` can map `wan/dmz/lan1..lan6` deterministically even on Docker engines that do not support network-level `interface_name`.
 
 To keep the appliance UI/CLI stable in Docker labs, `Interfaces → Auto-assign` prefers matching interface roles by
 the IPv4 subnets present on each interface (defaults match this repo’s `deploy/docker-compose.yml`):
@@ -114,6 +114,8 @@ the IPv4 subnets present on each interface (defaults match this repo’s `deploy
 - `lan1..lan6`: `192.168.242.0/24` … `192.168.247.0/24`
 
 If those subnets aren’t present, auto-assign falls back to kernel index ordering.
+
+On newer Docker engines you can optionally use Compose `interface_name` in custom lab files, but the supported starter path avoids depending on it so it works across older GitHub runners and classroom Docker installs.
 
 To override subnet matching (for custom lab topologies), set:
 `CONTAIND_AUTO_WAN_SUBNET`, `CONTAIND_AUTO_DMZ_SUBNET`, `CONTAIND_AUTO_LAN1_SUBNET` … `CONTAIND_AUTO_LAN6_SUBNET`.
