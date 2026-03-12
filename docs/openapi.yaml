@@ -92,6 +92,8 @@ components:
         role: { type: string, enum: [admin, view] }
         mustChangePassword: { type: boolean }
         mfaEnabled: { type: boolean }
+        mfaRequired: { type: boolean }
+        mfaGraceUntil: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -400,6 +402,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/MFAEnrollResponse" }
         "409": { description: MFA already enabled }
+        "403": { description: MFA setup required sessions may access this endpoint even when other API access is restricted }
 
   /auth/me/mfa/enable:
     post:
@@ -414,6 +417,7 @@ paths:
         "200": { description: MFA enabled }
         "401": { description: Invalid or expired challenge token or authentication code }
         "409": { description: MFA already enabled }
+        "403": { description: MFA setup required sessions may access this endpoint even when other API access is restricted }
 
   /auth/me/mfa/disable:
     post:
@@ -427,6 +431,7 @@ paths:
       responses:
         "200": { description: MFA disabled }
         "401": { description: Current password or authentication code invalid }
+        "409": { description: MFA is required for this account and cannot be self-disabled }
 
   # ── Dashboard ─────────────────────────────────────────────────────
   /dashboard:
@@ -535,13 +540,44 @@ paths:
 
   /users/{id}/mfa/disable:
     post:
-      summary: Disable MFA for a user (admin)
+      summary: Disable or reset MFA for a user (admin)
       tags: [Users]
       parameters:
         - $ref: "#/components/parameters/pathId"
       responses:
         "200": { description: MFA disabled }
         "404": { description: User not found }
+
+  /users/{id}/mfa/require:
+    post:
+      summary: Require MFA for a user (admin)
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: MFA requirement enabled, with grace period if setup is still pending }
+        "404": { description: User not found }
+
+  /users/{id}/mfa/clear:
+    post:
+      summary: Clear the MFA requirement for a user (admin)
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: MFA requirement cleared }
+        "404": { description: User not found }
+
+  /users/{id}/mfa/grace:
+    post:
+      summary: Extend the MFA setup grace period for a user (admin)
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/pathId"
+      responses:
+        "200": { description: MFA grace period extended }
+        "404": { description: User not found }
+        "409": { description: MFA is not currently required for this account }
 
   # ── Services ──────────────────────────────────────────────────────
   # Each service endpoint follows the same pattern:

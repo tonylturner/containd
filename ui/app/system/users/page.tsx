@@ -8,6 +8,7 @@ import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
 import { api, isAdmin, type User, type UserRole } from "../../../lib/api";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type UsersTab = "manage" | "create";
 
 export default function UsersPage() {
   const confirm = useConfirm();
@@ -23,6 +24,7 @@ export default function UsersPage() {
     role: UserRole;
   } | null>(null);
   const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<UsersTab>("manage");
 
   const [newUser, setNewUser] = useState<{
     username: string;
@@ -189,6 +191,80 @@ export default function UsersPage() {
     });
   }
 
+  function onRequireUserMFA(user: User) {
+    if (!isAdmin()) return;
+    confirm.open({
+      title: "Require MFA",
+      message: user.mfaEnabled
+        ? `Require MFA for ${user.username}? Their next login will require their authenticator app.`
+        : `Require MFA for ${user.username}? They will have 7 days to set it up before full access is restricted.`,
+      confirmLabel: "Require MFA",
+      variant: "warning",
+      onConfirm: async () => {
+        setError(null);
+        setSaveState("saving");
+        const ok = await api.requireUserMFA(user.id);
+        if (!ok.ok) {
+          setSaveState("error");
+          setError(ok.error || "Failed to require MFA.");
+          setTimeout(() => setSaveState("idle"), 5000);
+          return;
+        }
+        await refresh();
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      },
+    });
+  }
+
+  function onClearUserMFARequirement(user: User) {
+    if (!isAdmin()) return;
+    confirm.open({
+      title: "Clear MFA Requirement",
+      message: `Clear the MFA requirement for ${user.username}?`,
+      confirmLabel: "Clear requirement",
+      variant: "warning",
+      onConfirm: async () => {
+        setError(null);
+        setSaveState("saving");
+        const ok = await api.clearUserMFARequirement(user.id);
+        if (!ok.ok) {
+          setSaveState("error");
+          setError(ok.error || "Failed to clear MFA requirement.");
+          setTimeout(() => setSaveState("idle"), 5000);
+          return;
+        }
+        await refresh();
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      },
+    });
+  }
+
+  function onExtendUserMFAGrace(user: User) {
+    if (!isAdmin()) return;
+    confirm.open({
+      title: "Extend MFA Grace",
+      message: `Give ${user.username} another 7 days to set up MFA?`,
+      confirmLabel: "Extend grace",
+      variant: "warning",
+      onConfirm: async () => {
+        setError(null);
+        setSaveState("saving");
+        const ok = await api.extendUserMFAGrace(user.id);
+        if (!ok.ok) {
+          setSaveState("error");
+          setError(ok.error || "Failed to extend MFA grace.");
+          setTimeout(() => setSaveState("idle"), 5000);
+          return;
+        }
+        await refresh();
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      },
+    });
+  }
+
   return (
     <Shell title="User Management">
       <ConfirmDialog {...confirm.props} />
@@ -249,11 +325,28 @@ export default function UsersPage() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 opacity-100">
+      <div className="mb-4 flex max-w-md gap-1 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("manage")}
+          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "manage" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+        >
+          Manage Users
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("create")}
+          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "create" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+        >
+          Add User
+        </button>
+      </div>
+
+      {activeTab === "manage" && (
         <Card padding="lg">
           <h2 className="text-lg font-semibold text-[var(--text)]">Users</h2>
           <p className="mt-1 text-sm text-[var(--text)]">
-            Manage local accounts and roles.
+            Manage local accounts, roles, and MFA requirements.
           </p>
 
           <div className="mt-4">
@@ -265,15 +358,15 @@ export default function UsersPage() {
             />
           </div>
 
-          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
-            <table className="w-full text-sm">
+          <div className="mt-4 overflow-x-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
+            <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
                 <tr>
                   <th className="px-4 py-3">Username</th>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">MFA</th>
+                  <th className="px-4 py-3">MFA Policy</th>
                   <th className="px-4 py-3">Updated</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
@@ -394,18 +487,30 @@ export default function UsersPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/[0.1] text-emerald-400" : "bg-white/[0.06] text-[var(--text-muted)]"}`}
-                        >
-                          {u.mfaEnabled ? "enabled" : "disabled"}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/[0.1] text-emerald-400" : "bg-white/[0.06] text-[var(--text-muted)]"}`}
+                          >
+                            {u.mfaEnabled ? "enabled" : "disabled"}
+                          </span>
+                          {u.mfaRequired && (
+                            <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-amber-300">
+                              required
+                            </span>
+                          )}
+                        </div>
+                        {u.mfaRequired && !u.mfaEnabled && (
+                          <div className="mt-1 text-xs text-[var(--text-muted)]">
+                            {formatMFAGrace(u.mfaGraceUntil)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
                         {formatTimestamp(u.updatedAt ?? u.createdAt)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {editingUserId === u.id ? (
-                          <div className="flex justify-end gap-2">
+                          <div className="flex flex-wrap justify-end gap-2">
                             <button
                               onClick={() => saveEdit(u.id)}
                               disabled={!isAdmin()}
@@ -421,7 +526,7 @@ export default function UsersPage() {
                             </button>
                           </div>
                         ) : (
-                          <div className="flex justify-end gap-2">
+                          <div className="flex flex-wrap justify-end gap-2">
                             <button
                               onClick={() => startEdit(u)}
                               disabled={!isAdmin()}
@@ -436,13 +541,40 @@ export default function UsersPage() {
                             >
                               Reset password
                             </button>
+                            {!u.mfaRequired && (
+                              <button
+                                onClick={() => onRequireUserMFA(u)}
+                                disabled={!isAdmin()}
+                                className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                              >
+                                Require MFA
+                              </button>
+                            )}
+                            {u.mfaRequired && !u.mfaEnabled && (
+                              <button
+                                onClick={() => onExtendUserMFAGrace(u)}
+                                disabled={!isAdmin()}
+                                className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                              >
+                                Extend grace
+                              </button>
+                            )}
+                            {u.mfaRequired && (
+                              <button
+                                onClick={() => onClearUserMFARequirement(u)}
+                                disabled={!isAdmin()}
+                                className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                              >
+                                Clear MFA req
+                              </button>
+                            )}
                             {u.mfaEnabled && (
                               <button
                                 onClick={() => onDisableUserMFA(u)}
                                 disabled={!isAdmin()}
                                 className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
                               >
-                                Disable MFA
+                                {u.mfaRequired ? "Reset MFA" : "Disable MFA"}
                               </button>
                             )}
                             <button
@@ -461,10 +593,16 @@ export default function UsersPage() {
             </table>
           </div>
         </Card>
+      )}
 
+      {activeTab === "create" && (
         <Card padding="lg">
           <h2 className="text-lg font-semibold text-[var(--text)]">Add User</h2>
-          <div className="mt-4 grid gap-2">
+          <p className="mt-1 text-sm text-[var(--text)]">
+            Create a local account, then require MFA if the account should use
+            an authenticator app after first sign-in.
+          </p>
+          <div className="mt-4 grid max-w-2xl gap-2">
             <input
               value={newUser.username}
               onChange={(e) =>
@@ -537,7 +675,7 @@ export default function UsersPage() {
             </button>
           </div>
         </Card>
-      </div>
+      )}
     </Shell>
   );
 }
@@ -547,4 +685,12 @@ function formatTimestamp(value?: string) {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "—";
   return dt.toLocaleString();
+}
+
+function formatMFAGrace(value?: string) {
+  if (!value) return "Setup required now";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "Setup required now";
+  if (dt.getTime() <= Date.now()) return "Grace expired";
+  return `Grace until ${dt.toLocaleString()}`;
 }

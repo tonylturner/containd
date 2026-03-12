@@ -84,3 +84,73 @@ func TestSetAndDisableTOTP(t *testing.T) {
 		t.Fatalf("expected MFA disabled, got enabled=%v secret=%q", got.MFAEnabled, got.TOTPSecret)
 	}
 }
+
+func TestSetMFARequirement(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, err := s.Create(ctx, User{Username: "required-user", Role: "admin"}, "Password1")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	deadline := MFAGraceDeadline(time.Now())
+	if err := s.SetMFARequirement(ctx, u.ID, true, &deadline); err != nil {
+		t.Fatalf("SetMFARequirement require: %v", err)
+	}
+	got, err := s.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID after require: %v", err)
+	}
+	if !got.MFARequired || got.MFAGraceUntil == nil {
+		t.Fatalf("expected pending MFA requirement with grace, got %+v", got.User)
+	}
+
+	if err := s.SetMFARequirement(ctx, u.ID, false, nil); err != nil {
+		t.Fatalf("SetMFARequirement clear: %v", err)
+	}
+	got, err = s.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID after clear: %v", err)
+	}
+	if got.MFARequired || got.MFAGraceUntil != nil {
+		t.Fatalf("expected cleared MFA requirement, got %+v", got.User)
+	}
+}
+
+func TestMFAGraceHelpers(t *testing.T) {
+	enrollment, err := GenerateTOTPEnrollment("containd", "alice")
+	if err != nil {
+		t.Fatalf("GenerateTOTPEnrollment: %v", err)
+	}
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	future := time.Now().UTC().Add(1 * time.Hour)
+
+	if HasPendingMFARequirement(nil) {
+		t.Fatal("nil user should not have a pending MFA requirement")
+	}
+
+	u := &StoredUser{
+		User: User{
+			MFARequired:   true,
+			MFAGraceUntil: &future,
+		},
+	}
+	if !HasPendingMFARequirement(u) {
+		t.Fatal("expected pending MFA requirement")
+	}
+	if IsMFAGraceExpired(u, time.Now()) {
+		t.Fatal("future grace deadline should not be expired")
+	}
+
+	u.MFAGraceUntil = &past
+	if !IsMFAGraceExpired(u, time.Now()) {
+		t.Fatal("past grace deadline should be expired")
+	}
+
+	u.MFAEnabled = true
+	u.TOTPSecret = enrollment.Secret
+	if IsMFAGraceExpired(u, time.Now()) {
+		t.Fatal("enabled MFA should satisfy the requirement")
+	}
+}

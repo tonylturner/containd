@@ -173,6 +173,24 @@ function docsHrefForPath(pathname: string): string {
   return match?.href ?? "/docs/";
 }
 
+function parseOptionalDate(raw?: string): Date | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isMFAGraceExpired(raw?: string): boolean {
+  const deadline = parseOptionalDate(raw);
+  if (!deadline) return true;
+  return Date.now() >= deadline.getTime();
+}
+
+function formatOptionalDate(raw?: string): string | null {
+  const deadline = parseOptionalDate(raw);
+  if (!deadline) return null;
+  return deadline.toLocaleString();
+}
+
 function buildNavGroups(isAdmin: boolean): NavGroup[] {
   const groups: NavGroup[] = [
     {
@@ -264,14 +282,17 @@ export function Shell({
   const [me, setMe] = React.useState<User | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
-  const [profileTab, setProfileTab] = React.useState<"profile" | "password">(
-    "profile",
-  );
+  const [profileTab, setProfileTab] = React.useState<
+    "profile" | "password" | "mfa"
+  >("profile");
   const redirectingRef = React.useRef(false);
 
   const isAdmin = (me?.role ?? "") === "admin";
   const navGroups = React.useMemo(() => buildNavGroups(isAdmin), [isAdmin]);
   const docsHref = React.useMemo(() => docsHrefForPath(pathname), [pathname]);
+  const pendingMFA = !!me?.mfaRequired && !me?.mfaEnabled;
+  const forceMFA = pendingMFA && isMFAGraceExpired(me?.mfaGraceUntil);
+  const mfaGraceDisplay = formatOptionalDate(me?.mfaGraceUntil);
 
   // Auto-expand nav group containing the active page
   React.useEffect(() => {
@@ -367,6 +388,23 @@ export function Shell({
   }, []);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onMFARequired = () => {
+      setProfileTab("mfa");
+      setProfileOpen(true);
+    };
+    window.addEventListener(
+      "containd:auth:mfa_setup_required",
+      onMFARequired as EventListener,
+    );
+    return () =>
+      window.removeEventListener(
+        "containd:auth:mfa_setup_required",
+        onMFARequired as EventListener,
+      );
+  }, []);
+
+  React.useEffect(() => {
     if (pathname.startsWith("/login")) {
       setAuthChecked(true);
       setAuthError(null);
@@ -389,6 +427,13 @@ export function Shell({
       setMe(data);
       if (data?.mustChangePassword) {
         setProfileTab("password");
+        setProfileOpen(true);
+      } else if (
+        data?.mfaRequired &&
+        !data?.mfaEnabled &&
+        isMFAGraceExpired(data?.mfaGraceUntil)
+      ) {
+        setProfileTab("mfa");
         setProfileOpen(true);
       }
       if (
@@ -695,6 +740,43 @@ export function Shell({
                     </span>
                   </div>
                 )}
+                {pendingMFA && !forceMFA && (
+                  <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                    <div>
+                      <div className="font-medium text-amber-200">
+                        MFA setup is required for this account
+                      </div>
+                      <div className="mt-1 text-xs text-amber-200/90">
+                        You can still sign in without MFA during the grace
+                        period, but you should complete setup soon.
+                        {mfaGraceDisplay
+                          ? ` Grace ends on ${mfaGraceDisplay}.`
+                          : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileTab("mfa");
+                        setProfileOpen(true);
+                      }}
+                      className="shrink-0 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-ui hover:bg-amber-500/30"
+                    >
+                      Set up MFA
+                    </button>
+                  </div>
+                )}
+                {forceMFA && (
+                  <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                    <div className="font-medium text-red-200">
+                      MFA setup required before continuing
+                    </div>
+                    <div className="mt-1 text-xs text-red-200/90">
+                      Your MFA grace period has expired. Complete authenticator
+                      app setup to regain full access.
+                    </div>
+                  </div>
+                )}
                 <ConfigStatusBar />
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>
@@ -730,7 +812,14 @@ export function Shell({
                   </div>
                 </div>
                 <Breadcrumbs />
-                {children}
+                {forceMFA ? (
+                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-sm text-slate-300">
+                    Only account and MFA setup actions are available until MFA
+                    is enabled for this account.
+                  </div>
+                ) : (
+                  children
+                )}
               </>
             )}
           </div>
@@ -742,8 +831,9 @@ export function Shell({
           me={me}
           initialTab={profileTab}
           forcePassword={!!me.mustChangePassword}
+          forceMFA={forceMFA}
           onClose={() => {
-            if (!me.mustChangePassword) setProfileOpen(false);
+            if (!me.mustChangePassword && !forceMFA) setProfileOpen(false);
           }}
           onSaved={(u) => setMe(u)}
           onPasswordChanged={() =>
@@ -761,6 +851,7 @@ function ProfileModal({
   me,
   initialTab,
   forcePassword,
+  forceMFA,
   onClose,
   onSaved,
   onPasswordChanged,
@@ -768,6 +859,7 @@ function ProfileModal({
   me: User;
   initialTab: "profile" | "password" | "mfa";
   forcePassword?: boolean;
+  forceMFA?: boolean;
   onClose: () => void;
   onSaved: (u: User) => void;
   onPasswordChanged?: () => void;
@@ -787,6 +879,9 @@ function ProfileModal({
   const [state, setState] = React.useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = React.useState<string | null>(null);
   const passwordRef = React.useRef<HTMLInputElement | null>(null);
+  const mustStayOpen = !!forcePassword || !!forceMFA;
+  const mfaRequired = !!me.mfaRequired;
+  const mfaGraceDisplay = formatOptionalDate(me.mfaGraceUntil);
 
   React.useEffect(() => {
     setMfaEnabled(!!me.mfaEnabled);
@@ -800,11 +895,11 @@ function ProfileModal({
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !forcePassword) onClose();
+      if (e.key === "Escape" && !mustStayOpen) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [forcePassword, onClose]);
+  }, [mustStayOpen, onClose]);
 
   async function saveProfile() {
     setError(null);
@@ -881,7 +976,7 @@ function ProfileModal({
     setMfaEnrollment(null);
     setMfaCode("");
     setState("idle");
-    onSaved({ ...me, mfaEnabled: true });
+    onSaved({ ...me, mfaEnabled: true, mfaGraceUntil: undefined });
   }
 
   async function disableMFA() {
@@ -907,7 +1002,7 @@ function ProfileModal({
     setMfaDisablePassword("");
     setMfaDisableCode("");
     setState("idle");
-    onSaved({ ...me, mfaEnabled: false });
+    onSaved({ ...me, mfaEnabled: false, mfaGraceUntil: undefined });
   }
 
   const inputClass =
@@ -927,7 +1022,7 @@ function ProfileModal({
           >
             Account
           </h2>
-          {!forcePassword && (
+          {!mustStayOpen && (
             <button
               type="button"
               onClick={onClose}
@@ -963,6 +1058,23 @@ function ProfileModal({
           </div>
         )}
 
+        {forceMFA && !forcePassword && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4 shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Your MFA grace period has expired. Set up MFA to regain full access.
+          </div>
+        )}
+
         {error && (
           <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {error}
@@ -974,7 +1086,7 @@ function ProfileModal({
           <button
             type="button"
             onClick={() => setTab("profile")}
-            disabled={forcePassword}
+            disabled={forcePassword || forceMFA}
             className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "profile" ? "bg-white/[0.08] text-white" : "text-slate-400 hover:text-slate-200"} disabled:opacity-50`}
           >
             Profile
@@ -1118,9 +1230,9 @@ function ProfileModal({
                 Authenticator app MFA
               </div>
               <div className="mt-1 text-xs text-slate-400">
-                Optional TOTP-based MFA for local accounts. Recommended for
-                admin and instructor accounts. SMS is intentionally not
-                supported.
+                {mfaRequired
+                  ? "This account is required to use TOTP-based MFA. SMS is intentionally not supported."
+                  : "Optional TOTP-based MFA for local accounts. Recommended for admin and instructor accounts. SMS is intentionally not supported."}
               </div>
             </div>
 
@@ -1130,15 +1242,28 @@ function ProfileModal({
                   <div className="text-sm font-medium text-white">Status</div>
                   <div className="mt-1 text-xs text-slate-400">
                     {mfaEnabled
-                      ? "Enabled for this account."
-                      : "Disabled for this account."}
+                      ? mfaRequired
+                        ? "Enabled and required for this account."
+                        : "Enabled for this account."
+                      : mfaRequired
+                        ? mfaGraceDisplay
+                          ? `Required for this account. Grace ends on ${mfaGraceDisplay}.`
+                          : "Required for this account."
+                        : "Disabled for this account."}
                   </div>
                 </div>
-                <span
-                  className={`rounded-full px-2 py-1 text-[11px] ${mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/[0.06] text-slate-300"}`}
-                >
-                  {mfaEnabled ? "Enabled" : "Disabled"}
-                </span>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <span
+                    className={`rounded-full px-2 py-1 text-[11px] ${mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/[0.06] text-slate-300"}`}
+                  >
+                    {mfaEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                  {mfaRequired && (
+                    <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+                      Required
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1225,7 +1350,7 @@ function ProfileModal({
               </div>
             )}
 
-            {mfaEnabled && (
+            {mfaEnabled && !mfaRequired && (
               <div className="grid gap-3">
                 <div className="text-xs text-slate-400">
                   Disabling MFA requires your current password and a current
@@ -1272,6 +1397,13 @@ function ProfileModal({
                 >
                   {state === "saving" ? "Disabling..." : "Disable MFA"}
                 </button>
+              </div>
+            )}
+
+            {mfaEnabled && mfaRequired && (
+              <div className="text-xs text-slate-400">
+                MFA is required for this account. Contact an administrator if
+                you need the requirement cleared or your MFA device reset.
               </div>
             )}
           </div>

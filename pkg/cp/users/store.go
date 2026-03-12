@@ -26,16 +26,18 @@ var (
 )
 
 type User struct {
-	ID                 string    `json:"id"`
-	Username           string    `json:"username"`
-	FirstName          string    `json:"firstName,omitempty"`
-	LastName           string    `json:"lastName,omitempty"`
-	Email              string    `json:"email,omitempty"`
-	Role               string    `json:"role"` // admin|view
-	MustChangePassword bool      `json:"mustChangePassword,omitempty"`
-	MFAEnabled         bool      `json:"mfaEnabled,omitempty"`
-	CreatedAt          time.Time `json:"createdAt,omitempty"`
-	UpdatedAt          time.Time `json:"updatedAt,omitempty"`
+	ID                 string     `json:"id"`
+	Username           string     `json:"username"`
+	FirstName          string     `json:"firstName,omitempty"`
+	LastName           string     `json:"lastName,omitempty"`
+	Email              string     `json:"email,omitempty"`
+	Role               string     `json:"role"` // admin|view
+	MustChangePassword bool       `json:"mustChangePassword,omitempty"`
+	MFAEnabled         bool       `json:"mfaEnabled,omitempty"`
+	MFARequired        bool       `json:"mfaRequired,omitempty"`
+	MFAGraceUntil      *time.Time `json:"mfaGraceUntil,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt,omitempty"`
+	UpdatedAt          time.Time  `json:"updatedAt,omitempty"`
 }
 
 type StoredUser struct {
@@ -54,6 +56,7 @@ type Store interface {
 	SetPassword(ctx context.Context, id string, password string) error
 	SetTOTP(ctx context.Context, id string, secret string) error
 	DisableTOTP(ctx context.Context, id string) error
+	SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error
 	EnsureDefaultAdmin(ctx context.Context) error
 	CreateSession(ctx context.Context, userID string, idleTTL time.Duration, maxTTL time.Duration) (*Session, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
@@ -131,6 +134,8 @@ CREATE TABLE IF NOT EXISTS users (
   must_change_password INTEGER NOT NULL DEFAULT 0,
   mfa_totp_secret TEXT NOT NULL DEFAULT '',
   mfa_totp_enabled INTEGER NOT NULL DEFAULT 0,
+  mfa_required INTEGER NOT NULL DEFAULT 0,
+  mfa_grace_until INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -150,6 +155,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_secret TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_enabled INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_grace_until INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -200,8 +207,16 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 	return err
 }
 
+func graceUntilPtr(unix int64) *time.Time {
+	if unix <= 0 {
+		return nil
+	}
+	t := time.Unix(unix, 0).UTC()
+	return &t
+}
+
 func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, must_change_password, mfa_totp_enabled, created_at, updated_at FROM users ORDER BY username ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, first_name, last_name, email, role, must_change_password, mfa_totp_enabled, mfa_required, mfa_grace_until, created_at, updated_at FROM users ORDER BY username ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -209,10 +224,11 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		var cAt, uAt int64
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.MustChangePassword, &u.MFAEnabled, &cAt, &uAt); err != nil {
+		var cAt, uAt, graceUntil int64
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.MustChangePassword, &u.MFAEnabled, &u.MFARequired, &graceUntil, &cAt, &uAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
+		u.MFAGraceUntil = graceUntilPtr(graceUntil)
 		u.CreatedAt = time.Unix(cAt, 0).UTC()
 		u.UpdatedAt = time.Unix(uAt, 0).UTC()
 		out = append(out, u)
@@ -225,30 +241,32 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 
 func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*StoredUser, error) {
 	username = strings.TrimSpace(username)
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, created_at, updated_at FROM users WHERE username = ?`, username)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, created_at, updated_at FROM users WHERE username = ?`, username)
 	var u StoredUser
-	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &cAt, &uAt); err != nil {
+	var cAt, uAt, graceUntil int64
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get user: %w", err)
 	}
+	u.MFAGraceUntil = graceUntilPtr(graceUntil)
 	u.CreatedAt = time.Unix(cAt, 0).UTC()
 	u.UpdatedAt = time.Unix(uAt, 0).UTC()
 	return &u, nil
 }
 
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, created_at, updated_at FROM users WHERE id = ?`, id)
 	var u StoredUser
-	var cAt, uAt int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &cAt, &uAt); err != nil {
+	var cAt, uAt, graceUntil int64
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get user: %w", err)
 	}
+	u.MFAGraceUntil = graceUntilPtr(graceUntil)
 	u.CreatedAt = time.Unix(cAt, 0).UTC()
 	u.UpdatedAt = time.Unix(uAt, 0).UTC()
 	return &u, nil
@@ -416,7 +434,7 @@ func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) err
 		return errors.New("totp secret required")
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, updated_at=? WHERE id=?`, secret, now.Unix(), id)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
 	if err != nil {
 		return fmt.Errorf("set totp: %w", err)
 	}
@@ -429,9 +447,30 @@ func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) err
 
 func (s *SQLiteStore) DisableTOTP(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, updated_at=? WHERE id=?`, now.Unix(), id)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
 	if err != nil {
 		return fmt.Errorf("disable totp: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLiteStore) SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error {
+	now := time.Now().UTC()
+	requiredInt := 0
+	graceUnix := int64(0)
+	if required {
+		requiredInt = 1
+		if graceUntil != nil {
+			graceUnix = graceUntil.UTC().Unix()
+		}
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_required=?, mfa_grace_until=?, updated_at=? WHERE id=?`, requiredInt, graceUnix, now.Unix(), id)
+	if err != nil {
+		return fmt.Errorf("set mfa requirement: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {

@@ -19,6 +19,7 @@ const (
 	DefaultTOTPIssuer = "containd"
 	TOTPPeriod        = 30
 	TOTPSkew          = 1
+	MFAGracePeriod    = 7 * 24 * time.Hour
 )
 
 type TOTPEnrollment struct {
@@ -84,4 +85,25 @@ func ValidateTOTP(secret string, code string, now time.Time) bool {
 		Algorithm: otp.AlgorithmSHA1,
 	})
 	return err == nil && ok
+}
+
+func MFAGraceDeadline(now time.Time) time.Time {
+	return now.UTC().Add(MFAGracePeriod)
+}
+
+func HasPendingMFARequirement(u *StoredUser) bool {
+	if u == nil {
+		return false
+	}
+	return u.MFARequired && !u.MFAEnabled
+}
+
+func IsMFAGraceExpired(u *StoredUser, now time.Time) bool {
+	if !HasPendingMFARequirement(u) {
+		return false
+	}
+	if u.MFAGraceUntil == nil {
+		return true
+	}
+	return !now.UTC().Before(u.MFAGraceUntil.UTC())
 }

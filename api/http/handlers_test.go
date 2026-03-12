@@ -146,6 +146,22 @@ func (m *mockUserStore) DisableTOTP(_ context.Context, id string) error {
 	}
 	u.TOTPSecret = ""
 	u.MFAEnabled = false
+	u.MFAGraceUntil = nil
+	return nil
+}
+
+func (m *mockUserStore) SetMFARequirement(_ context.Context, id string, required bool, graceUntil *time.Time) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	u.MFARequired = required
+	if graceUntil == nil {
+		u.MFAGraceUntil = nil
+	} else {
+		t := graceUntil.UTC()
+		u.MFAGraceUntil = &t
+	}
 	return nil
 }
 
@@ -496,6 +512,47 @@ func TestLoginRequiresMFA(t *testing.T) {
 	}
 }
 
+func TestLoginAllowsPendingMFADuringGrace(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	hash, _ := bcrypt.GenerateFromPassword([]byte(testPassword), 4) //nolint:gosec
+	deadline := time.Now().UTC().Add(24 * time.Hour)
+	us.users["u1"] = &users.StoredUser{
+		User: users.User{
+			ID:            "u1",
+			Username:      "admin",
+			Role:          "admin",
+			MFARequired:   true,
+			MFAGraceUntil: &deadline,
+		},
+		PasswordHash: string(hash),
+	}
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	body := loginBody("admin", testPassword)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for grace-period login, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp loginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid login response JSON: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("expected non-empty token during MFA grace login")
+	}
+	if !resp.User.MFARequired || resp.User.MFAEnabled {
+		t.Fatalf("expected pending MFA requirement in login response, got %+v", resp.User)
+	}
+}
+
 func TestLoginRateLimiting(t *testing.T) {
 	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
 	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
@@ -776,6 +833,36 @@ func TestSelfMFAEnrollEnableDisable(t *testing.T) {
 	}
 }
 
+func TestRequiredUserCannotSelfDisableMFA(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	tok, uid := addTestAdmin(us, secret)
+	us.users[uid].MFARequired = true
+	enrollment, err := users.GenerateTOTPEnrollment("containd", "admin")
+	if err != nil {
+		t.Fatalf("GenerateTOTPEnrollment: %v", err)
+	}
+	us.users[uid].MFAEnabled = true
+	us.users[uid].TOTPSecret = enrollment.Secret
+	s := setupJWTServer(&mockStore{}, us)
+
+	disableBody, _ := json.Marshal(map[string]string{
+		"currentPassword": testPassword,
+		"code":            currentTOTPCode(t, us.users[uid].TOTPSecret),
+	})
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/disable", bytes.NewBuffer(disableBody), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 when required user disables MFA, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminCanDisableUserMFA(t *testing.T) {
 	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
 	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
@@ -798,6 +885,79 @@ func TestAdminCanDisableUserMFA(t *testing.T) {
 	}
 	if us.users[userID].MFAEnabled {
 		t.Fatal("expected target MFA to be disabled by admin")
+	}
+}
+
+func TestAdminDisableRequiredUserMFASetsGrace(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	adminTok, _ := addTestAdmin(us, secret)
+	_, userID := addTestUser(us, secret, "viewer-3", "viewer3", "view", false)
+	us.users[userID].MFARequired = true
+	us.users[userID].MFAEnabled = true
+	us.users[userID].TOTPSecret = "JBSWY3DPEHPK3PXP"
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/disable", bytes.NewBufferString(`{}`), adminTok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if us.users[userID].MFAEnabled {
+		t.Fatal("expected target MFA to be disabled by admin")
+	}
+	if !us.users[userID].MFARequired || us.users[userID].MFAGraceUntil == nil {
+		t.Fatalf("expected required MFA user to receive new grace window, got %+v", us.users[userID].User)
+	}
+}
+
+func TestAdminCanRequireClearAndExtendUserMFA(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	adminTok, _ := addTestAdmin(us, secret)
+	_, userID := addTestUser(us, secret, "viewer-4", "viewer4", "view", false)
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/require", bytes.NewBufferString(`{}`), adminTok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("require mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !us.users[userID].MFARequired || us.users[userID].MFAGraceUntil == nil {
+		t.Fatalf("expected user MFA requirement with grace, got %+v", us.users[userID].User)
+	}
+	firstDeadline := us.users[userID].MFAGraceUntil.UTC()
+
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/grace", bytes.NewBufferString(`{}`), adminTok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("extend mfa grace expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if us.users[userID].MFAGraceUntil == nil || !us.users[userID].MFAGraceUntil.After(firstDeadline) {
+		t.Fatalf("expected extended grace deadline after %v, got %+v", firstDeadline, us.users[userID].MFAGraceUntil)
+	}
+
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/clear", bytes.NewBufferString(`{}`), adminTok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear mfa requirement expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if us.users[userID].MFARequired || us.users[userID].MFAGraceUntil != nil {
+		t.Fatalf("expected cleared MFA requirement, got %+v", us.users[userID].User)
 	}
 }
 
@@ -866,6 +1026,57 @@ func TestMustChangePasswordEnforcement(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me even with must-change-password, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestExpiredMFARequirementRestrictsUntilEnabled(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_ADMIN_TOKEN", "")
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	defer t.Setenv("CONTAIND_JWT_SECRET", "")
+
+	us := newMockUserStore()
+	secret := []byte(testJWTSecret)
+	tok, uid := addTestAdmin(us, secret)
+	expired := time.Now().UTC().Add(-1 * time.Hour)
+	us.users[uid].MFARequired = true
+	us.users[uid].MFAGraceUntil = &expired
+	s := setupJWTServer(&mockStore{}, us)
+
+	rec := httptest.NewRecorder()
+	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for expired MFA requirement on /config, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /auth/me/mfa/enroll during restricted session, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var enrollment mfaEnrollResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &enrollment); err != nil {
+		t.Fatalf("invalid enroll response: %v", err)
+	}
+
+	enableBody, _ := json.Marshal(map[string]string{
+		"challengeToken": enrollment.ChallengeToken,
+		"code":           currentTOTPCode(t, enrollment.Secret),
+	})
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enable", bytes.NewBuffer(enableBody), tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /auth/me/mfa/enable during restricted session, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /config after enabling MFA, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

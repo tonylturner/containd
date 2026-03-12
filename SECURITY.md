@@ -143,7 +143,7 @@ For production-style deployments and serious training environments:
 
 - set a unique `CONTAIND_JWT_SECRET`
 - change the bootstrap password immediately on first login
-- enable app-based MFA for administrative accounts when practical
+- enable app-based MFA for administrative accounts when practical, and use the admin-side MFA requirement control for accounts that should not remain password-only
 - prefer HTTPS and restrict plain HTTP where possible
 - use SSH keys and disable SSH password auth when feasible
 - keep `CONTAIND_LAB_MODE=0`

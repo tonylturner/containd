@@ -129,6 +129,9 @@ async function captureAuthError(res: Response) {
         new CustomEvent("containd:auth:password_change_required"),
       );
     }
+    if (res.status === 403 && msg && /mfa setup required/i.test(msg)) {
+      window.dispatchEvent(new CustomEvent("containd:auth:mfa_setup_required"));
+    }
   } catch {
     // ignore
   }
@@ -527,6 +530,8 @@ export type User = {
   role: UserRole;
   mustChangePassword?: boolean;
   mfaEnabled?: boolean;
+  mfaRequired?: boolean;
+  mfaGraceUntil?: string;
   labMode?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -1396,6 +1401,21 @@ export const api = {
   disableUserMFA: (id: string) =>
     postJSONResult<{ status: string }>(
       `/api/v1/users/${encodeURIComponent(id)}/mfa/disable`,
+      {},
+    ),
+  requireUserMFA: (id: string) =>
+    postJSONResult<{ status: string; graceUntil?: string }>(
+      `/api/v1/users/${encodeURIComponent(id)}/mfa/require`,
+      {},
+    ),
+  clearUserMFARequirement: (id: string) =>
+    postJSONResult<{ status: string }>(
+      `/api/v1/users/${encodeURIComponent(id)}/mfa/clear`,
+      {},
+    ),
+  extendUserMFAGrace: (id: string) =>
+    postJSONResult<{ status: string; graceUntil?: string }>(
+      `/api/v1/users/${encodeURIComponent(id)}/mfa/grace`,
       {},
     ),
   deleteUser: (id: string) =>

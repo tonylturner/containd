@@ -169,6 +169,12 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		if u.MFAEnabled {
 			resp["mfaEnabled"] = true
 		}
+		if u.MFARequired {
+			resp["mfaRequired"] = true
+		}
+		if u.MFAGraceUntil != nil {
+			resp["mfaGraceUntil"] = u.MFAGraceUntil.Format(time.RFC3339Nano)
+		}
 		if u.MustChangePassword {
 			resp["mustChangePassword"] = true
 		}

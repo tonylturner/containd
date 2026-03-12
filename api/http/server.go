@@ -370,6 +370,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/users/:id", requireAdmin(), rateLimitSensitive(), updateUserHandler(userStore))
 		protected.POST("/users/:id/password", requireAdmin(), rateLimitSensitive(), setUserPasswordHandler(userStore))
 		protected.POST("/users/:id/mfa/disable", requireAdmin(), rateLimitSensitive(), disableUserMFAHandler(userStore))
+		protected.POST("/users/:id/mfa/require", requireAdmin(), rateLimitSensitive(), requireUserMFAHandler(userStore))
+		protected.POST("/users/:id/mfa/clear", requireAdmin(), rateLimitSensitive(), clearUserMFARequirementHandler(userStore))
+		protected.POST("/users/:id/mfa/grace", requireAdmin(), rateLimitSensitive(), extendUserMFAGraceHandler(userStore))
 		protected.DELETE("/users/:id", requireAdmin(), rateLimitSensitive(), deleteUserHandler(userStore))
 		if auditStore != nil {
 			auditHandlers(protected, auditStore)

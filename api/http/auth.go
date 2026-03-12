@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
 type role string
@@ -201,23 +201,45 @@ func authMiddleware(userStore users.Store) gin.HandlerFunc {
 		// Populate audit actor hooks.
 		c.Set("actor", u.Username)
 
-		// Enforce MustChangePassword server-side: only allow password change
-		// and session/identity endpoints until the password is updated.
-		if u.MustChangePassword {
-			path := c.Request.URL.Path
-			allowed := strings.HasSuffix(path, "/auth/me") ||
-				strings.HasSuffix(path, "/auth/me/password") ||
-				strings.HasSuffix(path, "/auth/session") ||
-				strings.HasSuffix(path, "/auth/logout") ||
-				strings.HasSuffix(path, "/health")
+		path := c.Request.URL.Path
+		passwordChangeRequired := u.MustChangePassword
+		mfaSetupRequired := users.IsMFAGraceExpired(u, time.Now())
+
+		// Enforce local account setup requirements server-side by allowing only
+		// identity, logout, and remediation endpoints until the account is brought
+		// back into compliance.
+		if passwordChangeRequired || mfaSetupRequired {
+			allowed := isBaseRestrictedAuthPath(path)
+			if passwordChangeRequired && strings.HasSuffix(path, "/auth/me/password") {
+				allowed = true
+			}
+			if mfaSetupRequired && isMFASetupPath(path) {
+				allowed = true
+			}
 			if !allowed {
-				abortJSON(c, http.StatusForbidden, "password change required")
+				if passwordChangeRequired {
+					abortJSON(c, http.StatusForbidden, "password change required")
+					return
+				}
+				abortJSON(c, http.StatusForbidden, "mfa setup required")
 				return
 			}
 		}
 
 		c.Next()
 	}
+}
+
+func isBaseRestrictedAuthPath(path string) bool {
+	return strings.HasSuffix(path, "/auth/me") ||
+		strings.HasSuffix(path, "/auth/session") ||
+		strings.HasSuffix(path, "/auth/logout") ||
+		strings.HasSuffix(path, "/health")
+}
+
+func isMFASetupPath(path string) bool {
+	return strings.HasSuffix(path, "/auth/me/mfa/enroll") ||
+		strings.HasSuffix(path, "/auth/me/mfa/enable")
 }
 
 func requireAdmin() gin.HandlerFunc {

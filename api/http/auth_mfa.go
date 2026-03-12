@@ -262,6 +262,10 @@ func disableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "MFA is not enabled for this account")
 			return
 		}
+		if u.MFARequired {
+			apiError(c, http.StatusConflict, "MFA is required for this account; ask an admin to clear the requirement before disabling it")
+			return
+		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
 			apiError(c, http.StatusUnauthorized, "current password invalid")
 			return
@@ -302,11 +306,113 @@ func disableUserMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		if u.MFARequired {
+			deadline := users.MFAGraceDeadline(time.Now())
+			if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, true, &deadline); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		auditLog(c, audit.Record{
 			Action: "auth.mfa.disable_admin",
 			Target: u.Username,
 			Detail: "admin disabled totp",
 		})
 		c.JSON(http.StatusOK, gin.H{"status": "mfa_disabled"})
+	}
+}
+
+func requireUserMFAHandler(userStore users.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if userStore == nil {
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
+			return
+		}
+		u, err := userStore.GetByID(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			apiError(c, http.StatusNotFound, "user not found")
+			return
+		}
+		var graceUntil *time.Time
+		status := "mfa_required"
+		if !u.MFAEnabled {
+			deadline := users.MFAGraceDeadline(time.Now())
+			graceUntil = &deadline
+			status = "mfa_required_pending_setup"
+		}
+		if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, true, graceUntil); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		auditLog(c, audit.Record{
+			Action: "auth.mfa.require_admin",
+			Target: u.Username,
+			Detail: status,
+		})
+		resp := gin.H{"status": status}
+		if graceUntil != nil {
+			resp["graceUntil"] = graceUntil.Format(time.RFC3339Nano)
+		}
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
+func clearUserMFARequirementHandler(userStore users.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if userStore == nil {
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
+			return
+		}
+		u, err := userStore.GetByID(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			apiError(c, http.StatusNotFound, "user not found")
+			return
+		}
+		if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, false, nil); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		auditLog(c, audit.Record{
+			Action: "auth.mfa.clear_admin",
+			Target: u.Username,
+			Detail: "mfa requirement cleared",
+		})
+		c.JSON(http.StatusOK, gin.H{"status": "mfa_requirement_cleared"})
+	}
+}
+
+func extendUserMFAGraceHandler(userStore users.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if userStore == nil {
+			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
+			return
+		}
+		u, err := userStore.GetByID(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			apiError(c, http.StatusNotFound, "user not found")
+			return
+		}
+		if !u.MFARequired {
+			apiError(c, http.StatusConflict, "MFA is not required for this account")
+			return
+		}
+		if u.MFAEnabled {
+			c.JSON(http.StatusOK, gin.H{"status": "mfa_already_enabled"})
+			return
+		}
+		deadline := users.MFAGraceDeadline(time.Now())
+		if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, true, &deadline); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		auditLog(c, audit.Record{
+			Action: "auth.mfa.extend_grace_admin",
+			Target: u.Username,
+			Detail: "mfa grace extended",
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"status":     "mfa_grace_extended",
+			"graceUntil": deadline.Format(time.RFC3339Nano),
+		})
 	}
 }

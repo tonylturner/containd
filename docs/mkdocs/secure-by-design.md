@@ -77,6 +77,7 @@ Project stance:
 Current alignment:
 
 - containd already has authenticated local accounts, short-lived JWT sessions, role enforcement, forced password change, session invalidation, and optional app-based TOTP MFA for local accounts.
+- admins can require MFA for individual local accounts, with a built-in 7-day enrollment grace period before full access is restricted.
 - authentication is part of the base product, not a paid add-on.
 
 Current caveat:

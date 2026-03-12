@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-03-12
+
+### Added
+- Added per-user MFA requirement controls with a 7-day enrollment grace period, admin-side grace extension/reset actions, and restricted post-grace access until MFA is enabled.
+
+### Changed
+- Reworked the user-management page into separate manage/create tabs so MFA policy controls and account actions remain usable on narrower screens.
+
+### Fixed
+- Fixed the quickstart CI workflow YAML so GitHub Actions can parse the generated-password step correctly and rerun CI after `v0.1.11`.
+
 ## [0.1.11] - 2026-03-12
 
 ### Added
