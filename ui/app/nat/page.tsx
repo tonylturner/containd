@@ -109,11 +109,16 @@ export default function NATPage() {
           setError(null);
           setNotice(null);
           const saved = await api.setNAT(cfg);
-          if (!saved) {
-            setError("Failed to update NAT (check zones).");
+          if (!saved.ok) {
+            setError(saved.error || "Failed to update NAT (check zones).");
             return;
           }
-          setNotice("NAT configuration saved.");
+          setNat(saved.data);
+          setNotice(
+            saved.warning
+              ? `NAT configuration saved with warning: ${saved.warning}`
+              : "NAT configuration saved.",
+          );
           refresh();
         }}
       />
@@ -125,11 +130,16 @@ export default function NATPage() {
           setError(null);
           setNotice(null);
           const saved = await api.setNAT(cfg);
-          if (!saved) {
-            setError("Failed to update port forwards (check zones/ports).");
+          if (!saved.ok) {
+            setError(saved.error || "Failed to update port forwards (check zones/ports).");
             return;
           }
-          setNotice("Port forwarding configuration saved.");
+          setNat(saved.data);
+          setNotice(
+            saved.warning
+              ? `Port forwarding configuration saved with warning: ${saved.warning}`
+              : "Port forwarding configuration saved.",
+          );
           refresh();
         }}
       />

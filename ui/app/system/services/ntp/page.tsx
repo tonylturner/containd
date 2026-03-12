@@ -66,15 +66,16 @@ export default function NTPPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setNTP(cfg);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save NTP settings.");
-      toast("Failed to save NTP settings", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save NTP settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("NTP settings saved", "success");
+      setCfg(saved.data);
+      toast(saved.warning ? `NTP settings saved with warning: ${saved.warning}` : "NTP settings saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(saved);
   }
 
   return (

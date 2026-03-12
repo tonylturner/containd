@@ -106,6 +106,7 @@ jobs:
             fi
             docker compose -f deploy/docker-compose.yml down -v || true
             rm -f /tmp/containd-quickstart.cookie
+            rm -f /tmp/containd-quickstart-routing.json
           }
           trap cleanup EXIT
 
@@ -142,6 +143,21 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"username":"containd","password":"Containd2"}' \
             "$api/auth/login" >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d '{"mode":"auto"}' \
+            "$api/interfaces/assign" | jq -e '.interfaces | type == "array" and length > 0' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -X PATCH \
+            -d '{"alias":"wan-ci"}' \
+            "$api/interfaces/wan" | jq -e '.alias == "wan-ci"' >/dev/null
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            "$api/routing" > /tmp/containd-quickstart-routing.json
+          curl -fsS -b /tmp/containd-quickstart.cookie \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/containd-quickstart-routing.json \
+            "$api/routing" | jq -e 'type == "object" and ((.gateways // []) | type == "array")' >/dev/null
           curl -fsS -b /tmp/containd-quickstart.cookie \
             "$api/interfaces/state" | jq -e 'type == "array" and length > 0' >/dev/null
           curl -fsS -b /tmp/containd-quickstart.cookie \

@@ -991,10 +991,12 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		if err != nil {
 			internalError(c, err)
 			return
 		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
 	}
@@ -1021,10 +1023,12 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		if err != nil {
 			internalError(c, err)
 			return
 		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "committed"})
 	}
@@ -1047,78 +1051,77 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		if err != nil {
 			internalError(c, err)
 			return
 		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
 	}
 }
 
-func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) error {
+func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	cfg, err := store.Load(ctx)
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	var warnings []string
 	if engine != nil {
 		// Infrastructure steps (interfaces, routing, services, pcap) may fail in
 		// unprivileged environments (e.g. Docker without NET_ADMIN). Collect those
 		// errors but always proceed to compile and apply rules so that IDS/firewall
 		// rule evaluation works even when nftables is unavailable.
-		var infraErrs []error
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("interfaces: %w", err))
+			warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
 		}
 		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("routing: %w", err))
+			warnings = append(warnings, fmt.Sprintf("routing: %v", err))
 		}
 		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("services: %w", err))
+			warnings = append(warnings, fmt.Sprintf("services: %v", err))
 		}
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("dataplane: %w", err))
+			warnings = append(warnings, fmt.Sprintf("dataplane: %v", err))
 		}
 		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("pcap config: %w", err))
+			warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
 		}
 		if cfg.PCAP.Enabled {
 			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-				infraErrs = append(infraErrs, fmt.Errorf("pcap start: %w", err))
+				warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
 			}
 		} else {
 			if _, err := engine.StopPcap(ctx); err != nil {
-				infraErrs = append(infraErrs, fmt.Errorf("pcap stop: %w", err))
+				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
 		}
 		// Load IDS rules from separate storage and inject for compilation.
 		idsRules, idsErr := store.LoadIDSRules(ctx)
 		if idsErr != nil {
-			infraErrs = append(infraErrs, fmt.Errorf("ids rules: %w", idsErr))
+			warnings = append(warnings, fmt.Sprintf("ids rules: %v", idsErr))
 		} else {
 			cfg.IDS.Rules = idsRules
 		}
 		// Always compile and push rules regardless of infrastructure errors.
 		snap, err := compile.CompileSnapshot(cfg)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := engine.ApplyRules(ctx, snap); err != nil {
-			return err
-		}
-		if len(infraErrs) > 0 {
-			return errors.Join(infraErrs...)
+			return nil, err
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 func diffConfigHandler(store config.Store) gin.HandlerFunc {
@@ -1138,6 +1141,21 @@ func diffConfigHandler(store config.Store) gin.HandlerFunc {
 			"candidate": candidate.RedactedCopy(),
 		})
 	}
+}
+
+func applyServiceRuntime(ctx context.Context, servicesCfg config.ServicesConfig, services ServicesApplier, engine EngineClient) []string {
+	var warnings []string
+	if services != nil {
+		if err := services.Apply(ctx, servicesCfg); err != nil {
+			warnings = append(warnings, fmt.Sprintf("services: %v", err))
+		}
+	}
+	if engine != nil {
+		if err := engine.ConfigureServices(ctx, servicesCfg); err != nil {
+			warnings = append(warnings, fmt.Sprintf("engine services: %v", err))
+		}
+	}
+	return warnings
 }
 
 func getSyslogHandler(store config.Store) gin.HandlerFunc {
@@ -1168,12 +1186,7 @@ func setSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerF
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
@@ -1214,12 +1227,7 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		auditLog(c, audit.Record{Action: "services.dns.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.DNS)
 	}
@@ -1253,12 +1261,7 @@ func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.NTP)
 	}
@@ -1300,12 +1303,7 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		auditLog(c, audit.Record{Action: "services.av.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.AV)
 	}
@@ -1454,18 +1452,7 @@ func setDHCPHandler(store config.Store, services ServicesApplier, engine EngineC
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
-		if engine != nil {
-			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
 		auditLog(c, audit.Record{Action: "services.dhcp.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.DHCP)
 	}
@@ -1502,18 +1489,7 @@ func setVPNHandler(store config.Store, services ServicesApplier, engine EngineCl
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
-		if engine != nil {
-			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
 		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.VPN)
 	}
@@ -1586,18 +1562,7 @@ func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, e
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
-		if engine != nil {
-			if err := engine.ConfigureServices(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
 		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name})
 		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
 	}
@@ -1894,12 +1859,7 @@ func setForwardProxyHandler(store config.Store, services ServicesApplier) gin.Ha
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
 	}
@@ -1933,12 +1893,7 @@ func setReverseProxyHandler(store config.Store, services ServicesApplier) gin.Ha
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
 		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "running"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
 	}
@@ -2403,7 +2358,7 @@ func setIDSHandler(store config.Store, engine EngineClient, services ServicesApp
 			return
 		}
 		// Push updated rules to the engine so IDS evaluation takes effect immediately.
-		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
 		idsCfg.Rules = nil // don't echo all rules back
 		c.JSON(http.StatusOK, idsCfg)
@@ -2487,7 +2442,7 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 			apiError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format})
 
 		c.JSON(http.StatusOK, gin.H{
@@ -2578,7 +2533,7 @@ func idsRestoreHandler(store config.Store, engine EngineClient, services Service
 			internalError(c, err)
 			return
 		}
-		_ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
 		auditLog(c, audit.Record{Action: "ids.rules.restore", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "restored", "count": len(rules)})
 	}
@@ -4461,10 +4416,12 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config"})
 		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
 	}
@@ -4594,10 +4551,12 @@ func createInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
 			}
+			setWarningHeader(c, warnings)
 		}
 		auditLog(c, audit.Record{Action: "interfaces.create", Target: iface.Name})
 		c.JSON(http.StatusOK, iface)
@@ -4629,10 +4588,12 @@ func deleteInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
 			}
+			setWarningHeader(c, warnings)
 		}
 		auditLog(c, audit.Record{Action: "interfaces.delete", Target: name})
 		c.Status(http.StatusNoContent)
@@ -4690,10 +4651,12 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
 			}
+			setWarningHeader(c, warnings)
 		}
 		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
 		c.JSON(http.StatusOK, iface)
@@ -4728,10 +4691,12 @@ func setRoutingHandler(store config.Store, engine EngineClient, services Service
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := applyRunningConfig(c.Request.Context(), store, engine, services); err != nil {
+		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "routing.set", Target: "config"})
 		c.JSON(http.StatusOK, cfg.Routing)
 	}
@@ -4833,11 +4798,32 @@ func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+func mergeJSONObject(dst, patch map[string]interface{}) map[string]interface{} {
+	if dst == nil {
+		dst = map[string]interface{}{}
+	}
+	for key, value := range patch {
+		if existing, ok := dst[key].(map[string]interface{}); ok {
+			if nested, ok := value.(map[string]interface{}); ok {
+				dst[key] = mergeJSONObject(existing, nested)
+				continue
+			}
+		}
+		dst[key] = value
+	}
+	return dst
+}
+
 func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		var rule config.Rule
-		if err := c.ShouldBindJSON(&rule); err != nil {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			apiError(c, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+		var patch map[string]interface{}
+		if err := json.Unmarshal(body, &patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
@@ -4849,11 +4835,33 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		updated := false
 		for i, existing := range cfg.Firewall.Rules {
 			if existing.ID == id {
+				currentJSON, err := json.Marshal(existing)
+				if err != nil {
+					internalError(c, err)
+					return
+				}
+				var merged map[string]interface{}
+				if err := json.Unmarshal(currentJSON, &merged); err != nil {
+					internalError(c, err)
+					return
+				}
+				merged = mergeJSONObject(merged, patch)
+				mergedJSON, err := json.Marshal(merged)
+				if err != nil {
+					internalError(c, err)
+					return
+				}
+				var rule config.Rule
+				if err := json.Unmarshal(mergedJSON, &rule); err != nil {
+					apiError(c, http.StatusBadRequest, "invalid rule payload")
+					return
+				}
 				if rule.ID == "" {
 					rule.ID = existing.ID
 				}
 				cfg.Firewall.Rules[i] = rule
 				updated = true
+				c.Set("updated_rule", rule)
 				break
 			}
 		}
@@ -4865,7 +4873,13 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, rule)
+		if v, ok := c.Get("updated_rule"); ok {
+			if rule, ok := v.(config.Rule); ok {
+				c.JSON(http.StatusOK, rule)
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "updated"})
 	}
 }
 

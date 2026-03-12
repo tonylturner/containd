@@ -71,13 +71,14 @@ export default function DNSPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setDNS(cfg);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save DNS settings.");
-      toast("Failed to save DNS settings", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save DNS settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      setCfg(saved);
-      toast("DNS settings saved", "success");
+      setCfg(saved.data);
+      toast(saved.warning ? `DNS settings saved with warning: ${saved.warning}` : "DNS settings saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
     await refresh();

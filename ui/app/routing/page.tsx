@@ -125,21 +125,25 @@ export default function RoutingPage() {
     refresh();
   }, []);
 
-  async function save(next: RoutingConfig) {
+  async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string }> {
     setError(null);
     setNotice(null);
     setSaving(true);
     const updated = await api.setRouting(next);
     setSaving(false);
-    if (!updated) {
-      setError("Failed to save routing config.");
-      return;
+    if (!updated.ok) {
+      setError(updated.error || "Failed to save routing config.");
+      return { ok: false };
     }
     setCfg({
-      gateways: updated.gateways ?? [],
-      routes: updated.routes ?? [],
-      rules: updated.rules ?? [],
+      gateways: updated.data.gateways ?? [],
+      routes: updated.data.routes ?? [],
+      rules: updated.data.rules ?? [],
     });
+    if (updated.warning) {
+      setNotice(`Saved with warning: ${updated.warning}`);
+    }
+    return { ok: true, warning: updated.warning };
   }
 
   async function addGateway() {
@@ -165,7 +169,8 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: cfg.rules ?? [],
     };
-    await save(next);
+    const result = await save(next);
+    if (!result.ok) return;
     setGwName("");
     setGwAlias("");
     setGwAddr("");
@@ -196,11 +201,12 @@ export default function RoutingPage() {
         setReconciling(true);
         const res = await api.reconcileRoutingReplace();
         setReconciling(false);
-        if (!res) {
-          setError("Failed to reconcile routing.");
+        if (!res.ok) {
+          setError(res.error || "Failed to reconcile routing.");
           return;
         }
         await refresh();
+        setNotice(res.warning ? `Routing reconciled with warning: ${res.warning}` : "Routing reconciled.");
       },
     });
   }
@@ -227,7 +233,8 @@ export default function RoutingPage() {
       routes: [...(cfg.routes ?? []), nextRoute],
       rules: cfg.rules ?? [],
     };
-    await save(next);
+    const result = await save(next);
+    if (!result.ok) return;
     setRouteDst("");
     setRouteGw("");
     setRouteIface("");
@@ -265,7 +272,8 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: [...(cfg.rules ?? []), nextRule],
     };
-    await save(next);
+    const result = await save(next);
+    if (!result.ok) return;
     setRuleSrc("");
     setRuleDst("");
     setRuleTable("");
@@ -335,9 +343,12 @@ export default function RoutingPage() {
       const nextRoutes =
         existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
 
-      await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+      const result = await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+      if (!result.ok) return;
       setNotice(
-        `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
+        result.warning
+          ? `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) with warning: ${result.warning}`
+          : `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
       );
     } catch (e) {
       setError(`Failed to auto-configure WAN default route: ${e instanceof Error ? e.message : String(e)}`);
@@ -398,8 +409,13 @@ export default function RoutingPage() {
         const nextRoutes =
           existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
 
-        await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
-        setNotice(`Adopted OS default route via ${dev} \u2192 ${gwIP} into routing config.`);
+        const result = await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+        if (!result.ok) return;
+        setNotice(
+          result.warning
+            ? `Adopted OS default route via ${dev} \u2192 ${gwIP} with warning: ${result.warning}`
+            : `Adopted OS default route via ${dev} \u2192 ${gwIP} into routing config.`,
+        );
       },
     });
   }

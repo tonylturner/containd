@@ -109,8 +109,8 @@ export default function IDSPage() {
     if (!canEdit) return;
     setError(null);
     const saved = await api.setIDS(ids);
-    if (!saved) { setError("Failed to save IDS rules."); return; }
-    setIds(saved);
+    if (!saved.ok) { setError(saved.error || "Failed to save IDS rules."); return; }
+    setIds(saved.data);
     flashSuccess("Rules saved.");
   }
 
@@ -709,8 +709,8 @@ function ImportPanel({ onImported, onError }: { onImported: (msg: string) => voi
     setImporting(true); onError("");
     const result = await api.importIDSRules(file, format || undefined);
     setImporting(false);
-    if (!result) { onError("Import failed. Check the file format and try again."); return; }
-    onImported(`Imported ${result.imported} rule${result.imported !== 1 ? "s" : ""} (${result.skipped} skipped). Format: ${result.format}. Total: ${result.total}.`);
+    if (!result.ok) { onError(result.error || "Import failed. Check the file format and try again."); return; }
+    onImported(`Imported ${result.data.imported} rule${result.data.imported !== 1 ? "s" : ""} (${result.data.skipped} skipped). Format: ${result.data.format}. Total: ${result.data.total}.`);
     if (fileRef.current) fileRef.current.value = "";
   }
 

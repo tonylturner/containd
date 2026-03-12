@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -43,6 +44,23 @@ func TestProxyManagerRendersForwardAndReverse(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "nginx-reverse.conf")); err != nil {
 		t.Fatalf("expected nginx-reverse.conf to exist: %v", err)
+	}
+	rendered, err := os.ReadFile(filepath.Join(dir, "envoy-forward.yaml"))
+	if err != nil {
+		t.Fatalf("read envoy-forward.yaml: %v", err)
+	}
+	if got := strings.Count(string(rendered), "dns_lookup_family: V4_ONLY"); got != 2 {
+		t.Fatalf("expected dns_lookup_family in both dynamic forward proxy cache stanzas, got %d", got)
+	}
+	if !strings.Contains(string(rendered), "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router") {
+		t.Fatal("expected forward proxy config to render a typed router filter")
+	}
+	reverseRendered, err := os.ReadFile(filepath.Join(dir, "nginx-reverse.conf"))
+	if err != nil {
+		t.Fatalf("read nginx-reverse.conf: %v", err)
+	}
+	if !strings.Contains(string(reverseRendered), "client_body_temp_path "+filepath.Join(dir, "nginx-tmp", "body")+";") {
+		t.Fatal("expected reverse proxy config to keep nginx temp paths under the writable services dir")
 	}
 }
 

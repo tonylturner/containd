@@ -58,11 +58,11 @@ export default function SystemSettingsPage() {
     }
     const [certPEM, keyPEM] = await Promise.all([readFileText(certFile), readFileText(keyFile)]);
     const res = await api.setTLSCert(certPEM, keyPEM);
-    if (!res) {
-      setError("Failed to upload certificate.");
+    if (!res.ok) {
+      setError(res.error || "Failed to upload certificate.");
       return;
     }
-    setStatus("Certificate updated. New connections will use it immediately.");
+    setStatus(res.warning ? `Certificate updated with warning: ${res.warning}` : "Certificate updated. New connections will use it immediately.");
     await refresh();
   }
 
@@ -76,11 +76,11 @@ export default function SystemSettingsPage() {
     }
     const pem = await readFileText(caFile);
     const res = await api.setTrustedCA(pem);
-    if (!res) {
-      setError("Failed to upload trusted CA bundle.");
+    if (!res.ok) {
+      setError(res.error || "Failed to upload trusted CA bundle.");
       return;
     }
-    setStatus("Trusted CA bundle saved.");
+    setStatus(res.warning ? `Trusted CA bundle saved with warning: ${res.warning}` : "Trusted CA bundle saved.");
   }
 
   return (

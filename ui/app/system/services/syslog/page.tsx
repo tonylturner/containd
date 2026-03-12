@@ -95,15 +95,16 @@ export default function SyslogPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setSyslog(cfg);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save syslog settings.");
-      toast("Failed to save syslog", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save syslog settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("Syslog saved", "success");
+      setCfg(saved.data);
+      toast(saved.warning ? `Syslog saved with warning: ${saved.warning}` : "Syslog saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(saved);
   }
 
   return (

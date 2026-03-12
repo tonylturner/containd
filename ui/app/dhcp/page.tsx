@@ -139,15 +139,16 @@ export default function DHCPPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setDHCP(cfg);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save DHCP settings.");
-      toast("Failed to save DHCP", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save DHCP settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("DHCP saved", "success");
+      setCfg(normalize(saved.data));
+      toast(saved.warning ? `DHCP saved with warning: ${saved.warning}` : "DHCP saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(normalize(saved));
   }
 
   return (

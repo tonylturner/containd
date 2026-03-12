@@ -30,9 +30,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
-	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/synth"
 )
@@ -137,8 +137,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine, simMgr))
-	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr))
-	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr))
+	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr, ownership))
+	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr, ownership))
 	mux.HandleFunc("/internal/pcap/stop", pcapStopHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/status", pcapStatusHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/list", pcapListHandler(pcapMgr))
@@ -794,7 +794,7 @@ func synthIDSCallback(dpEngine *engine.Engine) func(dpevents.Event) {
 	}
 }
 
-func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
+func pcapConfigHandler(mgr *pcap.Manager, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -810,6 +810,9 @@ func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
 			if err := json.Unmarshal(body, &cfg); err != nil {
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
+			}
+			if ownership != nil {
+				cfg.Interfaces = resolveInterfaceRefs(cfg.Interfaces, ownership.currentInterfaces())
 			}
 			wasRunning := mgr.Status().Running
 			if err := mgr.Configure(cfg); err != nil {
@@ -834,7 +837,7 @@ func pcapConfigHandler(mgr *pcap.Manager) http.HandlerFunc {
 	}
 }
 
-func pcapStartHandler(mgr *pcap.Manager) http.HandlerFunc {
+func pcapStartHandler(mgr *pcap.Manager, ownership *ownershipManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -851,6 +854,9 @@ func pcapStartHandler(mgr *pcap.Manager) http.HandlerFunc {
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+		}
+		if ownership != nil {
+			cfg.Interfaces = resolveInterfaceRefs(cfg.Interfaces, ownership.currentInterfaces())
 		}
 		if err := mgr.Start(r.Context(), cfg); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1169,7 +1175,6 @@ func firstNonEmpty(v, fallback string) string {
 	}
 	return v
 }
-
 
 func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

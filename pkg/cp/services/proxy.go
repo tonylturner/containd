@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -237,15 +238,23 @@ func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
 		CertsDir      string
 		AccessLogPath string
 		PidPath       string
+		TempDir       string
 	}
 
 	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
+	tempDir := filepath.Join(m.BaseDir, "nginx-tmp")
+	for _, sub := range []string{"body", "proxy", "fastcgi", "uwsgi", "scgi"} {
+		if err := os.MkdirAll(filepath.Join(tempDir, sub), 0o755); err != nil {
+			return err
+		}
+	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, tmplData{
 		ReverseProxyConfig: cfg,
 		CertsDir:           m.CertsDir,
 		AccessLogPath:      filepath.Join(logDir, "nginx-access.log"),
 		PidPath:            filepath.Join(m.BaseDir, "nginx.pid"),
+		TempDir:            tempDir,
 	}); err != nil {
 		return err
 	}
@@ -400,8 +409,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		return
 	}
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
-		_ = m.nginxCmd.Process.Signal(os.Interrupt)
-		time.Sleep(50 * time.Millisecond)
+		stopManagedProcess(m.nginxCmd.Process)
 	}
 	cmd := exec.CommandContext(ctx, m.NginxPath, "-c", configPath, "-g", "daemon off;")
 	cmd.Stdout = os.Stdout
@@ -439,11 +447,21 @@ func (m *ProxyManager) stopNginx() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
-		_ = m.nginxCmd.Process.Signal(os.Interrupt)
+		stopManagedProcess(m.nginxCmd.Process)
 		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid, "count": 1})
 	}
 	m.nginxCmd = nil
 	m.lastNginxStop = time.Now().UTC()
+}
+
+func stopManagedProcess(proc *os.Process) {
+	if proc == nil {
+		return
+	}
+	_ = proc.Signal(syscall.SIGTERM)
+	time.Sleep(200 * time.Millisecond)
+	_ = proc.Kill()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func (m *ProxyManager) Status() map[string]any {
@@ -687,7 +705,10 @@ static_resources:
               "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
               dns_cache_config:
                 name: dynamic_forward_proxy_cache
+                dns_lookup_family: V4_ONLY
           - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
   - name: dynamic_forward_proxy_cluster
     connect_timeout: 5s
@@ -714,6 +735,11 @@ events {}
 http {
   log_format containd_status "status=$status";
   access_log {{ .AccessLogPath }} containd_status;
+  client_body_temp_path {{ .TempDir }}/body;
+  proxy_temp_path {{ .TempDir }}/proxy;
+  fastcgi_temp_path {{ .TempDir }}/fastcgi;
+  uwsgi_temp_path {{ .TempDir }}/uwsgi;
+  scgi_temp_path {{ .TempDir }}/scgi;
 {{- range .Sites }}
 {{- $site := . }}
 upstream {{$site.Name}}_upstream {

@@ -85,8 +85,9 @@ if [[ -n "${ips}" ]]; then
   printf "  %s\n" ${ips}
   echo ""
   echo "Note:"
-  echo "  - These are Docker-assigned container IPs (OS/kernel level)."
-  echo "  - containd interface addresses are configured separately (UI: Interfaces / CLI: set interface ip)."
+  echo "  - These are the Docker-managed interface addresses from the starter lab topology."
+  echo "  - Change network wiring/subnets in .env or deploy/docker-compose.yml."
+  echo "  - Use containd to bind zones and enforce policy on top of that topology."
 fi
 
 echo ""

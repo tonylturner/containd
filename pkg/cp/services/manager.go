@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -37,10 +38,10 @@ type Manager struct {
 
 	telemetry *dpevents.Store
 	sparkMu   sync.Mutex
-	spark     map[string][]int        // primary metric per service (events/traffic)
-	counts    map[string]int          // primary totals
+	spark     map[string][]int // primary metric per service (events/traffic)
+	counts    map[string]int   // primary totals
 	buckets   map[string][]sparkBucket
-	errSpark  map[string][]int        // error metric per service
+	errSpark  map[string][]int // error metric per service
 	errCounts map[string]int
 	errBks    map[string][]sparkBucket
 }
@@ -280,42 +281,37 @@ func (m *Manager) StartAVWorker(ctx context.Context) {
 
 // Apply updates in-memory configs and renders service config files.
 func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	if m.Syslog != nil {
-		if err := m.Syslog.Apply(ctx, cfg.Syslog); err != nil {
-			return err
+	var errs []error
+	apply := func(fn func() error) {
+		if err := fn(); err != nil {
+			errs = append(errs, err)
 		}
+	}
+	if m.Syslog != nil {
+		apply(func() error { return m.Syslog.Apply(ctx, cfg.Syslog) })
 	}
 	if m.DNS != nil {
-		if err := m.DNS.Apply(ctx, cfg.DNS); err != nil {
-			return err
-		}
+		apply(func() error { return m.DNS.Apply(ctx, cfg.DNS) })
 	}
 	if m.NTP != nil {
-		if err := m.NTP.Apply(ctx, cfg.NTP); err != nil {
-			return err
-		}
+		apply(func() error { return m.NTP.Apply(ctx, cfg.NTP) })
 	}
 	if m.Proxy != nil {
-		if err := m.Proxy.Apply(ctx, cfg.Proxy); err != nil {
-			return err
-		}
+		apply(func() error { return m.Proxy.Apply(ctx, cfg.Proxy) })
 	}
 	if m.DHCP != nil {
-		if err := m.DHCP.Apply(ctx, cfg.DHCP); err != nil {
-			return err
-		}
+		apply(func() error { return m.DHCP.Apply(ctx, cfg.DHCP) })
 	}
 	if m.VPN != nil {
-		if err := m.VPN.Apply(ctx, cfg.VPN); err != nil {
-			return err
-		}
+		apply(func() error { return m.VPN.Apply(ctx, cfg.VPN) })
 	}
 	if m.AV != nil {
-		if err := m.AV.Apply(ctx, cfg.AV); err != nil {
-			return err
-		}
+		apply(func() error { return m.AV.Apply(ctx, cfg.AV) })
 	}
 	m.updateServiceGauges(cfg)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 	return nil
 }
 
@@ -428,12 +424,12 @@ func (m *Manager) decorateStatus(svc string, base any) any {
 		return mp
 	}
 	return map[string]any{
-		"status":    base,
-		"sparkline": spark,
-		"count":     count,
-		"rate_per_min": rate,
-		"errors_sparkline": errSpark,
-		"errors_count":     errCount,
+		"status":              base,
+		"sparkline":           spark,
+		"count":               count,
+		"rate_per_min":        rate,
+		"errors_sparkline":    errSpark,
+		"errors_count":        errCount,
 		"errors_rate_per_min": errRate,
 	}
 }

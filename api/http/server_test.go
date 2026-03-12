@@ -88,7 +88,7 @@ func (m *mockStore) CommitConfirmed(ctx context.Context, ttl time.Duration) erro
 	return nil
 }
 func (m *mockStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *mockStore) Rollback(ctx context.Context) error { return nil }
+func (m *mockStore) Rollback(ctx context.Context) error      { return nil }
 func (m *mockStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
 	return nil
 }
@@ -101,6 +101,7 @@ type mockEngine struct {
 	applied bool
 	snap    rules.Snapshot
 	err     error
+	svcErr  error
 	lastDP  config.DataPlaneConfig
 	lastIf  []config.Interface
 	lastRT  config.RoutingConfig
@@ -137,7 +138,7 @@ func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config
 
 func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
 	m.lastSvc = services
-	return nil
+	return m.svcErr
 }
 
 func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
@@ -491,6 +492,66 @@ func TestCreateFirewallRuleWithICSPredicate(t *testing.T) {
 	}
 	if len(m.cfg.Firewall.Rules) != 1 || m.cfg.Firewall.Rules[0].ICS.Protocol != "modbus" {
 		t.Fatalf("ics predicate not persisted: %+v", m.cfg.Firewall.Rules)
+	}
+}
+
+func TestUpdateFirewallRulePartialPatchPreservesExistingFields(t *testing.T) {
+	m := &mockStore{
+		cfg: &config.Config{
+			Zones: []config.Zone{{Name: "lan1"}, {Name: "wan"}},
+			Firewall: config.FirewallConfig{
+				DefaultAction: config.ActionDeny,
+				Rules: []config.Rule{{
+					ID:          "audit-allow",
+					Description: "old",
+					SourceZones: []string{"lan1"},
+					DestZones:   []string{"wan"},
+					Action:      config.ActionAllow,
+				}},
+			},
+		},
+	}
+	s := NewServer(m, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPatch, "/api/v1/firewall/rules/audit-allow", bytes.NewBufferString(`{"description":"new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := m.cfg.Firewall.Rules[0].Description; got != "new" {
+		t.Fatalf("expected description updated, got %q", got)
+	}
+	if got := m.cfg.Firewall.Rules[0].Action; got != config.ActionAllow {
+		t.Fatalf("expected action preserved, got %q", got)
+	}
+}
+
+func TestSetDHCPReturnsWarningWhenRuntimeApplyFails(t *testing.T) {
+	m := &mockStore{
+		cfg: &config.Config{
+			Zones: []config.Zone{{Name: "lan1"}},
+			Interfaces: []config.Interface{{
+				Name: "lan1",
+				Zone: "lan1",
+			}},
+		},
+	}
+	eng := &mockEngine{svcErr: errors.New("dhcp: nft apply failed: operation not permitted")}
+	s := NewServerWithEngineAndServices(m, nil, eng, nil, nil)
+	rec := httptest.NewRecorder()
+	body := `{"enabled":true,"listenIfaces":["lan1"],"pools":[{"iface":"lan1","start":"10.0.0.10","end":"10.0.0.20"}],"router":"10.0.0.1","dnsServers":["10.0.0.1"]}`
+	req := authedRequest(http.MethodPost, "/api/v1/services/dhcp", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Containd-Warnings"); !strings.Contains(got, "engine services: dhcp: nft apply failed") {
+		t.Fatalf("expected warning header, got %q", got)
+	}
+	if !m.cfg.Services.DHCP.Enabled {
+		t.Fatal("expected DHCP config persisted despite runtime warning")
 	}
 }
 

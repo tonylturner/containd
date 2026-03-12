@@ -62,6 +62,22 @@ func apiErrorDetail(c *gin.Context, status int, msg string, detail string) {
 	c.JSON(status, gin.H{"error": msg, "detail": detail})
 }
 
+func setWarningHeader(c *gin.Context, warnings []string) {
+	if len(warnings) == 0 {
+		return
+	}
+	trimmed := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		if msg := strings.TrimSpace(warning); msg != "" {
+			trimmed = append(trimmed, msg)
+		}
+	}
+	if len(trimmed) == 0 {
+		return
+	}
+	c.Header("X-Containd-Warnings", strings.Join(trimmed, "\n"))
+}
+
 func httpError(c *gin.Context, err error) {
 	if errors.Is(err, config.ErrNotFound) {
 		apiError(c, http.StatusNotFound, "config not found")

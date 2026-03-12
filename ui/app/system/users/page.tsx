@@ -64,9 +64,9 @@ export default function UsersPage() {
     setError(null);
     setSaveState("saving");
     const created = await api.createUser(newUser as any);
-    if (!created) {
+    if (!created.ok) {
       setSaveState("error");
-      setError("Failed to create user.");
+      setError(created.error || "Failed to create user.");
       setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
@@ -103,9 +103,9 @@ export default function UsersPage() {
     setError(null);
     setSaveState("saving");
     const updated = await api.updateUser(id, editDraft);
-    if (!updated) {
+    if (!updated.ok) {
       setSaveState("error");
-      setError("Failed to update user.");
+      setError(updated.error || "Failed to update user.");
       setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
@@ -126,9 +126,9 @@ export default function UsersPage() {
     setError(null);
     setSaveState("saving");
     const ok = await api.setUserPassword(resetPwUserId, resetPwValue);
-    if (!ok) {
+    if (!ok.ok) {
       setSaveState("error");
-      setError("Failed to set password.");
+      setError(ok.error || "Failed to set password.");
       setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
@@ -149,9 +149,9 @@ export default function UsersPage() {
         setError(null);
         setSaveState("saving");
         const ok = await api.deleteUser(user.id);
-        if (!ok) {
+        if (!ok.ok) {
           setSaveState("error");
-          setError("Failed to delete user. Ensure at least one admin remains.");
+          setError(ok.error || "Failed to delete user. Ensure at least one admin remains.");
           setTimeout(() => setSaveState("idle"), 5000);
           return;
         }

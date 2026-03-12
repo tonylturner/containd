@@ -614,12 +614,12 @@ function ProfileModal({
     setError(null);
     setState("saving");
     const updated = await api.updateMe({ firstName, lastName, email });
-    if (!updated) {
+    if (!updated.ok) {
       setState("error");
-      setError("Failed to save profile.");
+      setError(updated.error || "Failed to save profile.");
       return;
     }
-    onSaved(updated);
+    onSaved(updated.data);
     setState("idle");
   }
 
@@ -630,9 +630,9 @@ function ProfileModal({
     if (newPassword.length < 8) { setError("New password must be at least 8 characters."); return; }
     setState("saving");
     const ok = await api.changeMyPassword(currentPassword, newPassword);
-    if (!ok) {
+    if (!ok.ok) {
       setState("error");
-      setError("Failed to change password. Check your current password.");
+      setError(ok.error || "Failed to change password. Check your current password.");
       return;
     }
     setCurrentPassword("");

@@ -289,32 +289,38 @@ export default function FirewallPage() {
 
   async function onDelete(id: string) {
     setError(null);
-    const ok = await api.deleteFirewallRule(id);
-    if (!ok) {
-      setError("Failed to delete rule.");
+    setNotice(null);
+    const result = await api.deleteFirewallRule(id);
+    if (!result.ok) {
+      setError(result.error || "Failed to delete rule.");
       return;
     }
+    setNotice(result.warning ? `Rule deleted with warning: ${result.warning}` : "Rule deleted.");
     refresh();
   }
 
   async function onCreate(rule: FirewallRule) {
     setError(null);
+    setNotice(null);
     const created = await api.createFirewallRule(rule);
-    if (!created) {
-      setError("Failed to create rule (check zones/CIDRs).");
+    if (!created.ok) {
+      setError(created.error || "Failed to create rule (check zones/CIDRs).");
       return;
     }
+    setNotice(created.warning ? `Rule created with warning: ${created.warning}` : "Rule created.");
     refresh();
   }
 
   async function onUpdate(id: string, patch: Partial<FirewallRule>) {
     setError(null);
+    setNotice(null);
     const updated = await api.updateFirewallRule(id, patch);
-    if (!updated) {
-      setError("Failed to update rule.");
+    if (!updated.ok) {
+      setError(updated.error || "Failed to update rule.");
       return;
     }
     setEditing(null);
+    setNotice(updated.warning ? `Rule updated with warning: ${updated.warning}` : "Rule updated.");
     refresh();
   }
   const outboundStatus = (() => {
@@ -362,6 +368,7 @@ export default function FirewallPage() {
   async function doQuickStart() {
     setQuickStarting(true);
     try {
+      const warnings: string[] = [];
       const [ifs, states, curRouting] = await Promise.all([
         api.listInterfaces(),
         api.listInterfaceState(),
@@ -410,7 +417,8 @@ export default function FirewallPage() {
         existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
 
       const routingUpdated = await api.setRouting(nextRouting);
-      if (!routingUpdated) throw new Error("Failed to update routing configuration.");
+      if (!routingUpdated.ok) throw new Error(routingUpdated.error || "Failed to update routing configuration.");
+      if (routingUpdated.warning) warnings.push(`routing: ${routingUpdated.warning}`);
 
       const sourceZones = new Set([...(nat.sourceZones ?? []), "lan", "mgmt"]);
       const natNext: NATConfig = {
@@ -420,7 +428,8 @@ export default function FirewallPage() {
         sourceZones: Array.from(sourceZones),
       };
       const natUpdated = await api.setNAT(natNext);
-      if (!natUpdated) throw new Error("Failed to update NAT configuration.");
+      if (!natUpdated.ok) throw new Error(natUpdated.error || "Failed to update NAT configuration.");
+      if (natUpdated.warning) warnings.push(`nat: ${natUpdated.warning}`);
 
       const allowID = "allow-lan-wan";
       const existing = rules.find((r) => r.id === allowID) ?? null;
@@ -433,13 +442,19 @@ export default function FirewallPage() {
       };
       if (!existing) {
         const created = await api.createFirewallRule(allowRule);
-        if (!created) throw new Error("Failed to create the LAN\u2192WAN allow rule.");
+        if (!created.ok) throw new Error(created.error || "Failed to create the LAN\u2192WAN allow rule.");
+        if (created.warning) warnings.push(`firewall rule: ${created.warning}`);
       } else {
         const updated = await api.updateFirewallRule(allowID, allowRule);
-        if (!updated) throw new Error("Failed to update the LAN\u2192WAN allow rule.");
+        if (!updated.ok) throw new Error(updated.error || "Failed to update the LAN\u2192WAN allow rule.");
+        if (updated.warning) warnings.push(`firewall rule: ${updated.warning}`);
       }
 
-      setNotice(`Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`);
+      setNotice(
+        warnings.length > 0
+          ? `Enabled outbound quick start with warnings: ${warnings.join(" | ")}`
+          : `Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1154,7 +1169,7 @@ function DPIConfigSection({ config: cfg, onChange }: { config: DataPlaneConfig; 
     setSaving(true);
     const result = await setDataPlane(updated);
     setSaving(false);
-    setSaveState(result ? "saved" : "error");
+    setSaveState(result.ok ? "saved" : "error");
     setTimeout(() => setSaveState("idle"), 1500);
   }
 

@@ -52,6 +52,15 @@ func NewHTTPClient(baseURL string) *HTTPClient {
 	}
 }
 
+func engineStatusError(resp *http.Response, prefix string) error {
+	body, _ := io.ReadAll(resp.Body)
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return fmt.Errorf("%s %d", prefix, resp.StatusCode)
+	}
+	return fmt.Errorf("%s %d: %s", prefix, resp.StatusCode, detail)
+}
+
 func (c *HTTPClient) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if c.BaseURL == "" {
 		return fmt.Errorf("engine BaseURL is empty")
@@ -119,7 +128,7 @@ func (c *HTTPClient) ConfigureInterfaces(ctx context.Context, ifaces []config.In
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine interfaces status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine interfaces status")
 	}
 	return nil
 }
@@ -143,7 +152,7 @@ func (c *HTTPClient) ConfigureInterfacesReplace(ctx context.Context, ifaces []co
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine interfaces(replace) status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine interfaces(replace) status")
 	}
 	return nil
 }
@@ -167,7 +176,7 @@ func (c *HTTPClient) ConfigureRouting(ctx context.Context, routing config.Routin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine routing status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine routing status")
 	}
 	return nil
 }
@@ -191,7 +200,7 @@ func (c *HTTPClient) ConfigureRoutingReplace(ctx context.Context, routing config
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine routing(replace) status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine routing(replace) status")
 	}
 	return nil
 }
@@ -240,7 +249,7 @@ func (c *HTTPClient) PcapConfig(ctx context.Context) (config.PCAPConfig, error) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return out, fmt.Errorf("engine pcap config status %d", resp.StatusCode)
+		return out, engineStatusError(resp, "engine pcap config status")
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return out, err
@@ -296,7 +305,7 @@ func (c *HTTPClient) StartPcap(ctx context.Context, cfg config.PCAPConfig) (pcap
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return out, fmt.Errorf("engine pcap start status %d", resp.StatusCode)
+		return out, engineStatusError(resp, "engine pcap start status")
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return out, err
@@ -319,7 +328,7 @@ func (c *HTTPClient) StopPcap(ctx context.Context) (pcap.Status, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return out, fmt.Errorf("engine pcap stop status %d", resp.StatusCode)
+		return out, engineStatusError(resp, "engine pcap stop status")
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return out, err

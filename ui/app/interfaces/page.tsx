@@ -133,11 +133,12 @@ export default function InterfacesPage() {
     setAssigning(true);
     const res = await api.assignInterfaces("auto");
     setAssigning(false);
-    if (!res) {
-      setError("Failed to auto-assign interfaces.");
+    if (!res.ok) {
+      setError(res.error || "Failed to auto-assign interfaces.");
       return;
     }
     await refresh();
+    setNotice(res.warning ? `Auto-assign completed with warning: ${res.warning}` : "Interfaces auto-assigned.");
   }
 
   async function onReconcileReplace() {
@@ -152,11 +153,12 @@ export default function InterfacesPage() {
         setReconciling(true);
         const res = await api.reconcileInterfacesReplace();
         setReconciling(false);
-        if (!res) {
-          setError("Failed to reconcile interfaces.");
+        if (!res.ok) {
+          setError(res.error || "Failed to reconcile interfaces.");
           return;
         }
         await refresh();
+        setNotice(res.warning ? `Reconcile completed with warning: ${res.warning}` : "Interfaces reconciled.");
       },
     });
   }
@@ -208,8 +210,8 @@ export default function InterfacesPage() {
             };
     const created = await api.createInterface(payload);
     setSaving(false);
-    if (!created) {
-      setError("Failed to create interface.");
+    if (!created.ok) {
+      setError(created.error || "Failed to create interface.");
       return;
     }
     setName("");
@@ -221,19 +223,19 @@ export default function InterfacesPage() {
     setVlanId("10");
     setAddresses("");
     await refresh();
-    setNotice("Interface created.");
+    setNotice(created.warning ? `Interface created with warning: ${created.warning}` : "Interface created.");
   }
 
   async function onDelete(ifaceName: string) {
     setError(null);
     setNotice(null);
-    const ok = await api.deleteInterface(ifaceName);
-    if (!ok) {
-      setError("Failed to delete interface.");
+    const result = await api.deleteInterface(ifaceName);
+    if (!result.ok) {
+      setError(result.error || "Failed to delete interface.");
       return;
     }
     await refresh();
-    setNotice("Interface deleted.");
+    setNotice(result.warning ? `Interface deleted with warning: ${result.warning}` : "Interface deleted.");
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
@@ -248,14 +250,14 @@ export default function InterfacesPage() {
       if (gwErr) { setError(gwErr); return; }
     }
     const updated = await api.updateInterface(ifaceName, patch);
-    if (!updated) {
-      setError("Failed to update interface.");
+    if (!updated.ok) {
+      setError(updated.error || "Failed to update interface.");
       return;
     }
     // Optimistic config update so the row reflects immediately even if runtime state is slightly delayed.
-    setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated } : i)));
+    setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated.data } : i)));
     await refresh();
-    setNotice("Saved.");
+    setNotice(updated.warning ? `Saved with warning: ${updated.warning}` : "Saved.");
   }
 
   return (

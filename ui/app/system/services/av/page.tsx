@@ -92,7 +92,7 @@ export default function AVPage() {
     if (result.ok) {
       setSaveState("saved");
       setCfg(result.data);
-      toast("AV settings saved", "success");
+      toast(result.warning ? `AV settings saved with warning: ${result.warning}` : "AV settings saved", "success");
     } else {
       setSaveState("error");
       const msg = result.error || "Failed to save AV settings.";
@@ -108,8 +108,8 @@ export default function AVPage() {
     const result = await api.runAVUpdate();
     setUpdating(false);
     if (result.ok) {
-      setUpdateMsg("Definition update triggered.");
-      toast("Definition update triggered", "success");
+      setUpdateMsg(result.warning ? `Definition update triggered with warning: ${result.warning}` : "Definition update triggered.");
+      toast(result.warning ? `Definition update triggered with warning: ${result.warning}` : "Definition update triggered", "success");
     } else {
       const msg = result.error || "Failed to trigger update.";
       setUpdateMsg(msg);
@@ -490,9 +490,10 @@ export default function AVPage() {
                     if (!e.target.files?.length) return;
                     setUploading(true);
                     const f = e.target.files[0];
-                    const ok = await api.uploadAVDef(f);
-                    setUpdateMsg(ok ? `Uploaded ${f.name}` : `Upload failed for ${f.name}`);
-                    toast(ok ? `Uploaded ${f.name}` : `Upload failed for ${f.name}`, ok ? "success" : "error");
+                    const result = await api.uploadAVDef(f);
+                    const msg = result.ok ? `Uploaded ${f.name}` : (result.error || `Upload failed for ${f.name}`);
+                    setUpdateMsg(msg);
+                    toast(msg, result.ok ? "success" : "error");
                     setUploading(false);
                     refresh();
                   }}
@@ -518,9 +519,10 @@ export default function AVPage() {
                               variant: "danger",
                               confirmLabel: "Delete",
                               onConfirm: async () => {
-                                const ok = await api.deleteAVDef(d);
-                                setUpdateMsg(ok ? `Deleted ${d}` : `Failed to delete ${d}`);
-                                toast(ok ? `Deleted ${d}` : `Failed to delete ${d}`, ok ? "success" : "error");
+                                const result = await api.deleteAVDef(d);
+                                const msg = result.ok ? `Deleted ${d}` : (result.error || `Failed to delete ${d}`);
+                                setUpdateMsg(msg);
+                                toast(msg, result.ok ? "success" : "error");
                                 refresh();
                               },
                             });

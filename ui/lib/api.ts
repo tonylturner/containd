@@ -6,7 +6,7 @@ export type HealthResponse = {
 };
 
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+export type ApiResult<T> = { ok: true; data: T; warning?: string } | { ok: false; error: string };
 
 // In the browser we always use same-origin relative URLs so cookies/localStorage
 // are scoped consistently (localhost vs 127.0.0.1 vs 0.0.0.0 can otherwise break auth).
@@ -981,34 +981,24 @@ export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
 
 export async function setDataPlane(
   cfg: DataPlaneConfig,
-): Promise<DataPlaneConfig | null> {
-  try {
-    const res = await fetchWithSession("/api/v1/dataplane", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(cfg),
-    });
-    if (handleUnauthorized(res) || !res.ok) return null;
-    return (await res.json()) as DataPlaneConfig;
-  } catch {
-    return null;
-  }
+) : Promise<ApiResult<DataPlaneConfig>> {
+  return await postJSONResult<DataPlaneConfig>("/api/v1/dataplane", cfg);
 }
 
 export async function getPcapConfig(): Promise<PcapConfig | null> {
   return await getJSON<PcapConfig>("/api/v1/pcap/config");
 }
 
-export async function setPcapConfig(cfg: PcapConfig): Promise<PcapConfig | null> {
-  return await postJSON<PcapConfig>("/api/v1/pcap/config", cfg);
+export async function setPcapConfig(cfg: PcapConfig): Promise<ApiResult<PcapConfig>> {
+  return await postJSONResult<PcapConfig>("/api/v1/pcap/config", cfg);
 }
 
-export async function startPcap(cfg: PcapConfig): Promise<PcapStatus | null> {
-  return await postJSON<PcapStatus>("/api/v1/pcap/start", cfg);
+export async function startPcap(cfg: PcapConfig): Promise<ApiResult<PcapStatus>> {
+  return await postJSONResult<PcapStatus>("/api/v1/pcap/start", cfg);
 }
 
-export async function stopPcap(): Promise<PcapStatus | null> {
-  return await postJSON<PcapStatus>("/api/v1/pcap/stop", {});
+export async function stopPcap(): Promise<ApiResult<PcapStatus>> {
+  return await postJSONResult<PcapStatus>("/api/v1/pcap/stop", {});
 }
 
 export async function getPcapStatus(): Promise<PcapStatus | null> {
@@ -1024,7 +1014,7 @@ export async function listPcaps(): Promise<PcapItem[]> {
   return res ?? [];
 }
 
-export async function uploadPcap(file: File): Promise<PcapItem | null> {
+export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
   try {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -1033,10 +1023,12 @@ export async function uploadPcap(file: File): Promise<PcapItem | null> {
       headers: authHeaders(),
       body: form,
     });
-    if (handleUnauthorized(res) || !res.ok) return null;
-    return (await res.json()) as PcapItem;
-  } catch {
-    return null;
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: (await res.json()) as PcapItem, warning: parseWarningHeader(res) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
   }
 }
 
@@ -1044,45 +1036,16 @@ export function downloadPcapURL(name: string): string {
   return `/api/v1/pcap/download/${encodeURIComponent(name)}`;
 }
 
-export async function deletePcap(name: string): Promise<boolean> {
-  try {
-    const res = await fetchWithSession(`/api/v1/pcap/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    });
-    if (handleUnauthorized(res)) return false;
-    return res.ok;
-  } catch {
-    return false;
-  }
+export async function deletePcap(name: string): Promise<ApiResult<void>> {
+  return await deleteJSONResult(`/api/v1/pcap/${encodeURIComponent(name)}`);
 }
 
-export async function tagPcap(req: PcapTagRequest): Promise<boolean> {
-  try {
-    const res = await fetchWithSession("/api/v1/pcap/tag", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(req),
-    });
-    if (handleUnauthorized(res)) return false;
-    return res.ok;
-  } catch {
-    return false;
-  }
+export async function tagPcap(req: PcapTagRequest): Promise<ApiResult<{ status?: string }>> {
+  return await postJSONResult<{ status?: string }>("/api/v1/pcap/tag", req);
 }
 
-export async function replayPcap(req: PcapReplayRequest): Promise<boolean> {
-  try {
-    const res = await fetchWithSession("/api/v1/pcap/replay", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(req),
-    });
-    if (handleUnauthorized(res)) return false;
-    return res.ok;
-  } catch {
-    return false;
-  }
+export async function replayPcap(req: PcapReplayRequest): Promise<ApiResult<{ status?: string }>> {
+  return await postJSONResult<{ status?: string }>("/api/v1/pcap/replay", req);
 }
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T | null> {
@@ -1164,12 +1127,25 @@ async function deleteJSON(path: string): Promise<boolean> {
 }
 
 async function parseErrorBody(res: Response): Promise<string> {
-  try {
-    const body = await res.json();
-    return body.error || body.message || res.statusText;
-  } catch {
-    return res.statusText;
+	try {
+		const body = await res.json();
+		return body.error || body.message || res.statusText;
+	} catch {
+		return res.statusText;
+	}
+}
+
+async function parseSuccessBody<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) {
+    return undefined as T;
   }
+  return JSON.parse(text) as T;
+}
+
+function parseWarningHeader(res: Response): string | undefined {
+  const warning = (res.headers.get("x-containd-warnings") || "").trim();
+  return warning || undefined;
 }
 
 async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiResult<T>> {
@@ -1182,7 +1158,7 @@ async function postJSONResult<T>(path: string, payload: unknown): Promise<ApiRes
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: (await res.json()) as T };
+    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Network error" };
   }
@@ -1198,7 +1174,7 @@ async function patchJSONResult<T>(path: string, payload: unknown): Promise<ApiRe
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: (await res.json()) as T };
+    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Network error" };
   }
@@ -1213,7 +1189,7 @@ async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, warning: parseWarningHeader(res) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Network error" };
   }
@@ -1260,9 +1236,9 @@ export const api = {
     return res;
   },
   updateMe: (patch: UpdateMeRequest) =>
-    patchJSON<User>("/api/v1/auth/me", patch),
+    patchJSONResult<User>("/api/v1/auth/me", patch),
   changeMyPassword: (currentPassword: string, newPassword: string) =>
-    postJSON<{ status: string }>("/api/v1/auth/me/password", {
+    postJSONResult<{ status: string }>("/api/v1/auth/me/password", {
       currentPassword,
       newPassword,
     } as ChangePasswordRequest),
@@ -1270,16 +1246,16 @@ export const api = {
   // Users
   listUsers: () => getJSON<User[]>("/api/v1/users"),
   createUser: (u: Omit<User, "id"> & { password: string }) =>
-    postJSON<User>("/api/v1/users", u),
+    postJSONResult<User>("/api/v1/users", u),
   updateUser: (id: string, patch: Partial<User>) =>
-    patchJSON<User>(`/api/v1/users/${encodeURIComponent(id)}`, patch),
+    patchJSONResult<User>(`/api/v1/users/${encodeURIComponent(id)}`, patch),
   setUserPassword: (id: string, password: string) =>
-    postJSON<{ status: string }>(
+    postJSONResult<{ status: string }>(
       `/api/v1/users/${encodeURIComponent(id)}/password`,
       { password },
     ),
   deleteUser: (id: string) =>
-    deleteJSON(`/api/v1/users/${encodeURIComponent(id)}`),
+    deleteJSONResult(`/api/v1/users/${encodeURIComponent(id)}`),
 
   listZones: (signal?: AbortSignal) => getJSON<Zone[]>("/api/v1/zones", signal),
   createZone: (z: Zone) => postJSONResult<Zone>("/api/v1/zones", z),
@@ -1293,24 +1269,24 @@ export const api = {
   listInterfaces: (signal?: AbortSignal) => getJSON<Interface[]>("/api/v1/interfaces", signal),
   listInterfaceState: (signal?: AbortSignal) => getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
   assignInterfaces: (mode: "auto" | "explicit", mappings?: Record<string, string>) =>
-    postJSON<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
+    postJSONResult<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
       mode,
       mappings: mappings ?? {},
     }),
   reconcileInterfacesReplace: () =>
-    postJSON<{ status: string }>("/api/v1/interfaces/reconcile", { confirm: "REPLACE" }),
+    postJSONResult<{ status: string }>("/api/v1/interfaces/reconcile", { confirm: "REPLACE" }),
   createInterface: (i: Interface) =>
-    postJSON<Interface>("/api/v1/interfaces", i),
+    postJSONResult<Interface>("/api/v1/interfaces", i),
   updateInterface: (name: string, i: Partial<Interface>) =>
-    patchJSON<Interface>(`/api/v1/interfaces/${encodeURIComponent(name)}`, i),
+    patchJSONResult<Interface>(`/api/v1/interfaces/${encodeURIComponent(name)}`, i),
   deleteInterface: (name: string) =>
-    deleteJSON(`/api/v1/interfaces/${encodeURIComponent(name)}`),
+    deleteJSONResult(`/api/v1/interfaces/${encodeURIComponent(name)}`),
 
   getRouting: (signal?: AbortSignal) => getJSON<RoutingConfig>("/api/v1/routing", signal),
   getOSRouting: (signal?: AbortSignal) => getJSON<OSRoutingSnapshot>("/api/v1/routing/os", signal),
-  setRouting: (cfg: RoutingConfig) => postJSON<RoutingConfig>("/api/v1/routing", cfg),
+  setRouting: (cfg: RoutingConfig) => postJSONResult<RoutingConfig>("/api/v1/routing", cfg),
   reconcileRoutingReplace: () =>
-    postJSON<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
+    postJSONResult<{ status: string }>("/api/v1/routing/reconcile", { confirm: "REPLACE" }),
 
   listFirewallRules: (signal?: AbortSignal) => getJSON<FirewallRule[]>("/api/v1/firewall/rules", signal),
   createFirewallRule: (r: FirewallRule) =>
@@ -1344,21 +1320,27 @@ export const api = {
 
   // IDS / Rules
   getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
-  setIDS: (cfg: IDSConfig) => postJSON<IDSConfig>("/api/v1/ids/rules", cfg),
+  setIDS: (cfg: IDSConfig) => postJSONResult<IDSConfig>("/api/v1/ids/rules", cfg),
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
-  importIDSRules: async (file: File, format?: string): Promise<IDSImportResult | null> => {
+  importIDSRules: async (file: File, format?: string): Promise<ApiResult<IDSImportResult>> => {
     const form = new FormData();
     form.append("file", file);
     if (format) form.append("format", format);
-    const res = await fetch(`${API_BASE}/api/v1/ids/import`, {
-      method: "POST",
-      body: form,
-      credentials: "include",
-      headers: authHeaders(),
-    });
-    if (!res.ok) return null;
-    return res.json();
+    try {
+      const res = await fetchWithSession("/api/v1/ids/import", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+        headers: authHeaders(),
+      });
+      if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+      clearAuthExpired();
+      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      return { ok: true, data: (await res.json()) as IDSImportResult };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    }
   },
   exportIDSRules: async (format: string): Promise<boolean> => {
     const res = await fetch(`${API_BASE}/api/v1/ids/export?format=${encodeURIComponent(format)}`, {
@@ -1395,7 +1377,7 @@ export const api = {
   getRunningConfig: () => getJSON<ConfigBundle>("/api/v1/config"),
   getCandidateConfig: () => getJSON<ConfigBundle>("/api/v1/config/candidate"),
   setCandidateConfig: (cfg: ConfigBundle) =>
-    postJSON<{ status: string }>("/api/v1/config/candidate", cfg),
+    postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg),
   diffConfig: () =>
     getJSON<{ running: ConfigBundle | null; candidate: ConfigBundle | null }>(
       "/api/v1/config/diff",
@@ -1403,12 +1385,12 @@ export const api = {
   exportConfig: (redacted = true) =>
     getJSON<ConfigBundle>(`/api/v1/config/export?redacted=${redacted ? "1" : "0"}`),
   importConfig: (cfg: ConfigBundle) =>
-    postJSON<{ status: string }>("/api/v1/config/import", cfg),
+    postJSONResult<{ status: string }>("/api/v1/config/import", cfg),
   listConfigBackups: () => getJSON<ConfigBackup[]>("/api/v1/config/backups"),
   createConfigBackup: (req: { name?: string; redacted: boolean }) =>
-    postJSON<ConfigBackup>("/api/v1/config/backups", req),
+    postJSONResult<ConfigBackup>("/api/v1/config/backups", req),
   deleteConfigBackup: (id: string) =>
-    deleteJSON(`/api/v1/config/backups/${encodeURIComponent(id)}`),
+    deleteJSONResult(`/api/v1/config/backups/${encodeURIComponent(id)}`),
   downloadConfigBackup: async (id: string) => {
     const res = await fetchWithSession(`/api/v1/config/backups/${encodeURIComponent(id)}`, {
       headers: { ...authHeaders() },
@@ -1446,19 +1428,19 @@ export const api = {
   // System TLS
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
   setTLSCert: (certPEM: string, keyPEM: string) =>
-    postJSON<{ status: string }>("/api/v1/system/tls/cert", { certPEM, keyPEM }),
+    postJSONResult<{ status: string }>("/api/v1/system/tls/cert", { certPEM, keyPEM }),
   setTrustedCA: (pem: string) =>
-    postJSON<{ status: string }>("/api/v1/system/tls/trusted-ca", { pem }),
+    postJSONResult<{ status: string }>("/api/v1/system/tls/trusted-ca", { pem }),
 
   // Proxies
   getForwardProxy: () =>
     getJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward"),
   setForwardProxy: (cfg: ForwardProxyConfig) =>
-    postJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward", cfg),
+    postJSONResult<ForwardProxyConfig>("/api/v1/services/proxy/forward", cfg),
   getReverseProxy: () =>
     getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
   setReverseProxy: (cfg: ReverseProxyConfig) =>
-    postJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
+    postJSONResult<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
   getServicesStatus: (signal?: AbortSignal) =>
     getJSON<ServicesStatus>("/api/v1/services/status", signal),
   getSystemStats: (signal?: AbortSignal) =>
@@ -1467,40 +1449,58 @@ export const api = {
     getJSON<SystemInspection>("/api/v1/system/inspection", signal),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
-    postJSON<SyslogConfig>("/api/v1/services/syslog", cfg),
+    postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg),
   getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
   setAV: (cfg: AVConfig) => postJSONResult<AVConfig>("/api/v1/services/av", cfg),
   runAVUpdate: () => postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
   listAVDefs: () => getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
-  uploadAVDef: async (file: File) => {
+  uploadAVDef: async (file: File): Promise<ApiResult<{ status: string; file: string }>> => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch("/api/v1/services/av/defs", {
-      method: "POST",
-      body: form,
-    });
-    return res.ok;
+    try {
+      const res = await fetchWithSession("/api/v1/services/av/defs", {
+        method: "POST",
+        body: form,
+        headers: authHeaders(),
+      });
+      if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+      clearAuthExpired();
+      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      return { ok: true, data: (await res.json()) as { status: string; file: string } };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    }
   },
-  deleteAVDef: async (file: string) => {
+  deleteAVDef: async (file: string): Promise<ApiResult<{ status: string; file: string }>> => {
     const params = new URLSearchParams({ file });
-    const res = await fetch(`/api/v1/services/av/defs?${params.toString()}`, { method: "DELETE" });
-    return res.ok;
+    try {
+      const res = await fetchWithSession(`/api/v1/services/av/defs?${params.toString()}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+      clearAuthExpired();
+      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      return { ok: true, data: (await res.json()) as { status: string; file: string } };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    }
   },
   getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
-  setDNS: (cfg: DNSConfig) => postJSON<DNSConfig>("/api/v1/services/dns", cfg),
+  setDNS: (cfg: DNSConfig) => postJSONResult<DNSConfig>("/api/v1/services/dns", cfg),
   getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
-  setNTP: (cfg: NTPConfig) => postJSON<NTPConfig>("/api/v1/services/ntp", cfg),
+  setNTP: (cfg: NTPConfig) => postJSONResult<NTPConfig>("/api/v1/services/ntp", cfg),
   getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
-  setDHCP: (cfg: DHCPConfig) => postJSON<DHCPConfig>("/api/v1/services/dhcp", cfg),
+  setDHCP: (cfg: DHCPConfig) => postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
   listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
   getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
-  setVPN: (cfg: VPNConfig) => postJSON<VPNConfig>("/api/v1/services/vpn", cfg),
+  setVPN: (cfg: VPNConfig) => postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
   uploadOpenVPNProfile: (name: string, ovpn: string) =>
-    postJSON<OpenVPNProfileUploadResponse>("/api/v1/services/vpn/openvpn/profile", { name, ovpn }),
+    postJSONResult<OpenVPNProfileUploadResponse>("/api/v1/services/vpn/openvpn/profile", { name, ovpn }),
   listOpenVPNClients: () =>
     getJSON<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients"),
   createOpenVPNClient: (name: string) =>
-    postJSON<{ name: string }>("/api/v1/services/vpn/openvpn/clients", { name }),
+    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", { name }),
   downloadOpenVPNClientURL: (name: string) =>
     `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
   getWireGuardStatus: (iface?: string) =>

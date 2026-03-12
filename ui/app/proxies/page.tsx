@@ -130,12 +130,14 @@ export default function ProxiesPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setForwardProxy(forward);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save forward proxy settings.");
-      toast("Failed to save forward proxy settings", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save forward proxy settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("Forward proxy saved", "success");
+      setForward(saved.data);
+      toast(saved.warning ? `Forward proxy saved with warning: ${saved.warning}` : "Forward proxy saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -145,12 +147,14 @@ export default function ProxiesPage() {
     setError(null);
     setSaveState("saving");
     const saved = await api.setReverseProxy(reverse);
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save reverse proxy settings.");
-      toast("Failed to save reverse proxy settings", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save reverse proxy settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("Reverse proxy saved", "success");
+      setReverse(saved.data);
+      toast(saved.warning ? `Reverse proxy saved with warning: ${saved.warning}` : "Reverse proxy saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }

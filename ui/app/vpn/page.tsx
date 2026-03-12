@@ -330,15 +330,16 @@ export default function VPNPage() {
       wireguard: cfg.wireguard,
       openvpn,
     });
-    setSaveState(saved ? "saved" : "error");
-    if (!saved) {
-      setError("Failed to save VPN settings.");
-      toast("Failed to save VPN", "error");
+    setSaveState(saved.ok ? "saved" : "error");
+    if (!saved.ok) {
+      const msg = saved.error || "Failed to save VPN settings.";
+      setError(msg);
+      toast(msg, "error");
     } else {
-      toast("VPN saved", "success");
+      setCfg(normalize(saved.data));
+      toast(saved.warning ? `VPN saved with warning: ${saved.warning}` : "VPN saved", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
-    if (saved) setCfg(normalize(saved));
   }
 
   async function uploadOpenVPNProfile(file: File) {
@@ -349,16 +350,16 @@ export default function VPNPage() {
       const text = await file.text();
       const base = file.name.replace(/\.(ovpn|conf|txt)$/i, "");
       const res = await api.uploadOpenVPNProfile(base || "client", text);
-      if (!res?.vpn) {
+      if (!res.ok) {
         setUploadState("error");
-        setError("Failed to upload OpenVPN profile.");
+        setError(res.error || "Failed to upload OpenVPN profile.");
         setTimeout(() => setUploadState("idle"), 1500);
         return;
       }
       setUploadState("uploaded");
-      toast("Profile uploaded", "success");
+      toast(res.warning ? `Profile uploaded with warning: ${res.warning}` : "Profile uploaded", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
-      const next = normalize(res.vpn);
+      const next = normalize(res.data.vpn);
       setCfg({
         ...next,
         openvpn: { ...next.openvpn, managed: undefined },
@@ -379,16 +380,17 @@ export default function VPNPage() {
     const name = newClientName.trim();
     if (!name) return;
     setError(null);
-    try {
-      await api.createOpenVPNClient(name);
-      setNewClientName("");
-      const res = await api.listOpenVPNClients();
-      setOvpnClients(res?.clients ?? []);
-      toast("Client created", "success");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create client.");
-      toast("Failed to create client", "error");
+    const created = await api.createOpenVPNClient(name);
+    if (!created.ok) {
+      const msg = created.error || "Failed to create client.";
+      setError(msg);
+      toast(msg, "error");
+      return;
     }
+    setNewClientName("");
+    const res = await api.listOpenVPNClients();
+    setOvpnClients(res?.clients ?? []);
+    toast(created.warning ? `Client created with warning: ${created.warning}` : "Client created", "success");
   }
 
   async function downloadClient(name: string) {

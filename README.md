@@ -19,11 +19,19 @@ An open-source next-generation firewall purpose-built for ICS/OT network segment
 ## Quick Start
 
 ```bash
+mkdir containd-starter && cd containd-starter
 curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
-CONTAIND_JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
+curl -o .env https://raw.githubusercontent.com/tonylturner/containd/main/.env.example
+
+# edit .env and set a real CONTAIND_JWT_SECRET
+docker compose up -d
 ```
 
-The published compose file runs the combined appliance (`containd all`) and wires the management plane to the local engine automatically.
+The published starter compose runs the combined appliance (`containd all`), wires the management plane to the local engine automatically, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6` mapped to `eth0` through `eth7`.
+
+Docker/Compose owns the available interfaces and their Docker-level IP wiring. Use containd to bind zones, tighten policy, and configure services inside that topology. If you want different lab subnets or interface addresses, edit `.env` before you start the stack.
+
+Runtime enforcement requires a Linux Docker host. Docker Desktop on macOS/Windows is fine for UI, config, and topology exercises, but kernel-dependent features such as nftables enforcement, policy routing, WireGuard/OpenVPN TUN setup, host/flow blocking, and some capture paths will be limited or unavailable there.
 
 | Service | URL |
 |---------|-----|
@@ -77,7 +85,7 @@ Run modes: `containd all` (combined), `containd mgmt`, `containd engine`.
 
 ## Lab Topology
 
-The dev compose file (`deploy/docker-compose.dev.yml`) creates 8 isolated networks for development:
+The published starter compose (`deploy/docker-compose.yml`) and the source-build dev compose (`deploy/docker-compose.dev.yml`) both create 8 isolated Docker networks:
 
 | Network | Subnet | Interface |
 |---------|--------|-----------|
@@ -89,6 +97,8 @@ The dev compose file (`deploy/docker-compose.dev.yml`) creates 8 isolated networ
 | LAN4 | 192.168.245.0/24 | eth5 |
 | LAN5 | 192.168.246.0/24 | eth6 |
 | LAN6 | 192.168.247.0/24 | eth7 |
+
+By default, the starter compose pins containd to `.2` on each subnet and keeps `WAN` as the default-gateway network. Edit `.env` to change those subnets or addresses for your lab. For Docker-based deployments, treat Compose as the owner of network attachment and IP layout; use the containd UI/API to bind interfaces to zones and enforce segmentation inside that layout.
 
 ## Standalone Container
 

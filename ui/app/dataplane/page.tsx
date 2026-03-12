@@ -239,13 +239,14 @@ export default function PcapPage() {
     if (!tag) return;
     const item = pcaps.find((p) => p.name === pcapName);
     const tags = Array.from(new Set([...(item?.tags ?? []), tag]));
-    const ok = await tagPcap({ name: pcapName, tags });
-    if (ok) {
+    const result = await tagPcap({ name: pcapName, tags });
+    if (result.ok) {
       setPcapTag("");
       const list = await listPcaps();
       setPcaps(list);
+      setNotice(result.warning ? `PCAP tags updated with warning: ${result.warning}` : "PCAP tags updated.");
     } else {
-      setNotice("Failed to update PCAP tags.");
+      setNotice(result.error || "Failed to update PCAP tags.");
     }
   }
 
@@ -282,18 +283,23 @@ export default function PcapPage() {
     }
     setState("starting");
     const saved = await setPcapConfig(settings);
-    if (!saved) {
-      setNotice("Failed to save capture settings.");
+    if (!saved.ok) {
+      setNotice(saved.error || "Failed to save capture settings.");
       setState("idle");
       return;
     }
-    setSavedConfigJson(JSON.stringify(normalizeConfig(saved)));
-    const st = await startPcap(saved);
-    if (!st) {
-      setNotice("Failed to start capture.");
+    setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
+    const st = await startPcap(saved.data);
+    if (!st.ok) {
+      setNotice(st.error || "Failed to start capture.");
     } else {
-      setStatus(st);
+      setStatus(st.data);
       setSettings((prev) => ({ ...prev, enabled: true }));
+      setNotice(
+        [saved.warning, st.warning].filter(Boolean).length > 0
+          ? `Capture started with warning: ${[saved.warning, st.warning].filter(Boolean).join(" | ")}`
+          : "Capture started.",
+      );
     }
     setState("idle");
     await refresh();
@@ -303,11 +309,12 @@ export default function PcapPage() {
     if (!canEdit) return;
     setState("stopping");
     const st = await stopPcap();
-    if (!st) {
-      setNotice("Failed to stop capture.");
+    if (!st.ok) {
+      setNotice(st.error || "Failed to stop capture.");
     } else {
-      setStatus(st);
+      setStatus(st.data);
       setSettings((prev) => ({ ...prev, enabled: false }));
+      setNotice(st.warning ? `Capture stopped with warning: ${st.warning}` : "Capture stopped.");
     }
     setState("idle");
     await refresh();
@@ -320,13 +327,13 @@ export default function PcapPage() {
       return;
     }
     const saved = await setPcapConfig(settings);
-    if (!saved) {
-      setNotice("Failed to save capture settings.");
+    if (!saved.ok) {
+      setNotice(saved.error || "Failed to save capture settings.");
       return;
     }
-    setSettings(normalizeConfig(saved));
-    setSavedConfigJson(JSON.stringify(normalizeConfig(saved)));
-    setNotice("Capture settings saved.");
+    setSettings(normalizeConfig(saved.data));
+    setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
+    setNotice(saved.warning ? `Capture settings saved with warning: ${saved.warning}` : "Capture settings saved.");
     await refresh();
   }
 
@@ -338,9 +345,10 @@ export default function PcapPage() {
     }
     setUploading(true);
     const item = await uploadPcap(file);
-    if (!item) {
-      setNotice("Failed to upload PCAP.");
+    if (!item.ok) {
+      setNotice(item.error || "Failed to upload PCAP.");
     } else {
+      setNotice(item.warning ? `PCAP uploaded with warning: ${item.warning}` : "PCAP uploaded.");
       await refresh();
     }
     if (uploadInputRef.current) {
@@ -852,11 +860,12 @@ export default function PcapPage() {
                               confirmLabel: "Delete",
                               variant: "danger",
                               onConfirm: async () => {
-                                const ok = await deletePcap(p.name);
-                                if (ok) {
+                                const result = await deletePcap(p.name);
+                                if (result.ok) {
                                   setPcaps(await listPcaps());
+                                  setNotice(result.warning ? `PCAP deleted with warning: ${result.warning}` : "PCAP deleted.");
                                 } else {
-                                  setNotice("Failed to delete PCAP.");
+                                  setNotice(result.error || "Failed to delete PCAP.");
                                 }
                               },
                             });
@@ -923,14 +932,16 @@ export default function PcapPage() {
               disabled={!canEdit || !replayName || !replayIface}
               onClick={async () => {
                 const rate = replayRate.trim() ? Number(replayRate) : undefined;
-                const ok = await replayPcap({
+                const result = await replayPcap({
                   name: replayName,
                   interface: replayIface,
                   ratePps: Number.isFinite(rate) ? rate : undefined,
                 });
-                if (!ok) {
-                  setNotice("Failed to start replay.");
-                }
+                setNotice(
+                  result.ok
+                    ? (result.warning ? `Replay started with warning: ${result.warning}` : "Replay started.")
+                    : (result.error || "Failed to start replay."),
+                );
               }}
               className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
             >

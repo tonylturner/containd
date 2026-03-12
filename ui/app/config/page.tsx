@@ -150,18 +150,22 @@ function ConfigPage() {
     refreshBackups();
   }, []);
 
+  function statusWithWarning(base: string, warning?: string) {
+    return warning ? `${base} Warning: ${warning}` : base;
+  }
+
   async function saveCandidate() {
     if (!canEdit) return;
     setStatus(null);
     try {
       const parsed = JSON.parse(candidateText) as ConfigBundle;
       const res = await api.setCandidateConfig(parsed);
-      if (!res) {
-        setStatus("Failed to save candidate.");
+      if (!res.ok) {
+        setStatus(`Failed to save candidate: ${res.error}`);
         return;
       }
       setCandidateLoadedAt(new Date());
-      setStatus("Candidate saved.");
+      setStatus(statusWithWarning("Candidate saved.", res.warning));
       refresh();
     } catch (e) {
       setStatus("Invalid JSON.");
@@ -172,13 +176,13 @@ function ConfigPage() {
     if (!canEdit || !running) return;
     setStatus(null);
     const res = await api.setCandidateConfig(running);
-    if (!res) {
-      setStatus("Failed to copy running to candidate.");
+    if (!res.ok) {
+      setStatus(`Failed to copy running to candidate: ${res.error}`);
       return;
     }
     setCandidateText(JSON.stringify(running, null, 2));
     setCandidateLoadedAt(new Date());
-    setStatus("Candidate replaced with running.");
+    setStatus(statusWithWarning("Candidate replaced with running.", res.warning));
     refresh();
   }
 
@@ -196,7 +200,7 @@ function ConfigPage() {
         setStatus(null);
         const result = await api.commit();
         if (result.ok) {
-          setStatus("Committed.");
+          setStatus(statusWithWarning("Committed.", result.warning));
           window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Commit failed: ${result.error}`);
@@ -218,7 +222,7 @@ function ConfigPage() {
       onConfirm: async () => {
         setStatus(null);
         const result = await api.commitConfirmed(secs);
-        setStatus(result.ok ? `Commit-confirmed started (${secs}s).` : `Commit-confirmed failed: ${result.error}`);
+        setStatus(result.ok ? statusWithWarning(`Commit-confirmed started (${secs}s).`, result.warning) : `Commit-confirmed failed: ${result.error}`);
         refresh();
       },
     });
@@ -228,7 +232,7 @@ function ConfigPage() {
     if (!canEdit) return;
     setStatus(null);
     const result = await api.confirmCommit();
-    setStatus(result.ok ? "Commit confirmed." : `Confirm failed: ${result.error}`);
+    setStatus(result.ok ? statusWithWarning("Commit confirmed.", result.warning) : `Confirm failed: ${result.error}`);
     refresh();
   }
 
@@ -244,7 +248,7 @@ function ConfigPage() {
         setStatus(null);
         const result = await api.rollback();
         if (result.ok) {
-          setStatus("Rolled back.");
+          setStatus(statusWithWarning("Rolled back.", result.warning));
           window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Rollback failed: ${result.error}`);
@@ -283,7 +287,7 @@ function ConfigPage() {
       const text = await uploadFile.text();
       const parsed = JSON.parse(text) as ConfigBundle;
       const res = await api.importConfig(parsed);
-      setStatus(res ? "Config restored." : "Restore failed.");
+      setStatus(res.ok ? statusWithWarning("Config restored.", res.warning) : `Restore failed: ${res.error}`);
       refresh();
     } catch {
       setStatus("Invalid JSON file.");
@@ -302,12 +306,12 @@ function ConfigPage() {
       name: backupName.trim() ? backupName.trim() : undefined,
       redacted,
     });
-    if (!res) {
-      setStatus("Failed to create backup.");
+    if (!res.ok) {
+      setStatus(`Failed to create backup: ${res.error}`);
       return;
     }
     setBackupName("");
-    setStatus("Backup saved on appliance.");
+    setStatus(statusWithWarning("Backup saved on appliance.", res.warning));
     refreshBackups();
   }
 
@@ -337,11 +341,11 @@ function ConfigPage() {
       onConfirm: async () => {
         setStatus(null);
         const res = await api.deleteConfigBackup(backup.id);
-        if (!res) {
-          setStatus("Failed to delete backup.");
+        if (!res.ok) {
+          setStatus(`Failed to delete backup: ${res.error}`);
           return;
         }
-        setStatus("Backup deleted.");
+        setStatus(statusWithWarning("Backup deleted.", res.warning));
         refreshBackups();
       },
     });
