@@ -4504,14 +4504,6 @@ func isAutoAssignableDevice(name string, mac string) bool {
 	return true
 }
 
-func envOrDefault(key, def string) string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return def
-	}
-	return v
-}
-
 func envAnyOrDefault(def string, keys ...string) string {
 	for _, key := range keys {
 		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
