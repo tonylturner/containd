@@ -131,11 +131,7 @@ jobs:
           fi
 
           curl -fsS "$api/health" | jq -e '.status == "ok"' >/dev/null
-          quickstart_password="$(python3 - <<'PY'
-import secrets
-print("Ci" + secrets.token_hex(8) + "Aa1")
-PY
-          )"
+          quickstart_password="$(python3 -c 'import secrets; print("Ci" + secrets.token_hex(8) + "Aa1")')"
           curl -fsS -c /tmp/containd-quickstart.cookie \
             -H 'Content-Type: application/json' \
             -d '{"username":"containd","password":"containd"}' \
