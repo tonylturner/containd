@@ -33,7 +33,7 @@ docker build -f build/Dockerfile.mgmt -t containd/containd:dev .
 
 # Full appliance via Compose
 cp .env.example .env
-docker compose up -d --build
+docker compose --env-file .env -f deploy/docker-compose.dev.yml up -d --build
 ```
 
 ### Versioning

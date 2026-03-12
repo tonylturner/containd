@@ -1118,10 +1118,25 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 			return nil, err
 		}
 		if err := engine.ApplyRules(ctx, snap); err != nil {
+			if isRuntimeApplyWarning(err) {
+				warnings = append(warnings, fmt.Sprintf("ruleset: %v", err))
+				return warnings, nil
+			}
 			return nil, err
 		}
 	}
 	return warnings, nil
+}
+
+func isRuntimeApplyWarning(err error) bool {
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "operation not permitted") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "not supported") ||
+		strings.Contains(msg, "nft apply failed")
 }
 
 func diffConfigHandler(store config.Store) gin.HandlerFunc {
@@ -5110,6 +5125,7 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {
 			def := config.DefaultConfig()
+			config.ApplyBootstrapEnvDefaults(def)
 			def.System.Hostname = "containd"
 			def.System.Mgmt.ListenAddr = ":8080"
 			def.System.Mgmt.HTTPListenAddr = ":8080"

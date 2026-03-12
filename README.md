@@ -19,19 +19,26 @@ An open-source next-generation firewall purpose-built for ICS/OT network segment
 ## Quick Start
 
 ```bash
-mkdir containd-starter && cd containd-starter
-curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/tonylturner/containd/main/.env.example
-
-# edit .env and set a real CONTAIND_JWT_SECRET
-docker compose up -d
+curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/quickstart.sh
+sh quickstart.sh
 ```
 
-The published starter compose runs the combined appliance (`containd all`), wires the management plane to the local engine automatically, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6` mapped to `eth0` through `eth7`.
+`quickstart.sh` downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, auto-adjusts the starter subnets if they would overlap with existing Docker networks, and starts the combined appliance (`containd all`) for you.
+
+The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6` mapped to `eth0` through `eth7`.
 
 Docker/Compose owns the available interfaces and their Docker-level IP wiring. Use containd to bind zones, tighten policy, and configure services inside that topology. If you want different lab subnets or interface addresses, edit `.env` before you start the stack.
 
-Runtime enforcement requires a Linux Docker host. Docker Desktop on macOS/Windows is fine for UI, config, and topology exercises, but kernel-dependent features such as nftables enforcement, policy routing, WireGuard/OpenVPN TUN setup, host/flow blocking, and some capture paths will be limited or unavailable there.
+containd is designed for container-to-container segmentation inside Docker-based labs. Linux Docker hosts are supported, and Docker Desktop is also a valid lab target because the traffic being segmented lives inside Docker's Linux VM. On Windows, use Docker Desktop with the WSL2 backend. containd is not a native host firewall for macOS or Windows networking.
+
+For a customizable starter directory instead of the zero-touch path above:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
+sh bootstrap-starter.sh --dir containd-lab --no-start
+```
+
+That writes `docker-compose.yml`, `.env.example`, and `.env`, auto-adjusts conflicting default starter subnets on fresh setup, lets you customize `.env`, and then you can start with `docker compose up -d`.
 
 | Service | URL |
 |---------|-----|
@@ -98,14 +105,17 @@ The published starter compose (`deploy/docker-compose.yml`) and the source-build
 | LAN5 | 192.168.246.0/24 | eth6 |
 | LAN6 | 192.168.247.0/24 | eth7 |
 
-By default, the starter compose pins containd to `.2` on each subnet and keeps `WAN` as the default-gateway network. Edit `.env` to change those subnets or addresses for your lab. For Docker-based deployments, treat Compose as the owner of network attachment and IP layout; use the containd UI/API to bind interfaces to zones and enforce segmentation inside that layout.
+By default, the starter compose pins containd to `.2` on each subnet, keeps `WAN` as the default-gateway network, enables nftables enforcement, and runs the appliance as `root` inside the container so nftables, routing, and TUN operations work across Linux, Docker Desktop, and WSL-backed lab environments. Edit `.env` to change those subnets or addresses for your lab. For Docker-based deployments, treat Compose as the owner of network attachment and IP layout; use the containd UI/API to bind interfaces to zones and enforce segmentation inside that layout.
 
 ## Standalone Container
 
 ```bash
 docker run -d \
   --name containd \
+  --user 0 \
   --cap-add NET_ADMIN --cap-add NET_RAW \
+  --cap-add NET_BIND_SERVICE \
+  --device /dev/net/tun:/dev/net/tun \
   -p 8080:8080 -p 8443:8443 -p 2222:2222 \
   -v containd-data:/data \
   -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
@@ -125,7 +135,7 @@ CONTAIND_UI_DIR=ui/out ./containd all
 ## Security
 
 - Default-deny firewall posture
-- Distroless container image, nonroot
+- Distroless container image; the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
 - JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login
 - TLS 1.2+ with hardened cipher suites, HSTS enabled by default
 - CORS wildcard rejection, SameSite=Strict cookies, path traversal protection
@@ -140,7 +150,7 @@ See [SECURITY.md](SECURITY.md) for production hardening and vulnerability report
 Full docs are embedded in the appliance (Help icon in UI) and built from `docs/mkdocs/`:
 
 - [Architecture](docs/mkdocs/architecture.md) | [Dataplane](docs/mkdocs/dataplane.md) | [eBPF](docs/mkdocs/ebpf.md)
-- [Docker Compose Deployment](docs/mkdocs/docker-compose.md) | [Host Deploy](docs/mkdocs/deploy-host.md)
+- [Docker Compose Deployment](docs/mkdocs/docker-compose.md) | [Customizing Lab Compose](docs/mkdocs/lab-compose.md) | [Windows / WSL Notes](docs/mkdocs/windows-wsl.md) | [Host Deploy](docs/mkdocs/deploy-host.md)
 - [CLI Reference](docs/mkdocs/cli.md) | [Config Format](docs/mkdocs/config-format.md)
 - [ICS DPI](docs/mkdocs/ics-dpi.md) | [IDS Rules](docs/mkdocs/ids-rules.md) | [Policy Model](docs/mkdocs/policy-model.md)
 - [Services](docs/mkdocs/services.md) | [API Reference](docs/mkdocs/api-reference.md)

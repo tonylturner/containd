@@ -47,6 +47,8 @@ nav:
   - Home: index.md
   - Getting Started:
       - Deploy with Docker Compose: docker-compose.md
+      - Customizing Lab Compose: lab-compose.md
+      - Windows / WSL Notes: windows-wsl.md
       - Host Deploy Notes: deploy-host.md
   - Operations:
       - CLI: cli.md

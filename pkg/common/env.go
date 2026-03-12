@@ -38,3 +38,40 @@ func Env(name, fallback string) string {
 func EnvTrimmed(name, fallback string) string {
 	return strings.TrimSpace(Env(name, fallback))
 }
+
+// EnvBool reads an environment variable as a boolean. Truthy values are
+// 1,true,yes,on; falsy values are 0,false,no,off. Invalid or unset values
+// fall back to fallback.
+func EnvBool(name string, fallback bool) bool {
+	v := strings.ToLower(EnvTrimmed(name, ""))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+// EnvCSV reads a comma-separated environment variable into trimmed, non-empty
+// entries. Unset values return nil.
+func EnvCSV(name string) []string {
+	raw := EnvTrimmed(name, "")
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}

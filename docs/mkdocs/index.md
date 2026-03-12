@@ -4,7 +4,7 @@ Welcome to the containd documentation. This content is rendered in-app (Help ico
 
 ## Quick links
 
-- **Deploy**: `docker compose up -d` -- see [Deploy with Docker Compose](docker-compose.md)
+- **Deploy**: `sh quickstart.sh` -- see [Deploy with Docker Compose](docker-compose.md)
 - **Configure**: [CLI Reference](cli.md) (SSH console + in-app console)
 - **Core concepts**: [Architecture](architecture.md) and [Dataplane](dataplane.md)
 - **ICS/OT**: [ICS DPI](ics-dpi.md) -- protocol decoders, learn/enforce modes, per-protocol configuration

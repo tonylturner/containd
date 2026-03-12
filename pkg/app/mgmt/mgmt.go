@@ -498,6 +498,7 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
 		return
 	}
 	def := config.DefaultConfig()
+	config.ApplyBootstrapEnvDefaults(def)
 	def.System.Hostname = "containd"
 	def.System.Mgmt.ListenAddr = ":8080"
 	def.System.Mgmt.HTTPListenAddr = ":8080"

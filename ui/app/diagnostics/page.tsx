@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
+import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -127,6 +127,7 @@ export default function DiagnosticsPage() {
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [state, setState] = useState<InterfaceState[]>([]);
+  const [enforcementEnabled, setEnforcementEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const [pingHost, setPingHost] = useState("8.8.8.8");
@@ -180,9 +181,10 @@ export default function DiagnosticsPage() {
 
   useEffect(() => {
     (async () => {
-      const [i, s] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
+      const [i, s, dp] = await Promise.all([api.listInterfaces(), api.listInterfaceState(), fetchDataPlane()]);
       setIfaces(i ?? []);
       setState(s ?? []);
+      setEnforcementEnabled(dp?.enforcement ?? null);
     })();
   }, []);
 
@@ -192,7 +194,8 @@ export default function DiagnosticsPage() {
     () => (tcpTraceRes ? parseTraceroute(tcpTraceRes.output) : []),
     [tcpTraceRes],
   );
-  const blockDisabled = !canEdit || busy !== null;
+  const enforcementOff = enforcementEnabled === false;
+  const blockDisabled = !canEdit || busy !== null || enforcementOff;
 
   return (
     <Shell title="Diagnostics">
@@ -591,11 +594,19 @@ export default function DiagnosticsPage() {
 
         <Card title="Temporary Blocks" padding="lg">
           <div className="text-xs text-[var(--text-muted)]">
-            Push short-lived blocks into nftables. These are best-effort and expire automatically.
+            Push short-lived blocks into nftables. These are best-effort and expire automatically when dataplane
+            enforcement is enabled.
           </div>
           {!canEdit && (
             <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
               Admin access required to apply blocks.
+            </div>
+          )}
+          {canEdit && enforcementOff && (
+            <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+              Dataplane enforcement is off, so temporary block actions are disabled. Enable enforcement on the
+              Dataplane page or set <span className="font-semibold">CONTAIND_ENFORCE_ENABLED=1</span> in your lab
+              compose.
             </div>
           )}
           <div className="mt-4 grid gap-4">
@@ -641,7 +652,7 @@ export default function DiagnosticsPage() {
                         setBusy("block-host");
                         const ttl = blockHostTTL.trim() ? Number(blockHostTTL.trim()) : 0;
                         const res = await api.blockHostTemp(blockHostIP.trim(), Number.isFinite(ttl) ? ttl : undefined);
-                        if (!res) setBlockErr("Failed to apply host block.");
+                        if (!res.ok) setBlockErr(res.error || "Failed to apply host block.");
                         else setBlockMsg(`Blocked host ${blockHostIP.trim()}.`);
                         setBusy(null);
                       },
@@ -733,7 +744,7 @@ export default function DiagnosticsPage() {
                           dstPort: blockFlowPort.trim(),
                           ttlSeconds: Number.isFinite(ttl) ? ttl : undefined,
                         });
-                        if (!res) setBlockErr("Failed to apply flow block.");
+                        if (!res.ok) setBlockErr(res.error || "Failed to apply flow block.");
                         else setBlockMsg(`Blocked flow ${blockFlowSrc.trim()} -> ${blockFlowDst.trim()}:${blockFlowPort.trim()}.`);
                         setBusy(null);
                       },

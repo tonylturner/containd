@@ -1,8 +1,13 @@
 # containd — starter lab compose
-# Usage:
-#   curl -O https://raw.githubusercontent.com/tonylturner/containd/main/deploy/docker-compose.yml
-#   curl -o .env https://raw.githubusercontent.com/tonylturner/containd/main/.env.example
-#   # Edit .env and set a real CONTAIND_JWT_SECRET before starting
+# Recommended quick start:
+#   curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/quickstart.sh
+#   sh quickstart.sh
+#
+# Advanced starter setup:
+#   curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
+#   sh bootstrap-starter.sh --dir containd-lab --no-start
+#   cd containd-lab
+#   # Edit .env if you want custom ports, subnets, or image tags
 #   docker compose up -d
 #
 # Web UI:  http://localhost:8080
@@ -23,6 +28,8 @@
 # Edit the subnet/IP variables in .env to match your lab. Docker/Compose owns
 # the available interfaces and Docker-level IP wiring; containd owns zone
 # binding, firewall policy, services, and segmentation inside that topology.
+# Starter mode enables enforcement by default so container-to-container traffic
+# can be segmented immediately after initial zone/policy setup.
 #
 # ──────────────────────────────────────────────────────────────────
 # PRODUCTION HARDENING
@@ -52,6 +59,9 @@
 services:
   containd:
     image: ${CONTAIND_IMAGE:-ghcr.io/tonylturner/containd:latest}
+    # Root is required for nftables, routing, and TUN operations across Docker runtimes,
+    # including Docker Desktop-backed classroom/lab environments.
+    user: "0"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -63,7 +73,7 @@ services:
       - CONTAIND_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://127.0.0.1:8081}
       - CONTAIND_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
       - CONTAIND_CAPTURE_IFACES=${CONTAIND_CAPTURE_IFACES:-}
-      - CONTAIND_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-0}
+      - CONTAIND_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-1}
       - CONTAIND_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
       - CONTAIND_AUDIT_DB=${CONTAIND_AUDIT_DB:-/data/audit.db}
       - CONTAIND_USERS_DB=${CONTAIND_USERS_DB:-/data/users.db}

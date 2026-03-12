@@ -3,19 +3,25 @@ set -euo pipefail
 
 cmd="${1:-up}"
 shift || true
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+compose_file="$repo_root/deploy/docker-compose.yml"
+env_args=()
+if [[ -f "$repo_root/.env" ]]; then
+  env_args=(--env-file "$repo_root/.env")
+fi
 
 case "${cmd}" in
   up)
     # Starts the published starter compose in detached mode and prints connection info immediately after.
-    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" up -d "$@"
+    docker compose "${env_args[@]}" -f "$compose_file" up -d "$@"
     echo ""
     bash "$(dirname "$0")/containd-connect" containd || true
     ;;
   down)
-    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" down "$@"
+    docker compose "${env_args[@]}" -f "$compose_file" down "$@"
     ;;
   logs)
-    docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" logs -f "$@"
+    docker compose "${env_args[@]}" -f "$compose_file" logs -f "$@"
     ;;
   connect)
     bash "$(dirname "$0")/containd-connect" "${1:-containd}"

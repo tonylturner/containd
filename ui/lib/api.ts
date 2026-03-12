@@ -1298,7 +1298,7 @@ export const api = {
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
   setNAT: (cfg: NATConfig) => postJSONResult<NATConfig>("/api/v1/firewall/nat", cfg),
   blockHostTemp: (ip: string, ttlSeconds?: number) =>
-    postJSON<{ status: string }>("/api/v1/dataplane/blocks/host", {
+    postJSONResult<{ status: string }>("/api/v1/dataplane/blocks/host", {
       ip,
       ttlSeconds,
     }),
@@ -1309,7 +1309,7 @@ export const api = {
     dstPort: string;
     ttlSeconds?: number;
   }) =>
-    postJSON<{ status: string }>("/api/v1/dataplane/blocks/flow", req),
+    postJSONResult<{ status: string }>("/api/v1/dataplane/blocks/flow", req),
 
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSONResult<Asset>("/api/v1/assets", a),

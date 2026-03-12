@@ -59,7 +59,7 @@ The following environment variables control runtime behavior. They are read at s
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTAIND_CAPTURE_IFACES` | *(empty)* | Comma-separated list of interfaces to capture on |
-| `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable) |
+| `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable). The published starter and dev compose files override this to `1` by default. |
 | `CONTAIND_DPI_MOCK` | `0` | Enable synthetic DPI event generation for testing (`1` to enable) |
 
 ### DPI Configuration (Runtime)

@@ -80,7 +80,7 @@ func (c *HTTPClient) ApplyRules(ctx context.Context, snap rules.Snapshot) error 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine apply_rules status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine apply_rules status")
 	}
 	return nil
 }

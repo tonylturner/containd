@@ -68,7 +68,10 @@ func Run(ctx context.Context, opts Options) error {
 	ownership := newOwnershipManager(logger)
 
 	ifaces := opts.CaptureInterfaces
-	enforceEnabled := false
+	if len(ifaces) == 0 {
+		ifaces = common.EnvCSV("CONTAIND_CAPTURE_IFACES")
+	}
+	enforceEnabled := common.EnvBool("CONTAIND_ENFORCE_ENABLED", false)
 	if opts.EnforceEnabled != nil {
 		enforceEnabled = *opts.EnforceEnabled
 	}
