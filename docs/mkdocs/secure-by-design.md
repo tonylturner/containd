@@ -40,13 +40,25 @@ CISA's examples also make several expectations clear:
 - Security logs should be part of the baseline product.
 - Vulnerability reporting and advisory practices should be public and predictable.
 
+## Pledge Status at a Glance
+
+| Commitment | Status | containd today |
+| ---------- | ------ | -------------- |
+| Multi-factor authentication | Done | Optional app-based TOTP MFA is built in for local accounts, including admin-enforced MFA with a 7-day grace period. |
+| Reducing default passwords | Partial | Fresh installs still use a universal bootstrap password, but password change is mandatory on first login and the caveat is documented openly. |
+| Reducing an entire class of vulnerability | Partial | containd already emphasizes safer defaults, signed releases, SBOMs, scanning, and defensive validation, but this remains an ongoing engineering program rather than a finished milestone. |
+| Increasing customer installation of security patches | Partial | Releases, signed images, SBOMs, and update policy guidance are in place, but patch adoption still depends on operator action and is not measured centrally. |
+| Publishing a vulnerability disclosure policy | Done | Public `SECURITY.md` and machine-readable `security.txt` are implemented and shipped. |
+| Improving CVE transparency and completeness | Partial | containd now documents a GitHub advisory/CVE/CSAF process, but long-term completeness depends on continued execution as real advisories are published. |
+| Increasing the ability for customers to gather evidence of intrusions | Done | Audit logs, events, DPI telemetry, syslog/export, and logging guidance are part of the base product. |
+
 ## containd's Position
 
 containd is intended to meet the Secure by Design pledge in practice and align with the broader Secure by Design guidance. The current project position is:
 
 - containd already implements a number of the expected secure-by-default controls in the base product.
 - containd has one visible current caveat: fresh installs still use a universal bootstrap password that must be changed on first login.
-- containd also has several roadmap items that will make pledge alignment easier to verify publicly, especially around MFA and more formalized security process artifacts.
+- containd has completed the first wave of security-process work around MFA, disclosure policy, CSAF, logging guidance, and update policy, and now has a smaller follow-on roadmap focused on auth maturity and stronger bootstrap posture.
 
 This is intentional transparency. The point of this page is to show both what is already true and what still needs to be strengthened.
 
@@ -86,10 +98,9 @@ Current caveat:
 - SMS is intentionally not supported;
 - broader external identity integration and richer auth policy are still future work.
 
-Roadmap:
+Next steps:
 
 - keep MFA focused on authenticator apps such as Google Authenticator and Microsoft Authenticator;
-- keep the UI lightweight and avoid mandatory friction for lab users who do not need MFA on every account;
 - add stronger external identity options later, especially OIDC;
 - expand beyond the current `admin` and `view` roles into more robust role management.
 
@@ -122,7 +133,7 @@ Areas to keep improving:
 - track root causes over time rather than only counting fixes;
 - keep using memory-safe implementation languages where practical. The core management and control-plane code is already written in Go, which avoids many classic memory-safety issues common in C/C++ products.
 
-Roadmap:
+Next steps:
 
 - publish a short public note on the classes containd is deliberately trying to minimize, such as injection bugs, secret exposure, and unsafe parsing behavior;
 - use CVE/CWE history as an engineering learning signal rather than a vanity metric.
@@ -145,6 +156,12 @@ Implemented direction:
 - [`Update Policy`](update-policy.md) now documents the supported release posture, operator update expectations, and the secure update workflow for lab and production-style environments;
 - release notes, changelog entries, and machine-readable artifacts are meant to stay aligned so operators can update quickly.
 
+Next steps:
+
+- keep the update policy current as release process and support expectations evolve;
+- keep security-sensitive dependency updates explicit in release notes and advisories;
+- improve operator-facing upgrade guidance as the project approaches a more stable minor-release cadence.
+
 ### 5. Vulnerability Disclosure Policy (VDP)
 
 Current alignment:
@@ -152,11 +169,11 @@ Current alignment:
 - [SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) now acts as the project's public vulnerability disclosure policy and coordinated disclosure statement.
 - containd also publishes a machine-readable `security.txt` for discoverability.
 
-Current gap:
+Current caveat:
 
 - the project should continue tightening the policy over time as the advisory process matures, especially if it begins issuing more formal security advisories and CVEs on a regular basis.
 
-Roadmap:
+Next steps:
 
 - keep `SECURITY.md` as the human-readable disclosure policy;
 - keep `security.txt` current and discoverable in shipped deployments;
@@ -168,13 +185,10 @@ Current alignment:
 
 - containd already publishes versioned releases, signed images, SBOMs, and changelogs;
 - security-sensitive dependency fixes are called out in release notes when they occur.
-
-Current alignment:
-
 - containd now documents a lightweight advisory, CVE, and CSAF process in [`Advisories and CSAF`](advisories.md);
 - the project publishes provider metadata and repository layout for machine-readable advisory artifacts.
 
-Ongoing work:
+Next steps:
 
 - include CWE/root-cause information whenever practical;
 - keep changelog, GitHub advisories, and CSAF documents aligned as real advisories are published.
@@ -185,12 +199,9 @@ Current alignment:
 
 - containd already includes audit logs, runtime service events, firewall and DPI telemetry, syslog forwarding, event export in CEF/JSON/Syslog, monitoring views, and Prometheus metrics;
 - those capabilities are part of the base product and do not require a paid tier.
-
-Current alignment:
-
 - [`Logging and Evidence`](logging-evidence.md) now documents the major evidence surfaces, forwarding options, retention expectations, and recommended lab posture.
 
-Ongoing work:
+Next steps:
 
 - continue improving event quality for identity, configuration, and policy-change visibility.
 
@@ -239,8 +250,9 @@ The goal is not only to teach traffic segmentation. It is also to train students
 
 ### Near Term
 
-- keep the disclosure, CSAF, logging, and update-policy documents current as releases and advisories evolve
 - gather operational feedback on the local-account TOTP MFA flow and keep it lightweight
+- keep the disclosure, CSAF, logging, and update-policy documents current as releases and advisories evolve
+- make sure the first real public advisories use the documented GitHub advisory, release-note, and CSAF process consistently
 
 ### Medium Term
 
@@ -252,6 +264,7 @@ The goal is not only to teach traffic segmentation. It is also to train students
 
 - evaluate a stronger per-instance bootstrap path that preserves first-access reliability for labs while reducing dependence on a universal bootstrap password
 - continue improving the public evidence trail around advisories, patching, and measurable security progress
+- revisit whether patch-adoption guidance can be made more prescriptive as the supported deployment modes stabilize
 
 ## Bottom Line
 
