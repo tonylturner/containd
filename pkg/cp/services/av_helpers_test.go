@@ -4,6 +4,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -78,7 +79,19 @@ func startClamAVTestSocket(t *testing.T, response string) string {
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
 				buf := make([]byte, 4096)
-				_, _ = c.Read(buf)
+				var payload []byte
+				for {
+					n, err := c.Read(buf)
+					if n > 0 {
+						payload = append(payload, buf[:n]...)
+						if bytes.Contains(payload, []byte{0, 0, 0, 0}) {
+							break
+						}
+					}
+					if err != nil {
+						return
+					}
+				}
 				_, _ = c.Write([]byte(response + "\n"))
 			}(conn)
 		}
