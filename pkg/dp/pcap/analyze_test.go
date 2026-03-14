@@ -6,6 +6,7 @@ package pcap
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,8 +50,8 @@ func buildModbusEthernetFrame() []byte {
 	binary.BigEndian.PutUint16(mbap[0:], 1)   // transaction ID
 	binary.BigEndian.PutUint16(mbap[2:], 0)   // protocol ID
 	binary.BigEndian.PutUint16(mbap[4:], 6)   // length (unit + fc + 4 PDU bytes)
-	mbap[6] = 1                                // unit ID
-	mbap[7] = 3                                // function code (Read Holding Registers)
+	mbap[6] = 1                               // unit ID
+	mbap[7] = 3                               // function code (Read Holding Registers)
 	binary.BigEndian.PutUint16(mbap[8:], 0)   // start address
 	binary.BigEndian.PutUint16(mbap[10:], 10) // quantity
 
@@ -85,6 +86,45 @@ func buildModbusEthernetFrame() []byte {
 	frame = append(frame, ip...)
 	frame = append(frame, tcp...)
 	frame = append(frame, mbap...)
+	return frame
+}
+
+func buildIPv6EthernetFrame() []byte {
+	payload := []byte("hello over ipv6")
+
+	tcp := make([]byte, 20)
+	binary.BigEndian.PutUint16(tcp[0:], 12345)
+	binary.BigEndian.PutUint16(tcp[2:], 443)
+	tcp[12] = 5 << 4
+
+	ip := make([]byte, 40)
+	ip[0] = 0x60
+	binary.BigEndian.PutUint16(ip[4:], uint16(len(tcp)+len(payload)))
+	ip[6] = 6
+	ip[7] = 64
+	copy(ip[8:24], []byte{
+		0x20, 0x01, 0x0d, 0xb8,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 1,
+	})
+	copy(ip[24:40], []byte{
+		0x20, 0x01, 0x0d, 0xb8,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 2,
+	})
+
+	eth := make([]byte, 14)
+	eth[5] = 2
+	eth[11] = 1
+	binary.BigEndian.PutUint16(eth[12:], 0x86DD)
+
+	var frame []byte
+	frame = append(frame, eth...)
+	frame = append(frame, ip...)
+	frame = append(frame, tcp...)
+	frame = append(frame, payload...)
 	return frame
 }
 
@@ -203,6 +243,44 @@ func TestAnalyzePacketCounting(t *testing.T) {
 	}
 	if len(result.Flows) > 0 && result.Flows[0].Packets != 2 {
 		t.Errorf("flow Packets = %d, want 2", result.Flows[0].Packets)
+	}
+}
+
+func TestAnalyzeForPolicy(t *testing.T) {
+	frame := buildModbusEthernetFrame()
+	pcapData := buildPCAP([][]byte{frame})
+
+	result, err := AnalyzeForPolicy(bytes.NewReader(pcapData), modbus.NewDecoder())
+	if err != nil {
+		t.Fatalf("AnalyzeForPolicy() error: %v", err)
+	}
+	if result.Stats.PacketCount != 1 {
+		t.Fatalf("PacketCount = %d, want 1", result.Stats.PacketCount)
+	}
+	if result.EventSummary["modbus"] == 0 {
+		t.Fatalf("expected modbus event summary, got %#v", result.EventSummary)
+	}
+	if len(result.Profiles) == 0 {
+		t.Fatal("expected learned profiles")
+	}
+}
+
+func TestAnalyzeIPv6Packet(t *testing.T) {
+	frame := buildIPv6EthernetFrame()
+	pcapData := buildPCAP([][]byte{frame})
+
+	result, err := Analyze(bytes.NewReader(pcapData))
+	if err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if result.PacketCount != 1 || len(result.Flows) != 1 {
+		t.Fatalf("unexpected ipv6 analysis result: %#v", result)
+	}
+	if result.Flows[0].Protocol != "tcp" {
+		t.Fatalf("flow protocol = %q, want tcp", result.Flows[0].Protocol)
+	}
+	if !strings.Contains(result.Flows[0].Key, "2001:db8") {
+		t.Fatalf("flow key %q does not look ipv6", result.Flows[0].Key)
 	}
 }
 

@@ -29,38 +29,38 @@ const (
 // Known service node IDs for MSG requests and responses.
 const (
 	// Attribute services
-	ServiceReadRequest    = 629
-	ServiceReadResponse   = 632
-	ServiceWriteRequest   = 671
-	ServiceWriteResponse  = 674
-	ServiceHistoryReadRequest  = 673
-	ServiceHistoryReadResponse = 676
+	ServiceReadRequest           = 629
+	ServiceReadResponse          = 632
+	ServiceWriteRequest          = 671
+	ServiceWriteResponse         = 674
+	ServiceHistoryReadRequest    = 673
+	ServiceHistoryReadResponse   = 676
 	ServiceHistoryUpdateRequest  = 700
 	ServiceHistoryUpdateResponse = 703
 
 	// View services
-	ServiceBrowseRequest     = 525
-	ServiceBrowseResponse    = 528
-	ServiceBrowseNextRequest  = 531
-	ServiceBrowseNextResponse = 534
+	ServiceBrowseRequest                = 525
+	ServiceBrowseResponse               = 528
+	ServiceBrowseNextRequest            = 531
+	ServiceBrowseNextResponse           = 534
 	ServiceTranslateBrowsePathsRequest  = 554 // TranslateBrowsePathsToNodeIds is typically 554
 	ServiceTranslateBrowsePathsResponse = 557
 
 	// Session services
-	ServiceCreateSessionRequest   = 459
-	ServiceCreateSessionResponse  = 462
+	ServiceCreateSessionRequest    = 459
+	ServiceCreateSessionResponse   = 462
 	ServiceActivateSessionRequest  = 465 // ActivateSession request
 	ServiceActivateSessionResponse = 468
-	ServiceCloseSessionRequest    = 471
-	ServiceCloseSessionResponse   = 474
+	ServiceCloseSessionRequest     = 471
+	ServiceCloseSessionResponse    = 474
 
 	// Node management
-	ServiceAddNodesRequest       = 486
-	ServiceAddNodesResponse      = 489
-	ServiceDeleteNodesRequest    = 498
-	ServiceDeleteNodesResponse   = 501
-	ServiceAddReferencesRequest  = 502
-	ServiceAddReferencesResponse = 505
+	ServiceAddNodesRequest          = 486
+	ServiceAddNodesResponse         = 489
+	ServiceDeleteNodesRequest       = 498
+	ServiceDeleteNodesResponse      = 501
+	ServiceAddReferencesRequest     = 502
+	ServiceAddReferencesResponse    = 505
 	ServiceDeleteReferencesRequest  = 506
 	ServiceDeleteReferencesResponse = 509
 
@@ -69,14 +69,14 @@ const (
 	ServiceCallResponse = 713
 
 	// Subscription services
-	ServiceCreateSubscriptionRequest  = 785
-	ServiceCreateSubscriptionResponse = 788
-	ServiceModifySubscriptionRequest  = 793
-	ServiceModifySubscriptionResponse = 796
+	ServiceCreateSubscriptionRequest   = 785
+	ServiceCreateSubscriptionResponse  = 788
+	ServiceModifySubscriptionRequest   = 793
+	ServiceModifySubscriptionResponse  = 796
 	ServiceDeleteSubscriptionsRequest  = 799
 	ServiceDeleteSubscriptionsResponse = 802
-	ServicePublishRequest  = 826
-	ServicePublishResponse = 829
+	ServicePublishRequest              = 826
+	ServicePublishResponse             = 829
 
 	// MonitoredItem services
 	ServiceCreateMonitoredItemsRequest  = 749
@@ -88,7 +88,7 @@ const (
 )
 
 var (
-	ErrTooShort      = errors.New("opcua message too short")
+	ErrTooShort       = errors.New("opcua message too short")
 	ErrInvalidMsgType = errors.New("opcua invalid message type")
 )
 
@@ -186,44 +186,44 @@ func isValidMsgType(s string) bool {
 // serviceNameMap maps OPC UA service node IDs to human-readable names.
 // Using a map avoids a long switch in the hot path while keeping O(1) lookup.
 var serviceNameMap = map[uint16]string{
-	ServiceReadRequest:    "read-request",
-	ServiceReadResponse:   "read-response",
-	ServiceWriteRequest:   "write-request",
-	ServiceWriteResponse:  "write-response",
-	ServiceHistoryReadRequest:  "history-read-request",
-	ServiceHistoryReadResponse: "history-read-response",
-	ServiceHistoryUpdateRequest:  "history-update-request",
-	ServiceHistoryUpdateResponse: "history-update-response",
-	ServiceBrowseRequest:     "browse-request",
-	ServiceBrowseResponse:    "browse-response",
-	ServiceBrowseNextRequest:  "browse-next-request",
-	ServiceBrowseNextResponse: "browse-next-response",
+	ServiceReadRequest:                  "read-request",
+	ServiceReadResponse:                 "read-response",
+	ServiceWriteRequest:                 "write-request",
+	ServiceWriteResponse:                "write-response",
+	ServiceHistoryReadRequest:           "history-read-request",
+	ServiceHistoryReadResponse:          "history-read-response",
+	ServiceHistoryUpdateRequest:         "history-update-request",
+	ServiceHistoryUpdateResponse:        "history-update-response",
+	ServiceBrowseRequest:                "browse-request",
+	ServiceBrowseResponse:               "browse-response",
+	ServiceBrowseNextRequest:            "browse-next-request",
+	ServiceBrowseNextResponse:           "browse-next-response",
 	ServiceTranslateBrowsePathsRequest:  "translate-browse-paths-request",
 	ServiceTranslateBrowsePathsResponse: "translate-browse-paths-response",
-	ServiceCreateSessionRequest:   "create-session-request",
-	ServiceCreateSessionResponse:  "create-session-response",
-	ServiceActivateSessionRequest:  "activate-session-request",
-	ServiceActivateSessionResponse: "activate-session-response",
-	ServiceCloseSessionRequest:    "close-session-request",
-	ServiceCloseSessionResponse:   "close-session-response",
-	ServiceAddNodesRequest:       "add-nodes-request",
-	ServiceAddNodesResponse:      "add-nodes-response",
-	ServiceDeleteNodesRequest:    "delete-nodes-request",
-	ServiceDeleteNodesResponse:   "delete-nodes-response",
-	ServiceAddReferencesRequest:  "add-references-request",
-	ServiceAddReferencesResponse: "add-references-response",
-	ServiceDeleteReferencesRequest:  "delete-references-request",
-	ServiceDeleteReferencesResponse: "delete-references-response",
-	ServiceCallRequest:  "call-request",
-	ServiceCallResponse: "call-response",
-	ServiceCreateSubscriptionRequest:  "create-subscription-request",
-	ServiceCreateSubscriptionResponse: "create-subscription-response",
-	ServiceModifySubscriptionRequest:  "modify-subscription-request",
-	ServiceModifySubscriptionResponse: "modify-subscription-response",
-	ServiceDeleteSubscriptionsRequest:  "delete-subscriptions-request",
-	ServiceDeleteSubscriptionsResponse: "delete-subscriptions-response",
-	ServicePublishRequest:  "publish-request",
-	ServicePublishResponse: "publish-response",
+	ServiceCreateSessionRequest:         "create-session-request",
+	ServiceCreateSessionResponse:        "create-session-response",
+	ServiceActivateSessionRequest:       "activate-session-request",
+	ServiceActivateSessionResponse:      "activate-session-response",
+	ServiceCloseSessionRequest:          "close-session-request",
+	ServiceCloseSessionResponse:         "close-session-response",
+	ServiceAddNodesRequest:              "add-nodes-request",
+	ServiceAddNodesResponse:             "add-nodes-response",
+	ServiceDeleteNodesRequest:           "delete-nodes-request",
+	ServiceDeleteNodesResponse:          "delete-nodes-response",
+	ServiceAddReferencesRequest:         "add-references-request",
+	ServiceAddReferencesResponse:        "add-references-response",
+	ServiceDeleteReferencesRequest:      "delete-references-request",
+	ServiceDeleteReferencesResponse:     "delete-references-response",
+	ServiceCallRequest:                  "call-request",
+	ServiceCallResponse:                 "call-response",
+	ServiceCreateSubscriptionRequest:    "create-subscription-request",
+	ServiceCreateSubscriptionResponse:   "create-subscription-response",
+	ServiceModifySubscriptionRequest:    "modify-subscription-request",
+	ServiceModifySubscriptionResponse:   "modify-subscription-response",
+	ServiceDeleteSubscriptionsRequest:   "delete-subscriptions-request",
+	ServiceDeleteSubscriptionsResponse:  "delete-subscriptions-response",
+	ServicePublishRequest:               "publish-request",
+	ServicePublishResponse:              "publish-response",
 	ServiceCreateMonitoredItemsRequest:  "create-monitored-items-request",
 	ServiceCreateMonitoredItemsResponse: "create-monitored-items-response",
 	ServiceModifyMonitoredItemsRequest:  "modify-monitored-items-request",

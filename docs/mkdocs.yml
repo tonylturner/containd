@@ -58,6 +58,9 @@ nav:
       - Dataplane: dataplane.md
       - Enforcement: dataplane-enforcement.md
       - eBPF: ebpf.md
+      - Testing and Coverage: testing.md
+      - Performance Baseline: performance.md
+      - Code Boundaries: code-boundaries.md
   - Policy:
       - Policy Model: policy-model.md
       - ICS DPI: ics-dpi.md
@@ -68,6 +71,7 @@ nav:
       - Audit Baseline: audit-baseline.md
   - Security:
       - Secure by Design: secure-by-design.md
+      - Threat Model: threat-model.md
       - Advisories and CSAF: advisories.md
       - Logging and Evidence: logging-evidence.md
       - Update Policy: update-policy.md

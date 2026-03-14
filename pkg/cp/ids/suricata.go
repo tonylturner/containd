@@ -44,23 +44,23 @@ var suricataPriorityMap = map[int]string{
 // classtypeSeverityMap maps common classtypes to default severity when no
 // explicit priority is set.
 var classtypeSeverityMap = map[string]string{
-	"trojan-activity":          "high",
-	"attempted-admin":          "high",
-	"attempted-user":           "medium",
-	"shellcode-detect":         "critical",
-	"successful-admin":         "critical",
-	"successful-user":          "high",
-	"web-application-attack":   "high",
-	"policy-violation":         "medium",
-	"bad-unknown":              "medium",
-	"misc-activity":            "low",
-	"not-suspicious":           "low",
-	"protocol-command-decode":  "medium",
-	"network-scan":             "medium",
-	"denial-of-service":        "high",
-	"attempted-dos":            "medium",
-	"attempted-recon":          "low",
-	"successful-recon-limited": "medium",
+	"trojan-activity":             "high",
+	"attempted-admin":             "high",
+	"attempted-user":              "medium",
+	"shellcode-detect":            "critical",
+	"successful-admin":            "critical",
+	"successful-user":             "high",
+	"web-application-attack":      "high",
+	"policy-violation":            "medium",
+	"bad-unknown":                 "medium",
+	"misc-activity":               "low",
+	"not-suspicious":              "low",
+	"protocol-command-decode":     "medium",
+	"network-scan":                "medium",
+	"denial-of-service":           "high",
+	"attempted-dos":               "medium",
+	"attempted-recon":             "low",
+	"successful-recon-limited":    "medium",
 	"successful-recon-largescale": "high",
 }
 
@@ -84,86 +84,114 @@ func ConvertSuricataFiles(paths []string) ([]config.IDSRule, error) {
 // parseSuricataSnortLine is the shared parser for both Suricata and Snort rules.
 func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 	trimmed := strings.TrimSpace(line)
-
-	// Skip blank lines and comments.
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+	if isSkippedSuricataLine(trimmed) {
 		return config.IDSRule{}, nil
 	}
-
-	// Find the options section in parentheses.
-	optStart := strings.Index(trimmed, "(")
-	optEnd := strings.LastIndex(trimmed, ")")
-	if optStart < 0 || optEnd < 0 || optEnd <= optStart {
-		return config.IDSRule{}, fmt.Errorf("malformed rule: missing options parentheses")
+	header, optionsRaw, err := splitRuleHeaderAndOptions(trimmed)
+	if err != nil {
+		return config.IDSRule{}, err
 	}
+	fields, err := parseRuleHeaderFields(header)
+	if err != nil {
+		return config.IDSRule{}, err
+	}
+	opts := parseOptions(optionsRaw)
+	rule := buildBaseIDSRule(trimmed, sourceFormat, fields)
+	applyRuleIdentity(&rule, opts, sourceFormat)
+	applyRuleSeverityAndLabels(&rule, opts)
+	applyRuleReferencesAndMetadata(&rule, opts)
+	applyRuleSourceFormatFields(&rule, opts, sourceFormat)
+	rule.ContentMatches = parseContentMatches(opts)
+	rule.When = buildWhenFromOptions(opts, fields.protocol)
+	rule.ConversionNotes = buildConversionNotes(opts, fields.protocol)
+	if err := ensureRuleIdentity(&rule, sourceFormat); err != nil {
+		return config.IDSRule{}, err
+	}
+	return rule, nil
+}
 
-	header := strings.TrimSpace(trimmed[:optStart])
-	optionsRaw := trimmed[optStart+1 : optEnd]
+type suricataHeaderFields struct {
+	action   string
+	protocol string
+	srcAddr  string
+	srcPort  string
+	dstAddr  string
+	dstPort  string
+}
 
-	// Parse header: action protocol src_addr src_port direction dst_addr dst_port
+func isSkippedSuricataLine(line string) bool {
+	return line == "" || strings.HasPrefix(line, "#")
+}
+
+func splitRuleHeaderAndOptions(line string) (string, string, error) {
+	optStart := strings.Index(line, "(")
+	optEnd := strings.LastIndex(line, ")")
+	if optStart < 0 || optEnd < 0 || optEnd <= optStart {
+		return "", "", fmt.Errorf("malformed rule: missing options parentheses")
+	}
+	return strings.TrimSpace(line[:optStart]), line[optStart+1 : optEnd], nil
+}
+
+func parseRuleHeaderFields(header string) (suricataHeaderFields, error) {
 	hParts := strings.Fields(header)
 	if len(hParts) < 7 {
-		return config.IDSRule{}, fmt.Errorf("malformed rule header: expected at least 7 fields, got %d", len(hParts))
+		return suricataHeaderFields{}, fmt.Errorf("malformed rule header: expected at least 7 fields, got %d", len(hParts))
 	}
+	return suricataHeaderFields{
+		action:   strings.ToLower(hParts[0]),
+		protocol: strings.ToLower(hParts[1]),
+		srcAddr:  hParts[2],
+		srcPort:  hParts[3],
+		dstAddr:  hParts[5],
+		dstPort:  hParts[6],
+	}, nil
+}
 
-	action := strings.ToLower(hParts[0])
-	protocol := strings.ToLower(hParts[1])
-	srcAddr := hParts[2]
-	srcPort := hParts[3]
-	// hParts[4] is direction (-> or <>)
-	dstAddr := hParts[5]
-	dstPort := hParts[6]
-
-	// Parse options.
-	opts := parseOptions(optionsRaw)
-
+func buildBaseIDSRule(raw, sourceFormat string, fields suricataHeaderFields) config.IDSRule {
 	rule := config.IDSRule{
-		Labels: map[string]string{},
+		Labels:       map[string]string{},
+		SourceFormat: sourceFormat,
+		RawSource:    raw,
+		Action:       fields.action,
+		SrcAddr:      fields.srcAddr,
+		DstAddr:      fields.dstAddr,
+		SrcPort:      fields.srcPort,
+		DstPort:      fields.dstPort,
 	}
+	rule.Proto = deriveRuleProtocol(fields.protocol, fields.srcPort, fields.dstPort)
+	return rule
+}
 
-	// SourceFormat and RawSource.
-	rule.SourceFormat = sourceFormat
-	rule.RawSource = trimmed
-	rule.Action = action
-
-	// Network fields.
-	rule.SrcAddr = srcAddr
-	rule.DstAddr = dstAddr
-	rule.SrcPort = srcPort
-	rule.DstPort = dstPort
-
-	// Protocol header -> Proto field.
+func deriveRuleProtocol(protocol, srcPort, dstPort string) string {
 	if protocol != "ip" {
-		rule.Proto = protocol
-	}
-
-	// Map well-known ports to Proto if not already set from protocol header
-	// (e.g., protocol=tcp but dst port=502 -> modbus).
-	if rule.Proto == "tcp" || rule.Proto == "udp" || rule.Proto == "" {
-		if p, ok := portProtoMap[dstPort]; ok {
-			rule.Proto = p
-		} else if p, ok := portProtoMap[srcPort]; ok {
-			rule.Proto = p
+		if protocol != "tcp" && protocol != "udp" {
+			return protocol
 		}
 	}
-
-	// Extract standard option keywords.
-	prefix := "suricata-"
-	if sourceFormat == "snort" {
-		prefix = "snort-"
+	if p, ok := portProtoMap[dstPort]; ok {
+		return p
 	}
+	if p, ok := portProtoMap[srcPort]; ok {
+		return p
+	}
+	if protocol == "ip" {
+		return ""
+	}
+	return protocol
+}
 
+func applyRuleIdentity(rule *config.IDSRule, opts [][2]string, sourceFormat string) {
+	prefix := sourceFormatPrefix(sourceFormat)
 	if sid := optVal(opts, "sid"); sid != "" {
 		rule.ID = prefix + sid
 	}
-
 	if msg := optVal(opts, "msg"); msg != "" {
-		// msg values are typically quoted.
 		rule.Title = unquote(msg)
 		rule.Message = rule.Title
 	}
+}
 
-	// Severity: explicit priority takes precedence, then classtype defaults.
+func applyRuleSeverityAndLabels(rule *config.IDSRule, opts [][2]string) {
 	if pri := optVal(opts, "priority"); pri != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(pri)); err == nil {
 			if sev, ok := suricataPriorityMap[n]; ok {
@@ -171,8 +199,6 @@ func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 			}
 		}
 	}
-
-	// Classtype -> label and fallback severity.
 	if ct := optVal(opts, "classtype"); ct != "" {
 		rule.Labels["classtype"] = ct
 		if rule.Severity == "" {
@@ -181,64 +207,65 @@ func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 			}
 		}
 	}
-
-	// Rev.
 	if rev := optVal(opts, "rev"); rev != "" {
 		rule.Labels["rev"] = rev
 	}
+}
 
-	// References.
+func applyRuleReferencesAndMetadata(rule *config.IDSRule, opts [][2]string) {
 	for _, v := range optVals(opts, "reference") {
 		rule.References = append(rule.References, strings.TrimSpace(v))
 	}
-
-	// Metadata: parse key-value pairs, extract CVE and MITRE ATT&CK IDs.
 	for _, v := range optVals(opts, "metadata") {
-		for _, item := range strings.Split(v, ",") {
-			item = strings.TrimSpace(item)
-			if item == "" {
-				continue
-			}
-			lower := strings.ToLower(item)
-			if strings.HasPrefix(lower, "cve ") || strings.HasPrefix(lower, "cve_") {
-				cve := strings.TrimSpace(item[4:])
-				rule.CVE = append(rule.CVE, cve)
-			} else if strings.HasPrefix(lower, "mitre_attack_") || strings.HasPrefix(lower, "attack.") {
-				rule.MITREAttackIDs = append(rule.MITREAttackIDs, item)
-			} else {
-				rule.Labels["metadata."+item] = ""
-			}
+		applyMetadataValue(rule, v)
+	}
+}
+
+func applyMetadataValue(rule *config.IDSRule, value string) {
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		lower := strings.ToLower(item)
+		switch {
+		case strings.HasPrefix(lower, "cve ") || strings.HasPrefix(lower, "cve_"):
+			rule.CVE = append(rule.CVE, strings.TrimSpace(item[4:]))
+		case strings.HasPrefix(lower, "mitre_attack_") || strings.HasPrefix(lower, "attack."):
+			rule.MITREAttackIDs = append(rule.MITREAttackIDs, item)
+		default:
+			rule.Labels["metadata."+item] = ""
 		}
 	}
+}
 
-	// Content keywords -> ContentMatches.
-	rule.ContentMatches = parseContentMatches(opts)
+func applyRuleSourceFormatFields(rule *config.IDSRule, opts [][2]string, sourceFormat string) {
+	if sourceFormat != "snort" {
+		return
+	}
+	for _, kw := range []string{"activated_by", "count", "tag"} {
+		if v := optVal(opts, kw); v != "" {
+			rule.Labels[kw] = v
+		}
+	}
+}
 
-	// Snort-specific keywords stored in labels.
+func ensureRuleIdentity(rule *config.IDSRule, sourceFormat string) error {
+	if rule.ID != "" {
+		return nil
+	}
+	if rule.Title == "" {
+		return fmt.Errorf("rule has no sid or msg for identification")
+	}
+	rule.ID = sourceFormatPrefix(sourceFormat) + slugify(rule.Title)
+	return nil
+}
+
+func sourceFormatPrefix(sourceFormat string) string {
 	if sourceFormat == "snort" {
-		for _, kw := range []string{"activated_by", "count", "tag"} {
-			if v := optVal(opts, kw); v != "" {
-				rule.Labels[kw] = v
-			}
-		}
+		return "snort-"
 	}
-
-	// Build When conditions from content matches that can map to DPI fields.
-	rule.When = buildWhenFromOptions(opts, protocol)
-
-	// Generate ConversionNotes for anything we couldn't fully map.
-	rule.ConversionNotes = buildConversionNotes(opts, protocol)
-
-	// Fallback ID if no sid was present.
-	if rule.ID == "" {
-		if rule.Title != "" {
-			rule.ID = prefix + slugify(rule.Title)
-		} else {
-			return config.IDSRule{}, fmt.Errorf("rule has no sid or msg for identification")
-		}
-	}
-
-	return rule, nil
+	return "suricata-"
 }
 
 // parseOptions splits the Suricata/Snort options section into keyword-value pairs.
@@ -353,34 +380,8 @@ func parseContentMatches(opts [][2]string) []config.ContentMatch {
 			}
 			current = &cm
 
-		case "nocase":
-			if current != nil {
-				current.Nocase = true
-			}
-		case "depth":
-			if current != nil {
-				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-					current.Depth = n
-				}
-			}
-		case "offset":
-			if current != nil {
-				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-					current.Offset = n
-				}
-			}
-		case "distance":
-			if current != nil {
-				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-					current.Distance = n
-				}
-			}
-		case "within":
-			if current != nil {
-				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-					current.Within = n
-				}
-			}
+		case "nocase", "depth", "offset", "distance", "within":
+			applyContentModifier(current, kw, val)
 		}
 	}
 
@@ -390,6 +391,30 @@ func parseContentMatches(opts [][2]string) []config.ContentMatch {
 	}
 
 	return matches
+}
+
+func applyContentModifier(current *config.ContentMatch, keyword, value string) {
+	if current == nil {
+		return
+	}
+	if keyword == "nocase" {
+		current.Nocase = true
+		return
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return
+	}
+	switch keyword {
+	case "depth":
+		current.Depth = n
+	case "offset":
+		current.Offset = n
+	case "distance":
+		current.Distance = n
+	case "within":
+		current.Within = n
+	}
 }
 
 // buildWhenFromOptions generates IDSCondition trees from options that can map

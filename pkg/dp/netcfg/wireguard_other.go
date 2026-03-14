@@ -17,4 +17,3 @@ func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
 	_ = cfg
 	return fmt.Errorf("wireguard apply not supported on this platform")
 }
-

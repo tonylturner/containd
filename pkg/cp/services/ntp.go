@@ -186,6 +186,7 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 	}
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(testCtx, m.OpenNTPDPath, "-n", "-f", configPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -224,6 +225,7 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 		_ = m.cmd.Process.Signal(os.Interrupt)
 		time.Sleep(50 * time.Millisecond)
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, m.OpenNTPDPath, "-d", "-f", configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

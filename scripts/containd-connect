@@ -82,7 +82,7 @@ fi
 if [[ -n "${ips}" ]]; then
   echo ""
   echo "Container IPs (per Docker network):"
-  printf "  %s\n" ${ips}
+  printf "  %s\n" "${ips}"
   echo ""
   echo "Note:"
   echo "  - These are the Docker-managed interface addresses from the starter lab topology."

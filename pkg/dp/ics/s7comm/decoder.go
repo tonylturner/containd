@@ -38,40 +38,14 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		return nil, nil
 	}
 
-	// Parse TPKT header.
-	tpkt, tpktPayload, err := ParseTPKT(pkt.Payload)
+	s7hdr, cotp, cotpPayload, rawHex, err := parseS7Packet(pkt.Payload)
 	if err != nil {
 		return nil, nil
 	}
-	_ = tpkt
-
-	// Parse COTP header.
-	cotp, cotpPayload, err := ParseCOTP(tpktPayload)
-	if err != nil {
-		return nil, nil
-	}
-
-	// Include raw hex for operator visibility (cap to avoid huge payloads).
-	raw := pkt.Payload
-	if len(raw) > 512 {
-		raw = raw[:512]
-	}
-	rawHex := hex.EncodeToString(raw)
 
 	// Handle COTP Connection Request / Connection Confirm as connection events.
 	if cotp.PDUType == COTPConnectionRequest || cotp.PDUType == COTPConnectionConfirm {
-		attrs := map[string]any{
-			"cotp_pdu_type": cotp.PDUType,
-			"raw_hex":       rawHex,
-		}
-		ev := dpi.Event{
-			FlowID:     state.Key.Hash(),
-			Proto:      "s7comm",
-			Kind:       "connection",
-			Attributes: attrs,
-			Timestamp:  time.Now().UTC(),
-		}
-		return []dpi.Event{ev}, nil
+		return []dpi.Event{newS7ConnectionEvent(state, cotp, rawHex)}, nil
 	}
 
 	// Only process COTP Data Transfer (DT) PDUs for S7comm.
@@ -79,72 +53,112 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		return nil, nil
 	}
 
-	// Parse S7comm header.
-	s7hdr, err := ParseS7Header(cotpPayload)
+	return []dpi.Event{newS7DataEvent(state, s7hdr, cotpPayload, rawHex)}, nil
+}
+
+func parseS7Packet(payload []byte) (*S7Header, *COTPHeader, []byte, string, error) {
+	tpkt, tpktPayload, err := ParseTPKT(payload)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil, "", err
 	}
-
-	// Determine event kind based on message type.
-	kind := "request"
-	switch s7hdr.MessageType {
-	case MsgTypeJob:
-		kind = "request"
-	case MsgTypeAck, MsgTypeAckData:
-		kind = "response"
-	case MsgTypeUserdata:
-		kind = "request"
+	_ = tpkt
+	cotp, cotpPayload, err := ParseCOTP(tpktPayload)
+	if err != nil {
+		return nil, nil, nil, "", err
 	}
+	s7hdr, err := ParseS7Header(cotpPayload)
+	if err != nil && cotp.PDUType == COTPData {
+		return nil, nil, nil, "", err
+	}
+	return s7hdr, cotp, cotpPayload, cappedS7RawHex(payload), nil
+}
 
+func cappedS7RawHex(payload []byte) string {
+	raw := payload
+	if len(raw) > 512 {
+		raw = raw[:512]
+	}
+	return hex.EncodeToString(raw)
+}
+
+func newS7ConnectionEvent(state *flow.State, cotp *COTPHeader, rawHex string) dpi.Event {
+	return dpi.Event{
+		FlowID: state.Key.Hash(),
+		Proto:  "s7comm",
+		Kind:   "connection",
+		Attributes: map[string]any{
+			"cotp_pdu_type": cotp.PDUType,
+			"raw_hex":       rawHex,
+		},
+		Timestamp: time.Now().UTC(),
+	}
+}
+
+func newS7DataEvent(state *flow.State, s7hdr *S7Header, cotpPayload []byte, rawHex string) dpi.Event {
 	attrs := map[string]any{
 		"message_type":  s7hdr.MessageType,
 		"pdu_reference": s7hdr.PDUReference,
 		"raw_hex":       rawHex,
 	}
-
-	// Extract function code from parameter block if available.
-	if fc, ok := S7ParamFunctionCode(cotpPayload, s7hdr); ok {
-		attrs["function_code"] = fc
-		attrs["function_name"] = FunctionCodeName(fc)
-		attrs["is_write"] = IsWriteFunctionCode(fc)
-		attrs["is_control"] = IsControlFunctionCode(fc)
-
-		// Parse variable items for Read/Write Variable requests.
-		if fc == FuncReadVar || fc == FuncWriteVar {
-			items, itemCount := ParseS7VarItems(cotpPayload, s7hdr)
-			if itemCount > 0 {
-				attrs["item_count"] = itemCount
-			}
-			if len(items) > 0 {
-				// Emit first item's details as primary attributes.
-				first := items[0]
-				attrs["area"] = AreaName(first.Area)
-				attrs["address"] = FormatAddress(first.Address)
-				if first.Area == AreaDataBlocks {
-					attrs["db_number"] = first.DBNumber
-				}
-				// Flag writes to data blocks as safety-critical.
-				if fc == FuncWriteVar && first.Area == AreaDataBlocks {
-					attrs["safety_critical"] = true
-				}
-			}
-		}
-	}
-
-	// Include error fields for Ack-Data messages.
-	if s7hdr.MessageType == MsgTypeAckData {
-		attrs["error_class"] = s7hdr.ErrorClass
-		attrs["error_code"] = s7hdr.ErrorCode
-	}
-
-	ev := dpi.Event{
+	addS7FunctionAttrs(attrs, cotpPayload, s7hdr)
+	addS7AckAttrs(attrs, s7hdr)
+	return dpi.Event{
 		FlowID:     state.Key.Hash(),
 		Proto:      "s7comm",
-		Kind:       kind,
+		Kind:       s7MessageKind(s7hdr),
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
+}
+
+func s7MessageKind(s7hdr *S7Header) string {
+	switch s7hdr.MessageType {
+	case MsgTypeAck, MsgTypeAckData:
+		return "response"
+	default:
+		return "request"
+	}
+}
+
+func addS7FunctionAttrs(attrs map[string]any, cotpPayload []byte, s7hdr *S7Header) {
+	fc, ok := S7ParamFunctionCode(cotpPayload, s7hdr)
+	if !ok {
+		return
+	}
+	attrs["function_code"] = fc
+	attrs["function_name"] = FunctionCodeName(fc)
+	attrs["is_write"] = IsWriteFunctionCode(fc)
+	attrs["is_control"] = IsControlFunctionCode(fc)
+	if fc == FuncReadVar || fc == FuncWriteVar {
+		addS7VariableAttrs(attrs, cotpPayload, s7hdr, fc)
+	}
+}
+
+func addS7VariableAttrs(attrs map[string]any, cotpPayload []byte, s7hdr *S7Header, fc byte) {
+	items, itemCount := ParseS7VarItems(cotpPayload, s7hdr)
+	if itemCount > 0 {
+		attrs["item_count"] = itemCount
+	}
+	if len(items) == 0 {
+		return
+	}
+	first := items[0]
+	attrs["area"] = AreaName(first.Area)
+	attrs["address"] = FormatAddress(first.Address)
+	if first.Area == AreaDataBlocks {
+		attrs["db_number"] = first.DBNumber
+	}
+	if fc == FuncWriteVar && first.Area == AreaDataBlocks {
+		attrs["safety_critical"] = true
+	}
+}
+
+func addS7AckAttrs(attrs map[string]any, s7hdr *S7Header) {
+	if s7hdr.MessageType != MsgTypeAckData {
+		return
+	}
+	attrs["error_class"] = s7hdr.ErrorClass
+	attrs["error_code"] = s7hdr.ErrorCode
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

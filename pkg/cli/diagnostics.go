@@ -142,15 +142,9 @@ func diagPing() Command {
 		if out == nil {
 			return nil
 		}
-		if len(args) < 1 {
-			return fmt.Errorf("usage: diag ping <host> [count]")
-		}
-		host := args[0]
-		count := 4
-		if len(args) >= 2 {
-			if v, err := strconv.Atoi(args[1]); err == nil && v > 0 && v <= 20 {
-				count = v
-			}
+		host, count, err := parseDiagPingArgs(args)
+		if err != nil {
+			return err
 		}
 		ip, err := resolveIPv4(host)
 		if err != nil {
@@ -166,79 +160,120 @@ func diagPing() Command {
 		}
 		defer c.Close()
 
-		id := os.Getpid() & 0xffff
-		dstAddr := icmpV4DstAddr(c, ip, id)
-		var rtts []time.Duration
-		fmt.Fprintf(out, "PING %s (%s):\n", host, ip.String())
-		for i := 0; i < count; i++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+		rtts, err := runDiagPing(ctx, out, c, host, ip, count)
+		if err != nil {
+			return err
+		}
+		return printDiagPingSummary(out, rtts)
+	}
+}
 
-			seq := i + 1
-			msg := icmp.Message{
-				Type: ipv4.ICMPTypeEcho,
-				Code: 0,
-				Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
-			}
-			b, _ := msg.Marshal(nil)
-			start := time.Now()
-			_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-			if _, err := c.WriteTo(b, dstAddr); err != nil {
-				if isRawSocketDenied(err) {
-					// Some environments allow opening a UDP-based ICMP socket but deny sending/receiving.
-					// Fall back to a TCP connect probe so "diag ping" remains useful in containers.
-					return tcpPingFallback(ctx, out, host, ip, count)
-				}
-				fmt.Fprintf(out, "seq=%d send error: %v\n", seq, err)
-				continue
-			}
-			buf := make([]byte, 1500)
-			n, peer, err := c.ReadFrom(buf)
-			if err != nil {
-				if isRawSocketDenied(err) {
-					return tcpPingFallback(ctx, out, host, ip, count)
-				}
-				fmt.Fprintf(out, "seq=%d timeout\n", seq)
-				continue
-			}
-			rtt := time.Since(start)
-			rm, err := icmp.ParseMessage(1, buf[:n])
-			if err != nil {
-				fmt.Fprintf(out, "seq=%d parse error: %v\n", seq, err)
-				continue
-			}
-			switch rm.Type {
-			case ipv4.ICMPTypeEchoReply:
-				rtts = append(rtts, rtt)
-				fmt.Fprintf(out, "seq=%d from=%s time=%s\n", seq, peer.String(), rtt.Round(time.Millisecond))
-			default:
-				fmt.Fprintf(out, "seq=%d from=%s type=%v time=%s\n", seq, peer.String(), rm.Type, rtt.Round(time.Millisecond))
-			}
-			time.Sleep(250 * time.Millisecond)
+func parseDiagPingArgs(args []string) (string, int, error) {
+	if len(args) < 1 {
+		return "", 0, fmt.Errorf("usage: diag ping <host> [count]")
+	}
+	count := 4
+	if len(args) >= 2 {
+		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 && v <= 20 {
+			count = v
 		}
-		if len(rtts) == 0 {
-			fmt.Fprintln(out, "no replies")
-			return nil
-		}
-		var sum time.Duration
-		min := rtts[0]
-		max := rtts[0]
-		for _, d := range rtts {
-			sum += d
-			if d < min {
-				min = d
+	}
+	return args[0], count, nil
+}
+
+func runDiagPing(ctx context.Context, out io.Writer, c *icmp.PacketConn, host string, ip net.IP, count int) ([]time.Duration, error) {
+	id := os.Getpid() & 0xffff
+	dstAddr := icmpV4DstAddr(c, ip, id)
+	rtts := make([]time.Duration, 0, count)
+	fmt.Fprintf(out, "PING %s (%s):\n", host, ip.String())
+	for i := 0; i < count; i++ {
+		rtt, err := runDiagPingProbe(ctx, out, c, dstAddr, id, i+1)
+		if err != nil {
+			if isRawSocketDenied(err) {
+				return nil, tcpPingFallback(ctx, out, host, ip, count)
 			}
-			if d > max {
-				max = d
-			}
+			return nil, err
 		}
-		avg := sum / time.Duration(len(rtts))
-		fmt.Fprintf(out, "min/avg/max = %s/%s/%s\n", min.Round(time.Millisecond), avg.Round(time.Millisecond), max.Round(time.Millisecond))
+		if rtt > 0 {
+			rtts = append(rtts, rtt)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return rtts, nil
+}
+
+func runDiagPingProbe(ctx context.Context, out io.Writer, c *icmp.PacketConn, dstAddr net.Addr, id, seq int) (time.Duration, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	msg := icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("containd")},
+	}
+	b, _ := msg.Marshal(nil)
+	start := time.Now()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c.WriteTo(b, dstAddr); err != nil {
+		if isRawSocketDenied(err) {
+			return 0, rawSocketHint(err)
+		}
+		fmt.Fprintf(out, "seq=%d send error: %v\n", seq, err)
+		return 0, nil
+	}
+	buf := make([]byte, 1500)
+	n, peer, err := c.ReadFrom(buf)
+	if err != nil {
+		if isRawSocketDenied(err) {
+			return 0, rawSocketHint(err)
+		}
+		fmt.Fprintf(out, "seq=%d timeout\n", seq)
+		return 0, nil
+	}
+	rtt := time.Since(start)
+	rm, err := icmp.ParseMessage(1, buf[:n])
+	if err != nil {
+		fmt.Fprintf(out, "seq=%d parse error: %v\n", seq, err)
+		return 0, nil
+	}
+	printDiagPingReply(out, seq, peer, rm.Type, rtt)
+	if rm.Type == ipv4.ICMPTypeEchoReply {
+		return rtt, nil
+	}
+	return 0, nil
+}
+
+func printDiagPingReply(out io.Writer, seq int, peer net.Addr, typ icmp.Type, rtt time.Duration) {
+	if typ == ipv4.ICMPTypeEchoReply {
+		fmt.Fprintf(out, "seq=%d from=%s time=%s\n", seq, peer.String(), rtt.Round(time.Millisecond))
+		return
+	}
+	fmt.Fprintf(out, "seq=%d from=%s type=%v time=%s\n", seq, peer.String(), typ, rtt.Round(time.Millisecond))
+}
+
+func printDiagPingSummary(out io.Writer, rtts []time.Duration) error {
+	if len(rtts) == 0 {
+		fmt.Fprintln(out, "no replies")
 		return nil
 	}
+	var sum time.Duration
+	min := rtts[0]
+	max := rtts[0]
+	for _, d := range rtts {
+		sum += d
+		if d < min {
+			min = d
+		}
+		if d > max {
+			max = d
+		}
+	}
+	avg := sum / time.Duration(len(rtts))
+	fmt.Fprintf(out, "min/avg/max = %s/%s/%s\n", min.Round(time.Millisecond), avg.Round(time.Millisecond), max.Round(time.Millisecond))
+	return nil
 }
 
 func diagTraceroute() Command {

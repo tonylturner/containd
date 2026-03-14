@@ -42,4 +42,3 @@ func FromRulesAction(a rules.Action) Verdict {
 		return Verdict{Action: DenyDrop}
 	}
 }
-

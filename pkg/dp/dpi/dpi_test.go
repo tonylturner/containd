@@ -36,4 +36,3 @@ func TestManagerDispatch(t *testing.T) {
 		t.Fatalf("unexpected dispatch: events=%d d1=%d d2=%d", len(events), d1.calls, d2.calls)
 	}
 }
-

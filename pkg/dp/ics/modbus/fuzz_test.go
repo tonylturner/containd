@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
+package modbus
+
+import "testing"
+
+func FuzzParseTCPFrame(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0x00})
+	f.Add([]byte{
+		0x00, 0x01,
+		0x00, 0x00,
+		0x00, 0x06,
+		0x01,
+		0x03,
+		0x00, 0x00,
+		0x00, 0x02,
+	})
+	f.Add([]byte{
+		0x00, 0x02,
+		0x00, 0x00,
+		0x00, 0x06,
+		0x01,
+		0x10,
+		0x00, 0x00,
+		0x00, 0x01,
+	})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = ParseTCPFrame(data)
+	})
+}

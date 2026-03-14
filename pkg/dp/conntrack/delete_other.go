@@ -15,4 +15,3 @@ func Delete(ctx context.Context, req DeleteRequest) error {
 	_ = req
 	return fmt.Errorf("conntrack delete is only available on Linux")
 }
-

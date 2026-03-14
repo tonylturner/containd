@@ -27,10 +27,10 @@ func (d *PortDetector) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi
 		return nil, nil
 	}
 	attrs := map[string]any{
-		"detected":   proto,
-		"src_port":   pkt.SrcPort,
-		"dst_port":   pkt.DstPort,
-		"transport":  pkt.Proto,
+		"detected":  proto,
+		"src_port":  pkt.SrcPort,
+		"dst_port":  pkt.DstPort,
+		"transport": pkt.Proto,
 	}
 	ev := dpi.Event{
 		FlowID:     state.Key.Hash(),
@@ -76,4 +76,3 @@ func detectProto(pkt *dpi.ParsedPacket) string {
 	}
 	return ""
 }
-

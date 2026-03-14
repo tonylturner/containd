@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,7 @@ type VPNManager struct {
 	lastError  string
 
 	ovpnCmd        *exec.Cmd
+	ovpnWaitCh     chan struct{}
 	ovpnRunning    bool
 	ovpnConfigPath string
 	ovpnLastStart  time.Time
@@ -210,59 +212,76 @@ func (m *VPNManager) Status() map[string]any {
 			}
 			return strings.TrimSpace(m.lastCfg.OpenVPN.Server.PublicEndpoint)
 		}(),
-		"note":                "WireGuard is applied in-engine; OpenVPN is supervised in mgmt only when enabled, installed, and configured.",
+		"note": "WireGuard is applied in-engine; OpenVPN is supervised in mgmt only when enabled, installed, and configured.",
 	}
 }
 
 func (m *VPNManager) startOpenVPN(configPath string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if configPath == "" {
 		return errorsNew("openvpn configPath is empty")
 	}
 
+	m.mu.Lock()
 	if m.ovpnRunning && m.ovpnCmd != nil && m.ovpnCmd.Process != nil {
 		// Restart if config path changes; OpenVPN doesn't have a safe generic reload.
 		if m.ovpnConfigPath == configPath {
+			m.mu.Unlock()
 			return nil
 		}
-		_ = m.stopOpenVPNNoLock()
+		m.mu.Unlock()
+		if err := m.stopOpenVPN(); err != nil {
+			return err
+		}
+		m.mu.Lock()
 	}
 
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(m.OpenVPNPath, "--config", configPath, "--verb", "3")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
+	waitCh := make(chan struct{})
 	m.ovpnCmd = cmd
+	m.ovpnWaitCh = waitCh
 	m.ovpnRunning = true
 	m.ovpnConfigPath = configPath
 	m.ovpnLastStart = time.Now().UTC()
 	m.ovpnLastExit = ""
 	m.ovpnLastError = ""
+	m.mu.Unlock()
 	m.log.Infow("started openvpn", "pid", cmd.Process.Pid, "config", configPath)
 	go m.emit("service.vpn.openvpn.started", map[string]any{"pid": cmd.Process.Pid, "config": configPath, "count": 1})
 
-	go func() {
-		err := cmd.Wait()
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		m.ovpnRunning = false
-		m.ovpnLastStop = time.Now().UTC()
-		if err != nil {
-			m.ovpnLastExit = err.Error()
-		} else {
-			m.ovpnLastExit = "exited"
-		}
-		pid := pidOrZero(cmd)
-		exit := m.ovpnLastExit
-		m.log.Infow("openvpn exited", "pid", pid, "exit", exit)
-		go m.emit("service.vpn.openvpn.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
-	}()
+	go m.waitOpenVPN(cmd, waitCh)
 
 	return nil
+}
+
+func (m *VPNManager) waitOpenVPN(cmd *exec.Cmd, waitCh chan struct{}) {
+	defer close(waitCh)
+
+	err := cmd.Wait()
+	pid := pidOrZero(cmd)
+	exit := "exited"
+	if err != nil {
+		exit = err.Error()
+	}
+
+	m.mu.Lock()
+	if m.ovpnCmd == cmd {
+		m.ovpnRunning = false
+		m.ovpnCmd = nil
+		m.ovpnWaitCh = nil
+		m.ovpnLastStop = time.Now().UTC()
+		m.ovpnLastExit = exit
+	}
+	m.mu.Unlock()
+
+	m.log.Infow("openvpn exited", "pid", pid, "exit", exit)
+	go m.emit("service.vpn.openvpn.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
 }
 
 func (m *VPNManager) openVPNConfigPathForEnabled(cfg config.OpenVPNConfig) (string, error) {
@@ -303,39 +322,13 @@ func (m *VPNManager) openVPNConfigPathForEnabled(cfg config.OpenVPNConfig) (stri
 }
 
 func (m *VPNManager) renderOpenVPNManagedClient(mc *config.OpenVPNManagedClientConfig) (string, error) {
-	if mc == nil {
-		return "", errorsNew("openvpn managed config is nil")
-	}
-	remote := strings.TrimSpace(mc.Remote)
-	if remote == "" {
-		return "", errorsNew("openvpn managed remote is empty")
-	}
-	port := mc.Port
-	if port == 0 {
-		port = 1194
-	}
-	if port < 1 || port > 65535 {
-		return "", fmt.Errorf("openvpn managed port invalid: %d", mc.Port)
-	}
-	proto := strings.ToLower(strings.TrimSpace(mc.Proto))
-	if proto == "" {
-		proto = "udp"
-	}
-	if proto != "udp" && proto != "tcp" {
-		return "", fmt.Errorf("openvpn managed proto invalid: %q", mc.Proto)
-	}
-	if strings.TrimSpace(mc.CA) == "" || strings.TrimSpace(mc.Cert) == "" || strings.TrimSpace(mc.Key) == "" {
-		return "", errorsNew("openvpn managed requires ca, cert, and key PEM blocks")
-	}
-	user := strings.TrimSpace(mc.Username)
-	pass := strings.TrimSpace(mc.Password)
-	if (user != "") != (pass != "") {
-		return "", errorsNew("openvpn managed username/password must be set together")
+	opts, err := validateOpenVPNManagedClient(mc)
+	if err != nil {
+		return "", err
 	}
 
-	// Use a stable location under /data so it persists across restarts.
-	dir := openVPNManagedDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := prepareOpenVPNManagedDir()
+	if err != nil {
 		return "", err
 	}
 	confPath := filepath.Join(dir, "openvpn.conf")
@@ -344,80 +337,22 @@ func (m *VPNManager) renderOpenVPNManagedClient(mc *config.OpenVPNManagedClientC
 	keyPath := filepath.Join(dir, "client.key")
 	authPath := filepath.Join(dir, "auth.txt")
 
-	if err := atomicWriteFile(caPath, []byte(strings.TrimSpace(mc.CA)+"\n"), 0o600); err != nil {
+	if err := writeOpenVPNManagedClientFiles(opts, caPath, certPath, keyPath); err != nil {
 		return "", err
 	}
-	if err := atomicWriteFile(certPath, []byte(strings.TrimSpace(mc.Cert)+"\n"), 0o600); err != nil {
+	if err := writeOpenVPNManagedClientAuth(opts, authPath); err != nil {
 		return "", err
 	}
-	if err := atomicWriteFile(keyPath, []byte(strings.TrimSpace(mc.Key)+"\n"), 0o600); err != nil {
-		return "", err
-	}
-
-	var b strings.Builder
-	b.WriteString("client\n")
-	b.WriteString("dev tun\n")
-	b.WriteString("nobind\n")
-	b.WriteString("persist-key\n")
-	b.WriteString("persist-tun\n")
-	b.WriteString("resolv-retry infinite\n")
-	if proto == "tcp" {
-		b.WriteString("proto tcp-client\n")
-	} else {
-		b.WriteString("proto udp\n")
-	}
-	b.WriteString(fmt.Sprintf("remote %s %d\n", remote, port))
-	b.WriteString("ca ca.crt\n")
-	b.WriteString("cert client.crt\n")
-	b.WriteString("key client.key\n")
-	b.WriteString("remote-cert-tls server\n")
-	b.WriteString("auth-nocache\n")
-	if user != "" {
-		if err := atomicWriteFile(authPath, []byte(user+"\n"+pass+"\n"), 0o600); err != nil {
-			return "", err
-		}
-		b.WriteString("auth-user-pass auth.txt\n")
-	} else {
-		_ = os.Remove(authPath)
-	}
-	b.WriteString("verb 3\n")
-
-	if err := atomicWriteFile(confPath, []byte(b.String()), 0o600); err != nil {
+	if err := atomicWriteFile(confPath, []byte(renderOpenVPNManagedClientConfig(opts)), 0o600); err != nil {
 		return "", err
 	}
 	return confPath, nil
 }
 
 func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerConfig) (string, error) {
-	if sc == nil {
-		return "", errorsNew("openvpn server config is nil")
-	}
-	port := sc.ListenPort
-	if port == 0 {
-		port = 1194
-	}
-	if port < 1 || port > 65535 {
-		return "", fmt.Errorf("openvpn server listenPort invalid: %d", sc.ListenPort)
-	}
-	proto := strings.ToLower(strings.TrimSpace(sc.Proto))
-	if proto == "" {
-		proto = "udp"
-	}
-	if proto != "udp" && proto != "tcp" {
-		return "", fmt.Errorf("openvpn server proto invalid: %q", sc.Proto)
-	}
-	tunnelCIDR := strings.TrimSpace(sc.TunnelCIDR)
-	if tunnelCIDR == "" {
-		return "", errorsNew("openvpn server tunnelCIDR is empty")
-	}
-	ip, ipnet, err := netParseCIDR4(tunnelCIDR)
+	opts, err := validateOpenVPNManagedServer(sc)
 	if err != nil {
-		return "", fmt.Errorf("openvpn server tunnelCIDR invalid: %q", tunnelCIDR)
-	}
-	network := ip.Mask(ipnet.Mask).To4()
-	mask := netmaskString(ipnet.Mask)
-	if network == nil || mask == "" {
-		return "", errorsNew("openvpn server tunnelCIDR invalid (must be IPv4 CIDR)")
+		return "", err
 	}
 
 	dir := openVPNManagedServerDir()
@@ -435,55 +370,250 @@ func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerC
 		return "", err
 	}
 
+	confPath := filepath.Join(dir, "openvpn.conf")
+	if err := atomicWriteFile(confPath, []byte(renderOpenVPNManagedServerConfig(opts, caCertPath, serverCertPath, serverKeyPath)), 0o600); err != nil {
+		return "", err
+	}
+	return confPath, nil
+}
+
+type openVPNManagedClientOptions struct {
+	remote string
+	port   int
+	proto  string
+	ca     string
+	cert   string
+	key    string
+	user   string
+	pass   string
+}
+
+func validateOpenVPNManagedClient(mc *config.OpenVPNManagedClientConfig) (openVPNManagedClientOptions, error) {
+	if mc == nil {
+		return openVPNManagedClientOptions{}, errorsNew("openvpn managed config is nil")
+	}
+	remote := strings.TrimSpace(mc.Remote)
+	if remote == "" {
+		return openVPNManagedClientOptions{}, errorsNew("openvpn managed remote is empty")
+	}
+	port := firstNonZeroPort(mc.Port, 1194)
+	if err := validateOpenVPNPort("openvpn managed port", mc.Port, port); err != nil {
+		return openVPNManagedClientOptions{}, err
+	}
+	proto, err := validateOpenVPNProto("openvpn managed proto", mc.Proto)
+	if err != nil {
+		return openVPNManagedClientOptions{}, err
+	}
+	if strings.TrimSpace(mc.CA) == "" || strings.TrimSpace(mc.Cert) == "" || strings.TrimSpace(mc.Key) == "" {
+		return openVPNManagedClientOptions{}, errorsNew("openvpn managed requires ca, cert, and key PEM blocks")
+	}
+	user := strings.TrimSpace(mc.Username)
+	pass := strings.TrimSpace(mc.Password)
+	if (user != "") != (pass != "") {
+		return openVPNManagedClientOptions{}, errorsNew("openvpn managed username/password must be set together")
+	}
+	return openVPNManagedClientOptions{
+		remote: remote,
+		port:   port,
+		proto:  proto,
+		ca:     strings.TrimSpace(mc.CA),
+		cert:   strings.TrimSpace(mc.Cert),
+		key:    strings.TrimSpace(mc.Key),
+		user:   user,
+		pass:   pass,
+	}, nil
+}
+
+func prepareOpenVPNManagedDir() (string, error) {
+	dir := openVPNManagedDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func writeOpenVPNManagedClientFiles(opts openVPNManagedClientOptions, caPath, certPath, keyPath string) error {
+	if err := atomicWriteFile(caPath, []byte(opts.ca+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := atomicWriteFile(certPath, []byte(opts.cert+"\n"), 0o600); err != nil {
+		return err
+	}
+	return atomicWriteFile(keyPath, []byte(opts.key+"\n"), 0o600)
+}
+
+func writeOpenVPNManagedClientAuth(opts openVPNManagedClientOptions, authPath string) error {
+	if opts.user == "" {
+		_ = os.Remove(authPath)
+		return nil
+	}
+	return atomicWriteFile(authPath, []byte(opts.user+"\n"+opts.pass+"\n"), 0o600)
+}
+
+func renderOpenVPNManagedClientConfig(opts openVPNManagedClientOptions) string {
 	var b strings.Builder
-	b.WriteString("port " + fmt.Sprintf("%d", port) + "\n")
-	if proto == "tcp" {
+	b.WriteString("client\n")
+	b.WriteString("dev tun\n")
+	b.WriteString("nobind\n")
+	b.WriteString("persist-key\n")
+	b.WriteString("persist-tun\n")
+	b.WriteString("resolv-retry infinite\n")
+	if opts.proto == "tcp" {
+		b.WriteString("proto tcp-client\n")
+	} else {
+		b.WriteString("proto udp\n")
+	}
+	b.WriteString(fmt.Sprintf("remote %s %d\n", opts.remote, opts.port))
+	b.WriteString("ca ca.crt\n")
+	b.WriteString("cert client.crt\n")
+	b.WriteString("key client.key\n")
+	b.WriteString("remote-cert-tls server\n")
+	b.WriteString("auth-nocache\n")
+	if opts.user != "" {
+		b.WriteString("auth-user-pass auth.txt\n")
+	}
+	b.WriteString("verb 3\n")
+	return b.String()
+}
+
+type openVPNManagedServerOptions struct {
+	port           int
+	proto          string
+	network        net.IP
+	mask           string
+	clientToClient bool
+	pushDNS        []string
+	pushRoutes     []string
+}
+
+func validateOpenVPNManagedServer(sc *config.OpenVPNManagedServerConfig) (openVPNManagedServerOptions, error) {
+	if sc == nil {
+		return openVPNManagedServerOptions{}, errorsNew("openvpn server config is nil")
+	}
+	port := firstNonZeroPort(sc.ListenPort, 1194)
+	if err := validateOpenVPNPort("openvpn server listenPort", sc.ListenPort, port); err != nil {
+		return openVPNManagedServerOptions{}, err
+	}
+	proto, err := validateOpenVPNProto("openvpn server proto", sc.Proto)
+	if err != nil {
+		return openVPNManagedServerOptions{}, err
+	}
+	network, mask, err := validateOpenVPNTunnelCIDR(sc.TunnelCIDR)
+	if err != nil {
+		return openVPNManagedServerOptions{}, err
+	}
+	pushRoutes, err := validateOpenVPNPushRoutes(sc.PushRoutes)
+	if err != nil {
+		return openVPNManagedServerOptions{}, err
+	}
+	return openVPNManagedServerOptions{
+		port:           port,
+		proto:          proto,
+		network:        network,
+		mask:           mask,
+		clientToClient: sc.ClientToClient,
+		pushDNS:        trimNonEmptyStrings(sc.PushDNS),
+		pushRoutes:     pushRoutes,
+	}, nil
+}
+
+func firstNonZeroPort(port, def int) int {
+	if port == 0 {
+		return def
+	}
+	return port
+}
+
+func validateOpenVPNPort(label string, raw, port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("%s invalid: %d", label, raw)
+	}
+	return nil
+}
+
+func validateOpenVPNProto(label, raw string) (string, error) {
+	proto := strings.ToLower(strings.TrimSpace(raw))
+	if proto == "" {
+		proto = "udp"
+	}
+	if proto != "udp" && proto != "tcp" {
+		return "", fmt.Errorf("%s invalid: %q", label, raw)
+	}
+	return proto, nil
+}
+
+func validateOpenVPNTunnelCIDR(raw string) (net.IP, string, error) {
+	tunnelCIDR := strings.TrimSpace(raw)
+	if tunnelCIDR == "" {
+		return nil, "", errorsNew("openvpn server tunnelCIDR is empty")
+	}
+	ip, ipnet, err := netParseCIDR4(tunnelCIDR)
+	if err != nil {
+		return nil, "", fmt.Errorf("openvpn server tunnelCIDR invalid: %q", tunnelCIDR)
+	}
+	network := ip.Mask(ipnet.Mask).To4()
+	mask := netmaskString(ipnet.Mask)
+	if network == nil || mask == "" {
+		return nil, "", errorsNew("openvpn server tunnelCIDR invalid (must be IPv4 CIDR)")
+	}
+	return network, mask, nil
+}
+
+func validateOpenVPNPushRoutes(routes []string) ([]string, error) {
+	validated := make([]string, 0, len(routes))
+	for _, cidr := range trimNonEmptyStrings(routes) {
+		if _, _, err := netParseCIDR4(cidr); err != nil {
+			return nil, fmt.Errorf("openvpn server pushRoutes invalid: %q", cidr)
+		}
+		validated = append(validated, cidr)
+	}
+	return validated, nil
+}
+
+func trimNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func renderOpenVPNManagedServerConfig(opts openVPNManagedServerOptions, caCertPath, serverCertPath, serverKeyPath string) string {
+	var b strings.Builder
+	b.WriteString("port " + fmt.Sprintf("%d", opts.port) + "\n")
+	if opts.proto == "tcp" {
 		b.WriteString("proto tcp-server\n")
 	} else {
 		b.WriteString("proto udp\n")
 	}
 	b.WriteString("dev tun\n")
 	b.WriteString("topology subnet\n")
-	b.WriteString(fmt.Sprintf("server %s %s\n", network.String(), mask))
+	b.WriteString(fmt.Sprintf("server %s %s\n", opts.network.String(), opts.mask))
 	b.WriteString("persist-key\n")
 	b.WriteString("persist-tun\n")
 	b.WriteString("keepalive 10 60\n")
 	b.WriteString("dh none\n")
-	if proto == "udp" {
+	if opts.proto == "udp" {
 		b.WriteString("explicit-exit-notify 1\n")
 	}
-	if sc.ClientToClient {
+	if opts.clientToClient {
 		b.WriteString("client-to-client\n")
 	}
 	b.WriteString("ca " + caCertPath + "\n")
 	b.WriteString("cert " + serverCertPath + "\n")
 	b.WriteString("key " + serverKeyPath + "\n")
-
-	for _, dns := range sc.PushDNS {
-		d := strings.TrimSpace(dns)
-		if d == "" {
-			continue
-		}
-		b.WriteString(fmt.Sprintf("push \"dhcp-option DNS %s\"\n", d))
+	for _, dns := range opts.pushDNS {
+		b.WriteString(fmt.Sprintf("push \"dhcp-option DNS %s\"\n", dns))
 	}
-	for _, cidr := range sc.PushRoutes {
-		c := strings.TrimSpace(cidr)
-		if c == "" {
-			continue
-		}
-		_, rnet, err := netParseCIDR4(c)
-		if err != nil {
-			return "", fmt.Errorf("openvpn server pushRoutes invalid: %q", cidr)
-		}
+	for _, cidr := range opts.pushRoutes {
+		_, rnet, _ := netParseCIDR4(cidr)
 		b.WriteString(fmt.Sprintf("push \"route %s %s\"\n", rnet.IP.String(), netmaskString(rnet.Mask)))
 	}
 	b.WriteString("verb 3\n")
-
-	confPath := filepath.Join(dir, "openvpn.conf")
-	if err := atomicWriteFile(confPath, []byte(b.String()), 0o600); err != nil {
-		return "", err
-	}
-	return confPath, nil
+	return b.String()
 }
 
 func openVPNManagedDir() string {
@@ -517,33 +647,35 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 func (m *VPNManager) stopOpenVPN() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.stopOpenVPNNoLock()
-}
-
-func (m *VPNManager) stopOpenVPNNoLock() error {
 	if !m.ovpnRunning || m.ovpnCmd == nil || m.ovpnCmd.Process == nil {
 		m.ovpnRunning = false
 		m.ovpnCmd = nil
+		m.ovpnWaitCh = nil
+		m.mu.Unlock()
 		return nil
 	}
-	_ = m.ovpnCmd.Process.Signal(syscall.SIGTERM)
-	m.log.Infow("stopping openvpn", "pid", m.ovpnCmd.Process.Pid)
 	cmd := m.ovpnCmd
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	waitCh := m.ovpnWaitCh
+	pid := cmd.Process.Pid
+	m.mu.Unlock()
+
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	m.log.Infow("stopping openvpn", "pid", pid)
 	select {
-	case <-done:
+	case <-waitCh:
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		<-done
+		<-waitCh
 	}
-	m.log.Infow("stopped openvpn", "pid", cmd.Process.Pid)
-	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": cmd.Process.Pid, "count": 1})
-	m.ovpnRunning = false
-	m.ovpnCmd = nil
-	m.ovpnLastStop = time.Now().UTC()
-	m.ovpnLastExit = "stopped"
+
+	m.mu.Lock()
+	if m.ovpnCmd == nil {
+		m.ovpnLastExit = "stopped"
+	}
+	m.mu.Unlock()
+
+	m.log.Infow("stopped openvpn", "pid", pid)
+	go m.emit("service.vpn.openvpn.stopped", map[string]any{"pid": pid, "count": 1})
 	return nil
 }
 

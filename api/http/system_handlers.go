@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type tlsInfoResponse struct {

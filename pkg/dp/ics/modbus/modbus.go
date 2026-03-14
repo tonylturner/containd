@@ -62,4 +62,3 @@ func IsWriteFunctionCode(fc uint8) bool {
 		return false
 	}
 }
-

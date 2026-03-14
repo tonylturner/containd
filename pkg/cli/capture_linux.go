@@ -17,17 +17,10 @@ import (
 )
 
 func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration, outPath string) (int, error) {
-	if ifaceName == "" {
-		return 0, fmt.Errorf("iface required")
-	}
-	if duration <= 0 {
-		return 0, fmt.Errorf("duration must be > 0")
-	}
-
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+	if err := validateCaptureRequest(ifaceName, duration); err != nil {
 		return 0, err
 	}
-	f, err := os.Create(outPath)
+	f, err := createPCAPOutput(outPath)
 	if err != nil {
 		return 0, err
 	}
@@ -42,26 +35,54 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 	if err != nil {
 		return 0, fmt.Errorf("unknown interface %q: %w", ifaceName, err)
 	}
-
-	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons16(unix.ETH_P_ALL)))
+	fd, err := openCaptureSocket(iface.Index)
 	if err != nil {
 		return 0, err
 	}
 	defer unix.Close(fd)
+	return capturePackets(ctx, f, fd, duration, snaplen)
+}
 
+func validateCaptureRequest(ifaceName string, duration time.Duration) error {
+	if ifaceName == "" {
+		return fmt.Errorf("iface required")
+	}
+	if duration <= 0 {
+		return fmt.Errorf("duration must be > 0")
+	}
+	return nil
+}
+
+func createPCAPOutput(outPath string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return nil, err
+	}
+	return os.Create(outPath)
+}
+
+func openCaptureSocket(ifindex int) (int, error) {
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons16(unix.ETH_P_ALL)))
+	if err != nil {
+		return 0, err
+	}
 	if err := unix.SetNonblock(fd, true); err != nil {
+		unix.Close(fd)
 		return 0, err
 	}
-	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons16(unix.ETH_P_ALL), Ifindex: iface.Index}); err != nil {
+	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons16(unix.ETH_P_ALL), Ifindex: ifindex}); err != nil {
+		unix.Close(fd)
 		return 0, err
 	}
+	return fd, nil
+}
 
+func capturePackets(ctx context.Context, f *os.File, fd int, duration time.Duration, snaplen int) (int, error) {
 	end := time.Now().Add(duration)
 	buf := make([]byte, snaplen)
 	pkts := 0
 
 	for {
-		if time.Now().After(end) {
+		if captureDeadlineReached(end) {
 			break
 		}
 		select {
@@ -70,15 +91,8 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 		default:
 		}
 
-		timeout := int(end.Sub(time.Now()).Milliseconds())
-		if timeout > 250 {
-			timeout = 250
-		}
-		if timeout < 0 {
-			timeout = 0
-		}
 		pollfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		n, err := unix.Poll(pollfds, timeout)
+		n, err := unix.Poll(pollfds, capturePollTimeout(end))
 		if err != nil {
 			if err == unix.EINTR {
 				continue
@@ -107,6 +121,21 @@ func captureToPCAP(ctx context.Context, ifaceName string, duration time.Duration
 	}
 
 	return pkts, nil
+}
+
+func captureDeadlineReached(end time.Time) bool {
+	return time.Now().After(end)
+}
+
+func capturePollTimeout(end time.Time) int {
+	timeout := int(end.Sub(time.Now()).Milliseconds())
+	if timeout > 250 {
+		return 250
+	}
+	if timeout < 0 {
+		return 0
+	}
+	return timeout
 }
 
 func htons16(v uint16) uint16 {

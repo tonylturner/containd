@@ -18,4 +18,3 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig, opts ApplyR
 	// No-op on non-Linux platforms.
 	return nil
 }
-

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -228,7 +229,11 @@ func normalizeOrigin(raw string) (string, bool) {
 	if u.Path != "" && u.Path != "/" {
 		return "", false
 	}
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), true
+	host := canonicalOriginHost(u.Scheme, u.Host)
+	if host == "" {
+		return "", false
+	}
+	return strings.ToLower(u.Scheme) + "://" + host, true
 }
 
 func sameOrigin(origin string, r *http.Request) bool {
@@ -244,7 +249,8 @@ func sameOrigin(origin string, r *http.Request) bool {
 	if reqScheme == "" || reqHost == "" {
 		return false
 	}
-	return strings.EqualFold(u.Scheme, reqScheme) && strings.EqualFold(u.Host, reqHost)
+	return strings.EqualFold(u.Scheme, reqScheme) &&
+		strings.EqualFold(canonicalOriginHost(u.Scheme, u.Host), canonicalOriginHost(reqScheme, reqHost))
 }
 
 func requestScheme(r *http.Request) string {
@@ -265,7 +271,36 @@ func requestHost(r *http.Request) string {
 		return ""
 	}
 	if host := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0]); host != "" {
-		return strings.ToLower(host)
+		return host
 	}
-	return strings.ToLower(strings.TrimSpace(r.Host))
+	return strings.TrimSpace(r.Host)
+}
+
+func canonicalOriginHost(scheme, rawHost string) string {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	rawHost = strings.TrimSpace(rawHost)
+	if rawHost == "" {
+		return ""
+	}
+	u := &url.URL{Scheme: scheme, Host: rawHost}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return ""
+	}
+	port := strings.TrimSpace(u.Port())
+	if port == "" || port == defaultPortForScheme(scheme) {
+		return host
+	}
+	return strings.ToLower(net.JoinHostPort(host, port))
+}
+
+func defaultPortForScheme(scheme string) string {
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }

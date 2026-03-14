@@ -32,105 +32,132 @@ func tracerouteUDPv4Linux(ctx context.Context, out io.Writer, host string, dst n
 		return fmt.Errorf("only IPv4 is supported for now")
 	}
 
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	conn, fd, err := openTracerouteSocket()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	var fd int
-	raw, err := conn.SyscallConn()
-	if err != nil {
-		return err
-	}
-	if err := raw.Control(func(s uintptr) {
-		fd = int(s)
-	}); err != nil {
-		return err
-	}
-	if fd == 0 {
-		return fmt.Errorf("failed to get UDP socket fd")
-	}
-
-	if err := unix.SetsockoptInt(fd, unix.SOL_IP, unix.IP_RECVERR, 1); err != nil {
-		return err
-	}
-
-	const (
-		basePort              = 33434
-		probesPerHop          = 3
-		probeTimeout          = 2 * time.Second
-		icmpTypeDestUnreach   = 3
-		icmpTypeTimeExceeded  = 11
-		icmpCodePortUnreach   = 3
-		originICMP            = 2 // SO_EE_ORIGIN_ICMP
-	)
-
-	fmt.Fprintf(out, "traceroute to %s (%s), %d hops max (udp/%d)\n", host, dst4.String(), maxHops, basePort)
+	fmt.Fprintf(out, "traceroute to %s (%s), %d hops max (udp/%d)\n", host, dst4.String(), maxHops, tracerouteBasePort)
 
 	for ttl := 1; ttl <= maxHops; ttl++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		reached, err := runTracerouteHop(ctx, out, conn, fd, dst4, ttl)
+		if err != nil {
+			return err
 		}
-
-		if err := unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_TTL, ttl); err != nil {
-			return fmt.Errorf("set TTL=%d: %w", ttl, err)
-		}
-
-		fmt.Fprintf(out, "%2d  ", ttl)
-		peerIP := ""
-		reached := false
-
-		for probe := 0; probe < probesPerHop; probe++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			port := basePort + ttl + probe
-			start := time.Now()
-			if _, err := conn.WriteToUDP([]byte{0}, &net.UDPAddr{IP: dst4, Port: port}); err != nil {
-				fmt.Fprint(out, "* ")
-				continue
-			}
-
-			hopIP, serr, ok := recvIPv4ErrQueue(ctx, fd, time.Now().Add(probeTimeout))
-			if !ok || serr == nil {
-				fmt.Fprint(out, "* ")
-				continue
-			}
-
-			if peerIP == "" && hopIP != "" {
-				peerIP = hopIP
-				fmt.Fprintf(out, "%s  ", peerIP)
-			}
-
-			fmt.Fprintf(out, "%s ", time.Since(start).Round(time.Millisecond))
-
-			// Consider ourselves "reached" when destination returns port unreachable.
-			if serr.Origin == originICMP && serr.Type == icmpTypeDestUnreach && serr.Code == icmpCodePortUnreach {
-				reached = true
-			}
-
-			// Drain any extra errors quickly to avoid stale reads on the next probe.
-			_, _, _ = recvIPv4ErrQueue(ctx, fd, time.Now().Add(10*time.Millisecond))
-		}
-
-		if peerIP == "" {
-			// If we didn't get a hop IP, we still want consistent output.
-			_ = peerIP
-		}
-		fmt.Fprintln(out)
-
 		if reached {
 			break
 		}
 	}
 
 	return nil
+}
+
+const (
+	tracerouteBasePort           = 33434
+	tracerouteProbesPerHop       = 3
+	tracerouteProbeTimeout       = 2 * time.Second
+	tracerouteDrainTimeout       = 10 * time.Millisecond
+	icmpTypeDestUnreach          = 3
+	icmpCodePortUnreach          = 3
+	originICMP             uint8 = 2 // SO_EE_ORIGIN_ICMP
+)
+
+func openTracerouteSocket() (*net.UDPConn, int, error) {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		return nil, 0, err
+	}
+	fd, err := tracerouteSocketFD(conn)
+	if err != nil {
+		conn.Close()
+		return nil, 0, err
+	}
+	if err := unix.SetsockoptInt(fd, unix.SOL_IP, unix.IP_RECVERR, 1); err != nil {
+		conn.Close()
+		return nil, 0, err
+	}
+	return conn, fd, nil
+}
+
+func tracerouteSocketFD(conn *net.UDPConn) (int, error) {
+	var fd int
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	if err := raw.Control(func(s uintptr) {
+		fd = int(s)
+	}); err != nil {
+		return 0, err
+	}
+	if fd == 0 {
+		return 0, fmt.Errorf("failed to get UDP socket fd")
+	}
+	return fd, nil
+}
+
+func runTracerouteHop(ctx context.Context, out io.Writer, conn *net.UDPConn, fd int, dst net.IP, ttl int) (bool, error) {
+	if err := tracerouteContext(ctx); err != nil {
+		return false, err
+	}
+	if err := unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_TTL, ttl); err != nil {
+		return false, fmt.Errorf("set TTL=%d: %w", ttl, err)
+	}
+
+	fmt.Fprintf(out, "%2d  ", ttl)
+	peerIP := ""
+	reached := false
+	for probe := 0; probe < tracerouteProbesPerHop; probe++ {
+		hopIP, hopReached, rtt, ok, err := runTracerouteProbe(ctx, conn, fd, dst, ttl, probe)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			fmt.Fprint(out, "* ")
+			continue
+		}
+		if peerIP == "" && hopIP != "" {
+			peerIP = hopIP
+			fmt.Fprintf(out, "%s  ", peerIP)
+		}
+		fmt.Fprintf(out, "%s ", rtt.Round(time.Millisecond))
+		if hopReached {
+			reached = true
+		}
+	}
+	fmt.Fprintln(out)
+	return reached, nil
+}
+
+func runTracerouteProbe(ctx context.Context, conn *net.UDPConn, fd int, dst net.IP, ttl, probe int) (string, bool, time.Duration, bool, error) {
+	if err := tracerouteContext(ctx); err != nil {
+		return "", false, 0, false, err
+	}
+
+	port := tracerouteBasePort + ttl + probe
+	start := time.Now()
+	if _, err := conn.WriteToUDP([]byte{0}, &net.UDPAddr{IP: dst, Port: port}); err != nil {
+		return "", false, 0, false, nil
+	}
+
+	hopIP, serr, ok := recvIPv4ErrQueue(ctx, fd, time.Now().Add(tracerouteProbeTimeout))
+	if !ok || serr == nil {
+		return "", false, 0, false, nil
+	}
+	reached := serr.Origin == originICMP && serr.Type == icmpTypeDestUnreach && serr.Code == icmpCodePortUnreach
+	rtt := time.Since(start)
+	_, _, _ = recvIPv4ErrQueue(ctx, fd, time.Now().Add(tracerouteDrainTimeout))
+	return hopIP, reached, rtt, true, nil
+}
+
+func tracerouteContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 func recvIPv4ErrQueue(ctx context.Context, fd int, deadline time.Time) (hopIP string, serr *unix.SockExtendedErr, ok bool) {

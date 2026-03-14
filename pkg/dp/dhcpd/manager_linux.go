@@ -37,12 +37,12 @@ type pool struct {
 }
 
 type listener struct {
-	cancel context.CancelFunc
-	errCh  chan error
-	cfg    config.DHCPConfig
-	pool   pool
-	start  time.Time
-	retry  int
+	cancel       context.CancelFunc
+	errCh        chan error
+	cfg          config.DHCPConfig
+	pool         pool
+	start        time.Time
+	retry        int
 	reservations map[string]string // mac(lower) -> ip
 }
 
@@ -92,15 +92,58 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 
 	// Opportunistically prune expired leases on apply.
 	m.pruneExpiredLeasesLocked()
+	plan, err := buildApplyPlan(cfg, ifaces)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled || len(plan.devs) == 0 {
+		return m.disableLocked(ctx)
+	}
+	if err := m.ensureRedirectLocked(ctx, plan.devs); err != nil {
+		return err
+	}
+	m.stopRemovedListenersLocked(plan.devs)
+	m.restartChangedListenersLocked(cfg, plan.pools)
+	if err := m.startMissingListenersLocked(cfg, plan.devs, plan.pools, plan.reservations); err != nil {
+		return err
+	}
+	m.loadLeasesLocked()
+	m.lastErr = ""
+	go m.emit("service.dhcp.applied", map[string]any{
+		"enabled": true,
+		"devices": plan.devs,
+		"pools":   len(plan.pools),
+	})
+	return nil
+}
 
-	// Resolve logical interface names to kernel devices.
+type dhcpApplyPlan struct {
+	devs         []string
+	pools        map[string]pool
+	reservations map[string]map[string]string
+}
+
+func buildApplyPlan(cfg config.DHCPConfig, ifaces []config.Interface) (dhcpApplyPlan, error) {
+	resolveDev := newDHCPDeviceResolver(ifaces)
+	pools, err := buildDHCPPools(cfg.Pools, resolveDev)
+	if err != nil {
+		return dhcpApplyPlan{}, err
+	}
+	return dhcpApplyPlan{
+		devs:         resolveListenDevices(cfg.ListenIfaces, resolveDev),
+		pools:        pools,
+		reservations: buildDHCPReservations(cfg.Reservations, resolveDev),
+	}, nil
+}
+
+func newDHCPDeviceResolver(ifaces []config.Interface) func(string) string {
 	byName := map[string]config.Interface{}
 	for _, i := range ifaces {
 		if strings.TrimSpace(i.Name) != "" {
 			byName[i.Name] = i
 		}
 	}
-	resolveDev := func(ref string) string {
+	return func(ref string) string {
 		ref = strings.TrimSpace(ref)
 		if ref == "" {
 			return ""
@@ -113,11 +156,11 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		}
 		return ref
 	}
+}
 
-	// Build pool map keyed by resolved device.
-	pools := map[string]pool{}
-	reservations := map[string]map[string]string{} // dev -> mac -> ip
-	for _, p := range cfg.Pools {
+func buildDHCPPools(pools []config.DHCPPool, resolveDev func(string) string) (map[string]pool, error) {
+	out := map[string]pool{}
+	for _, p := range pools {
 		dev := resolveDev(p.Iface)
 		if dev == "" {
 			continue
@@ -125,11 +168,16 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		start := net.ParseIP(strings.TrimSpace(p.Start)).To4()
 		end := net.ParseIP(strings.TrimSpace(p.End)).To4()
 		if start == nil || end == nil {
-			return fmt.Errorf("dhcp: invalid pool %q: %s-%s", p.Iface, p.Start, p.End)
+			return nil, fmt.Errorf("dhcp: invalid pool %q: %s-%s", p.Iface, p.Start, p.End)
 		}
-		pools[dev] = pool{Start: start, End: end}
+		out[dev] = pool{Start: start, End: end}
 	}
-	for _, r := range cfg.Reservations {
+	return out, nil
+}
+
+func buildDHCPReservations(reservations []config.DHCPReservation, resolveDev func(string) string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, r := range reservations {
 		dev := resolveDev(r.Iface)
 		if dev == "" {
 			continue
@@ -139,15 +187,17 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		if mac == "" || ip == nil {
 			continue
 		}
-		if _, ok := reservations[dev]; !ok {
-			reservations[dev] = map[string]string{}
+		if _, ok := out[dev]; !ok {
+			out[dev] = map[string]string{}
 		}
-		reservations[dev][mac] = ip.String()
+		out[dev][mac] = ip.String()
 	}
+	return out
+}
 
-	// Determine the set of devices to serve on.
+func resolveListenDevices(listenIfaces []string, resolveDev func(string) string) []string {
 	var devs []string
-	for _, li := range cfg.ListenIfaces {
+	for _, li := range listenIfaces {
 		dev := resolveDev(li)
 		if dev == "" {
 			continue
@@ -155,23 +205,21 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		devs = append(devs, dev)
 	}
 	sort.Strings(devs)
-	devs = compactStrings(devs)
+	return compactStrings(devs)
+}
 
-	// Stop everything if disabled.
-	if !cfg.Enabled || len(devs) == 0 {
-		for dev, l := range m.listeners {
-			l.cancel()
-			delete(m.listeners, dev)
-		}
-		_ = ensureRedirect(ctx, nil, false)
-		m.lastErr = ""
-		go m.emit("service.dhcp.disabled", map[string]any{
-			"enabled": false,
-		})
-		return nil
+func (m *Manager) disableLocked(ctx context.Context) error {
+	for dev, l := range m.listeners {
+		l.cancel()
+		delete(m.listeners, dev)
 	}
+	_ = ensureRedirect(ctx, nil, false)
+	m.lastErr = ""
+	go m.emit("service.dhcp.disabled", map[string]any{"enabled": false})
+	return nil
+}
 
-	// Ensure nft redirect exists for selected devs.
+func (m *Manager) ensureRedirectLocked(ctx context.Context, devs []string) error {
 	if err := ensureRedirect(ctx, devs, true); err != nil {
 		m.lastErr = err.Error()
 		go m.emit("service.dhcp.redirect_failed", map[string]any{
@@ -180,18 +228,22 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		})
 		return err
 	}
+	return nil
+}
 
-	// Stop listeners no longer needed.
+func (m *Manager) stopRemovedListenersLocked(devs []string) {
 	for dev, l := range m.listeners {
-		if !contains(devs, dev) {
-			l.cancel()
-			delete(m.listeners, dev)
-			go m.emit("service.dhcp.listener_stopped", map[string]any{"dev": dev})
+		if contains(devs, dev) {
+			continue
 		}
+		l.cancel()
+		delete(m.listeners, dev)
+		go m.emit("service.dhcp.listener_stopped", map[string]any{"dev": dev})
 	}
+}
 
-	// Restart listeners whose scope/config changed.
-	for _, dev := range devs {
+func (m *Manager) restartChangedListenersLocked(cfg config.DHCPConfig, pools map[string]pool) {
+	for dev := range m.listeners {
 		l, ok := m.listeners[dev]
 		if !ok {
 			continue
@@ -200,14 +252,16 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		if !ok {
 			continue
 		}
-		if dhcpListenerNeedsRestart(l, cfg, pl) {
-			l.cancel()
-			delete(m.listeners, dev)
-			go m.emit("service.dhcp.listener_restarting", map[string]any{"dev": dev})
+		if !dhcpListenerNeedsRestart(l, cfg, pl) {
+			continue
 		}
+		l.cancel()
+		delete(m.listeners, dev)
+		go m.emit("service.dhcp.listener_restarting", map[string]any{"dev": dev})
 	}
+}
 
-	// Start new listeners.
+func (m *Manager) startMissingListenersLocked(cfg config.DHCPConfig, devs []string, pools map[string]pool, reservations map[string]map[string]string) error {
 	for _, dev := range devs {
 		if _, ok := m.listeners[dev]; ok {
 			continue
@@ -218,16 +272,6 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 		}
 		m.startListenerLocked(dev, cfg, pl, reservations[dev])
 	}
-
-	// Best-effort load persisted leases on first enable.
-	m.loadLeasesLocked()
-
-	m.lastErr = ""
-	go m.emit("service.dhcp.applied", map[string]any{
-		"enabled": true,
-		"devices": devs,
-		"pools":   len(pools),
-	})
 	return nil
 }
 
@@ -483,12 +527,12 @@ func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool
 		errCh <- serveDHCPv4(lctx, dev, cfg, pl, res, m)
 	}(dev, pl, res)
 	m.listeners[dev] = listener{
-		cancel: cancel,
-		errCh:  errCh,
-		cfg:    cfg,
-		pool:   pl,
-		start:  time.Now().UTC(),
-		retry:  0,
+		cancel:       cancel,
+		errCh:        errCh,
+		cfg:          cfg,
+		pool:         pl,
+		start:        time.Now().UTC(),
+		retry:        0,
 		reservations: res,
 	}
 	go m.emit("service.dhcp.listener_started", map[string]any{"dev": dev})
@@ -672,4 +716,3 @@ func nextFreeIP(dev string, pl pool, m *Manager) (net.IP, error) {
 	}
 	return nil, errors.New("no free leases available")
 }
-

@@ -65,4 +65,3 @@ func TestEvaluatorNestedAllAnyNot(t *testing.T) {
 		t.Fatal("expected no match")
 	}
 }
-

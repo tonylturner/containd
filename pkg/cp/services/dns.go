@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-	"strconv"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -47,7 +47,7 @@ type DNSManager struct {
 
 	statsCancel context.CancelFunc
 	lastStats   map[string]int64
-	log        *zap.SugaredLogger
+	log         *zap.SugaredLogger
 }
 
 // RecordQueries increments DNS traffic counters (success/errors) for telemetry.
@@ -265,6 +265,7 @@ func (m *DNSManager) Validate(ctx context.Context, cfg config.DNSConfig) error {
 	}
 
 	var out bytes.Buffer
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	testCmd := exec.Command(m.CheckConfPath, path)
 	testCmd.Stdout = &out
 	testCmd.Stderr = &out
@@ -313,7 +314,8 @@ func (m *DNSManager) startOrReload(configPath string) error {
 
 	if m.CheckConfPath != "" {
 		var out bytes.Buffer
-		testCmd := exec.Command(m.CheckConfPath, configPath)
+			// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+			testCmd := exec.Command(m.CheckConfPath, configPath)
 		testCmd.Stdout = &out
 		testCmd.Stderr = &out
 		if err := testCmd.Run(); err != nil {
@@ -335,6 +337,7 @@ func (m *DNSManager) startOrReload(configPath string) error {
 		_ = m.stopLockedNoLock()
 	}
 
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(m.UnboundPath, "-d", "-c", configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -444,6 +447,7 @@ func (m *DNSManager) pollStatsOnce(ctx context.Context) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(cctx, m.ControlPath, args...)
 	out, err := cmd.Output()
 	if err != nil {

@@ -39,12 +39,12 @@ func (m *memStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
 	return m.Load(ctx)
 }
 
-func (m *memStore) Commit(ctx context.Context) error   { return nil }
+func (m *memStore) Commit(ctx context.Context) error { return nil }
 func (m *memStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
 	return nil
 }
 func (m *memStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *memStore) Rollback(ctx context.Context) error { return nil }
+func (m *memStore) Rollback(ctx context.Context) error      { return nil }
 func (m *memStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
 	return nil
 }

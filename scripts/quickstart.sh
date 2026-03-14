@@ -5,8 +5,8 @@ REPO_OWNER=${CONTAIND_REPO_OWNER:-tonylturner}
 REPO_NAME=${CONTAIND_REPO_NAME:-containd}
 REF=${CONTAIND_REF:-main}
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." 2>/dev/null && pwd || printf '')
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." 2>/dev/null && pwd || printf '')
 
 if [ -f "$script_dir/bootstrap-starter.sh" ]; then
     exec sh "$script_dir/bootstrap-starter.sh" "$@"

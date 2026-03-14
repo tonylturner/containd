@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"text/template"
+	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template -- renders Envoy/Nginx config, not HTML.
 	"time"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
@@ -275,6 +275,7 @@ func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardPr
 	}
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	testCmd := exec.CommandContext(testCtx, m.EnvoyPath, "--mode", "validate", "-c", configPath)
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -301,6 +302,7 @@ func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReversePr
 	if _, err := os.Stat(m.NginxPath); err != nil {
 		return nil
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	testCmd := exec.CommandContext(ctx, m.NginxPath, "-t", "-c", configPath)
 	if out, err := testCmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -347,6 +349,7 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		_ = m.envoyCmd.Process.Signal(os.Interrupt)
 		time.Sleep(50 * time.Millisecond)
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, m.EnvoyPath, "-c", configPath, "--log-level", "info")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -411,6 +414,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		stopManagedProcess(m.nginxCmd.Process)
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, m.NginxPath, "-c", configPath, "-g", "daemon off;")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

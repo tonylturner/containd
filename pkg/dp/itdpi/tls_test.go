@@ -35,7 +35,7 @@ func buildClientHello(sni string, alpnProtos []string) []byte {
 	// session_id_length: 0
 	ch = append(ch, 0x00)
 	// cipher_suites: length(2) + 2 suites (4 bytes each entry is 2 bytes)
-	ch = binary.BigEndian.AppendUint16(ch, 4) // 2 cipher suites = 4 bytes
+	ch = binary.BigEndian.AppendUint16(ch, 4)      // 2 cipher suites = 4 bytes
 	ch = binary.BigEndian.AppendUint16(ch, 0x1301) // TLS_AES_128_GCM_SHA256
 	ch = binary.BigEndian.AppendUint16(ch, 0xC02F) // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 	// compression_methods: length(1) + null(1)
@@ -88,7 +88,7 @@ func buildClientHello(sni string, alpnProtos []string) []byte {
 
 	// Wrap in TLS record: type=0x16, version=0x0301, length(2)
 	var rec []byte
-	rec = append(rec, 0x16) // content type: Handshake
+	rec = append(rec, 0x16)                          // content type: Handshake
 	rec = binary.BigEndian.AppendUint16(rec, 0x0301) // TLS 1.0 record version
 	rec = binary.BigEndian.AppendUint16(rec, uint16(len(hs)))
 	rec = append(rec, hs...)

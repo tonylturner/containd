@@ -54,7 +54,8 @@ type SQLiteStore struct {
 	pendingTimer *time.Timer
 }
 
-// WipeAll deletes all persisted config state (running/candidate/previous/pending).
+// WipeAll deletes all persisted config state (running/candidate/previous/pending)
+// plus separately stored IDS rules.
 // It does not close the DB or change schema.
 func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	if s == nil || s.db == nil {
@@ -66,10 +67,18 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 		s.pendingTimer.Stop()
 		s.pendingTimer = nil
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM configs`); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin wipe tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs`); err != nil {
 		return fmt.Errorf("wipe configs: %w", err)
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ids_rules`); err != nil {
+		return fmt.Errorf("wipe ids_rules: %w", err)
+	}
+	return tx.Commit()
 }
 
 // NewSQLiteStore opens or creates a SQLite database at the given path.
@@ -137,12 +146,44 @@ func bootstrapSchema(db *sql.DB) error {
 // It also clears any stale candidate so that LoadCandidate will re-seed
 // from the updated running config, keeping the two in sync.
 func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
-	if err := s.saveKind(ctx, configKeyRunning, cfg); err != nil {
-		return err
+	if cfg == nil {
+		return errors.New("config is nil")
 	}
-	// Clear candidate so it re-seeds from running on next load.
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
-	return nil
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	persisted := cloneConfigForPersist(cfg)
+	replaceIDSRules := cfg.IDS.Rules != nil
+	if replaceIDSRules {
+		persisted.IDS.Rules = nil
+	}
+	blob, err := json.Marshal(persisted)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin save tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if replaceIDSRules {
+		if err := replaceIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyRunning, string(blob), time.Now().Unix()); err != nil {
+		return fmt.Errorf("persist config: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate); err != nil {
+		return fmt.Errorf("clear candidate: %w", err)
+	}
+	return tx.Commit()
 }
 
 // SaveCandidate stores a candidate config (staged).
@@ -166,6 +207,17 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 		return fmt.Errorf("persist config: %w", err)
 	}
 	return nil
+}
+
+func cloneConfigForPersist(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	cp := *cfg
+	if cfg.IDS.Rules != nil {
+		cp.IDS.Rules = append([]IDSRule(nil), cfg.IDS.Rules...)
+	}
+	return &cp
 }
 
 // Load returns the running config or ErrNotFound if none exists.
@@ -379,6 +431,13 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	if err := replaceIDSRulesTx(ctx, tx, rules); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ids_rules`); err != nil {
 		return fmt.Errorf("clear ids_rules: %w", err)
 	}
@@ -398,7 +457,7 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 			return fmt.Errorf("insert ids rule %s: %w", r.ID, err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // LoadIDSRules returns all stored IDS rules. If the ids_rules table is empty

@@ -16,19 +16,19 @@ import (
 
 // LearnedProfile accumulates observed ICS traffic for a single communication pair and protocol.
 type LearnedProfile struct {
-	Protocol      string           `json:"protocol"`
-	SourceIP      string           `json:"sourceIP"`
-	DestIP        string           `json:"destIP"`
-	UnitIDs       map[uint8]bool   `json:"unitIDs,omitempty"`
-	FunctionCodes map[uint8]bool   `json:"functionCodes,omitempty"`
-	Addresses     map[string]bool  `json:"addresses,omitempty"`
-	ServiceCodes  map[uint16]bool  `json:"serviceCodes,omitempty"`  // CIP/OPC UA service codes > 255
-	ObjectClasses map[uint16]bool  `json:"objectClasses,omitempty"` // CIP object classes
-	ReadSeen      bool             `json:"readSeen"`
-	WriteSeen     bool             `json:"writeSeen"`
-	FirstSeen     time.Time        `json:"firstSeen"`
-	LastSeen      time.Time        `json:"lastSeen"`
-	PacketCount   int              `json:"packetCount"`
+	Protocol      string          `json:"protocol"`
+	SourceIP      string          `json:"sourceIP"`
+	DestIP        string          `json:"destIP"`
+	UnitIDs       map[uint8]bool  `json:"unitIDs,omitempty"`
+	FunctionCodes map[uint8]bool  `json:"functionCodes,omitempty"`
+	Addresses     map[string]bool `json:"addresses,omitempty"`
+	ServiceCodes  map[uint16]bool `json:"serviceCodes,omitempty"`  // CIP/OPC UA service codes > 255
+	ObjectClasses map[uint16]bool `json:"objectClasses,omitempty"` // CIP object classes
+	ReadSeen      bool            `json:"readSeen"`
+	WriteSeen     bool            `json:"writeSeen"`
+	FirstSeen     time.Time       `json:"firstSeen"`
+	LastSeen      time.Time       `json:"lastSeen"`
+	PacketCount   int             `json:"packetCount"`
 }
 
 // Learner passively records ICS traffic and generates allowlist rules.
@@ -62,150 +62,160 @@ func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 
 	p, ok := l.profiles[key]
 	if !ok {
-		p = &LearnedProfile{
-			Protocol:      proto,
-			SourceIP:      srcIP,
-			DestIP:        dstIP,
-			UnitIDs:       make(map[uint8]bool),
-			FunctionCodes: make(map[uint8]bool),
-			Addresses:     make(map[string]bool),
-			ServiceCodes:  make(map[uint16]bool),
-			ObjectClasses: make(map[uint16]bool),
-			FirstSeen:     now,
-		}
+		p = newLearnedProfile(proto, srcIP, dstIP, now)
 		l.profiles[key] = p
 	}
 
+	updateProfileMetadata(p, now)
+	recordProtocolAttributes(proto, p, ev)
+	recordReadWriteState(p, ev)
+}
+
+func newLearnedProfile(proto, srcIP, dstIP string, now time.Time) *LearnedProfile {
+	return &LearnedProfile{
+		Protocol:      proto,
+		SourceIP:      srcIP,
+		DestIP:        dstIP,
+		UnitIDs:       make(map[uint8]bool),
+		FunctionCodes: make(map[uint8]bool),
+		Addresses:     make(map[string]bool),
+		ServiceCodes:  make(map[uint16]bool),
+		ObjectClasses: make(map[uint16]bool),
+		FirstSeen:     now,
+	}
+}
+
+func updateProfileMetadata(p *LearnedProfile, now time.Time) {
 	p.LastSeen = now
 	p.PacketCount++
+}
 
-	// Extract protocol-specific attributes and normalize them.
+func recordProtocolAttributes(proto string, p *LearnedProfile, ev dpi.Event) {
 	switch proto {
 	case "cip":
-		// CIP: service_code (uint8) → FunctionCodes, object_class (uint16) → ObjectClasses,
-		// cip_path → Addresses.
-		if sc, ok := ev.Attributes["service_code"]; ok {
-			if v, ok := toUint8(sc); ok {
-				p.FunctionCodes[v] = true
-			}
-		}
-		if oc, ok := ev.Attributes["object_class"]; ok {
-			if v, ok := toUint16(oc); ok {
-				p.ObjectClasses[v] = true
-			}
-		}
-		if cp, ok := ev.Attributes["cip_path"]; ok {
-			if s, ok := cp.(string); ok && s != "" {
-				p.Addresses[s] = true
-			}
-		}
-
+		recordCIPAttributes(p, ev)
 	case "dnp3":
-		// DNP3: function_code (uint8), object_groups (string) → Addresses.
-		if fc, ok := ev.Attributes["function_code"]; ok {
-			if v, ok := toUint8(fc); ok {
-				p.FunctionCodes[v] = true
-			}
-		}
-		if og, ok := ev.Attributes["object_groups"]; ok {
-			if s, ok := og.(string); ok && s != "" {
-				p.Addresses[s] = true
-			}
-		}
-
+		recordDNP3Attributes(p, ev)
 	case "s7comm":
-		// S7comm: function_code (uint8), address (string like "DB1.DBW0").
-		if fc, ok := ev.Attributes["function_code"]; ok {
-			if v, ok := toUint8(fc); ok {
-				p.FunctionCodes[v] = true
-			}
-		}
-		if addr, ok := ev.Attributes["address"]; ok {
-			if s, ok := addr.(string); ok && s != "" {
-				p.Addresses[s] = true
-			}
-		}
-
+		recordFunctionAndAddress(p, ev)
 	case "bacnet":
-		// BACnet: service_code (uint8) → FunctionCodes,
-		// object_type + object_instance → Addresses.
-		if sc, ok := ev.Attributes["service_code"]; ok {
-			if v, ok := toUint8(sc); ok {
+		recordBACnetAttributes(p, ev)
+	case "opcua":
+		recordStringAddress(p, ev.Attributes["service"])
+	case "mms":
+		recordMMSAttributes(p, ev)
+	default:
+		recordDefaultAttributes(p, ev)
+	}
+}
+
+func recordCIPAttributes(p *LearnedProfile, ev dpi.Event) {
+	if sc, ok := ev.Attributes["service_code"]; ok {
+		if v, ok := toUint8(sc); ok {
+			p.FunctionCodes[v] = true
+		}
+	}
+	if oc, ok := ev.Attributes["object_class"]; ok {
+		if v, ok := toUint16(oc); ok {
+			p.ObjectClasses[v] = true
+		}
+	}
+	recordStringAddress(p, ev.Attributes["cip_path"])
+}
+
+func recordDNP3Attributes(p *LearnedProfile, ev dpi.Event) {
+	if fc, ok := ev.Attributes["function_code"]; ok {
+		if v, ok := toUint8(fc); ok {
+			p.FunctionCodes[v] = true
+		}
+	}
+	recordStringAddress(p, ev.Attributes["object_groups"])
+}
+
+func recordFunctionAndAddress(p *LearnedProfile, ev dpi.Event) {
+	if fc, ok := ev.Attributes["function_code"]; ok {
+		if v, ok := toUint8(fc); ok {
+			p.FunctionCodes[v] = true
+		}
+	}
+	recordStringAddress(p, ev.Attributes["address"])
+}
+
+func recordBACnetAttributes(p *LearnedProfile, ev dpi.Event) {
+	if sc, ok := ev.Attributes["service_code"]; ok {
+		if v, ok := toUint8(sc); ok {
+			p.FunctionCodes[v] = true
+		}
+	}
+	objType, hasType := ev.Attributes["object_type"]
+	objInst, hasInst := ev.Attributes["object_instance"]
+	if hasType && hasInst {
+		p.Addresses[fmt.Sprintf("%v/%v", objType, objInst)] = true
+	}
+}
+
+func recordMMSAttributes(p *LearnedProfile, ev dpi.Event) {
+	if st, ok := ev.Attributes["service_tag"]; ok {
+		if s, ok := st.(string); ok {
+			if v, ok := parseHexUint8(s); ok {
 				p.FunctionCodes[v] = true
 			}
 		}
-		// Build address from object type and instance if available.
-		objType, hasType := ev.Attributes["object_type"]
-		objInst, hasInst := ev.Attributes["object_instance"]
-		if hasType && hasInst {
-			s := fmt.Sprintf("%v/%v", objType, objInst)
+	}
+	recordStringAddress(p, ev.Attributes["variable_name"])
+}
+
+func recordDefaultAttributes(p *LearnedProfile, ev dpi.Event) {
+	if fc, ok := ev.Attributes["function_code"]; ok {
+		if v, ok := toUint8(fc); ok {
+			p.FunctionCodes[v] = true
+		}
+	}
+	if uid, ok := ev.Attributes["unit_id"]; ok {
+		if v, ok := toUint8(uid); ok {
+			p.UnitIDs[v] = true
+		}
+	}
+	if addr, ok := ev.Attributes["address"]; ok {
+		recordAddressValue(p, addr)
+	}
+}
+
+func recordStringAddress(p *LearnedProfile, v any) {
+	s, ok := v.(string)
+	if ok && s != "" {
+		p.Addresses[s] = true
+	}
+}
+
+func recordAddressValue(p *LearnedProfile, v any) {
+	switch a := v.(type) {
+	case string:
+		if a != "" {
+			p.Addresses[a] = true
+		}
+	default:
+		s := fmt.Sprintf("%v", a)
+		if s != "" {
 			p.Addresses[s] = true
 		}
-
-	case "opcua":
-		// OPC UA: service (string) for display, service node ID may be uint16 > 255.
-		if svc, ok := ev.Attributes["service"]; ok {
-			if s, ok := svc.(string); ok && s != "" {
-				p.Addresses[s] = true
-			}
-		}
-		// OPC UA service node IDs are not directly emitted as an attribute in
-		// the decoder, but if present they would be uint16. The service name
-		// is what we capture as an address for rule visibility.
-
-	case "mms":
-		// MMS: service_tag (string like "0xA5") → parse to uint8 → FunctionCodes,
-		// variable_name (string) → Addresses.
-		if st, ok := ev.Attributes["service_tag"]; ok {
-			if s, ok := st.(string); ok {
-				if v, ok := parseHexUint8(s); ok {
-					p.FunctionCodes[v] = true
-				}
-			}
-		}
-		if vn, ok := ev.Attributes["variable_name"]; ok {
-			if s, ok := vn.(string); ok && s != "" {
-				p.Addresses[s] = true
-			}
-		}
-
-	default:
-		// Modbus and any other protocol: use generic attribute names.
-		if fc, ok := ev.Attributes["function_code"]; ok {
-			if v, ok := toUint8(fc); ok {
-				p.FunctionCodes[v] = true
-			}
-		}
-		if uid, ok := ev.Attributes["unit_id"]; ok {
-			if v, ok := toUint8(uid); ok {
-				p.UnitIDs[v] = true
-			}
-		}
-		if addr, ok := ev.Attributes["address"]; ok {
-			switch a := addr.(type) {
-			case string:
-				if a != "" {
-					p.Addresses[a] = true
-				}
-			default:
-				s := fmt.Sprintf("%v", a)
-				if s != "" {
-					p.Addresses[s] = true
-				}
-			}
-		}
 	}
+}
 
-	// Extract is_write (common across all protocols).
-	if w, ok := ev.Attributes["is_write"]; ok {
-		if b, ok := w.(bool); ok {
-			if b {
-				p.WriteSeen = true
-			} else {
-				p.ReadSeen = true
-			}
-		}
+func recordReadWriteState(p *LearnedProfile, ev dpi.Event) {
+	w, ok := ev.Attributes["is_write"]
+	if !ok {
+		return
 	}
+	b, ok := w.(bool)
+	if !ok {
+		return
+	}
+	if b {
+		p.WriteSeen = true
+		return
+	}
+	p.ReadSeen = true
 }
 
 // Profiles returns a copy of all learned profiles.

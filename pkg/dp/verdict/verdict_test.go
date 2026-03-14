@@ -17,4 +17,3 @@ func TestFromRulesAction(t *testing.T) {
 		t.Fatalf("expected deny verdict, got %s", got.Action)
 	}
 }
-

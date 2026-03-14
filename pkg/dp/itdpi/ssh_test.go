@@ -151,7 +151,7 @@ func TestSSHKexInit(t *testing.T) {
 	var buf []byte
 	buf = binary.BigEndian.AppendUint32(buf, pktLen)
 	buf = append(buf, paddingLen) // padding_length
-	buf = append(buf, 20)        // SSH_MSG_KEXINIT
+	buf = append(buf, 20)         // SSH_MSG_KEXINIT
 	buf = append(buf, payload...)
 	buf = append(buf, padding...)
 

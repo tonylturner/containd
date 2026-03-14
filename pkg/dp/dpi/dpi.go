@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultReassemblyMax     = 64 * 1024       // 64 KB per stream
+	defaultReassemblyMax     = 64 * 1024        // 64 KB per stream
 	defaultReassemblyTimeout = 30 * time.Second // idle stream timeout
 )
 

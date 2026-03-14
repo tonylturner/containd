@@ -58,9 +58,9 @@ func buildS7Header(msgType uint8, pduRef uint16, paramData []byte, s7data []byte
 	hdr[0] = 0x32 // protocol ID
 	hdr[1] = msgType
 	binary.BigEndian.PutUint16(hdr[2:4], 0x0000)   // reserved
-	binary.BigEndian.PutUint16(hdr[4:6], pduRef)    // PDU reference
-	binary.BigEndian.PutUint16(hdr[6:8], paramLen)  // parameter length
-	binary.BigEndian.PutUint16(hdr[8:10], dataLen)  // data length
+	binary.BigEndian.PutUint16(hdr[4:6], pduRef)   // PDU reference
+	binary.BigEndian.PutUint16(hdr[6:8], paramLen) // parameter length
+	binary.BigEndian.PutUint16(hdr[8:10], dataLen) // data length
 
 	result := append(hdr, paramData...)
 	result = append(result, s7data...)
@@ -101,6 +101,14 @@ func TestParseTPKTTooShort(t *testing.T) {
 
 func TestParseTPKTInvalidVersion(t *testing.T) {
 	data := []byte{0x04, 0x00, 0x00, 0x07, 0x01, 0x02, 0x03}
+	_, _, err := ParseTPKT(data)
+	if err != ErrInvalidTPKT {
+		t.Errorf("expected ErrInvalidTPKT, got %v", err)
+	}
+}
+
+func TestParseTPKTRejectsShortDeclaredLength(t *testing.T) {
+	data := []byte{0x03, 0x00, 0x00, 0x02}
 	_, _, err := ParseTPKT(data)
 	if err != ErrInvalidTPKT {
 		t.Errorf("expected ErrInvalidTPKT, got %v", err)
@@ -572,10 +580,10 @@ func TestFormatAddress(t *testing.T) {
 		addr uint32
 		want string
 	}{
-		{0x000018, "3.0"},  // 24 / 8 = 3, 24 % 8 = 0
-		{0x000019, "3.1"},  // 25 / 8 = 3, 25 % 8 = 1
+		{0x000018, "3.0"}, // 24 / 8 = 3, 24 % 8 = 0
+		{0x000019, "3.1"}, // 25 / 8 = 3, 25 % 8 = 1
 		{0x000000, "0.0"},
-		{0x000008, "1.0"},  // 8 / 8 = 1, 8 % 8 = 0
+		{0x000008, "1.0"}, // 8 / 8 = 1, 8 % 8 = 0
 	}
 	for _, tc := range tests {
 		got := FormatAddress(tc.addr)

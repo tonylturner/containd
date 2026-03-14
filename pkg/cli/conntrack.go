@@ -56,4 +56,3 @@ func showConntrackAPI(api *API) Command {
 		return nil
 	}
 }
-

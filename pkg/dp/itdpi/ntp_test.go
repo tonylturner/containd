@@ -28,7 +28,7 @@ func buildNTPPacket(li, vn, mode, stratum uint8, refID [4]byte) []byte {
 	buf := make([]byte, ntpMinLen)
 	buf[0] = (li << 6) | (vn << 3) | mode
 	buf[1] = stratum
-	buf[2] = 6   // poll interval (log2 seconds = 64s)
+	buf[2] = 6    // poll interval (log2 seconds = 64s)
 	buf[3] = 0xE0 // precision (-32, signed)
 	// Root Delay: 0.5 seconds = 0x00008000 in 16.16 fixed point
 	binary.BigEndian.PutUint32(buf[4:8], 0x00008000)

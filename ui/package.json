@@ -7,7 +7,7 @@
     "prebuild": "node ./scripts/build-docs.js",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.7",

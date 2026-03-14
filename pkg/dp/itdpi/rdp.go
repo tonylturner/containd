@@ -85,8 +85,8 @@ func (d *RDPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 
 	// Parse X.224 COTP header at offset 4.
 	// length indicator (1 byte), type code (1 byte).
-	cotpLI := p[4]                   // length indicator
-	cotpType := p[5] & 0xF0         // type is upper nibble
+	cotpLI := p[4]          // length indicator
+	cotpType := p[5] & 0xF0 // type is upper nibble
 	_ = cotpLI
 
 	if int(cotpLI)+5 > tpktLen {

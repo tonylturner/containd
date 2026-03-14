@@ -13,10 +13,10 @@ import (
 const eipHeaderSize = 24
 
 var (
-	ErrTooShort      = errors.New("EtherNet/IP frame too short")
-	ErrTruncated     = errors.New("EtherNet/IP frame truncated")
-	ErrNoCIPPayload  = errors.New("no CIP payload in encapsulation")
-	ErrCIPTooShort   = errors.New("CIP message too short")
+	ErrTooShort     = errors.New("EtherNet/IP frame too short")
+	ErrTruncated    = errors.New("EtherNet/IP frame truncated")
+	ErrNoCIPPayload = errors.New("no CIP payload in encapsulation")
+	ErrCIPTooShort  = errors.New("CIP message too short")
 )
 
 // EIPHeader represents a parsed EtherNet/IP encapsulation header.
@@ -371,7 +371,9 @@ func ParseEIPHeader(data []byte) (*EIPHeader, error) {
 
 // ParseCIPMessage extracts a CIP message from the data portion of a
 // SendRRData or SendUnitData encapsulation. The data layout is:
-//   Interface handle (4) + Timeout (2) + Item count (2) + Items...
+//
+//	Interface handle (4) + Timeout (2) + Item count (2) + Items...
+//
 // Each item: Type ID (2) + Length (2) + Data (Length bytes)
 // We look for Unconnected Data Item (0x00B2) or Connected Data Item (0x00B1).
 func ParseCIPMessage(data []byte) (*CIPMessage, error) {

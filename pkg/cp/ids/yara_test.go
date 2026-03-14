@@ -5,6 +5,8 @@ package ids
 
 import (
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func TestParseYARABasicRule(t *testing.T) {
@@ -25,6 +27,12 @@ func TestParseYARABasicRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	assertYARABasicRuleMetadata(t, r)
+	assertYARABasicRuleStrings(t, r)
+}
+
+func assertYARABasicRuleMetadata(t *testing.T, r config.IDSRule) {
+	t.Helper()
 	if r.ID != "yara-testmalware" {
 		t.Errorf("unexpected ID: %s", r.ID)
 	}
@@ -58,8 +66,10 @@ func TestParseYARABasicRule(t *testing.T) {
 	if len(r.ConversionNotes) != 1 {
 		t.Errorf("expected 1 conversion note, got %d", len(r.ConversionNotes))
 	}
+}
 
-	// Verify strings parsing.
+func assertYARABasicRuleStrings(t *testing.T, r config.IDSRule) {
+	t.Helper()
 	if len(r.YARAStrings) != 3 {
 		t.Fatalf("expected 3 YARA strings, got %d", len(r.YARAStrings))
 	}

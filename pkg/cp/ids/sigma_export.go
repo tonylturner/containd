@@ -40,16 +40,16 @@ func ExportSigmaRules(rules []config.IDSRule) ([]byte, error) {
 
 // sigmaExportRule is the output structure for Sigma YAML export.
 type sigmaExportRule struct {
-	Title       string              `yaml:"title"`
-	ID          string              `yaml:"id,omitempty"`
-	Description string              `yaml:"description,omitempty"`
-	Level       string              `yaml:"level,omitempty"`
-	Status      string              `yaml:"status,omitempty"`
-	Tags        []string            `yaml:"tags,omitempty"`
-	LogSource   map[string]string   `yaml:"logsource,omitempty"`
-	Detection   map[string]any      `yaml:"detection,omitempty"`
-	References  []string            `yaml:"references,omitempty"`
-	Fields      []string            `yaml:"fields,omitempty"`
+	Title       string            `yaml:"title"`
+	ID          string            `yaml:"id,omitempty"`
+	Description string            `yaml:"description,omitempty"`
+	Level       string            `yaml:"level,omitempty"`
+	Status      string            `yaml:"status,omitempty"`
+	Tags        []string          `yaml:"tags,omitempty"`
+	LogSource   map[string]string `yaml:"logsource,omitempty"`
+	Detection   map[string]any    `yaml:"detection,omitempty"`
+	References  []string          `yaml:"references,omitempty"`
+	Fields      []string          `yaml:"fields,omitempty"`
 }
 
 func buildSigmaRule(rule config.IDSRule) sigmaExportRule {

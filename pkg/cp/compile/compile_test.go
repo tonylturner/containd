@@ -123,9 +123,9 @@ func TestExpandCIDRTokensVPN(t *testing.T) {
 	cfg.Services.VPN.OpenVPN.Enabled = true
 	cfg.Services.VPN.OpenVPN.Mode = "server"
 	cfg.Services.VPN.OpenVPN.Server = &config.OpenVPNManagedServerConfig{
-		ListenPort:  1194,
-		Proto:       "udp",
-		TunnelCIDR:  "10.9.0.0/24",
+		ListenPort:     1194,
+		Proto:          "udp",
+		TunnelCIDR:     "10.9.0.0/24",
 		PublicEndpoint: "vpn.example.com",
 	}
 

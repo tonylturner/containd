@@ -41,26 +41,26 @@ type hostInfo struct {
 }
 
 type runtimeInfo struct {
-	DockerVersion    string `json:"dockerVersion,omitempty"`
+	DockerVersion     string `json:"dockerVersion,omitempty"`
 	ContainerdVersion string `json:"containerdVersion,omitempty"`
-	CgroupDriver     string `json:"cgroupDriver"`
-	StorageDriver    string `json:"storageDriver,omitempty"`
+	CgroupDriver      string `json:"cgroupDriver"`
+	StorageDriver     string `json:"storageDriver,omitempty"`
 }
 
 type containerInfo struct {
-	ID              string    `json:"id,omitempty"`
-	Image           string    `json:"image,omitempty"`
-	RestartPolicy   string    `json:"restartPolicy,omitempty"`
-	RestartCount    int       `json:"restartCount"`
-	NetworkMode     string    `json:"networkMode,omitempty"`
-	Privileged      bool      `json:"privileged"`
-	SeccompProfile  string    `json:"seccompProfile,omitempty"`
-	ApparmorProfile string    `json:"apparmorProfile,omitempty"`
-	ReadonlyRootfs  bool      `json:"readonlyRootfs"`
-	NoNewPrivileges bool      `json:"noNewPrivileges"`
-	Capabilities    []string  `json:"capabilities,omitempty"`
+	ID              string      `json:"id,omitempty"`
+	Image           string      `json:"image,omitempty"`
+	RestartPolicy   string      `json:"restartPolicy,omitempty"`
+	RestartCount    int         `json:"restartCount"`
+	NetworkMode     string      `json:"networkMode,omitempty"`
+	Privileged      bool        `json:"privileged"`
+	SeccompProfile  string      `json:"seccompProfile,omitempty"`
+	ApparmorProfile string      `json:"apparmorProfile,omitempty"`
+	ReadonlyRootfs  bool        `json:"readonlyRootfs"`
+	NoNewPrivileges bool        `json:"noNewPrivileges"`
+	Capabilities    []string    `json:"capabilities,omitempty"`
 	Mounts          []mountInfo `json:"mounts,omitempty"`
-	EnvVars         []envVar  `json:"envVars,omitempty"`
+	EnvVars         []envVar    `json:"envVars,omitempty"`
 }
 
 type mountInfo struct {
@@ -312,182 +312,234 @@ func dockerHTTPClient() *http.Client {
 // reflects the actual host (e.g., macOS) rather than the container's Linux distro.
 func collectFromDocker(ctx context.Context, hostname string) (runtimeInfo, containerInfo, hostInfo) {
 	ri := runtimeInfo{}
-	ci := containerInfo{}
 	hostOut := hostInfo{}
 	client := dockerHTTPClient()
 
-	// Docker version info
-	if req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/version", nil); err == nil {
-		if resp, err := client.Do(req); err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-				var ver map[string]interface{}
-				if json.Unmarshal(body, &ver) == nil {
-					if v, ok := ver["Version"].(string); ok {
-						ri.DockerVersion = v
-					}
-					// Containerd version from Docker components
-					if components, ok := ver["Components"].([]interface{}); ok {
-						for _, comp := range components {
-							if m, ok := comp.(map[string]interface{}); ok {
-								if name, _ := m["Name"].(string); strings.EqualFold(name, "containerd") {
-									if v, ok := m["Version"].(string); ok {
-										ri.ContainerdVersion = v
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Docker info for storage/cgroup driver
-	if req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/info", nil); err == nil {
-		if resp, err := client.Do(req); err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-				var info map[string]interface{}
-				if json.Unmarshal(body, &info) == nil {
-					if v, ok := info["Driver"].(string); ok {
-						ri.StorageDriver = v
-					}
-					if v, ok := info["CgroupDriver"].(string); ok {
-						ri.CgroupDriver = v
-					}
-					// Host OS info from Docker daemon (reflects actual host, not container)
-					if v, ok := info["OperatingSystem"].(string); ok {
-						hostOut.OS = v
-					}
-					if v, ok := info["KernelVersion"].(string); ok {
-						hostOut.Kernel = v
-					}
-					if v, ok := info["Architecture"].(string); ok {
-						hostOut.Arch = v
-					}
-				}
-			}
-		}
-	}
-
-	// Container inspect for our own container
-	containerID := hostname
-	inspectURL := fmt.Sprintf("http://localhost/containers/%s/json", containerID)
-	if req, err := http.NewRequestWithContext(ctx, "GET", inspectURL, nil); err == nil {
-		if resp, err := client.Do(req); err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-				var cj map[string]interface{}
-				if json.Unmarshal(body, &cj) == nil {
-					ci = parseDockerInspect(cj)
-				}
-			}
-		}
-	}
+	collectDockerVersionInfo(ctx, client, &ri)
+	collectDockerRuntimeInfo(ctx, client, &ri, &hostOut)
+	ci := collectDockerContainerInfo(ctx, client, hostname)
 
 	return ri, ci, hostOut
+}
+
+func collectDockerVersionInfo(ctx context.Context, client *http.Client, ri *runtimeInfo) {
+	ver := fetchDockerJSON(ctx, client, "http://localhost/version")
+	if ver == nil {
+		return
+	}
+	if v, ok := ver["Version"].(string); ok {
+		ri.DockerVersion = v
+	}
+	ri.ContainerdVersion = containerdVersion(ver["Components"])
+}
+
+func collectDockerRuntimeInfo(ctx context.Context, client *http.Client, ri *runtimeInfo, hostOut *hostInfo) {
+	info := fetchDockerJSON(ctx, client, "http://localhost/info")
+	if info == nil {
+		return
+	}
+	if v, ok := info["Driver"].(string); ok {
+		ri.StorageDriver = v
+	}
+	if v, ok := info["CgroupDriver"].(string); ok {
+		ri.CgroupDriver = v
+	}
+	if v, ok := info["OperatingSystem"].(string); ok {
+		hostOut.OS = v
+	}
+	if v, ok := info["KernelVersion"].(string); ok {
+		hostOut.Kernel = v
+	}
+	if v, ok := info["Architecture"].(string); ok {
+		hostOut.Arch = v
+	}
+}
+
+func collectDockerContainerInfo(ctx context.Context, client *http.Client, hostname string) containerInfo {
+	inspectURL := fmt.Sprintf("http://localhost/containers/%s/json", hostname)
+	if inspect := fetchDockerJSON(ctx, client, inspectURL); inspect != nil {
+		return parseDockerInspect(inspect)
+	}
+	return containerInfo{}
+}
+
+func fetchDockerJSON(ctx context.Context, client *http.Client, url string) map[string]interface{} {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil
+	}
+	var out map[string]interface{}
+	if json.Unmarshal(body, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func containerdVersion(components any) string {
+	list, ok := components.([]interface{})
+	if !ok {
+		return ""
+	}
+	for _, comp := range list {
+		m, ok := comp.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := m["Name"].(string)
+		if !strings.EqualFold(name, "containerd") {
+			continue
+		}
+		if v, ok := m["Version"].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // parseDockerInspect extracts container details from a Docker inspect JSON response.
 func parseDockerInspect(cj map[string]interface{}) containerInfo {
 	ci := containerInfo{}
+	parseDockerInspectID(cj, &ci)
+	parseDockerInspectConfig(cj, &ci)
+	parseDockerInspectHostConfig(cj, &ci)
+	parseDockerInspectRestartState(cj, &ci)
+	return ci
+}
 
+func parseDockerInspectID(cj map[string]interface{}, ci *containerInfo) {
 	if id, ok := cj["Id"].(string); ok {
 		if len(id) > 12 {
 			ci.ID = id[:12]
-		} else {
-			ci.ID = id
+			return
+		}
+		ci.ID = id
+	}
+}
+
+func parseDockerInspectConfig(cj map[string]interface{}, ci *containerInfo) {
+	configMap, ok := cj["Config"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if img, ok := configMap["Image"].(string); ok {
+		ci.Image = img
+	}
+	if envList, ok := configMap["Env"].([]interface{}); ok {
+		ci.EnvVars = filterEnvList(envList)
+	}
+}
+
+func parseDockerInspectHostConfig(cj map[string]interface{}, ci *containerInfo) {
+	hostConfig, ok := cj["HostConfig"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	parseDockerInspectHostFlags(hostConfig, ci)
+	parseDockerInspectRestartPolicy(hostConfig, ci)
+	parseDockerInspectSecurityOpt(hostConfig, ci)
+	parseDockerInspectCapabilities(hostConfig, ci)
+	parseDockerInspectBinds(hostConfig, ci)
+}
+
+func parseDockerInspectHostFlags(hostConfig map[string]interface{}, ci *containerInfo) {
+	if nm, ok := hostConfig["NetworkMode"].(string); ok {
+		ci.NetworkMode = nm
+	}
+	if priv, ok := hostConfig["Privileged"].(bool); ok {
+		ci.Privileged = priv
+	}
+	if ro, ok := hostConfig["ReadonlyRootfs"].(bool); ok {
+		ci.ReadonlyRootfs = ro
+	}
+}
+
+func parseDockerInspectRestartPolicy(hostConfig map[string]interface{}, ci *containerInfo) {
+	if rp, ok := hostConfig["RestartPolicy"].(map[string]interface{}); ok {
+		if name, ok := rp["Name"].(string); ok {
+			ci.RestartPolicy = name
 		}
 	}
+}
 
-	if config, ok := cj["Config"].(map[string]interface{}); ok {
-		if img, ok := config["Image"].(string); ok {
-			ci.Image = img
-		}
-		// Environment variables (filtered)
-		if envList, ok := config["Env"].([]interface{}); ok {
-			ci.EnvVars = filterEnvList(envList)
+func parseDockerInspectSecurityOpt(hostConfig map[string]interface{}, ci *containerInfo) {
+	secOpts, ok := hostConfig["SecurityOpt"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, opt := range secOpts {
+		s, _ := opt.(string)
+		switch {
+		case strings.HasPrefix(s, "no-new-privileges"):
+			ci.NoNewPrivileges = true
+		case strings.HasPrefix(s, "seccomp="):
+			ci.SeccompProfile = strings.TrimPrefix(s, "seccomp=")
+		case strings.HasPrefix(s, "apparmor="):
+			ci.ApparmorProfile = strings.TrimPrefix(s, "apparmor=")
 		}
 	}
+}
 
-	if hostConfig, ok := cj["HostConfig"].(map[string]interface{}); ok {
-		if nm, ok := hostConfig["NetworkMode"].(string); ok {
-			ci.NetworkMode = nm
-		}
-		if priv, ok := hostConfig["Privileged"].(bool); ok {
-			ci.Privileged = priv
-		}
-		if ro, ok := hostConfig["ReadonlyRootfs"].(bool); ok {
-			ci.ReadonlyRootfs = ro
-		}
-
-		// Restart policy
-		if rp, ok := hostConfig["RestartPolicy"].(map[string]interface{}); ok {
-			if name, ok := rp["Name"].(string); ok {
-				ci.RestartPolicy = name
-			}
-		}
-
-		// Security options
-		if secOpts, ok := hostConfig["SecurityOpt"].([]interface{}); ok {
-			for _, opt := range secOpts {
-				s, _ := opt.(string)
-				if strings.HasPrefix(s, "no-new-privileges") {
-					ci.NoNewPrivileges = true
-				}
-				if strings.HasPrefix(s, "seccomp=") {
-					ci.SeccompProfile = strings.TrimPrefix(s, "seccomp=")
-				}
-				if strings.HasPrefix(s, "apparmor=") {
-					ci.ApparmorProfile = strings.TrimPrefix(s, "apparmor=")
-				}
-			}
-		}
-
-		// Capabilities
-		if capAdd, ok := hostConfig["CapAdd"].([]interface{}); ok {
-			for _, cap := range capAdd {
-				if s, ok := cap.(string); ok {
-					ci.Capabilities = append(ci.Capabilities, s)
-				}
-			}
-		}
-
-		// Mounts/Binds
-		if binds, ok := hostConfig["Binds"].([]interface{}); ok {
-			for _, b := range binds {
-				s, _ := b.(string)
-				parts := strings.SplitN(s, ":", 3)
-				if len(parts) >= 2 {
-					m := mountInfo{
-						HostPath:      parts[0],
-						ContainerPath: parts[1],
-						Mode:          "rw",
-					}
-					if len(parts) == 3 {
-						m.Mode = parts[2]
-					}
-					ci.Mounts = append(ci.Mounts, m)
-				}
-			}
+func parseDockerInspectCapabilities(hostConfig map[string]interface{}, ci *containerInfo) {
+	capAdd, ok := hostConfig["CapAdd"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, cap := range capAdd {
+		if s, ok := cap.(string); ok {
+			ci.Capabilities = append(ci.Capabilities, s)
 		}
 	}
+}
 
-	// Restart count
+func parseDockerInspectBinds(hostConfig map[string]interface{}, ci *containerInfo) {
+	binds, ok := hostConfig["Binds"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, b := range binds {
+		mount, ok := parseDockerBindMount(b)
+		if ok {
+			ci.Mounts = append(ci.Mounts, mount)
+		}
+	}
+}
+
+func parseDockerBindMount(raw interface{}) (mountInfo, bool) {
+	s, _ := raw.(string)
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) < 2 {
+		return mountInfo{}, false
+	}
+	mount := mountInfo{
+		HostPath:      parts[0],
+		ContainerPath: parts[1],
+		Mode:          "rw",
+	}
+	if len(parts) == 3 {
+		mount.Mode = parts[2]
+	}
+	return mount, true
+}
+
+func parseDockerInspectRestartState(cj map[string]interface{}, ci *containerInfo) {
 	if rc, ok := cj["RestartCount"].(float64); ok {
 		ci.RestartCount = int(rc)
 	}
-
-	// AppArmor from top-level
 	if ap, ok := cj["AppArmorProfile"].(string); ok && ap != "" && ci.ApparmorProfile == "" {
 		ci.ApparmorProfile = ap
 	}
-
-	return ci
 }
 
 // filterEnvList filters a Docker env list ([]interface{} of "KEY=VALUE") to safe keys.

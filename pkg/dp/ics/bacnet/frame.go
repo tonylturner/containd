@@ -11,10 +11,10 @@ import (
 
 // BVLC function codes.
 const (
-	BVLCResult              = 0x00
-	BVLCForwardedNPDU       = 0x04
-	BVLCOriginalUnicast     = 0x0A
-	BVLCOriginalBroadcast   = 0x0B
+	BVLCResult            = 0x00
+	BVLCForwardedNPDU     = 0x04
+	BVLCOriginalUnicast   = 0x0A
+	BVLCOriginalBroadcast = 0x0B
 )
 
 // APDU PDU types (upper 4 bits).
@@ -28,20 +28,20 @@ const (
 
 // Service choice values.
 const (
-	ServiceIAm                       = 0
-	ServiceSubscribeCOV              = 5
-	ServiceRemoveListElement         = 6
-	ServiceWhoHas                    = 7
-	ServiceCreateObject              = 8 // confirmed service choice 8
-	ServiceWhoIs                     = 8 // unconfirmed service choice 8
-	ServiceDeleteObject              = 9
-	ServiceReadProperty              = 12
-	ServiceReadPropertyMultiple      = 14
-	ServiceWriteProperty             = 15
-	ServiceWritePropertyMultiple     = 16
+	ServiceIAm                        = 0
+	ServiceSubscribeCOV               = 5
+	ServiceRemoveListElement          = 6
+	ServiceWhoHas                     = 7
+	ServiceCreateObject               = 8 // confirmed service choice 8
+	ServiceWhoIs                      = 8 // unconfirmed service choice 8
+	ServiceDeleteObject               = 9
+	ServiceReadProperty               = 12
+	ServiceReadPropertyMultiple       = 14
+	ServiceWriteProperty              = 15
+	ServiceWritePropertyMultiple      = 16
 	ServiceDeviceCommunicationControl = 17
-	ServiceReinitializeDevice        = 20
-	ServiceReadRange                 = 26
+	ServiceReinitializeDevice         = 20
+	ServiceReadRange                  = 26
 )
 
 // objectTypeNames maps BACnet object type IDs to names.
@@ -108,7 +108,7 @@ type Frame struct {
 	// Parsed property fields for ReadProperty/WriteProperty
 	HasObjectInfo  bool
 	ObjectType     uint16
-	ObjectInstance  uint32
+	ObjectInstance uint32
 	HasPropertyID  bool
 	PropertyID     uint8
 	IsCritical     bool // DeviceCommunicationControl, ReinitializeDevice
@@ -130,115 +130,115 @@ func ParseFrame(b []byte) (*Frame, error) {
 		return nil, fmt.Errorf("%w: 0x%02x", ErrInvalidType, f.BVLCType)
 	}
 
-	// Determine NPDU offset based on BVLC function.
-	npduOffset := 4
-	if f.BVLCFunction == BVLCForwardedNPDU {
-		// Forwarded-NPDU includes 6 extra bytes (4-byte IP + 2-byte port).
-		npduOffset = 10
-	}
-
+	npduOffset := bacnetNPDUOffset(f.BVLCFunction)
 	if len(b) < npduOffset+2 {
-		// No NPDU present; frame is BVLC-only (e.g., BVLC-Result).
 		return f, nil
 	}
 
 	f.NPDUVersion = b[npduOffset]
 	f.NPDUControl = b[npduOffset+1]
 
-	// Parse variable-length NPDU header to find APDU start.
-	apduOffset := npduOffset + 2
-	ctrl := f.NPDUControl
-
-	// DNET/DADR present (bit 5)
-	if ctrl&0x20 != 0 {
-		if len(b) < apduOffset+3 {
-			return f, nil
-		}
-		// 2-byte DNET
-		apduOffset += 2
-		// 1-byte DLEN
-		dlen := int(b[apduOffset])
-		apduOffset++
-		// DADR bytes
-		apduOffset += dlen
-		// 1-byte hop count
-		if len(b) > apduOffset {
-			apduOffset++
-		}
-	}
-
-	// SNET/SADR present (bit 3)
-	if ctrl&0x08 != 0 {
-		if len(b) < apduOffset+3 {
-			return f, nil
-		}
-		apduOffset += 2 // SNET
-		slen := int(b[apduOffset])
-		apduOffset++
-		apduOffset += slen
-	}
-
-	// Check if APDU is present (bit 7 of control = 0 means APDU follows;
-	// bit 7 = 1 means network-layer message).
-	if ctrl&0x80 != 0 {
-		// Network-layer message, no APDU.
+	apduOffset, ok := bacnetAPDUOffset(b, npduOffset, f.NPDUControl)
+	if !ok || f.NPDUControl&0x80 != 0 {
 		return f, nil
 	}
-
 	if len(b) <= apduOffset {
 		return f, nil
 	}
 
 	f.HasAPDU = true
 	f.PDUType = (b[apduOffset] >> 4) & 0x0F
+	f.ServiceChoice = bacnetServiceChoice(b, apduOffset, f.PDUType)
+	applyBACnetCriticalFlags(f)
+	parseBACnetPropertyRequest(b, apduOffset, f)
+	return f, nil
+}
 
-	// Parse service choice based on PDU type.
-	switch f.PDUType {
+func bacnetNPDUOffset(fn uint8) int {
+	if fn == BVLCForwardedNPDU {
+		return 10
+	}
+	return 4
+}
+
+func bacnetAPDUOffset(b []byte, npduOffset int, ctrl uint8) (int, bool) {
+	apduOffset := npduOffset + 2
+	var ok bool
+	apduOffset, ok = skipBACnetDNET(b, apduOffset, ctrl)
+	if !ok {
+		return 0, false
+	}
+	apduOffset, ok = skipBACnetSNET(b, apduOffset, ctrl)
+	return apduOffset, ok
+}
+
+func skipBACnetDNET(b []byte, apduOffset int, ctrl uint8) (int, bool) {
+	if ctrl&0x20 == 0 {
+		return apduOffset, true
+	}
+	if len(b) < apduOffset+3 {
+		return 0, false
+	}
+	apduOffset += 2
+	dlen := int(b[apduOffset])
+	apduOffset++
+	apduOffset += dlen
+	if len(b) > apduOffset {
+		apduOffset++
+	}
+	return apduOffset, true
+}
+
+func skipBACnetSNET(b []byte, apduOffset int, ctrl uint8) (int, bool) {
+	if ctrl&0x08 == 0 {
+		return apduOffset, true
+	}
+	if len(b) < apduOffset+3 {
+		return 0, false
+	}
+	apduOffset += 2
+	slen := int(b[apduOffset])
+	apduOffset++
+	apduOffset += slen
+	return apduOffset, true
+}
+
+func bacnetServiceChoice(b []byte, apduOffset int, pduType uint8) uint8 {
+	switch pduType {
 	case PDUConfirmedRequest:
-		// Confirmed: byte0=type+flags, byte1=max-segs/max-resp, byte2=invoke-id, byte3=service
 		if len(b) > apduOffset+3 {
-			f.ServiceChoice = b[apduOffset+3]
+			return b[apduOffset+3]
 		}
 	case PDUUnconfirmedRequest:
-		// Unconfirmed: byte0=type, byte1=service
 		if len(b) > apduOffset+1 {
-			f.ServiceChoice = b[apduOffset+1]
+			return b[apduOffset+1]
 		}
-	case PDUSimpleACK:
-		// Simple-ACK: byte0=type, byte1=invoke-id, byte2=service
+	case PDUSimpleACK, PDUComplexACK, PDUError:
 		if len(b) > apduOffset+2 {
-			f.ServiceChoice = b[apduOffset+2]
-		}
-	case PDUComplexACK:
-		// Complex-ACK: byte0=type+flags, byte1=invoke-id, byte2=service
-		if len(b) > apduOffset+2 {
-			f.ServiceChoice = b[apduOffset+2]
-		}
-	case PDUError:
-		// Error: byte0=type, byte1=invoke-id, byte2=service
-		if len(b) > apduOffset+2 {
-			f.ServiceChoice = b[apduOffset+2]
+			return b[apduOffset+2]
 		}
 	}
+	return 0
+}
 
-	// Mark critical control operations.
-	if f.PDUType == PDUConfirmedRequest {
-		switch f.ServiceChoice {
-		case ServiceDeviceCommunicationControl, ServiceReinitializeDevice:
-			f.IsCritical = true
-		}
+func applyBACnetCriticalFlags(f *Frame) {
+	if f.PDUType != PDUConfirmedRequest {
+		return
 	}
-
-	// For ReadProperty/WriteProperty confirmed requests, parse object identifier
-	// and property ID from the service request data.
-	if f.PDUType == PDUConfirmedRequest &&
-		(f.ServiceChoice == ServiceReadProperty || f.ServiceChoice == ServiceWriteProperty) {
-		// Service data starts after the APDU header (4 bytes for confirmed request).
-		svcDataOffset := apduOffset + 4
-		parsePropertyRequest(b, svcDataOffset, f)
+	switch f.ServiceChoice {
+	case ServiceDeviceCommunicationControl, ServiceReinitializeDevice:
+		f.IsCritical = true
 	}
+}
 
-	return f, nil
+func parseBACnetPropertyRequest(b []byte, apduOffset int, f *Frame) {
+	if f.PDUType != PDUConfirmedRequest {
+		return
+	}
+	if f.ServiceChoice != ServiceReadProperty && f.ServiceChoice != ServiceWriteProperty {
+		return
+	}
+	parsePropertyRequest(b, apduOffset+4, f)
 }
 
 // parsePropertyRequest extracts object type, instance, and property ID from

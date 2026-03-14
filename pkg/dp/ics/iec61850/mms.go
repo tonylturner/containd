@@ -34,14 +34,14 @@ const s7commProtocolID = 0x32
 // MMS ASN.1 context-class tags for confirmed-request service choices.
 // These are the outer tag bytes seen in the PDU.
 const (
-	mmsTagGetNameList              = 0xA1
-	mmsTagRead                     = 0xA4
-	mmsTagWrite                    = 0xA5
-	mmsTagGetVariableAccessAttrs   = 0xA6
-	mmsTagDefineNamedVariableList  = 0xAB
-	mmsTagGetNamedVarListAttrs     = 0xAC
-	mmsTagDeleteNamedVariableList  = 0xAD
-	mmsTagObtainFile               = 0xAE
+	mmsTagGetNameList             = 0xA1
+	mmsTagRead                    = 0xA4
+	mmsTagWrite                   = 0xA5
+	mmsTagGetVariableAccessAttrs  = 0xA6
+	mmsTagDefineNamedVariableList = 0xAB
+	mmsTagGetNamedVarListAttrs    = 0xAC
+	mmsTagDeleteNamedVariableList = 0xAD
+	mmsTagObtainFile              = 0xAE
 )
 
 // MMS PDU type tags (outermost ASN.1 tag).
@@ -56,29 +56,29 @@ const (
 // mmsServiceName maps context tags inside a confirmed-request/response to
 // human-readable service names.
 var mmsServiceName = map[byte]string{
-	mmsTagGetNameList:              "get_name_list",
-	mmsTagRead:                     "read",
-	mmsTagWrite:                    "write",
-	mmsTagGetVariableAccessAttrs:   "get_variable_access_attributes",
-	mmsTagDefineNamedVariableList:  "define_named_variable_list",
-	mmsTagGetNamedVarListAttrs:     "get_named_variable_list_attributes",
-	mmsTagDeleteNamedVariableList:  "delete_named_variable_list",
-	mmsTagObtainFile:               "obtain_file",
+	mmsTagGetNameList:             "get_name_list",
+	mmsTagRead:                    "read",
+	mmsTagWrite:                   "write",
+	mmsTagGetVariableAccessAttrs:  "get_variable_access_attributes",
+	mmsTagDefineNamedVariableList: "define_named_variable_list",
+	mmsTagGetNamedVarListAttrs:    "get_named_variable_list_attributes",
+	mmsTagDeleteNamedVariableList: "delete_named_variable_list",
+	mmsTagObtainFile:              "obtain_file",
 }
 
 // mmsWriteServices are service tags that perform write/control operations.
 var mmsWriteServices = map[byte]bool{
-	mmsTagWrite:                    true,
-	mmsTagDefineNamedVariableList:  true,
-	mmsTagDeleteNamedVariableList:  true,
+	mmsTagWrite:                   true,
+	mmsTagDefineNamedVariableList: true,
+	mmsTagDeleteNamedVariableList: true,
 }
 
 // mmsControlServices are service tags that perform control operations.
 var mmsControlServices = map[byte]bool{
-	mmsTagWrite:                    true,
-	mmsTagDefineNamedVariableList:  true,
-	mmsTagDeleteNamedVariableList:  true,
-	mmsTagObtainFile:               true,
+	mmsTagWrite:                   true,
+	mmsTagDefineNamedVariableList: true,
+	mmsTagDeleteNamedVariableList: true,
+	mmsTagObtainFile:              true,
 }
 
 // MMSDecoder implements dpi.Decoder for IEC 61850 MMS visibility.
@@ -113,132 +113,124 @@ func (d *MMSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		return nil, nil
 	}
 
-	payload := pkt.Payload
+	cotpPDUType, mmsPayload, ok := parseMMSPayload(pkt.Payload)
+	if !ok {
+		return nil, nil
+	}
+	if cotpPDUType == cotpCR || cotpPDUType == cotpCC {
+		return []dpi.Event{newMMSConnectionEvent(state, cotpPDUType)}, nil
+	}
+	return buildMMSEvents(state, pkt.Payload, mmsPayload), nil
+}
 
-	// --- TPKT header (4 bytes) ---
-	if len(payload) < tpktHdrLen {
-		return nil, nil
+func parseMMSPayload(payload []byte) (byte, []byte, bool) {
+	tpktPayload, ok := parseMMSTPKT(payload)
+	if !ok {
+		return 0, nil, false
 	}
-	if payload[0] != tpktVersion {
-		return nil, nil
+	cotpPDUType, mmsStart, ok := parseMMSCOTP(tpktPayload)
+	if !ok {
+		return 0, nil, false
 	}
-	// TPKT length is bytes 2-3 (big-endian).
+	if cotpPDUType != cotpDT {
+		return cotpPDUType, nil, true
+	}
+	if mmsStart >= len(payload) || payload[mmsStart] == s7commProtocolID {
+		return 0, nil, false
+	}
+	return cotpPDUType, payload[mmsStart:], true
+}
+
+func parseMMSTPKT(payload []byte) ([]byte, bool) {
+	if len(payload) < tpktHdrLen || payload[0] != tpktVersion {
+		return nil, false
+	}
 	tpktLen := int(payload[2])<<8 | int(payload[3])
 	if tpktLen < tpktHdrLen || tpktLen > len(payload) {
-		return nil, nil
+		return nil, false
 	}
+	return payload[:tpktLen], true
+}
 
-	// --- COTP header ---
+func parseMMSCOTP(tpktPayload []byte) (byte, int, bool) {
 	cotpStart := tpktHdrLen
-	if len(payload) <= cotpStart {
-		return nil, nil
+	if len(tpktPayload) <= cotpStart {
+		return 0, 0, false
 	}
-	cotpLen := int(payload[cotpStart]) // length indicator (excludes itself)
-	if cotpLen < 1 || cotpStart+1+cotpLen > len(payload) {
-		return nil, nil
+	cotpLen := int(tpktPayload[cotpStart])
+	if cotpLen < 1 || cotpStart+1+cotpLen > len(tpktPayload) {
+		return 0, 0, false
 	}
-	cotpPDUType := payload[cotpStart+1] & 0xF0
+	return tpktPayload[cotpStart+1] & 0xF0, cotpStart + 1 + cotpLen, true
+}
 
-	// For non-DT PDUs (CR/CC), just note connection setup.
-	if cotpPDUType == cotpCR || cotpPDUType == cotpCC {
-		kind := "connection_request"
-		if cotpPDUType == cotpCC {
-			kind = "connection_confirm"
-		}
-		attrs := map[string]any{
+func newMMSConnectionEvent(state *flow.State, cotpPDUType byte) dpi.Event {
+	kind := "connection_request"
+	if cotpPDUType == cotpCC {
+		kind = "connection_confirm"
+	}
+	return dpi.Event{
+		FlowID: state.Key.Hash(),
+		Proto:  "mms",
+		Kind:   kind,
+		Attributes: map[string]any{
 			"service": "connection",
-		}
-		ev := dpi.Event{
-			FlowID:     state.Key.Hash(),
-			Proto:      "mms",
-			Kind:       kind,
-			Attributes: attrs,
-			Timestamp:  time.Now().UTC(),
-		}
-		return []dpi.Event{ev}, nil
+		},
+		Timestamp: time.Now().UTC(),
 	}
+}
 
-	// Only handle COTP DT (Data Transfer).
-	if cotpPDUType != cotpDT {
-		return nil, nil
-	}
-
-	// The MMS/S7comm payload starts after the COTP header.
-	mmsStart := cotpStart + 1 + cotpLen
-	if mmsStart >= len(payload) {
-		return nil, nil
-	}
-
-	// --- Differentiate S7comm vs MMS ---
-	// S7comm payloads start with protocol ID 0x32.
-	if payload[mmsStart] == s7commProtocolID {
-		// This is S7comm traffic — let the S7comm decoder handle it.
-		return nil, nil
-	}
-
-	// --- MMS payload (ASN.1/BER encoded) ---
-	mmsPayload := payload[mmsStart:]
-
-	// The outermost tag identifies the MMS PDU type.
+func buildMMSEvents(state *flow.State, rawPayload, mmsPayload []byte) []dpi.Event {
 	if len(mmsPayload) < 2 {
-		return nil, nil
+		return nil
 	}
-
 	pduTag := mmsPayload[0]
 	kind := mmsPDUKind(pduTag)
-
-	// Skip the outer tag + length to find the service tag inside.
 	inner, ok := skipASN1TagLength(mmsPayload)
 	if !ok || len(inner) == 0 {
-		// Emit a generic MMS event even if we can't parse the inner content.
-		attrs := map[string]any{
-			"pdu_tag": fmt.Sprintf("0x%02X", pduTag),
-		}
-		addRawHex(attrs, pkt.Payload)
-		ev := dpi.Event{
-			FlowID:     state.Key.Hash(),
-			Proto:      "mms",
-			Kind:       kind,
-			Attributes: attrs,
-			Timestamp:  time.Now().UTC(),
-		}
-		return []dpi.Event{ev}, nil
+		return []dpi.Event{newMMSGenericEvent(state, kind, pduTag, rawPayload)}
 	}
-
-	// For confirmed request/response, skip the invoke-id to find the
-	// service choice tag.
 	serviceTag, serviceName := extractServiceTag(pduTag, inner)
+	return []dpi.Event{newMMSServicedEvent(state, kind, pduTag, serviceTag, serviceName, inner, rawPayload)}
+}
 
-	isWrite := mmsWriteServices[serviceTag]
-	isControl := mmsControlServices[serviceTag]
-
+func newMMSGenericEvent(state *flow.State, kind string, pduTag byte, rawPayload []byte) dpi.Event {
 	attrs := map[string]any{
-		"service":    serviceName,
-		"pdu_tag":    fmt.Sprintf("0x%02X", pduTag),
-		"is_write":   isWrite,
-		"is_control": isControl,
+		"pdu_tag": fmt.Sprintf("0x%02X", pduTag),
 	}
-	if serviceTag != 0 {
-		attrs["service_tag"] = fmt.Sprintf("0x%02X", serviceTag)
-	}
-
-	// Extract variable name for read/write services.
-	if serviceTag == mmsTagRead || serviceTag == mmsTagWrite {
-		if varName := extractVariableName(pduTag, inner); varName != "" {
-			attrs["variable_name"] = varName
-		}
-	}
-
-	addRawHex(attrs, pkt.Payload)
-
-	ev := dpi.Event{
+	addRawHex(attrs, rawPayload)
+	return dpi.Event{
 		FlowID:     state.Key.Hash(),
 		Proto:      "mms",
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
+}
+
+func newMMSServicedEvent(state *flow.State, kind string, pduTag, serviceTag byte, serviceName string, inner, rawPayload []byte) dpi.Event {
+	attrs := map[string]any{
+		"service":    serviceName,
+		"pdu_tag":    fmt.Sprintf("0x%02X", pduTag),
+		"is_write":   mmsWriteServices[serviceTag],
+		"is_control": mmsControlServices[serviceTag],
+	}
+	if serviceTag != 0 {
+		attrs["service_tag"] = fmt.Sprintf("0x%02X", serviceTag)
+	}
+	if serviceTag == mmsTagRead || serviceTag == mmsTagWrite {
+		if varName := extractVariableName(pduTag, inner); varName != "" {
+			attrs["variable_name"] = varName
+		}
+	}
+	addRawHex(attrs, rawPayload)
+	return dpi.Event{
+		FlowID:     state.Key.Hash(),
+		Proto:      "mms",
+		Kind:       kind,
+		Attributes: attrs,
+		Timestamp:  time.Now().UTC(),
+	}
 }
 
 // OnFlowEnd is a no-op for MMS.
@@ -339,7 +331,6 @@ func skipASN1TagLength(data []byte) ([]byte, bool) {
 	return data[pos : pos+l], true
 }
 
-
 // asn1ElementSize returns the total size (tag + length + value) of a
 // BER-TLV element. Returns -1 if the encoding is malformed.
 func asn1ElementSize(data []byte) int {
@@ -380,9 +371,10 @@ func asn1ElementSize(data []byte) int {
 // VisibleString.  Returns "domain/item" or "" if not found.
 //
 // The structure inside a Read/Write request is:
-//   service-choice [context tag] -> variableAccessSpecification ->
-//     listOfVariable -> SEQUENCE OF { variableSpecification }
-//       -> name -> domain-specific [context 1] -> SEQUENCE { domainId, itemId }
+//
+//	service-choice [context tag] -> variableAccessSpecification ->
+//	  listOfVariable -> SEQUENCE OF { variableSpecification }
+//	    -> name -> domain-specific [context 1] -> SEQUENCE { domainId, itemId }
 //
 // We do a bounded depth-first scan through the ASN.1 structure looking
 // for the domain-specific pattern.
@@ -471,7 +463,9 @@ func scanForDomainSpecific(data []byte, depth int) string {
 
 // parseDomainSpecificName extracts domainId and itemId from the content
 // of a domain-specific ObjectName.  The structure is:
-//   SEQUENCE { domainId VisibleString, itemId VisibleString }
+//
+//	SEQUENCE { domainId VisibleString, itemId VisibleString }
+//
 // or directly two VisibleString elements (context-tagged or universal).
 func parseDomainSpecificName(data []byte) (domain, item string) {
 	// If wrapped in a SEQUENCE (0x30), unwrap it first.

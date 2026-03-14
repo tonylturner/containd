@@ -46,32 +46,52 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	var buf bytes.Buffer
 	buf.WriteString("flush ruleset\n")
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
-	// Zone interface sets for iifname/oifname binding.
-	if len(snap.ZoneIfaces) > 0 {
-		zones := make([]string, 0, len(snap.ZoneIfaces))
-		for z := range snap.ZoneIfaces {
-			zones = append(zones, z)
-		}
-		sort.Strings(zones)
-		for _, z := range zones {
-			ifaces := snap.ZoneIfaces[z]
-			if len(ifaces) == 0 {
-				continue
-			}
-			setName := "zone_" + sanitizeIdent(z) + "_ifaces"
-			buf.WriteString(fmt.Sprintf("  set %s {\n", setName))
-			buf.WriteString("    type ifname;\n")
-			buf.WriteString("    elements = { ")
-			for i, iface := range ifaces {
-				if i > 0 {
-					buf.WriteString(", ")
-				}
-				buf.WriteString(fmt.Sprintf("\"%s\"", iface))
-			}
-			buf.WriteString(" }\n")
-			buf.WriteString("  }\n")
-		}
+	c.writeZoneIfaceSets(&buf, snap)
+	c.writeDynamicSets(&buf)
+	if err := c.writeInputChain(&buf, snap); err != nil {
+		return "", err
 	}
+	if err := c.writeForwardChain(&buf, snap); err != nil {
+		return "", err
+	}
+	if err := c.writePreroutingChain(&buf, snap); err != nil {
+		return "", err
+	}
+	c.writePostroutingChain(&buf, snap)
+	buf.WriteString("}\n")
+	return buf.String(), nil
+}
+
+func (c *Compiler) writeZoneIfaceSets(buf *bytes.Buffer, snap *rules.Snapshot) {
+	if len(snap.ZoneIfaces) == 0 {
+		return
+	}
+	zones := make([]string, 0, len(snap.ZoneIfaces))
+	for z := range snap.ZoneIfaces {
+		zones = append(zones, z)
+	}
+	sort.Strings(zones)
+	for _, z := range zones {
+		ifaces := snap.ZoneIfaces[z]
+		if len(ifaces) == 0 {
+			continue
+		}
+		setName := "zone_" + sanitizeIdent(z) + "_ifaces"
+		buf.WriteString(fmt.Sprintf("  set %s {\n", setName))
+		buf.WriteString("    type ifname;\n")
+		buf.WriteString("    elements = { ")
+		for i, iface := range ifaces {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteString(fmt.Sprintf("\"%s\"", iface))
+		}
+		buf.WriteString(" }\n")
+		buf.WriteString("  }\n")
+	}
+}
+
+func (c *Compiler) writeDynamicSets(buf *bytes.Buffer) {
 	buf.WriteString("  set block_hosts {\n")
 	buf.WriteString("    type ipv4_addr;\n")
 	buf.WriteString("    flags timeout;\n")
@@ -80,8 +100,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_service;\n")
 	buf.WriteString("    flags timeout;\n")
 	buf.WriteString("  }\n")
-	// INPUT: traffic destined to the appliance itself.
-	// Keep this minimal for now; mgmt/UI runs in a separate container in dev.
+}
+
+func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
@@ -89,15 +110,13 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
-	// Allow management-plane to talk to engine internal API.
 	buf.WriteString("    tcp dport 8081 accept;\n")
-	// Local service allow rules (mgmt/ssh/vpn). Deterministic ordering.
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
 	for _, lr := range locals {
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {
-			return "", err
+			return err
 		}
 		if line == "" {
 			continue
@@ -105,158 +124,184 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		buf.WriteString("    " + line + ";\n")
 	}
 	buf.WriteString("  }\n")
+	return nil
+}
+
+func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
 	buf.WriteString("    ct state { established, related } accept;\n")
-	// Dynamic blocks first (verdict-driven).
 	buf.WriteString("    ip saddr @block_hosts drop;\n")
 	buf.WriteString("    ip daddr @block_hosts drop;\n")
 	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
-
-	// Allow DNATed flows (match on original dport to avoid bypass via direct LAN IP).
-	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
-		pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-		sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
-		for _, pf := range pfs {
-			if !pf.Enabled {
-				continue
-			}
-			ingress := strings.TrimSpace(pf.IngressZone)
-			if ingress == "" {
-				continue
-			}
-			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
-			if proto != "tcp" && proto != "udp" {
-				continue
-			}
-			if pf.ListenPort < 1 || pf.ListenPort > 65535 {
-				continue
-			}
-			dstPort := pf.DestPort
-			if dstPort == 0 {
-				dstPort = pf.ListenPort
-			}
-			if dstPort < 1 || dstPort > 65535 {
-				continue
-			}
-			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
-			parts := []string{
-				fmt.Sprintf("iifname @%s", ingSet),
-				"ct status dnat",
-				proto + " dport " + strconv.Itoa(dstPort),
-			}
-			if len(pf.AllowedSources) > 0 {
-				validated, err := validateCIDRList(pf.AllowedSources)
-				if err != nil {
-					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
-				}
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
-			}
-			// Accept after DNAT; proto match is implicit via ct original clause.
-			parts = append(parts, "accept")
-			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
-		}
+	if err := c.writeDNATAccepts(buf, snap); err != nil {
+		return err
 	}
-
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
 		line, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
 		if err != nil {
-			return "", err
+			return err
 		}
 		buf.WriteString("    " + line + ";\n")
 	}
 	buf.WriteString("  }\n")
+	return nil
+}
 
-	// PREROUTING NAT: DNAT port forwards (simple destination NAT).
-	if len(snap.NAT.PortForwards) > 0 && len(snap.ZoneIfaces) > 0 {
-		entries := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-		sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
-		buf.WriteString("  chain prerouting {\n")
-		buf.WriteString("    type nat hook prerouting priority dstnat;\n")
-		buf.WriteString("    policy accept;\n")
-		for _, pf := range entries {
-			if !pf.Enabled {
-				continue
-			}
-			ingress := strings.TrimSpace(pf.IngressZone)
-			if ingress == "" {
-				continue
-			}
-			proto := strings.ToLower(strings.TrimSpace(pf.Proto))
-			if proto != "tcp" && proto != "udp" {
-				continue
-			}
-			if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
-				continue
-			}
-			dstIP := strings.TrimSpace(pf.DestIP)
-			if net.ParseIP(dstIP) == nil {
-				continue
-			}
-			dstPort := pf.DestPort
-			if dstPort == 0 {
-				dstPort = pf.ListenPort
-			}
-			if dstPort < 1 || dstPort > 65535 {
-				continue
-			}
-
-			ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
-			parts := []string{
-				fmt.Sprintf("iifname @%s", ingSet),
-			}
-			if len(pf.AllowedSources) > 0 {
-				validated, err := validateCIDRList(pf.AllowedSources)
-				if err != nil {
-					return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
-				}
-				parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
-			}
-			parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
-			if dstPort > 0 && dstPort != pf.ListenPort {
-				parts = append(parts, fmt.Sprintf("dnat ip to %s:%d", dstIP, dstPort))
-			} else {
-				parts = append(parts, fmt.Sprintf("dnat ip to %s", dstIP))
-			}
-			buf.WriteString("    " + strings.Join(parts, " ") + ";\n")
-		}
-		buf.WriteString("  }\n")
+func (c *Compiler) writeDNATAccepts(buf *bytes.Buffer, snap *rules.Snapshot) error {
+	if len(snap.NAT.PortForwards) == 0 || len(snap.ZoneIfaces) == 0 {
+		return nil
 	}
-
-	// POSTROUTING NAT: source NAT (masquerade) for common lab/appliance setups.
-	if snap.NAT.Enabled && len(snap.ZoneIfaces) > 0 {
-		egress := strings.TrimSpace(snap.NAT.EgressZone)
-		if egress == "" {
-			egress = "wan"
+	pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+	sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
+	for _, pf := range pfs {
+		line, err := compileDNATAccept(pf)
+		if err != nil {
+			return err
 		}
-		srcZones := snap.NAT.SourceZones
-		if len(srcZones) == 0 {
-			srcZones = []string{"lan", "dmz"}
+		if line != "" {
+			buf.WriteString("    " + line + ";\n")
 		}
-		buf.WriteString("  chain postrouting {\n")
-		buf.WriteString("    type nat hook postrouting priority srcnat;\n")
-		buf.WriteString("    policy accept;\n")
-		// Ensure DNAT'd traffic from wan -> lan returns via engine (SNAT/masq).
-		if len(snap.NAT.PortForwards) > 0 {
-			buf.WriteString("    iifname @zone_wan_ifaces oifname @zone_lan_ifaces masquerade;\n")
-		}
-		for _, z := range srcZones {
-			z = strings.TrimSpace(z)
-			if z == "" {
-				continue
-			}
-			srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
-			egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
-			buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade;\n", srcSet, egSet))
-		}
-		buf.WriteString("  }\n")
 	}
+	return nil
+}
 
-	buf.WriteString("}\n")
-	return buf.String(), nil
+func (c *Compiler) writePreroutingChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
+	if len(snap.NAT.PortForwards) == 0 || len(snap.ZoneIfaces) == 0 {
+		return nil
+	}
+	entries := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	buf.WriteString("  chain prerouting {\n")
+	buf.WriteString("    type nat hook prerouting priority dstnat;\n")
+	buf.WriteString("    policy accept;\n")
+	for _, pf := range entries {
+		line, err := compilePreroutingDNAT(pf)
+		if err != nil {
+			return err
+		}
+		if line != "" {
+			buf.WriteString("    " + line + ";\n")
+		}
+	}
+	buf.WriteString("  }\n")
+	return nil
+}
+
+func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot) {
+	if !snap.NAT.Enabled || len(snap.ZoneIfaces) == 0 {
+		return
+	}
+	egress := strings.TrimSpace(snap.NAT.EgressZone)
+	if egress == "" {
+		egress = "wan"
+	}
+	srcZones := snap.NAT.SourceZones
+	if len(srcZones) == 0 {
+		srcZones = []string{"lan", "dmz"}
+	}
+	buf.WriteString("  chain postrouting {\n")
+	buf.WriteString("    type nat hook postrouting priority srcnat;\n")
+	buf.WriteString("    policy accept;\n")
+	if len(snap.NAT.PortForwards) > 0 {
+		buf.WriteString("    iifname @zone_wan_ifaces oifname @zone_lan_ifaces masquerade;\n")
+	}
+	for _, z := range srcZones {
+		z = strings.TrimSpace(z)
+		if z == "" {
+			continue
+		}
+		srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
+		egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
+		buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade;\n", srcSet, egSet))
+	}
+	buf.WriteString("  }\n")
+}
+
+func compileDNATAccept(pf rules.PortForward) (string, error) {
+	if !pf.Enabled {
+		return "", nil
+	}
+	ingress := strings.TrimSpace(pf.IngressZone)
+	if ingress == "" {
+		return "", nil
+	}
+	proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+	if proto != "tcp" && proto != "udp" {
+		return "", nil
+	}
+	if pf.ListenPort < 1 || pf.ListenPort > 65535 {
+		return "", nil
+	}
+	dstPort := pf.DestPort
+	if dstPort == 0 {
+		dstPort = pf.ListenPort
+	}
+	if dstPort < 1 || dstPort > 65535 {
+		return "", nil
+	}
+	ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+	parts := []string{
+		fmt.Sprintf("iifname @%s", ingSet),
+		"ct status dnat",
+		proto + " dport " + strconv.Itoa(dstPort),
+	}
+	if len(pf.AllowedSources) > 0 {
+		validated, err := validateCIDRList(pf.AllowedSources)
+		if err != nil {
+			return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+		}
+		parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
+	}
+	parts = append(parts, "accept")
+	return strings.Join(parts, " "), nil
+}
+
+func compilePreroutingDNAT(pf rules.PortForward) (string, error) {
+	if !pf.Enabled {
+		return "", nil
+	}
+	ingress := strings.TrimSpace(pf.IngressZone)
+	if ingress == "" {
+		return "", nil
+	}
+	proto := strings.ToLower(strings.TrimSpace(pf.Proto))
+	if proto != "tcp" && proto != "udp" {
+		return "", nil
+	}
+	if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
+		return "", nil
+	}
+	dstIP := strings.TrimSpace(pf.DestIP)
+	if net.ParseIP(dstIP) == nil {
+		return "", nil
+	}
+	dstPort := pf.DestPort
+	if dstPort == 0 {
+		dstPort = pf.ListenPort
+	}
+	if dstPort < 1 || dstPort > 65535 {
+		return "", nil
+	}
+	ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+	parts := []string{fmt.Sprintf("iifname @%s", ingSet)}
+	if len(pf.AllowedSources) > 0 {
+		validated, err := validateCIDRList(pf.AllowedSources)
+		if err != nil {
+			return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
+		}
+		parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
+	}
+	parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
+	if dstPort > 0 && dstPort != pf.ListenPort {
+		parts = append(parts, fmt.Sprintf("dnat ip to %s:%d", dstIP, dstPort))
+	} else {
+		parts = append(parts, fmt.Sprintf("dnat ip to %s", dstIP))
+	}
+	return strings.Join(parts, " "), nil
 }
 
 func defaultPolicy(a rules.Action) string {
@@ -444,6 +489,7 @@ func (a *NftApplier) Apply(ctx context.Context, ruleset string) error {
 	if path == "" {
 		path = "nft"
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, path, "-f", "-")
 	cmd.Stdin = strings.NewReader(ruleset)
 	out, err := cmd.CombinedOutput()
@@ -522,6 +568,7 @@ func (u *NftUpdater) run(ctx context.Context, args []string) error {
 	if path == "" {
 		path = "nft"
 	}
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

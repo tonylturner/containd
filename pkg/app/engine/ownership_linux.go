@@ -7,7 +7,6 @@ package engineapp
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
@@ -217,9 +216,9 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 	}
 }
 
-func ownershipStatusJSON(m *ownershipManager) []byte {
+func ownershipStatus(m *ownershipManager) map[string]any {
 	if m == nil {
-		return []byte(`{"enabled":false}`)
+		return map[string]any{"enabled": false}
 	}
 	st := m.state.Load().(ownershipState)
 	ifaces := make([]string, 0, len(st.ifaces))
@@ -233,13 +232,11 @@ func ownershipStatusJSON(m *ownershipManager) []byte {
 		}
 	}
 	sort.Strings(ifaces)
-	resp := map[string]any{
+	return map[string]any{
 		"enabled":     true,
 		"ifaces":      ifaces,
 		"routes":      len(st.routing.Routes),
 		"policyRules": len(st.routing.Rules),
 		"lastError":   m.getLastError(),
 	}
-	b, _ := json.Marshal(resp)
-	return b
 }

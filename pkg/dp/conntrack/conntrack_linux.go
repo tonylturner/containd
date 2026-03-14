@@ -59,22 +59,27 @@ func List(limit int) ([]Entry, error) {
 func parseLine(line string) Entry {
 	e := Entry{Raw: line}
 	parts := strings.Fields(line)
+	parseConntrackHeader(&e, parts)
+	parseConntrackFields(&e, parts)
+	return e
+}
+
+func parseConntrackHeader(e *Entry, parts []string) {
 	if len(parts) >= 3 {
 		e.Proto = parts[2]
 	}
-	// Timeout is usually parts[4].
 	if len(parts) >= 5 {
 		if v, err := strconv.Atoi(parts[4]); err == nil {
 			e.TimeoutSecs = v
 		}
 	}
-	// TCP state is typically right after timeout, e.g. parts[5].
 	if len(parts) >= 6 && strings.ToUpper(parts[5]) == parts[5] {
 		e.State = parts[5]
 	}
+}
 
-	// Key/value pairs; src/dst/sport/dport appear twice (original + reply).
-	sawSrc, sawDst, sawSport, sawDport := 0, 0, 0, 0
+func parseConntrackFields(e *Entry, parts []string) {
+	seen := conntrackFieldState{}
 	for _, p := range parts {
 		if p == "[ASSURED]" {
 			e.Assured = true
@@ -84,38 +89,38 @@ func parseLine(line string) Entry {
 		if !ok {
 			continue
 		}
-		switch k {
-		case "src":
-			sawSrc++
-			if sawSrc == 1 {
-				e.Src = v
-			} else if sawSrc == 2 {
-				e.ReplySrc = v
-			}
-		case "dst":
-			sawDst++
-			if sawDst == 1 {
-				e.Dst = v
-			} else if sawDst == 2 {
-				e.ReplyDst = v
-			}
-		case "sport":
-			sawSport++
-			if sawSport == 1 {
-				e.Sport = v
-			} else if sawSport == 2 {
-				e.ReplySport = v
-			}
-		case "dport":
-			sawDport++
-			if sawDport == 1 {
-				e.Dport = v
-			} else if sawDport == 2 {
-				e.ReplyDport = v
-			}
-		case "mark":
-			e.Mark = v
-		}
+		assignConntrackField(e, &seen, k, v)
 	}
-	return e
+}
+
+type conntrackFieldState struct {
+	src, dst, sport, dport int
+}
+
+func assignConntrackField(e *Entry, seen *conntrackFieldState, key, value string) {
+	switch key {
+	case "src":
+		seen.src++
+		assignConntrackEndpoint(&e.Src, &e.ReplySrc, seen.src, value)
+	case "dst":
+		seen.dst++
+		assignConntrackEndpoint(&e.Dst, &e.ReplyDst, seen.dst, value)
+	case "sport":
+		seen.sport++
+		assignConntrackEndpoint(&e.Sport, &e.ReplySport, seen.sport, value)
+	case "dport":
+		seen.dport++
+		assignConntrackEndpoint(&e.Dport, &e.ReplyDport, seen.dport, value)
+	case "mark":
+		e.Mark = value
+	}
+}
+
+func assignConntrackEndpoint(primary, reply *string, seen int, value string) {
+	switch seen {
+	case 1:
+		*primary = value
+	case 2:
+		*reply = value
+	}
 }

@@ -204,3 +204,35 @@ func TestSQLiteStoreCreatesFile(t *testing.T) {
 		t.Fatalf("expected db file to exist: %v", err)
 	}
 }
+
+func TestSQLiteStoreWipeAllClearsIDSRules(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewSQLiteStore(filepath.Join(dir, "cfg.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	cfg := DefaultConfig()
+	if err := store.Save(context.Background(), cfg); err != nil {
+		t.Fatalf("save default config: %v", err)
+	}
+	if rules, err := store.LoadIDSRules(context.Background()); err != nil || len(rules) == 0 {
+		t.Fatalf("expected seeded ids rules before wipe, got %d %v", len(rules), err)
+	}
+
+	if err := store.WipeAll(context.Background()); err != nil {
+		t.Fatalf("wipe all: %v", err)
+	}
+
+	if _, err := store.Load(context.Background()); err != ErrNotFound {
+		t.Fatalf("expected config not found after wipe, got %v", err)
+	}
+	rules, err := store.LoadIDSRules(context.Background())
+	if err != nil {
+		t.Fatalf("load ids rules after wipe: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Fatalf("expected ids rules cleared after wipe, got %d", len(rules))
+	}
+}

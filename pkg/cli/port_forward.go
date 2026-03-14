@@ -70,111 +70,11 @@ func setPortForwardAddAPI(api *API) Command {
 		if api == nil {
 			return fmt.Errorf("api unavailable")
 		}
-		if len(args) < 5 {
-			return fmt.Errorf("usage: set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off]")
+		pf, err := parsePortForwardAddArgs(args)
+		if err != nil {
+			return err
 		}
-
-		pf := config.PortForward{
-			ID:          strings.TrimSpace(args[0]),
-			Enabled:     true,
-			IngressZone: strings.TrimSpace(args[1]),
-			Proto:       strings.ToLower(strings.TrimSpace(args[2])),
-		}
-		if pf.ID == "" {
-			return fmt.Errorf("id is required")
-		}
-		if pf.IngressZone == "" {
-			return fmt.Errorf("ingress_zone is required")
-		}
-		if pf.Proto != "tcp" && pf.Proto != "udp" {
-			return fmt.Errorf("proto must be tcp or udp")
-		}
-		lp, err := strconv.Atoi(strings.TrimSpace(args[3]))
-		if err != nil || lp < 1 || lp > 65535 {
-			return fmt.Errorf("invalid listen_port %q", args[3])
-		}
-		pf.ListenPort = lp
-
-		destArg := strings.TrimSpace(args[4])
-		if destArg == "" {
-			return fmt.Errorf("dest is required")
-		}
-		if strings.Contains(destArg, ":") {
-			host, portStr, err := net.SplitHostPort(destArg)
-			if err != nil {
-				return fmt.Errorf("invalid dest %q", destArg)
-			}
-			pf.DestIP = strings.TrimSpace(host)
-			dp, err := strconv.Atoi(strings.TrimSpace(portStr))
-			if err != nil || dp < 1 || dp > 65535 {
-				return fmt.Errorf("invalid dest_port %q", portStr)
-			}
-			pf.DestPort = dp
-		} else {
-			pf.DestIP = destArg
-		}
-		if ip := net.ParseIP(strings.TrimSpace(pf.DestIP)); ip == nil || ip.To4() == nil {
-			return fmt.Errorf("dest_ip must be an IPv4 address")
-		}
-
-		i := 5
-		for i < len(args) {
-			key := strings.ToLower(strings.TrimSpace(args[i]))
-			switch key {
-			case "off", "disabled", "disable":
-				pf.Enabled = false
-				i++
-				continue
-			case "sources", "source", "src":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("missing value for %q", key)
-				}
-				val := strings.TrimSpace(args[i])
-				i++
-				if val == "" || val == "-" || strings.EqualFold(val, "any") {
-					pf.AllowedSources = nil
-					continue
-				}
-				parts := strings.Split(val, ",")
-				var outCIDRs []string
-				seen := map[string]struct{}{}
-				for _, p := range parts {
-					p = strings.TrimSpace(p)
-					if p == "" {
-						continue
-					}
-					if _, _, err := net.ParseCIDR(p); err != nil {
-						return fmt.Errorf("invalid sources CIDR %q", p)
-					}
-					if _, ok := seen[p]; ok {
-						continue
-					}
-					seen[p] = struct{}{}
-					outCIDRs = append(outCIDRs, p)
-				}
-				pf.AllowedSources = outCIDRs
-			case "desc", "description":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("missing value for %q", key)
-				}
-				pf.Description = strings.TrimSpace(args[i])
-				i++
-			default:
-				return fmt.Errorf("unexpected token %q", args[i])
-			}
-		}
-
-		var nat config.NATConfig
-		_ = api.getJSON(ctx, "/api/v1/firewall/nat", &nat)
-		for _, existing := range nat.PortForwards {
-			if existing.ID == pf.ID {
-				return fmt.Errorf("port-forward already exists: %s", pf.ID)
-			}
-		}
-		nat.PortForwards = append(nat.PortForwards, pf)
-		if err := api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil); err != nil {
+		if err := addPortForward(ctx, api, pf); err != nil {
 			return err
 		}
 		if out != nil {
@@ -182,6 +82,147 @@ func setPortForwardAddAPI(api *API) Command {
 		}
 		return nil
 	}
+}
+
+func parsePortForwardAddArgs(args []string) (config.PortForward, error) {
+	if len(args) < 5 {
+		return config.PortForward{}, fmt.Errorf("usage: set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off]")
+	}
+	pf := config.PortForward{
+		ID:          strings.TrimSpace(args[0]),
+		Enabled:     true,
+		IngressZone: strings.TrimSpace(args[1]),
+		Proto:       strings.ToLower(strings.TrimSpace(args[2])),
+	}
+	if err := validatePortForwardIdentity(&pf, args[3]); err != nil {
+		return config.PortForward{}, err
+	}
+	if err := parsePortForwardDest(&pf, args[4]); err != nil {
+		return config.PortForward{}, err
+	}
+	if err := applyPortForwardOptions(&pf, args[5:]); err != nil {
+		return config.PortForward{}, err
+	}
+	return pf, nil
+}
+
+func validatePortForwardIdentity(pf *config.PortForward, listenPortArg string) error {
+	if pf.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if pf.IngressZone == "" {
+		return fmt.Errorf("ingress_zone is required")
+	}
+	if pf.Proto != "tcp" && pf.Proto != "udp" {
+		return fmt.Errorf("proto must be tcp or udp")
+	}
+	lp, err := strconv.Atoi(strings.TrimSpace(listenPortArg))
+	if err != nil || lp < 1 || lp > 65535 {
+		return fmt.Errorf("invalid listen_port %q", listenPortArg)
+	}
+	pf.ListenPort = lp
+	return nil
+}
+
+func parsePortForwardDest(pf *config.PortForward, destArg string) error {
+	destArg = strings.TrimSpace(destArg)
+	if destArg == "" {
+		return fmt.Errorf("dest is required")
+	}
+	if strings.Contains(destArg, ":") {
+		host, portStr, err := net.SplitHostPort(destArg)
+		if err != nil {
+			return fmt.Errorf("invalid dest %q", destArg)
+		}
+		pf.DestIP = strings.TrimSpace(host)
+		dp, err := strconv.Atoi(strings.TrimSpace(portStr))
+		if err != nil || dp < 1 || dp > 65535 {
+			return fmt.Errorf("invalid dest_port %q", portStr)
+		}
+		pf.DestPort = dp
+	} else {
+		pf.DestIP = destArg
+	}
+	if ip := net.ParseIP(strings.TrimSpace(pf.DestIP)); ip == nil || ip.To4() == nil {
+		return fmt.Errorf("dest_ip must be an IPv4 address")
+	}
+	return nil
+}
+
+func applyPortForwardOptions(pf *config.PortForward, args []string) error {
+	for i := 0; i < len(args); {
+		key := strings.ToLower(strings.TrimSpace(args[i]))
+		switch key {
+		case "off", "disabled", "disable":
+			pf.Enabled = false
+			i++
+		case "sources", "source", "src":
+			value, next, err := optionValue(key, args, i)
+			if err != nil {
+				return err
+			}
+			sources, err := parseAllowedSourceCIDRs(value)
+			if err != nil {
+				return err
+			}
+			pf.AllowedSources = sources
+			i = next
+		case "desc", "description":
+			value, next, err := optionValue(key, args, i)
+			if err != nil {
+				return err
+			}
+			pf.Description = strings.TrimSpace(value)
+			i = next
+		default:
+			return fmt.Errorf("unexpected token %q", args[i])
+		}
+	}
+	return nil
+}
+
+func optionValue(key string, args []string, i int) (string, int, error) {
+	i++
+	if i >= len(args) {
+		return "", i, fmt.Errorf("missing value for %q", key)
+	}
+	return strings.TrimSpace(args[i]), i + 1, nil
+}
+
+func parseAllowedSourceCIDRs(value string) ([]string, error) {
+	if value == "" || value == "-" || strings.EqualFold(value, "any") {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	var outCIDRs []string
+	seen := map[string]struct{}{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(p); err != nil {
+			return nil, fmt.Errorf("invalid sources CIDR %q", p)
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		outCIDRs = append(outCIDRs, p)
+	}
+	return outCIDRs, nil
+}
+
+func addPortForward(ctx context.Context, api *API, pf config.PortForward) error {
+	var nat config.NATConfig
+	_ = api.getJSON(ctx, "/api/v1/firewall/nat", &nat)
+	for _, existing := range nat.PortForwards {
+		if existing.ID == pf.ID {
+			return fmt.Errorf("port-forward already exists: %s", pf.ID)
+		}
+	}
+	nat.PortForwards = append(nat.PortForwards, pf)
+	return api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil)
 }
 
 func setPortForwardDelAPI(api *API) Command {

@@ -57,11 +57,56 @@ cd ui && npm run lint
 bash scripts/smoketest
 ```
 
+### Local Verification
+
+For the standard contributor verification flow, use:
+
+```bash
+bash scripts/dev-verify.sh
+```
+
+This runs:
+
+- `go vet ./...`
+- `golangci-lint run` (with a Docker fallback if the binary is not installed locally)
+- `staticcheck ./...` (with a `go run` fallback if the binary is not installed locally)
+- `ineffassign ./...` (with a `go run` fallback if the binary is not installed locally)
+- `shellcheck -x` on the repo shell entrypoints (with a Docker fallback if the binary is not installed locally)
+- `go test ./...`
+- `cd ui && npm run lint`
+- `mkdocs build -f docs/mkdocs.yml`
+
+To include the repo filesystem vulnerability scan too:
+
+```bash
+bash scripts/dev-verify.sh --with-trivy
+```
+
+To include the curated Semgrep security scan too:
+
+```bash
+bash scripts/dev-verify.sh --with-semgrep
+```
+
+For dataplane benchmark and profile work:
+
+```bash
+bash scripts/perf-baseline.sh
+bash scripts/perf-baseline.sh --profile
+```
+
+For complexity triage during refactors:
+
+```bash
+bash scripts/complexity-report.sh
+```
+
 ## Code Standards
 
 ### Go
 
 - Follow standard Go conventions (`gofmt`, `go vet`).
+- Prefer `bash scripts/dev-verify.sh` before pushing so local verification matches the expected repo baseline.
 - Maintain strict separation between data plane (`pkg/dp/`), control plane (`pkg/cp/`), and management plane (`pkg/mp/`, `api/`).
 - Data plane snapshots are immutable; use atomic swaps.
 - Avoid introducing new dependencies without justification.
@@ -78,6 +123,32 @@ bash scripts/smoketest
 - Write tests for new functionality.
 - Keep commits focused: one logical change per commit.
 - Write clear commit messages: imperative mood, concise summary, body if needed.
+
+## Code Boundaries
+
+The main contributor-facing facades now have explicit ownership boundaries documented in [docs/mkdocs/code-boundaries.md](docs/mkdocs/code-boundaries.md).
+
+When adding new code:
+
+- Treat facade files as routing/assembly surfaces, not catch-all implementation files.
+- Add new HTTP endpoints to the matching `api/http/*_handlers.go` domain file, not back into `api/http/server.go`.
+- Add config validation to the matching `pkg/cp/config/validate*.go` file, not back into `pkg/cp/config/config.go`.
+- Add new UI API endpoints to the matching `ui/lib/api-*.ts` domain file, and keep `ui/lib/api.ts` as the stable facade.
+- Move large page-local forms, modals, and lookup tables into sibling modules before growing page files further.
+
+## Local Verification
+
+Recommended local verification flows:
+
+- `bash scripts/dev-verify.sh`
+- `bash scripts/dev-verify.sh --with-semgrep`
+- `bash scripts/dev-verify.sh --with-coverage`
+- `bash scripts/smoketest`
+- `bash scripts/perf-baseline.sh`
+
+For coverage-specific inspection, use:
+
+- `bash scripts/coverage-report.sh`
 
 ## Pull Request Process
 

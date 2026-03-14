@@ -272,61 +272,75 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	if ctx.ICS == nil {
 		return false
 	}
-	if ce.ICS.Protocol != "" && ce.ICS.Protocol != ctx.ICS.Protocol {
+	return matchICSProtocol(ce.ICS, ctx) &&
+		matchICSFunctionCode(ce.ICS, ctx) &&
+		matchICSUnitID(ce.ICS, ctx) &&
+		matchICSAddresses(ce.addresses, ctx) &&
+		matchICSObjectClass(ce.ICS, ctx) &&
+		matchICSDirection(ce.ICS, ctx) &&
+		matchICSAccessMode(ce.ICS, ctx)
+}
+
+func matchICSProtocol(pred ICSPredicate, ctx EvalContext) bool {
+	return pred.Protocol == "" || pred.Protocol == ctx.ICS.Protocol
+}
+
+func matchICSFunctionCode(pred ICSPredicate, ctx EvalContext) bool {
+	if len(pred.FunctionCode) == 0 {
+		return true
+	}
+	for _, fc := range pred.FunctionCode {
+		if fc == ctx.ICS.FunctionCode {
+			return true
+		}
+	}
+	return false
+}
+
+func matchICSUnitID(pred ICSPredicate, ctx EvalContext) bool {
+	if pred.UnitID == nil {
+		return true
+	}
+	return ctx.ICS.UnitID != nil && *pred.UnitID == *ctx.ICS.UnitID
+}
+
+func matchICSAddresses(addresses []compiledAddr, ctx EvalContext) bool {
+	if len(addresses) == 0 {
+		return true
+	}
+	ctxVal, ok := parseAddr(ctx.ICS.Address)
+	if !ok {
 		return false
 	}
-	if len(ce.ICS.FunctionCode) > 0 {
-		match := false
-		for _, fc := range ce.ICS.FunctionCode {
-			if fc == ctx.ICS.FunctionCode {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
+	for _, a := range addresses {
+		if ctxVal >= a.low && ctxVal <= a.high {
+			return true
 		}
 	}
-	if ce.ICS.UnitID != nil {
-		if ctx.ICS.UnitID == nil || *ce.ICS.UnitID != *ctx.ICS.UnitID {
-			return false
+	return false
+}
+
+func matchICSObjectClass(pred ICSPredicate, ctx EvalContext) bool {
+	if len(pred.ObjectClasses) == 0 {
+		return true
+	}
+	for _, oc := range pred.ObjectClasses {
+		if oc == ctx.ICS.ObjectClass {
+			return true
 		}
 	}
-	if len(ce.addresses) > 0 {
-		ctxVal, ok := parseAddr(ctx.ICS.Address)
-		if !ok {
-			return false
-		}
-		matched := false
-		for _, a := range ce.addresses {
-			if ctxVal >= a.low && ctxVal <= a.high {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
-	}
-	if len(ce.ICS.ObjectClasses) > 0 {
-		match := false
-		for _, oc := range ce.ICS.ObjectClasses {
-			if oc == ctx.ICS.ObjectClass {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
-		}
-	}
-	if ce.ICS.Direction != "" && ce.ICS.Direction != ctx.ICS.Direction {
+	return false
+}
+
+func matchICSDirection(pred ICSPredicate, ctx EvalContext) bool {
+	return pred.Direction == "" || pred.Direction == ctx.ICS.Direction
+}
+
+func matchICSAccessMode(pred ICSPredicate, ctx EvalContext) bool {
+	if pred.ReadOnly && !ctx.ICS.ReadOnly {
 		return false
 	}
-	if ce.ICS.ReadOnly && !ctx.ICS.ReadOnly {
-		return false
-	}
-	if ce.ICS.WriteOnly && !ctx.ICS.WriteOnly {
+	if pred.WriteOnly && !ctx.ICS.WriteOnly {
 		return false
 	}
 	return true
@@ -420,60 +434,54 @@ func matchSchedule(entry Entry, ctx EvalContext) bool {
 	if schedulePredicateEmpty(entry.Schedule) {
 		return true
 	}
-	now := ctx.Now
+	now, ok := scheduleNow(entry.Schedule, ctx.Now)
+	return ok && matchScheduleDay(entry.Schedule, now) && matchScheduleTimeWindow(entry.Schedule, now)
+}
+
+func scheduleNow(schedule SchedulePredicate, now time.Time) (time.Time, bool) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	// Convert to the rule's timezone if specified.
-	if entry.Schedule.Timezone != "" {
-		loc, err := time.LoadLocation(entry.Schedule.Timezone)
-		if err != nil {
-			return false
-		}
-		now = now.In(loc)
+	if schedule.Timezone == "" {
+		return now, true
 	}
-	// Check day of week.
-	if len(entry.Schedule.DaysOfWeek) > 0 {
-		day := now.Weekday().String()
-		found := false
-		for _, d := range entry.Schedule.DaysOfWeek {
-			if d == day {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
+	loc, err := time.LoadLocation(schedule.Timezone)
+	if err != nil {
+		return time.Time{}, false
 	}
-	// Check time window.
-	hasStart := entry.Schedule.StartTime != ""
-	hasEnd := entry.Schedule.EndTime != ""
-	if hasStart || hasEnd {
-		hhmm := formatHHMM(now.Hour(), now.Minute())
-		if hasStart && hasEnd {
-			if entry.Schedule.StartTime <= entry.Schedule.EndTime {
-				// Normal range, e.g. 09:00–17:00.
-				if hhmm < entry.Schedule.StartTime || hhmm > entry.Schedule.EndTime {
-					return false
-				}
-			} else {
-				// Overnight range, e.g. 22:00–06:00.
-				if hhmm < entry.Schedule.StartTime && hhmm > entry.Schedule.EndTime {
-					return false
-				}
-			}
-		} else if hasStart {
-			if hhmm < entry.Schedule.StartTime {
-				return false
-			}
-		} else {
-			if hhmm > entry.Schedule.EndTime {
-				return false
-			}
-		}
+	return now.In(loc), true
+}
+
+func matchScheduleDay(schedule SchedulePredicate, now time.Time) bool {
+	if len(schedule.DaysOfWeek) == 0 {
+		return true
 	}
-	return true
+	day := now.Weekday().String()
+	return contains(schedule.DaysOfWeek, day)
+}
+
+func matchScheduleTimeWindow(schedule SchedulePredicate, now time.Time) bool {
+	hasStart := schedule.StartTime != ""
+	hasEnd := schedule.EndTime != ""
+	if !hasStart && !hasEnd {
+		return true
+	}
+	return withinScheduleWindow(formatHHMM(now.Hour(), now.Minute()), schedule.StartTime, schedule.EndTime)
+}
+
+func withinScheduleWindow(hhmm, start, end string) bool {
+	hasStart := start != ""
+	hasEnd := end != ""
+	if hasStart && hasEnd {
+		if start <= end {
+			return hhmm >= start && hhmm <= end
+		}
+		return hhmm >= start || hhmm <= end
+	}
+	if hasStart {
+		return hhmm >= start
+	}
+	return hhmm <= end
 }
 
 // formatHHMM returns "HH:MM" without fmt.Sprintf allocation.

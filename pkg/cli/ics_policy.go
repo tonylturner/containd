@@ -31,83 +31,125 @@ import (
 //	--mode <learn|enforce>
 func setFirewallICSRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) < 3 {
-			return fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--mode <learn|enforce>]")
+		rule, err := parseFirewallICSRuleArgs(args)
+		if err != nil {
+			return err
 		}
-
-		rule := config.Rule{
-			ID:     args[0],
-			Action: config.Action(strings.ToUpper(args[1])),
-			ICS: config.ICSPredicate{
-				Protocol: args[2],
-			},
-		}
-
-		// Parse optional flags.
-		i := 3
-		for i < len(args) {
-			switch args[i] {
-			case "--src-zone":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--src-zone requires a value")
-				}
-				rule.SourceZones = []string{args[i]}
-			case "--dst-zone":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--dst-zone requires a value")
-				}
-				rule.DestZones = []string{args[i]}
-			case "--function-code":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--function-code requires a value")
-				}
-				codes, err := parseUint8CSV(args[i])
-				if err != nil {
-					return fmt.Errorf("invalid --function-code: %w", err)
-				}
-				rule.ICS.FunctionCode = codes
-			case "--unit-id":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--unit-id requires a value")
-				}
-				v, err := strconv.ParseUint(args[i], 10, 8)
-				if err != nil {
-					return fmt.Errorf("invalid --unit-id: %w", err)
-				}
-				uid := uint8(v)
-				rule.ICS.UnitID = &uid
-			case "--addresses":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--addresses requires a value")
-				}
-				rule.ICS.Addresses = strings.Split(args[i], ",")
-			case "--read-only":
-				rule.ICS.ReadOnly = true
-			case "--write-only":
-				rule.ICS.WriteOnly = true
-			case "--mode":
-				i++
-				if i >= len(args) {
-					return fmt.Errorf("--mode requires a value")
-				}
-				mode := args[i]
-				if mode != "learn" && mode != "enforce" {
-					return fmt.Errorf("--mode must be 'learn' or 'enforce'")
-				}
-				rule.ICS.Mode = mode
-			default:
-				return fmt.Errorf("unknown option: %s", args[i])
-			}
-			i++
-		}
-
 		return api.postJSON(ctx, "/api/v1/firewall/ics-rules", rule, out)
 	}
+}
+
+func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
+	if len(args) < 3 {
+		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--mode <learn|enforce>]")
+	}
+
+	rule := config.Rule{
+		ID:     args[0],
+		Action: config.Action(strings.ToUpper(args[1])),
+		ICS: config.ICSPredicate{
+			Protocol: args[2],
+		},
+	}
+
+	for i := 3; i < len(args); i++ {
+		next, err := applyFirewallICSRuleArg(&rule, args, i)
+		if err != nil {
+			return config.Rule{}, err
+		}
+		i = next
+	}
+	return rule, nil
+}
+
+func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, error) {
+	switch args[index] {
+	case "--src-zone":
+		value, next, err := firewallICSRuleValue(args, index, "--src-zone")
+		if err != nil {
+			return index, err
+		}
+		rule.SourceZones = []string{value}
+		return next, nil
+	case "--dst-zone":
+		value, next, err := firewallICSRuleValue(args, index, "--dst-zone")
+		if err != nil {
+			return index, err
+		}
+		rule.DestZones = []string{value}
+		return next, nil
+	case "--function-code":
+		value, next, err := firewallICSRuleValue(args, index, "--function-code")
+		if err != nil {
+			return index, err
+		}
+		codes, err := parseUint8CSV(value)
+		if err != nil {
+			return index, fmt.Errorf("invalid --function-code: %w", err)
+		}
+		rule.ICS.FunctionCode = codes
+		return next, nil
+	case "--unit-id":
+		value, next, err := firewallICSRuleValue(args, index, "--unit-id")
+		if err != nil {
+			return index, err
+		}
+		uid, err := parseFirewallICSUnitID(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.UnitID = uid
+		return next, nil
+	case "--addresses":
+		value, next, err := firewallICSRuleValue(args, index, "--addresses")
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.Addresses = strings.Split(value, ",")
+		return next, nil
+	case "--read-only":
+		rule.ICS.ReadOnly = true
+		return index, nil
+	case "--write-only":
+		rule.ICS.WriteOnly = true
+		return index, nil
+	case "--mode":
+		value, next, err := firewallICSRuleValue(args, index, "--mode")
+		if err != nil {
+			return index, err
+		}
+		if err := validateFirewallICSMode(value); err != nil {
+			return index, err
+		}
+		rule.ICS.Mode = value
+		return next, nil
+	default:
+		return index, fmt.Errorf("unknown option: %s", args[index])
+	}
+}
+
+func firewallICSRuleValue(args []string, index int, flag string) (string, int, error) {
+	index++
+	if index >= len(args) {
+		return "", index, fmt.Errorf("%s requires a value", flag)
+	}
+	return args[index], index, nil
+}
+
+func parseFirewallICSUnitID(value string) (*uint8, error) {
+	v, err := strconv.ParseUint(value, 10, 8)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --unit-id: %w", err)
+	}
+	uid := uint8(v)
+	return &uid, nil
+}
+
+func validateFirewallICSMode(mode string) error {
+	if mode != "learn" && mode != "enforce" {
+		return fmt.Errorf("--mode must be 'learn' or 'enforce'")
+	}
+	return nil
 }
 
 // showFirewallICSRulesAPI lists firewall rules that have ICS predicates.

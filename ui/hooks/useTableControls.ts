@@ -30,7 +30,7 @@ export function useTableControls<T extends Record<string, any>>(
   const [sortDir, setSortDir] = useState<"asc" | "desc">(opts?.defaultDir ?? "asc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(opts?.defaultPageSize ?? 25);
-  const searchKeys = opts?.searchKeys ?? [];
+  const searchKeys = useMemo(() => opts?.searchKeys ?? [], [opts?.searchKeys]);
 
   const setSort = (key: string) => {
     if (key === sortKey) {

@@ -6,10 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,16 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/ics/bacnet"
-	"github.com/tonylturner/containd/pkg/dp/ics/cip"
-	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
-	"github.com/tonylturner/containd/pkg/dp/ics/iec61850"
-	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
-	"github.com/tonylturner/containd/pkg/dp/ics/opcua"
-	"github.com/tonylturner/containd/pkg/dp/ics/s7comm"
-	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
-	"github.com/tonylturner/containd/pkg/dp/itdpi"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
@@ -97,88 +85,6 @@ type Config struct {
 type DPIExclusion struct {
 	Value string
 	Type  string // "ip", "cidr", "domain"
-}
-
-// DefaultDecoders returns the standard set of DPI decoders for both ICS and
-// IT protocols. Used by the engine and by offline analysis (PCAP-to-policy).
-func DefaultDecoders() []dpi.Decoder {
-	return []dpi.Decoder{
-		modbus.NewDecoder(),
-		dnp3.NewDecoder(),
-		cip.NewDecoder(),
-		iec61850.NewMMSDecoder(), // MMS before S7comm: both use port 102
-		s7comm.NewDecoder(),
-		bacnet.NewDecoder(),
-		opcua.NewDecoder(),
-		itdpi.NewDNSDecoder(),
-		itdpi.NewTLSDecoder(),
-		itdpi.NewHTTPDecoder(),
-		itdpi.NewSSHDecoder(),
-		itdpi.NewSMBDecoder(),
-		itdpi.NewNTPDecoder(),
-		itdpi.NewSNMPDecoder(),
-		itdpi.NewRDPDecoder(),
-		itdpi.NewICSMarker(),
-		itdpi.NewPortDetector(),
-	}
-}
-
-// itDecoderProto maps IT DPI decoder types to their protocol key used in
-// DPIProtocols config.
-var itDecoderProto = map[string]string{
-	"*itdpi.DNSDecoder":  "dns",
-	"*itdpi.TLSDecoder":  "tls",
-	"*itdpi.HTTPDecoder": "http",
-	"*itdpi.SSHDecoder":  "ssh",
-	"*itdpi.SMBDecoder":  "smb",
-	"*itdpi.NTPDecoder":  "ntp",
-	"*itdpi.SNMPDecoder": "snmp",
-	"*itdpi.RDPDecoder":  "rdp",
-}
-
-// icsDecoderProto maps ICS DPI decoder types to their protocol key used in
-// DPIICSProtocols config.
-var icsDecoderProto = map[string]string{
-	"*modbus.Decoder":      "modbus",
-	"*dnp3.Decoder":        "dnp3",
-	"*cip.Decoder":         "cip",
-	"*s7comm.Decoder":      "s7comm",
-	"*iec61850.MMSDecoder": "mms",
-	"*bacnet.Decoder":      "bacnet",
-	"*opcua.Decoder":       "opcua",
-}
-
-// FilterDecoders returns decoders filtered by the per-protocol toggle maps.
-// Utility decoders (ICSMarker, PortDetector) are always included. IT decoders
-// are filtered by itProtos and ICS decoders by icsProtos. If both maps are
-// empty, all decoders are returned. For each decoder in a category, it is
-// included if its protocol key is not in the map OR if it is explicitly true.
-func FilterDecoders(itProtos, icsProtos map[string]bool) []dpi.Decoder {
-	all := DefaultDecoders()
-	if len(itProtos) == 0 && len(icsProtos) == 0 {
-		return all // no filter → all enabled
-	}
-	var out []dpi.Decoder
-	for _, d := range all {
-		typeName := fmt.Sprintf("%T", d)
-		if protoKey, isIT := itDecoderProto[typeName]; isIT {
-			enabled, configured := itProtos[protoKey]
-			if !configured || enabled {
-				out = append(out, d)
-			}
-			continue
-		}
-		if protoKey, isICS := icsDecoderProto[typeName]; isICS {
-			enabled, configured := icsProtos[protoKey]
-			if !configured || enabled {
-				out = append(out, d)
-			}
-			continue
-		}
-		// Utility decoder — always include
-		out = append(out, d)
-	}
-	return out
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -327,72 +233,79 @@ func (e *Engine) ShouldInspect(state *flow.State, pkt *dpi.ParsedPacket) bool {
 	if e == nil || pkt == nil {
 		return false
 	}
-	// Master DPI toggle — when explicitly disabled, skip DPI entirely.
-	// Note: inspectAll (DPIMock/lab mode) overrides this for testing.
-	if !e.dpiEnabled && !e.inspectAll {
-		return false
-	}
-	// Check IP exclusions.
-	if len(e.dpiExclusions) > 0 && state != nil && e.isExcluded(state) {
+	if !e.dpiInspectionEnabled(state) {
 		return false
 	}
 	if e.inspectAll {
 		return true
 	}
 	snap := e.ruleSnap.Load()
-	if snap == nil {
+	if !shouldInspectWithSnapshot(snap) {
 		return false
 	}
-	// If IDS is enabled, inspect everything for now (future: selective per IDS rule proto).
 	if snap.IDS.Enabled {
 		return true
 	}
-	if len(snap.Firewall) == 0 {
-		return false
-	}
 	for _, entry := range snap.Firewall {
-		if entry.ICS.Protocol == "" {
-			continue
-		}
-		// If explicit protocols exist, require port match.
-		if len(entry.Protocols) > 0 {
-			for _, p := range entry.Protocols {
-				if protocolPortMatches(entry, p, state, pkt) {
-					return true
-				}
-			}
-			continue
-		}
-		// Default port heuristics by ICS protocol.
-		switch strings.ToLower(entry.ICS.Protocol) {
-		case "modbus":
-			if servicePort(state, pkt) == 502 {
-				return true
-			}
-		case "dnp3":
-			if servicePort(state, pkt) == 20000 {
-				return true
-			}
-		case "cip":
-			port := servicePort(state, pkt)
-			if port == 44818 || port == 2222 {
-				return true
-			}
-		case "s7comm", "mms":
-			if servicePort(state, pkt) == 102 {
-				return true
-			}
-		case "bacnet":
-			if servicePort(state, pkt) == 47808 {
-				return true
-			}
-		case "opcua":
-			if servicePort(state, pkt) == 4840 {
-				return true
-			}
+		if shouldInspectFirewallEntry(entry, state, pkt) {
+			return true
 		}
 	}
 	return false
+}
+
+func (e *Engine) dpiInspectionEnabled(state *flow.State) bool {
+	// Master DPI toggle — when explicitly disabled, skip DPI entirely.
+	// Note: inspectAll (DPIMock/lab mode) overrides this for testing.
+	if !e.dpiEnabled && !e.inspectAll {
+		return false
+	}
+	if len(e.dpiExclusions) > 0 && state != nil && e.isExcluded(state) {
+		return false
+	}
+	return true
+}
+
+func shouldInspectWithSnapshot(snap *rules.Snapshot) bool {
+	return snap != nil && len(snap.Firewall) > 0 || (snap != nil && snap.IDS.Enabled)
+}
+
+func shouldInspectFirewallEntry(entry rules.Entry, state *flow.State, pkt *dpi.ParsedPacket) bool {
+	if entry.ICS.Protocol == "" {
+		return false
+	}
+	if len(entry.Protocols) > 0 {
+		return entryMatchesProtocolPorts(entry, state, pkt)
+	}
+	return matchesICSDefaultPort(entry.ICS.Protocol, servicePort(state, pkt))
+}
+
+func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.ParsedPacket) bool {
+	for _, p := range entry.Protocols {
+		if protocolPortMatches(entry, p, state, pkt) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesICSDefaultPort(proto string, port uint16) bool {
+	switch strings.ToLower(proto) {
+	case "modbus":
+		return port == 502
+	case "dnp3":
+		return port == 20000
+	case "cip":
+		return port == 44818 || port == 2222
+	case "s7comm", "mms":
+		return port == 102
+	case "bacnet":
+		return port == 47808
+	case "opcua":
+		return port == 4840
+	default:
+		return false
+	}
 }
 
 func (e *Engine) handlePacket(pkt capture.Packet) {
@@ -492,646 +405,4 @@ func (e *Engine) sweepFlows(now time.Time) {
 			metrics.FlowsActive.Dec()
 		}
 	}
-}
-
-func protocolPortMatches(entry rules.Entry, p rules.Protocol, state *flow.State, pkt *dpi.ParsedPacket) bool {
-	if p.Name != "" && !strings.EqualFold(p.Name, pkt.Proto) {
-		return false
-	}
-	port := servicePort(state, pkt)
-	if p.Port == "" {
-		// Any port for that transport.
-		return true
-	}
-	min, max, ok := parsePortRange(p.Port)
-	if !ok {
-		return false
-	}
-	return port >= min && port <= max
-}
-
-// isExcluded checks whether either endpoint of a flow matches a DPI exclusion.
-func (e *Engine) isExcluded(state *flow.State) bool {
-	for _, excl := range e.dpiExclusions {
-		switch excl.Type {
-		case "ip":
-			ip := net.ParseIP(excl.Value)
-			if ip == nil {
-				continue
-			}
-			if state.Key.SrcIP.Equal(ip) || state.Key.DstIP.Equal(ip) {
-				return true
-			}
-		case "cidr":
-			_, cidr, err := net.ParseCIDR(excl.Value)
-			if err != nil {
-				continue
-			}
-			if cidr.Contains(state.Key.SrcIP) || cidr.Contains(state.Key.DstIP) {
-				return true
-			}
-		case "domain":
-			// Domain exclusions are matched against flow metadata if available.
-			// In practice, DNS responses populate flow state with resolved names.
-			// For now, domain exclusions match the SNI or query_name if the flow
-			// has been tagged by TLS/DNS decoders — this will be enhanced when
-			// TLS interception is added.
-			continue
-		}
-	}
-	return false
-}
-
-func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, bool) {
-	if e == nil || state == nil || pkt == nil || len(evs) == 0 || !strings.EqualFold(e.dpiMode, "enforce") {
-		return verdict.Verdict{}, false
-	}
-	snap := e.ruleSnap.Load()
-	if snap == nil {
-		return verdict.Verdict{}, false
-	}
-	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
-	for _, ev := range evs {
-		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
-		if !ok {
-			continue
-		}
-		v := e.EvaluateVerdict(ctx)
-		if v.Action == verdict.AllowContinue {
-			continue
-		}
-		if v.Action == verdict.DenyDrop {
-			v.Action = verdict.BlockFlowTemp
-			if v.TTL <= 0 {
-				v.TTL = dpiEnforceBlockTTL
-			}
-		}
-		if err := e.ApplyVerdict(context.Background(), v, ctx); err != nil {
-			continue
-		}
-		return v, true
-	}
-	return verdict.Verdict{}, false
-}
-
-func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
-	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) {
-		return rules.EvalContext{}, false
-	}
-	service := servicePort(state, pkt)
-	ctx := rules.EvalContext{
-		SrcZone: srcZone,
-		DstZone: dstZone,
-		SrcIP:   state.Key.SrcIP,
-		DstIP:   state.Key.DstIP,
-		Proto:   strings.ToLower(pkt.Proto),
-		Port:    strconv.Itoa(int(service)),
-		ICS: &rules.ICSContext{
-			Protocol:  strings.ToLower(ev.Proto),
-			Address:   attrString(ev.Attributes, "address"),
-			ReadOnly:  !attrBool(ev.Attributes, "is_write"),
-			WriteOnly: attrBool(ev.Attributes, "is_write"),
-			Direction: eventDirection(ev.Kind),
-		},
-	}
-	if fc, ok := attrUint8(ev.Attributes, "function_code"); ok {
-		ctx.ICS.FunctionCode = fc
-	}
-	if unitID, ok := attrUint8(ev.Attributes, "unit_id"); ok {
-		unit := unitID
-		ctx.ICS.UnitID = &unit
-	}
-	if objectClass, ok := attrUint16(ev.Attributes, "object_class"); ok {
-		ctx.ICS.ObjectClass = objectClass
-	}
-	return ctx, true
-}
-
-func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, string) {
-	if snap == nil || len(snap.ZoneIfaces) == 0 {
-		return "", ""
-	}
-	type zoneNets struct {
-		name string
-		nets []*net.IPNet
-	}
-	var zones []zoneNets
-	for zone, ifaces := range snap.ZoneIfaces {
-		zn := zoneNets{name: zone}
-		for _, ifaceName := range ifaces {
-			iface, err := net.InterfaceByName(ifaceName)
-			if err != nil {
-				continue
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, addr := range addrs {
-				switch v := addr.(type) {
-				case *net.IPNet:
-					zn.nets = append(zn.nets, v)
-				case *net.IPAddr:
-					bits := 32
-					if v.IP.To4() == nil {
-						bits = 128
-					}
-					zn.nets = append(zn.nets, &net.IPNet{IP: v.IP, Mask: net.CIDRMask(bits, bits)})
-				}
-			}
-		}
-		if len(zn.nets) > 0 {
-			zones = append(zones, zn)
-		}
-	}
-	zoneForIP := func(ip net.IP) string {
-		if ip == nil {
-			return ""
-		}
-		for _, zone := range zones {
-			for _, network := range zone.nets {
-				if network.Contains(ip) {
-					return zone.name
-				}
-			}
-		}
-		return ""
-	}
-	return zoneForIP(srcIP), zoneForIP(dstIP)
-}
-
-func isRuleEvaluableICSEvent(proto string) bool {
-	switch strings.ToLower(strings.TrimSpace(proto)) {
-	case "modbus", "dnp3", "cip", "s7comm", "mms", "bacnet", "opcua":
-		return true
-	default:
-		return false
-	}
-}
-
-func eventDirection(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "response", "exception":
-		return "response"
-	default:
-		return "request"
-	}
-}
-
-func attrBool(attrs map[string]any, key string) bool {
-	if attrs == nil {
-		return false
-	}
-	switch v := attrs[key].(type) {
-	case bool:
-		return v
-	case string:
-		return strings.EqualFold(v, "true")
-	default:
-		return false
-	}
-}
-
-func attrUint8(attrs map[string]any, key string) (uint8, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint8:
-		return v, true
-	case uint16:
-		if v <= 255 {
-			return uint8(v), true
-		}
-	case int:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	}
-	return 0, false
-}
-
-func attrUint16(attrs map[string]any, key string) (uint16, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint16:
-		return v, true
-	case uint8:
-		return uint16(v), true
-	case int:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	}
-	return 0, false
-}
-
-func attrString(attrs map[string]any, key string) string {
-	if attrs == nil {
-		return ""
-	}
-	switch v := attrs[key].(type) {
-	case string:
-		return v
-	case uint8:
-		return strconv.FormatUint(uint64(v), 10)
-	case uint16:
-		return strconv.FormatUint(uint64(v), 10)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		return strconv.FormatInt(int64(v), 10)
-	default:
-		return ""
-	}
-}
-
-func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
-	if state != nil && state.Key.Dir == flow.DirReverse {
-		return pkt.SrcPort
-	}
-	return pkt.DstPort
-}
-
-func parsePortRange(s string) (uint16, uint16, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, 0, false
-	}
-	if !strings.Contains(s, "-") {
-		v, err := strconv.Atoi(s)
-		if err != nil || v < 0 || v > 65535 {
-			return 0, 0, false
-		}
-		u := uint16(v)
-		return u, u, true
-	}
-	parts := strings.SplitN(s, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || lo < 0 || hi < 0 || lo > 65535 || hi > 65535 {
-		return 0, 0, false
-	}
-	if lo > hi {
-		lo, hi = hi, lo
-	}
-	return uint16(lo), uint16(hi), true
-}
-
-// RecordDPIEvents appends events to the telemetry store.
-func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if e == nil || e.eventStore == nil {
-		return
-	}
-	metrics.DPIEventsTotal.Add(float64(len(evs)))
-	for i := range evs {
-		evs[i] = itdpi.MarkICS(evs[i])
-	}
-	// Record ICS events into the asset inventory.
-	if e.inventory != nil && state != nil {
-		srcIP := state.Key.SrcIP.String()
-		dstIP := state.Key.DstIP.String()
-		for _, ev := range evs {
-			if isICSEvent(ev.Proto, ev.Kind) {
-				e.inventory.RecordEvent(srcIP, dstIP, ev)
-			}
-		}
-	}
-	// Record ICS events into the learner when learn mode is active.
-	if e.learner != nil && state != nil && e.hasLearnMode() {
-		srcIP := state.Key.SrcIP.String()
-		dstIP := state.Key.DstIP.String()
-		for _, ev := range evs {
-			if isICSEvent(ev.Proto, ev.Kind) {
-				e.learner.RecordEvent(srcIP, dstIP, ev)
-			}
-		}
-	}
-	// Run anomaly detection on ICS events.
-	if e.anomalyDetector != nil && state != nil {
-		srcIP := state.Key.SrcIP.String()
-		dstIP := state.Key.DstIP.String()
-		for _, ev := range evs {
-			if !isICSEvent(ev.Proto, ev.Kind) {
-				continue
-			}
-			anomalies := e.anomalyDetector.Check(srcIP, dstIP, ev)
-			for _, a := range anomalies {
-				alert := dpi.Event{
-					FlowID: ev.FlowID,
-					Proto:  "ids",
-					Kind:   "anomaly",
-					Attributes: map[string]any{
-						"anomaly_type": a.Type,
-						"protocol":     a.Protocol,
-						"severity":     a.Severity,
-						"message":      a.Message,
-						"source_ip":    a.SourceIP,
-						"dest_ip":      a.DestIP,
-					},
-					Timestamp: a.Timestamp,
-				}
-				e.eventStore.Record(state, pkt, []dpi.Event{alert})
-			}
-		}
-	}
-	// Check signature engine for known ICS attack patterns.
-	if e.sigEngine != nil {
-		for _, ev := range evs {
-			matches := e.sigEngine.Match(ev)
-			for _, m := range matches {
-				alert := dpi.Event{
-					FlowID: ev.FlowID,
-					Proto:  "ids",
-					Kind:   "signature_match",
-					Attributes: map[string]any{
-						"signature_id": m.Signature.ID,
-						"name":         m.Signature.Name,
-						"severity":     m.Signature.Severity,
-						"description":  m.Signature.Description,
-					},
-					Timestamp: m.Timestamp,
-				}
-				e.eventStore.Record(state, pkt, []dpi.Event{alert})
-			}
-		}
-	}
-	// Push HTTP previews to AV sink (if configured).
-	if e.avSink != nil {
-		src, dst := srcDestStrings(state)
-		for _, ev := range evs {
-			if ev.Proto != "http" {
-				continue
-			}
-			if ev.Kind != "request" && ev.Kind != "response" {
-				continue
-			}
-			preview, _ := ev.Attributes["preview"].([]byte)
-			hash, _ := ev.Attributes["hash"].(string)
-			if len(preview) == 0 {
-				continue
-			}
-			ics := isICSEvent(ev.Proto, ev.Kind)
-			task := AVScanTask{
-				Hash:      hash,
-				Direction: ev.Kind,
-				Proto:     "http",
-				Source:    src,
-				Dest:      dst,
-				FlowID:    ev.FlowID,
-				Preview:   preview,
-				ICS:       ics,
-			}
-			e.avSink.EnqueueAVScan(context.Background(), task)
-			// Drop preview from telemetry to avoid large payloads.
-			delete(ev.Attributes, "preview")
-		}
-	}
-	if e.stats != nil && state != nil {
-		srcIP := state.Key.SrcIP.String()
-		dstIP := state.Key.DstIP.String()
-		for _, ev := range evs {
-			e.stats.Record(ev, len(pkt.Payload))
-			e.stats.RecordFlow(srcIP, dstIP, ev.Proto, 1, int64(len(pkt.Payload)))
-		}
-	}
-	e.eventStore.Record(state, pkt, evs)
-	// Evaluate IDS rules over DPI events and record alerts.
-	snap := e.ruleSnap.Load()
-	if snap != nil && snap.IDS.Enabled && len(snap.IDS.Rules) > 0 {
-		eval := ids.New(snap.IDS)
-		var alerts []dpi.Event
-		for _, ev := range evs {
-			alerts = append(alerts, eval.Evaluate(ev)...)
-		}
-		if len(alerts) > 0 {
-			metrics.IDSAlertsTotal.Add(float64(len(alerts)))
-			e.eventStore.Record(state, pkt, alerts)
-		}
-	}
-}
-
-// VerdictCache returns the flow verdict cache.
-func (e *Engine) VerdictCache() *VerdictCache {
-	if e == nil {
-		return nil
-	}
-	return e.verdictCache
-}
-
-// Events returns the telemetry event store.
-func (e *Engine) Events() *events.Store {
-	return e.eventStore
-}
-
-// Inventory returns the ICS asset inventory.
-func (e *Engine) Inventory() *inventory.Inventory {
-	if e == nil {
-		return nil
-	}
-	return e.inventory
-}
-
-// ProtoStats returns current per-protocol statistics derived from DPI events.
-func (e *Engine) ProtoStats() []stats.ProtoStats {
-	if e == nil || e.stats == nil {
-		return nil
-	}
-	return e.stats.Stats()
-}
-
-// TopTalkers returns the top N observed flows by byte count.
-func (e *Engine) TopTalkers(n int) []stats.FlowStats {
-	if e == nil || e.stats == nil {
-		return nil
-	}
-	return e.stats.TopTalkers(n)
-}
-
-// AnomalyDetector returns the protocol anomaly detector.
-func (e *Engine) AnomalyDetector() *anomaly.Detector {
-	if e == nil {
-		return nil
-	}
-	return e.anomalyDetector
-}
-
-// AVSink returns the currently configured AV sink, if any.
-func (e *Engine) AVSink() AVSink {
-	if e == nil {
-		return nil
-	}
-	return e.avSink
-}
-
-// Updater returns the dynamic nftables updater when enforcement is enabled.
-func (e *Engine) Updater() enforce.Updater {
-	if e == nil {
-		return nil
-	}
-	return e.updater
-}
-
-// Learner returns the ICS traffic learner.
-func (e *Engine) Learner() *learn.Learner {
-	if e == nil {
-		return nil
-	}
-	return e.learner
-}
-
-// SignatureEngine returns the ICS signature matching engine.
-func (e *Engine) SignatureEngine() *signatures.Engine {
-	if e == nil {
-		return nil
-	}
-	return e.sigEngine
-}
-
-// hasLearnMode returns true if any firewall entry has Mode == "learn".
-func (e *Engine) hasLearnMode() bool {
-	snap := e.ruleSnap.Load()
-	if snap == nil {
-		return false
-	}
-	for _, entry := range snap.Firewall {
-		if strings.EqualFold(entry.ICS.Mode, "learn") {
-			return true
-		}
-	}
-	return false
-}
-
-func isICSEvent(proto, kind string) bool {
-	switch strings.ToLower(proto) {
-	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "ics":
-		return true
-	}
-	_ = kind
-	return false
-}
-
-// Evaluate applies the current rule snapshot to a simple context.
-func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
-	return ev.Evaluate(ctx)
-}
-
-// EvaluateVerdict returns a baseline verdict for the current snapshot.
-// DPI/IDS paths will later override this for selective inspection policies.
-func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
-	start := time.Now()
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
-	action, matched := ev.EvaluateMatch(ctx)
-	v := verdict.FromRulesAction(action)
-	metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
-	metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()
-
-	// Emit a telemetry event when the matched rule has logging enabled.
-	if matched != nil && matched.Log && e.eventStore != nil {
-		attrs := map[string]any{
-			"ruleId": matched.ID,
-			"action": string(matched.Action),
-		}
-		if ctx.Proto != "" {
-			attrs["proto"] = ctx.Proto
-		}
-		if ctx.Port != "" {
-			attrs["port"] = ctx.Port
-		}
-		if ctx.SrcZone != "" {
-			attrs["srcZone"] = ctx.SrcZone
-		}
-		if ctx.DstZone != "" {
-			attrs["dstZone"] = ctx.DstZone
-		}
-		logEvent := events.Event{
-			Kind:       "firewall.rule.hit",
-			Timestamp:  time.Now().UTC(),
-			Transport:  ctx.Proto,
-			Attributes: attrs,
-		}
-		if ctx.SrcIP != nil {
-			logEvent.SrcIP = ctx.SrcIP.String()
-		}
-		if ctx.DstIP != nil {
-			logEvent.DstIP = ctx.DstIP.String()
-		}
-		if ctx.Port != "" {
-			p, err := strconv.ParseUint(ctx.Port, 10, 16)
-			if err == nil {
-				logEvent.DstPort = uint16(p)
-			}
-		}
-		e.eventStore.Append(logEvent)
-	}
-	return v
-}
-
-// ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
-// It is safe to call even when enforcement is disabled.
-func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	if e.updater == nil {
-		return nil
-	}
-	switch v.Action {
-	case verdict.BlockHostTemp:
-		ip := flow.SrcIP
-		if ip == nil {
-			ip = flow.DstIP
-		}
-		return e.updater.BlockHostTemp(ctx, ip, v.TTL)
-	case verdict.BlockFlowTemp:
-		return e.updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
-	default:
-		return nil
-	}
-}
-
-// RulesetStatus returns the last compiled/applied nftables ruleset snapshot.
-func (e *Engine) RulesetStatus() RulesetStatus {
-	if e == nil {
-		return RulesetStatus{}
-	}
-	ptr := e.rulesetStatus.Load()
-	if ptr == nil {
-		return RulesetStatus{}
-	}
-	return *ptr
-}
-
-func (e *Engine) setRulesetStatus(ruleset string, err error) {
-	st := &RulesetStatus{
-		Ruleset:   ruleset,
-		AppliedAt: time.Now().UTC(),
-	}
-	if err != nil {
-		st.Error = err.Error()
-	}
-	e.rulesetStatus.Store(st)
 }
