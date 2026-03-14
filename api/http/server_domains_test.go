@@ -119,6 +119,64 @@ func TestApplyICSTemplatePersistsRules(t *testing.T) {
 	}
 }
 
+func TestApplyICSTemplateListFirewallRulesReturnsArraySafeShapes(t *testing.T) {
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_read_only",
+		"sourceZones":["lan"],
+		"destZones":["wan"]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply template: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = authedRequest(http.MethodGet, "/api/v1/firewall/rules", nil)
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list firewall rules: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode firewall rules payload: %v", err)
+	}
+
+	for _, rule := range payload {
+		if id, _ := rule["id"].(string); id != "tpl-modbus-allow-reads" && id != "tpl-modbus-deny-writes" {
+			continue
+		}
+		if _, ok := rule["sourceZones"].([]any); !ok {
+			t.Fatalf("sourceZones must be a JSON array for rule %v: %#v", rule["id"], rule["sourceZones"])
+		}
+		if _, ok := rule["destZones"].([]any); !ok {
+			t.Fatalf("destZones must be a JSON array for rule %v: %#v", rule["id"], rule["destZones"])
+		}
+		if _, ok := rule["protocols"].([]any); !ok {
+			t.Fatalf("protocols must be a JSON array for rule %v: %#v", rule["id"], rule["protocols"])
+		}
+		rawICS, ok := rule["ics"].(map[string]any)
+		if !ok {
+			t.Fatalf("ics must be an object for rule %v: %#v", rule["id"], rule["ics"])
+		}
+		if fc, ok := rawICS["functionCode"]; ok {
+			if _, ok := fc.([]any); !ok {
+				t.Fatalf("ics.functionCode must be a JSON array for rule %v: %#v", rule["id"], fc)
+			}
+		}
+		if addrs, ok := rawICS["addresses"]; ok {
+			if _, ok := addrs.([]any); !ok {
+				t.Fatalf("ics.addresses must be a JSON array for rule %v: %#v", rule["id"], addrs)
+			}
+		}
+	}
+}
+
 func TestApplyICSTemplateUpsertsExistingRules(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Firewall.Rules = []config.Rule{{

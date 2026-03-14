@@ -7,7 +7,8 @@
     "prebuild": "node ./scripts/build-docs.js",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0"
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0",
+    "test:routes": "playwright test"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.7",
@@ -22,6 +23,7 @@
     "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@types/node": "20.12.7",
     "@types/react": "18.2.46",
     "autoprefixer": "10.4.18",

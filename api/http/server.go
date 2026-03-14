@@ -208,7 +208,6 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	protected := api.Group("")
 	protected.Use(enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()))
 	protected.Use(authMiddleware(userStore))
-	protected.Use(enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()))
 	{
 		protected.GET("/auth/me", meHandler(userStore))
 		protected.GET("/auth/session", authSessionHandler(userStore))

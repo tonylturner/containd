@@ -8,10 +8,11 @@ with_trivy=0
 with_semgrep=0
 with_coverage=0
 with_race=0
+with_route_smoke=0
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/dev-verify.sh [--with-trivy] [--with-semgrep] [--with-coverage] [--with-race]
+Usage: bash scripts/dev-verify.sh [--with-trivy] [--with-semgrep] [--with-coverage] [--with-race] [--with-route-smoke]
 
 Runs the standard local verification set for containd:
   - go vet ./...
@@ -32,6 +33,7 @@ Optional:
   --with-semgrep Also run the curated Semgrep security scan.
   --with-coverage Also run the package coverage summary workflow.
   --with-race    Also run the targeted race-regression package set.
+  --with-route-smoke Also run the browser-driven UI route sanity suite.
 EOF
 }
 
@@ -48,6 +50,9 @@ while [ "$#" -gt 0 ]; do
             ;;
         --with-race)
             with_race=1
+            ;;
+        --with-route-smoke)
+            with_route_smoke=1
             ;;
         -h|--help)
             usage
@@ -187,6 +192,14 @@ fi
 if [ "$with_race" -eq 1 ]; then
     run_step "targeted race tests"
     go test -race ./api/http ./pkg/app/engine ./pkg/cp/services ./pkg/mp/sshserver
+fi
+
+if [ "$with_route_smoke" -eq 1 ]; then
+    run_step "ui route smoke"
+    (
+        cd ui
+        npm run test:routes
+    )
 fi
 
 printf '\nAll requested verification steps passed.\n'

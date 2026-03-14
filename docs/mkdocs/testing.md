@@ -45,8 +45,32 @@ bash scripts/dev-verify.sh --with-coverage
 That complements the other validation workflows:
 
 - `bash scripts/dev-verify.sh --with-semgrep`
+- `bash scripts/dev-verify.sh --with-route-smoke`
 - `bash scripts/smoketest`
 - `bash scripts/perf-baseline.sh`
+
+## UI Route Smoke
+
+For browser-level client sanity, the UI now includes a Playwright route sweep that logs in via mocked API responses, visits every app route, and fails on uncaught page exceptions or console errors.
+
+Run it directly from `ui/`:
+
+```bash
+npx playwright install chromium
+npm run test:routes
+```
+
+Or include it in the broader repo verification pass:
+
+```bash
+bash scripts/dev-verify.sh --with-route-smoke
+```
+
+This route smoke is intentionally shallow:
+
+- it is meant to catch client crashes, broken route initialization, and obvious page-level regressions
+- it is not a replacement for full interactive lab testing
+- it specifically exercises malformed firewall/ICS rule shapes so UI regressions like `.join is not a function` fail in CI instead of surfacing only during manual testing
 
 ## Current Shape
 
