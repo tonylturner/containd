@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-03-14
+
+### Added
+- Added route-level sanity coverage for the management API and a browser-driven route smoke suite over the shipped UI pages so release validation catches broken views and endpoint drift before user testing.
+
+### Fixed
+- Fixed ICS and firewall rule views so ICS predicate fields such as Modbus function codes are serialized and normalized as real JSON arrays instead of crashing the UI after template-generated rule creation.
+- Clarified `security.txt`, CSAF provider metadata, and release packaging so containd now explicitly documents that it currently publishes CSAF provider metadata and authoring scaffolding, while advisory JSON documents are only published when a real vulnerability disclosure exists.
+
 ## [0.1.14] - 2026-03-13
 
 ### Added
