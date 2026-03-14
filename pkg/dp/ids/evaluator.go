@@ -46,65 +46,81 @@ func (e *Evaluator) Evaluate(ev dpi.Event) []dpi.Event {
 	}
 	var out []dpi.Event
 	for _, r := range e.cfg.Rules {
-		if r.ID == "" {
+		if !idsRuleMatchesEvent(r, ev) {
 			continue
 		}
-		if r.Enabled != nil && !*r.Enabled {
-			continue
-		}
-		if r.Proto != "" && !strings.EqualFold(r.Proto, ev.Proto) {
-			continue
-		}
-		if r.Kind != "" && !strings.EqualFold(r.Kind, ev.Kind) {
-			continue
-		}
-		if !matchCond(r.When, ev) {
-			continue
-		}
-		attrs := map[string]any{
-			"rule_id":     r.ID,
-			"severity":    r.Severity,
-			"message":     firstNonEmpty(r.Message, r.Title, "IDS alert"),
-			"event_proto": ev.Proto,
-			"event_kind":  ev.Kind,
-		}
-		if len(r.Labels) > 0 {
-			attrs["labels"] = r.Labels
-		}
-		if ev.Attributes != nil {
-			attrs["event_attrs"] = ev.Attributes
-		}
-		if len(r.References) > 0 {
-			attrs["references"] = r.References
-		}
-		if len(r.CVE) > 0 {
-			attrs["cve"] = r.CVE
-		}
-		if len(r.MITREAttackIDs) > 0 {
-			attrs["mitre_attack_ids"] = r.MITREAttackIDs
-		}
-		if r.Description != "" {
-			attrs["description"] = r.Description
-		}
-		if r.SourceFormat != "" {
-			attrs["source_format"] = r.SourceFormat
-		}
-		if len(r.ContentMatches) > 0 {
-			var patterns []string
-			for _, cm := range r.ContentMatches {
-				patterns = append(patterns, cm.Pattern)
-			}
-			attrs["matched_patterns"] = patterns
-		}
-		out = append(out, dpi.Event{
-			FlowID:     ev.FlowID,
-			Proto:      "ids",
-			Kind:       "alert",
-			Attributes: attrs,
-			Timestamp:  time.Now().UTC(),
-		})
+		out = append(out, buildIDSAlertEvent(r, ev))
 	}
 	return out
+}
+
+func idsRuleMatchesEvent(r rules.IDSRule, ev dpi.Event) bool {
+	if r.ID == "" {
+		return false
+	}
+	if r.Enabled != nil && !*r.Enabled {
+		return false
+	}
+	if r.Proto != "" && !strings.EqualFold(r.Proto, ev.Proto) {
+		return false
+	}
+	if r.Kind != "" && !strings.EqualFold(r.Kind, ev.Kind) {
+		return false
+	}
+	return matchCond(r.When, ev)
+}
+
+func buildIDSAlertEvent(r rules.IDSRule, ev dpi.Event) dpi.Event {
+	return dpi.Event{
+		FlowID:     ev.FlowID,
+		Proto:      "ids",
+		Kind:       "alert",
+		Attributes: buildIDSAlertAttributes(r, ev),
+		Timestamp:  time.Now().UTC(),
+	}
+}
+
+func buildIDSAlertAttributes(r rules.IDSRule, ev dpi.Event) map[string]any {
+	attrs := map[string]any{
+		"rule_id":     r.ID,
+		"severity":    r.Severity,
+		"message":     firstNonEmpty(r.Message, r.Title, "IDS alert"),
+		"event_proto": ev.Proto,
+		"event_kind":  ev.Kind,
+	}
+	if len(r.Labels) > 0 {
+		attrs["labels"] = r.Labels
+	}
+	if ev.Attributes != nil {
+		attrs["event_attrs"] = ev.Attributes
+	}
+	if len(r.References) > 0 {
+		attrs["references"] = r.References
+	}
+	if len(r.CVE) > 0 {
+		attrs["cve"] = r.CVE
+	}
+	if len(r.MITREAttackIDs) > 0 {
+		attrs["mitre_attack_ids"] = r.MITREAttackIDs
+	}
+	if r.Description != "" {
+		attrs["description"] = r.Description
+	}
+	if r.SourceFormat != "" {
+		attrs["source_format"] = r.SourceFormat
+	}
+	if matched := matchedContentPatterns(r.ContentMatches); len(matched) > 0 {
+		attrs["matched_patterns"] = matched
+	}
+	return attrs
+}
+
+func matchedContentPatterns(matches []rules.ContentMatch) []string {
+	patterns := make([]string, 0, len(matches))
+	for _, cm := range matches {
+		patterns = append(patterns, cm.Pattern)
+	}
+	return patterns
 }
 
 func matchCond(c rules.IDSCondition, ev dpi.Event) bool {

@@ -112,7 +112,9 @@ starter_topology_is_default() {
 docker_subnets() {
     ids=$(docker network ls -q 2>/dev/null || true)
     [ -n "$ids" ] || return 0
-    docker network inspect $ids --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null | awk 'NF'
+    # shellcheck disable=SC2086
+    set -- $ids
+    docker network inspect "$@" --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null | awk 'NF'
 }
 
 choose_starter_prefix() {
@@ -190,8 +192,8 @@ current_env_value() {
     ' "$file"
 }
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." 2>/dev/null && pwd || printf '')
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." 2>/dev/null && pwd || printf '')
 use_local=0
 if [ -n "$repo_root" ] && [ -f "$repo_root/deploy/docker-compose.yml" ] && [ -f "$repo_root/.env.example" ]; then
     use_local=1

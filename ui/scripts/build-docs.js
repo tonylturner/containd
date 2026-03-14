@@ -14,7 +14,7 @@ function collectFiles(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   let out = [];
   for (const entry of entries) {
-    const full = path.join(dir, entry.name);
+    const full = path.join(dir, entry.name); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- entry.name comes from readdirSync on the current docs tree, not user-controlled input.
     if (entry.isDirectory()) {
       out = out.concat(collectFiles(full));
     } else if (entry.isFile()) {

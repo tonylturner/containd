@@ -63,132 +63,257 @@ type request struct {
 	clientID []byte
 }
 
+type dhcpRuntime struct {
+	dev          string
+	pool         pool
+	serverIP     net.IP
+	mask         net.IPMask
+	routerIP     net.IP
+	dnsIPs       []net.IP
+	leaseSeconds int
+	domain       string
+	reservations map[string]string
+	manager      *Manager
+	fd           int
+}
+
 func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool, reservations map[string]string, m *Manager) error {
+	rt, err := newDHCPRuntime(dev, cfg, pl, reservations, m)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rt.fd)
+
+	buf := make([]byte, 1500)
+	for {
+		req, ok, err := recvDHCPRequest(ctx, rt.fd, buf)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		emitDHCPRequestEvent(rt, req)
+		if err := handleDHCPRequest(rt, req); err != nil {
+			return err
+		}
+	}
+}
+
+func newDHCPRuntime(dev string, cfg config.DHCPConfig, pl pool, reservations map[string]string, m *Manager) (dhcpRuntime, error) {
 	dev = strings.TrimSpace(dev)
 	if dev == "" {
-		return fmt.Errorf("dhcp: empty device")
+		return dhcpRuntime{}, fmt.Errorf("dhcp: empty device")
 	}
 
 	serverIP, mask, err := ifaceIPv4(dev)
 	if err != nil {
-		return fmt.Errorf("dhcp: iface %q has no IPv4 address (needed for server-id): %w", dev, err)
+		return dhcpRuntime{}, fmt.Errorf("dhcp: iface %q has no IPv4 address (needed for server-id): %w", dev, err)
 	}
 	routerIP := net.ParseIP(strings.TrimSpace(cfg.Router)).To4()
 	if routerIP == nil {
-		// Default to interface IP if not specified.
 		routerIP = serverIP
 	}
 	dnsIPs := parseIPv4List(cfg.DNSServers)
 	if len(dnsIPs) == 0 {
 		dnsIPs = []net.IP{routerIP}
 	}
-	leaseSeconds := parseLeaseSeconds(cfg.LeaseSeconds)
+	fd, err := openDHCPListener(dev)
+	if err != nil {
+		return dhcpRuntime{}, err
+	}
+	return dhcpRuntime{
+		dev:          dev,
+		pool:         pl,
+		serverIP:     serverIP,
+		mask:         mask,
+		routerIP:     routerIP,
+		dnsIPs:       dnsIPs,
+		leaseSeconds: parseLeaseSeconds(cfg.LeaseSeconds),
+		domain:       cfg.Domain,
+		reservations: reservations,
+		manager:      m,
+		fd:           fd,
+	}, nil
+}
 
+func openDHCPListener(dev string) (int, error) {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, unix.IPPROTO_UDP)
 	if err != nil {
-		return fmt.Errorf("dhcp: socket: %w", err)
+		return 0, fmt.Errorf("dhcp: socket: %w", err)
 	}
-	defer unix.Close(fd)
-
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_BROADCAST, 1)
 	_ = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, dev)
-
 	if err := unix.Bind(fd, &unix.SockaddrInet4{Port: dhcpListenPort}); err != nil {
-		return fmt.Errorf("dhcp: bind %s:%d: %w", dev, dhcpListenPort, err)
+		_ = unix.Close(fd)
+		return 0, fmt.Errorf("dhcp: bind %s:%d: %w", dev, dhcpListenPort, err)
+	}
+	return fd, nil
+}
+
+func recvDHCPRequest(ctx context.Context, fd int, buf []byte) (request, bool, error) {
+	select {
+	case <-ctx.Done():
+		return request{}, false, ctx.Err()
+	default:
 	}
 
-	buf := make([]byte, 1500)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1, Usec: 0})
+	n, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+			return request{}, false, nil
 		}
-
-		_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1, Usec: 0})
-		n, _, err := unix.Recvfrom(fd, buf, 0)
-		if err != nil {
-			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
-				continue
-			}
-			return fmt.Errorf("dhcp: recv: %w", err)
-		}
-		if n <= 0 {
-			continue
-		}
-		req, err := parseRequest(buf[:n])
-		if err != nil {
-			continue
-		}
-		if req.msgType != dhcpMsgDiscover && req.msgType != dhcpMsgRequest {
-			continue
-		}
-		if m != nil {
-			switch req.msgType {
-			case dhcpMsgDiscover:
-				go m.emit("service.dhcp.discover", map[string]any{"dev": dev, "mac": req.mac, "hostname": req.hostname, "count": 1})
-			case dhcpMsgRequest:
-				go m.emit("service.dhcp.request", map[string]any{"dev": dev, "mac": req.mac, "hostname": req.hostname, "requested_ip": ipOrEmpty(req.reqIP), "count": 1})
-			}
-		}
-
-		assignedIP := net.IP(nil)
-		if existing, ok := m.lookupLeaseIP(dev, req.mac); ok {
-			assignedIP = net.ParseIP(existing).To4()
-		}
-		if assignedIP == nil && req.reqIP != nil {
-			ip := req.reqIP.To4()
-			if ip != nil && ipInPool(ip, pl) && !m.isIPInUse(dev, ip.String()) {
-				assignedIP = ip
-			}
-		}
-		if assignedIP == nil && reservations != nil {
-			if ipStr, ok := reservations[strings.ToLower(req.mac)]; ok {
-				ip := net.ParseIP(ipStr).To4()
-				if ip != nil && ipInPool(ip, pl) && !m.isIPInUse(dev, ip.String()) {
-					assignedIP = ip
-					if m != nil {
-						go m.emit("service.dhcp.reservation.hit", map[string]any{"dev": dev, "mac": req.mac, "ip": ip.String(), "count": 1})
-					}
-				} else if m != nil {
-					reason := "invalid"
-					if ip != nil && m.isIPInUse(dev, ip.String()) {
-						reason = "in_use"
-					} else if ip != nil && !ipInPool(ip, pl) {
-						reason = "out_of_pool"
-					}
-					go m.emit("service.dhcp.reservation.miss", map[string]any{"dev": dev, "mac": req.mac, "ip": ipStr, "reason": reason, "error_count": 1})
-				}
-			}
-		}
-		if assignedIP == nil {
-			ip, err := nextFreeIP(dev, pl, m)
-			if err != nil {
-				if m != nil {
-					go m.emit("service.dhcp.nak", map[string]any{"dev": dev, "mac": req.mac, "reason": "no_free_ip", "error_count": 1})
-				}
-				_ = sendNAK(fd, dev, req, serverIP)
-				continue
-			}
-			assignedIP = ip
-		}
-
-		switch req.msgType {
-		case dhcpMsgDiscover:
-			if m != nil {
-				go m.emit("service.dhcp.offer", map[string]any{"dev": dev, "mac": req.mac, "ip": assignedIP.String(), "hostname": req.hostname, "count": 1})
-			}
-			_ = sendOffer(fd, dev, req, assignedIP, serverIP, mask, routerIP, dnsIPs, leaseSeconds, cfg.Domain)
-		case dhcpMsgRequest:
-			m.upsertLease(dev, req.mac, assignedIP.String(), req.hostname, leaseSeconds)
-			if m != nil {
-				go m.emit("service.dhcp.ack", map[string]any{"dev": dev, "mac": req.mac, "ip": assignedIP.String(), "hostname": req.hostname, "count": 1})
-			}
-			_ = sendAck(fd, dev, req, assignedIP, serverIP, mask, routerIP, dnsIPs, leaseSeconds, cfg.Domain)
-		}
+		return request{}, false, fmt.Errorf("dhcp: recv: %w", err)
 	}
+	if n <= 0 {
+		return request{}, false, nil
+	}
+	req, err := parseRequest(buf[:n])
+	if err != nil {
+		return request{}, false, nil
+	}
+	if req.msgType != dhcpMsgDiscover && req.msgType != dhcpMsgRequest {
+		return request{}, false, nil
+	}
+	return req, true, nil
+}
+
+func emitDHCPRequestEvent(rt dhcpRuntime, req request) {
+	if rt.manager == nil {
+		return
+	}
+	switch req.msgType {
+	case dhcpMsgDiscover:
+		go rt.manager.emit("service.dhcp.discover", map[string]any{"dev": rt.dev, "mac": req.mac, "hostname": req.hostname, "count": 1})
+	case dhcpMsgRequest:
+		go rt.manager.emit("service.dhcp.request", map[string]any{"dev": rt.dev, "mac": req.mac, "hostname": req.hostname, "requested_ip": ipOrEmpty(req.reqIP), "count": 1})
+	}
+}
+
+func handleDHCPRequest(rt dhcpRuntime, req request) error {
+	assignedIP, err := selectAssignedIP(rt, req)
+	if err != nil {
+		emitDHCPNAK(rt, req, "no_free_ip")
+		_ = sendNAK(rt.fd, rt.dev, req, rt.serverIP)
+		return nil
+	}
+	switch req.msgType {
+	case dhcpMsgDiscover:
+		emitDHCPOffer(rt, req, assignedIP)
+		_ = sendOffer(rt.fd, rt.dev, req, assignedIP, rt.serverIP, rt.mask, rt.routerIP, rt.dnsIPs, rt.leaseSeconds, rt.domain)
+	case dhcpMsgRequest:
+		upsertDHCPLease(rt, req, assignedIP)
+		emitDHCPAck(rt, req, assignedIP)
+		_ = sendAck(rt.fd, rt.dev, req, assignedIP, rt.serverIP, rt.mask, rt.routerIP, rt.dnsIPs, rt.leaseSeconds, rt.domain)
+	}
+	return nil
+}
+
+func selectAssignedIP(rt dhcpRuntime, req request) (net.IP, error) {
+	if ip := lookupExistingLease(rt, req); ip != nil {
+		return ip, nil
+	}
+	if ip := requestedLeaseIP(rt, req); ip != nil {
+		return ip, nil
+	}
+	if ip := reservedLeaseIP(rt, req); ip != nil {
+		return ip, nil
+	}
+	return nextFreeIP(rt.dev, rt.pool, rt.manager)
+}
+
+func lookupExistingLease(rt dhcpRuntime, req request) net.IP {
+	if rt.manager == nil {
+		return nil
+	}
+	existing, ok := rt.manager.lookupLeaseIP(rt.dev, req.mac)
+	if !ok {
+		return nil
+	}
+	return net.ParseIP(existing).To4()
+}
+
+func requestedLeaseIP(rt dhcpRuntime, req request) net.IP {
+	ip := req.reqIP.To4()
+	if ip == nil || !ipInPool(ip, rt.pool) || leaseIPInUse(rt.manager, rt.dev, ip.String()) {
+		return nil
+	}
+	return ip
+}
+
+func reservedLeaseIP(rt dhcpRuntime, req request) net.IP {
+	if rt.reservations == nil {
+		return nil
+	}
+	ipStr, ok := rt.reservations[strings.ToLower(req.mac)]
+	if !ok {
+		return nil
+	}
+	ip := net.ParseIP(ipStr).To4()
+	if ip != nil && ipInPool(ip, rt.pool) && !leaseIPInUse(rt.manager, rt.dev, ip.String()) {
+		emitDHCPReservationHit(rt, req, ip)
+		return ip
+	}
+	emitDHCPReservationMiss(rt, req, ip, ipStr)
+	return nil
+}
+
+func leaseIPInUse(m *Manager, dev, ip string) bool {
+	if m == nil {
+		return false
+	}
+	return m.isIPInUse(dev, ip)
+}
+
+func upsertDHCPLease(rt dhcpRuntime, req request, ip net.IP) {
+	if rt.manager == nil {
+		return
+	}
+	rt.manager.upsertLease(rt.dev, req.mac, ip.String(), req.hostname, rt.leaseSeconds)
+}
+
+func emitDHCPReservationHit(rt dhcpRuntime, req request, ip net.IP) {
+	if rt.manager == nil {
+		return
+	}
+	go rt.manager.emit("service.dhcp.reservation.hit", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ip.String(), "count": 1})
+}
+
+func emitDHCPReservationMiss(rt dhcpRuntime, req request, ip net.IP, ipStr string) {
+	if rt.manager == nil {
+		return
+	}
+	reason := "invalid"
+	if ip != nil && leaseIPInUse(rt.manager, rt.dev, ip.String()) {
+		reason = "in_use"
+	} else if ip != nil && !ipInPool(ip, rt.pool) {
+		reason = "out_of_pool"
+	}
+	go rt.manager.emit("service.dhcp.reservation.miss", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ipStr, "reason": reason, "error_count": 1})
+}
+
+func emitDHCPOffer(rt dhcpRuntime, req request, ip net.IP) {
+	if rt.manager == nil {
+		return
+	}
+	go rt.manager.emit("service.dhcp.offer", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ip.String(), "hostname": req.hostname, "count": 1})
+}
+
+func emitDHCPAck(rt dhcpRuntime, req request, ip net.IP) {
+	if rt.manager == nil {
+		return
+	}
+	go rt.manager.emit("service.dhcp.ack", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ip.String(), "hostname": req.hostname, "count": 1})
+}
+
+func emitDHCPNAK(rt dhcpRuntime, req request, reason string) {
+	if rt.manager == nil {
+		return
+	}
+	go rt.manager.emit("service.dhcp.nak", map[string]any{"dev": rt.dev, "mac": req.mac, "reason": reason, "error_count": 1})
 }
 
 func ipOrEmpty(ip net.IP) string {

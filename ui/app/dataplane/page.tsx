@@ -6,7 +6,6 @@ import {
   api,
   isAdmin,
   deletePcap,
-  downloadPcapURL,
   getPcapConfig,
   getPcapStatus,
   listPcaps,
@@ -24,9 +23,13 @@ import {
   type PcapStatus,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
-import { InfoTip } from "../../components/InfoTip";
-import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { SavedPcapsCard, ReplayCard } from "./pcap-library";
+import {
+  CaptureSetupCard,
+  CaptureStatusCard,
+} from "./pcap-settings";
+import { normalizeConfig } from "./pcap-utils";
 
 type CaptureMode = "once" | "rolling";
 type SaveState = "idle" | "starting" | "stopping";
@@ -51,7 +54,7 @@ export default function PcapPage() {
   const [replayIface, setReplayIface] = useState("");
   const [replayRate, setReplayRate] = useState("");
   const [uploading, setUploading] = useState(false);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const [savedConfigJson, setSavedConfigJson] = useState<string | null>(null);
   const dirtyRef = useRef(false);
   const [settings, setSettings] = useState<PcapConfig>({
@@ -398,579 +401,112 @@ export default function PcapPage() {
           {notice}
         </div>
       )}
-      <Card className="mb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">Capture Status</div>
-            <div className="mt-1 text-sm text-[var(--text)]">
-              {isRunning ? "Running" : "Stopped"}
-            </div>
-          </div>
-          <span className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}>
-            {isRunning ? "active" : "idle"}
-          </span>
-        </div>
-        <div className="mt-2 text-xs text-[var(--text-muted)]">{captureSummary}</div>
-        <div className="mt-2 text-xs text-[var(--text-muted)]">
-          Started: <span className="text-[var(--text)]">{runningSince}</span>
-        </div>
-        <div className="mt-1 text-xs text-[var(--text-muted)]">
-          Active interfaces:{" "}
-          <span className="text-[var(--text)]">
-            {(status?.interfaces ?? settings.interfaces ?? []).length
-              ? (status?.interfaces ?? settings.interfaces ?? []).join(", ")
-              : "none"}
-          </span>
-        </div>
-        {status?.lastError ? (
-          <div className="mt-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-            {status.lastError}
-          </div>
-        ) : null}
-      </Card>
-      <Card padding="lg">
-        <h2 className="text-lg font-semibold text-[var(--text)]">Capture setup</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
-          Start/stop packet captures on selected interfaces and store PCAPs for replay.
-        </p>
-        {configIssues.length > 0 && (
-          <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-            <div className="font-semibold">Capture checks</div>
-            <ul className="mt-1 list-disc space-y-0.5 pl-4">
-              {configIssues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="mt-4 grid gap-4">
-          <div>
-            <div className="flex items-center justify-between text-xs uppercase tracking-wide text-[var(--text-muted)]">
-              <span>Interfaces</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setAllInterfaces(true)}
-                  disabled={!canEdit}
-                  className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setAllInterfaces(false)}
-                  disabled={!canEdit}
-                  className="rounded-full border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-                >
-                  None
-                </button>
-              </div>
-            </div>
-            <div className="mt-2 grid gap-2 md:grid-cols-4">
-              {ifaceOptions.map((opt) => (
-                <label key={opt.value} className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui">
-                  <input
-                    type="checkbox"
-                    checked={(settings.interfaces ?? []).includes(opt.value)}
-                    disabled={!canEdit}
-                    onChange={() => toggleIface(opt.value)}
-                    className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
-                  />
-                  {opt.label}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                Mode
-                <InfoTip label="Rolling keeps the newest files; Once stops after max size." />
-              </label>
-              <select
-                value={settings.mode}
-                disabled={!canEdit}
-                onChange={(e) => setSettings((prev) => ({ ...prev, mode: e.target.value as CaptureMode }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-              >
-                <option value="rolling">rolling</option>
-                <option value="once">once</option>
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                Snaplen (bytes)
-                <InfoTip label="Max bytes captured per packet (higher = larger PCAPs)." />
-              </label>
-              <input
-                type="number"
-                value={settings.snaplen}
-                disabled={!canEdit}
-                onChange={(e) => setSettings((prev) => ({ ...prev, snaplen: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-              />
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                Max size (MB)
-                <InfoTip label="Max file size before rotation or stop." />
-              </label>
-              <input
-                type="number"
-                value={settings.maxSizeMB}
-                disabled={!canEdit}
-                onChange={(e) => setSettings((prev) => ({ ...prev, maxSizeMB: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                Max files
-                <InfoTip label="How many files to keep when in rolling mode." />
-              </label>
-              <input
-                type="number"
-                value={settings.maxFiles}
-                disabled={!canEdit}
-                onChange={(e) => setSettings((prev) => ({ ...prev, maxFiles: Number(e.target.value) || 0 }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-              />
-            </div>
-            <div className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Filters (tcpdump style)</div>
-              <div className="mt-2 grid gap-2 md:grid-cols-3">
-                <input
-                  value={settings.filter?.src ?? ""}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), src: e.target.value } }))
-                  }
-                  placeholder="src host 10.0.0.10"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                />
-                <input
-                  value={settings.filter?.dst ?? ""}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setSettings((prev) => ({ ...prev, filter: { ...(prev.filter ?? {}), dst: e.target.value } }))
-                  }
-                  placeholder="dst host 10.0.0.20"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                />
-                <select
-                  value={settings.filter?.proto ?? "any"}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      filter: { ...(prev.filter ?? {}), proto: e.target.value as "any" | "tcp" | "udp" | "icmp" },
-                    }))
-                  }
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                >
-                  <option value="any">any proto</option>
-                  <option value="tcp">tcp</option>
-                  <option value="udp">udp</option>
-                  <option value="icmp">icmp</option>
-                </select>
-              </div>
-              <div className="mt-2 text-xs text-[var(--text-muted)]">
-                Filter preview: <span className="font-mono text-[var(--text)]">{bpfPreview}</span>
-              </div>
-            </div>
-          </div>
-
-          <details className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-            <summary className="cursor-pointer text-sm text-[var(--text)]">Advanced capture options</summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                  File prefix
-                  <InfoTip label="Prefix for saved PCAP files." />
-                </label>
-                <input
-                  value={settings.filePrefix}
-                  disabled={!canEdit}
-                  onChange={(e) => setSettings((prev) => ({ ...prev, filePrefix: e.target.value }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                />
-              </div>
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                  Rotate interval (seconds)
-                  <InfoTip label="Rotate files on time in addition to size." />
-                </label>
-                <input
-                  type="number"
-                  value={settings.rotateSeconds}
-                  disabled={!canEdit}
-                  onChange={(e) => setSettings((prev) => ({ ...prev, rotateSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                />
-              </div>
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                  Buffer (MB)
-                  <InfoTip label="Capture buffer size before flush." />
-                </label>
-                <input
-                  type="number"
-                  value={settings.bufferMB}
-                  disabled={!canEdit}
-                  onChange={(e) => setSettings((prev) => ({ ...prev, bufferMB: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-                <input
-                  type="checkbox"
-                  checked={settings.promisc}
-                  disabled={!canEdit}
-                  onChange={(e) => setSettings((prev) => ({ ...prev, promisc: e.target.checked }))}
-                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
-                />
-                Promiscuous mode
-                <InfoTip label="Capture all traffic seen by the interface." />
-              </label>
-            </div>
-          </details>
-
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">PCAP Forwarding (Remote Sensor)</div>
-                <p className="mt-1 text-sm text-[var(--text)]">
-                  Stream captures per interface to a remote sensor (tap-style).
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 grid gap-2 text-[11px] uppercase tracking-wide text-[var(--text-dim)] md:grid-cols-[120px_1fr_120px_120px]">
-              <span>Interface</span>
-              <span>Sensor Host</span>
-              <span>Port</span>
-              <span>Proto</span>
-            </div>
-            <div className="mt-3 grid gap-2">
-              {(settings.forwardTargets ?? []).map((target) => {
-                if (!target.interface) return null;
-                const iface = target.interface;
-                return (
-                <div
-                  key={iface}
-                  className="grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 md:grid-cols-[120px_1fr_120px_120px]"
-                >
-                  <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-                    <input
-                      type="checkbox"
-                      checked={target.enabled}
-                      disabled={!canEdit}
-                      onChange={(e) => updateForwardTarget(iface, { enabled: e.target.checked })}
-                      className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
-                    />
-                    {iface}
-                  </label>
-                  <input
-                    value={target.host}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) => updateForwardTarget(iface, { host: e.target.value })}
-                    placeholder="sensor.example.local"
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
-                  />
-                  <input
-                    type="number"
-                    value={target.port}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) => updateForwardTarget(iface, { port: Number(e.target.value) || 0 })}
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
-                  />
-                  <select
-                    value={target.proto}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) => updateForwardTarget(iface, { proto: e.target.value as "tcp" | "udp" })}
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
-                  />
-                </div>
-                );
-              })}
-            </div>
-            <div className="mt-2 text-xs text-[var(--text-muted)]">
-              Streams PCAP data to remote collectors; configure one target per interface.
-            </div>
-            {enabledForwarding.length > 0 ? (
-              <div className="mt-2 text-xs text-[var(--text-muted)]">
-                Active forwarding: <span className="text-[var(--text)]">{enabledForwarding.join(", ")}</span>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </Card>
+      <CaptureStatusCard
+        isRunning={isRunning}
+        captureSummary={captureSummary}
+        runningSince={runningSince}
+        status={status}
+        settings={settings}
+      />
+      <CaptureSetupCard
+        canEdit={canEdit}
+        settings={settings}
+        setSettings={setSettings}
+        configIssues={configIssues}
+        ifaceOptions={ifaceOptions}
+        toggleIface={toggleIface}
+        setAllInterfaces={setAllInterfaces}
+        bpfPreview={bpfPreview}
+        updateForwardTarget={updateForwardTarget}
+        enabledForwarding={enabledForwarding}
+      />
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Saved PCAPs</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">Download or replay captures from storage.</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <input
-              value={pcapQuery}
-              onChange={(e) => setPcapQuery(e.target.value)}
-                placeholder="Search by name, iface, tag"
-                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:w-2/3"
-              />
-              <button
-                onClick={() => refresh()}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-              >
-                {refreshing ? "Refreshing..." : "Refresh"}
-              </button>
-            <button
-              onClick={() => setPcapQuery("")}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-            >
-              Clear search
-            </button>
-              <button
-                onClick={() => uploadInputRef.current?.click()}
-                disabled={!canEdit || uploading}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-              >
-              {uploading ? "Uploading..." : "Upload PCAP"}
-            </button>
-            <input
-              ref={uploadInputRef}
-              type="file"
-              accept=".pcap"
-              className="hidden"
-              onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
-            />
-          </div>
-          {lastRefresh ? (
-            <div className="mt-2 text-xs text-[var(--text-dim)]">
-              Last refreshed: {lastRefresh.toLocaleTimeString()} · Auto-refresh every 8s
-            </div>
-          ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-            <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">
-              {pcaps.length} total
-            </span>
-            <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">
-              {totalSizeMB.toFixed(1)} MB stored
-            </span>
-          </div>
-          {ifaceStats.length > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text)]">
-              <button
-                onClick={() => setIfaceFilter("all")}
-                className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === "all" ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
-              >
-                All interfaces
-              </button>
-              {ifaceStats.map(([iface, stats]) => (
-                <button
-                  key={iface}
-                  onClick={() => setIfaceFilter(iface)}
-                  className={`rounded-full px-2 py-0.5 transition-ui ${ifaceFilter === iface ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
-                >
-                  {iface} · {stats.count}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
-            <table className="w-full text-left text-sm text-[var(--text)]">
-              <thead className="bg-[var(--surface)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                <tr>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Iface</th>
-                  <th className="px-3 py-2">Size</th>
-                  <th className="px-3 py-2">Tags</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visiblePcaps.length === 0 ? (
-                  <tr className="border-t border-amber-500/[0.1]">
-                    <td colSpan={6} className="px-3 py-3 text-sm text-[var(--text-muted)]">
-                      No captures match your filters.
-                    </td>
-                  </tr>
-                ) : (
-                  visiblePcaps.map((p) => (
-                    <tr key={p.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                      <td className="px-3 py-2">
-                        <div className="font-mono text-xs text-[var(--text)]">{p.name}</div>
-                        <div className="text-[11px] text-[var(--text-muted)]">{new Date(p.createdAt).toLocaleString()}</div>
-                      </td>
-                      <td className="px-3 py-2">{p.interface || "—"}</td>
-                      <td className="px-3 py-2">{(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(p.tags ?? []).length ? (
-                            (p.tags ?? []).map((t) => (
-                              <span key={t} className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">
-                                {t}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-xs text-[var(--text-dim)]">—</span>
-                          )}
-                        </div>
-                        <div className="mt-1 flex items-center gap-1">
-                          <input
-                            value={pcapTag}
-                            onChange={(e) => setPcapTag(e.target.value)}
-                            placeholder="add tag"
-                            className="w-24 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
-                          />
-                          <button
-                            onClick={() => addTag(p.name)}
-                            disabled={!canEdit}
-                            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">{p.status}</span>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <a
-                          href={downloadPcapURL(p.name)}
-                          className="mr-2 inline-flex rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
-                        >
-                          Download
-                        </a>
-                        <button
-                          onClick={() => void replayPcap({ name: p.name, interface: p.interface })}
-                          disabled={!canEdit}
-                          className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-                        >
-                          Replay
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (!canEdit) return;
-                            confirm.open({
-                              title: "Delete PCAP",
-                              message: `Delete capture "${p.name}"? This cannot be undone.`,
-                              confirmLabel: "Delete",
-                              variant: "danger",
-                              onConfirm: async () => {
-                                const result = await deletePcap(p.name);
-                                if (result.ok) {
-                                  setPcaps(await listPcaps());
-                                  setNotice(result.warning ? `PCAP deleted with warning: ${result.warning}` : "PCAP deleted.");
-                                } else {
-                                  setNotice(result.error || "Failed to delete PCAP.");
-                                }
-                              },
-                            });
-                          }}
-                          disabled={!canEdit}
-                          className="rounded-md text-red-400 transition-ui hover:bg-red-500/10 px-2 py-1 text-xs disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Replay</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">Replay a saved PCAP back onto an interface.</p>
-          <div className="mt-4 grid gap-3">
-            <select
-              disabled={!canEdit}
-              value={replayName}
-              onChange={(e) => {
-                const next = e.target.value;
-                setReplayName(next);
-                const match = pcaps.find((p) => p.name === next);
-                if (match?.interface) {
-                  setReplayIface(match.interface);
+        <SavedPcapsCard
+          canEdit={canEdit}
+          pcapQuery={pcapQuery}
+          setPcapQuery={setPcapQuery}
+          onRefresh={refresh}
+          refreshing={refreshing}
+          uploading={uploading}
+          uploadInputRef={uploadInputRef}
+          onUpload={handleUpload}
+          lastRefresh={lastRefresh}
+          pcaps={pcaps}
+          totalSizeMB={totalSizeMB}
+          ifaceStats={ifaceStats}
+          ifaceFilter={ifaceFilter}
+          setIfaceFilter={setIfaceFilter}
+          visiblePcaps={visiblePcaps}
+          pcapTag={pcapTag}
+          setPcapTag={setPcapTag}
+          onAddTag={addTag}
+          onReplayInline={(p) => {
+            void (async () => {
+              const result = await replayPcap({ name: p.name, interface: p.interface });
+              setNotice(
+                result.ok
+                  ? result.warning
+                    ? `Replay started with warning: ${result.warning}`
+                    : "Replay started."
+                  : result.error || "Failed to start replay.",
+              );
+            })();
+          }}
+          onDelete={(p) => {
+            if (!canEdit) return;
+            confirm.open({
+              title: "Delete PCAP",
+              message: `Delete capture "${p.name}"? This cannot be undone.`,
+              confirmLabel: "Delete",
+              variant: "danger",
+              onConfirm: async () => {
+                const result = await deletePcap(p.name);
+                if (result.ok) {
+                  setPcaps(await listPcaps());
+                  setNotice(result.warning ? `PCAP deleted with warning: ${result.warning}` : "PCAP deleted.");
+                } else {
+                  setNotice(result.error || "Failed to delete PCAP.");
                 }
-              }}
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
-            >
-              <option value="">Select a PCAP</option>
-              {pcaps.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <select
-              disabled={!canEdit}
-              value={replayIface}
-              onChange={(e) => setReplayIface(e.target.value)}
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
-            >
-              <option value="">Replay interface</option>
-              {ifaceOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <input
-              disabled={!canEdit}
-              value={replayRate}
-              onChange={(e) => setReplayRate(e.target.value)}
-              placeholder="Replay rate (pps)"
-              className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
-            />
-            <button
-              disabled={!canEdit || !replayName || !replayIface}
-              onClick={async () => {
-                const rate = replayRate.trim() ? Number(replayRate) : undefined;
-                const result = await replayPcap({
-                  name: replayName,
-                  interface: replayIface,
-                  ratePps: Number.isFinite(rate) ? rate : undefined,
-                });
-                setNotice(
-                  result.ok
-                    ? (result.warning ? `Replay started with warning: ${result.warning}` : "Replay started.")
-                    : (result.error || "Failed to start replay."),
-                );
-              }}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
-            >
-              Start replay
-            </button>
-          </div>
-        </Card>
+              },
+            });
+          }}
+        />
+
+        <ReplayCard
+          canEdit={canEdit}
+          replayName={replayName}
+          setReplayName={(next) => {
+            const value = typeof next === "function" ? next(replayName) : next;
+            setReplayName(value);
+            const match = pcaps.find((p) => p.name === value);
+            if (match?.interface) {
+              setReplayIface(match.interface);
+            }
+          }}
+          replayIface={replayIface}
+          setReplayIface={setReplayIface}
+          replayRate={replayRate}
+          setReplayRate={setReplayRate}
+          pcaps={pcaps}
+          ifaceOptions={ifaceOptions}
+          onReplaySubmit={async () => {
+            const rate = replayRate.trim() ? Number(replayRate) : undefined;
+            const result = await replayPcap({
+              name: replayName,
+              interface: replayIface,
+              ratePps: Number.isFinite(rate) ? rate : undefined,
+            });
+            setNotice(
+              result.ok
+                ? result.warning
+                  ? `Replay started with warning: ${result.warning}`
+                  : "Replay started."
+                : result.error || "Failed to start replay.",
+            );
+          }}
+        />
       </div>
     </Shell>
   );
-}
-
-function normalizeConfig(cfg: PcapConfig): PcapConfig {
-  return {
-    enabled: cfg.enabled ?? false,
-    interfaces: cfg.interfaces ?? [],
-    snaplen: cfg.snaplen ?? 262144,
-    maxSizeMB: cfg.maxSizeMB ?? 64,
-    maxFiles: cfg.maxFiles ?? 8,
-    mode: cfg.mode ?? "rolling",
-    promisc: cfg.promisc ?? true,
-    bufferMB: cfg.bufferMB ?? 4,
-    rotateSeconds: cfg.rotateSeconds ?? 300,
-    filePrefix: cfg.filePrefix ?? "capture",
-    filter: {
-      src: cfg.filter?.src ?? "",
-      dst: cfg.filter?.dst ?? "",
-      proto: cfg.filter?.proto ?? "any",
-    },
-    forwardTargets: cfg.forwardTargets ?? [],
-  };
 }

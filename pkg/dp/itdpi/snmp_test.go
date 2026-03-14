@@ -402,10 +402,10 @@ func buildSNMPv1TrapPacket(community string) []byte {
 	trapBody = append(trapBody, berOID("1.3.6.1.4.1.99")...)
 	// Agent address: APPLICATION 0, 4 bytes.
 	trapBody = append(trapBody, berTLV(0x40, []byte{10, 0, 0, 1})...)
-	trapBody = append(trapBody, berInteger(6)...)  // generic-trap: enterpriseSpecific
-	trapBody = append(trapBody, berInteger(1)...)  // specific-trap
+	trapBody = append(trapBody, berInteger(6)...)              // generic-trap: enterpriseSpecific
+	trapBody = append(trapBody, berInteger(1)...)              // specific-trap
 	trapBody = append(trapBody, berTLV(0x43, []byte{0x00})...) // TimeTicks
-	trapBody = append(trapBody, berSequence(nil)...) // empty varbinds
+	trapBody = append(trapBody, berSequence(nil)...)           // empty varbinds
 
 	pdu := berTLV(pduTrapV1, trapBody)
 

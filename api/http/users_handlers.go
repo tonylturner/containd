@@ -6,8 +6,8 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
 func listUsersHandler(store users.Store) gin.HandlerFunc {

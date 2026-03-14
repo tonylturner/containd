@@ -31,67 +31,83 @@ func listIPv4Routes() ([]ipv4Route, error) {
 		if line == "" {
 			continue
 		}
-		// Skip header.
 		if first {
 			first = false
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 8 {
+		route, ok := parseProcNetRouteLine(line)
+		if !ok {
 			continue
 		}
-
-		ifaceName := fields[0]
-		dstHex := fields[1]
-		gwHex := fields[2]
-		metricStr := fields[6]
-		maskHex := fields[7]
-
-		dst, err := parseProcNetHexIPv4(dstHex)
-		if err != nil {
-			continue
-		}
-		gw, err := parseProcNetHexIPv4(gwHex)
-		if err != nil {
-			continue
-		}
-		mask, err := parseProcNetHexIPv4(maskHex)
-		if err != nil {
-			continue
-		}
-
-		ones, _ := net.IPMask(mask.To4()).Size()
-		dstStr := fmt.Sprintf("%s/%d", dst.String(), ones)
-		if dst.Equal(net.IPv4zero) && ones == 0 {
-			dstStr = ""
-		}
-
-		gwStr := ""
-		if !gw.Equal(net.IPv4zero) {
-			gwStr = gw.String()
-		}
-
-		metric := 0
-		if v, err := strconv.Atoi(metricStr); err == nil {
-			metric = v
-		}
-
-		ifaceIdx := 0
-		if iface, err := net.InterfaceByName(ifaceName); err == nil && iface != nil {
-			ifaceIdx = iface.Index
-		}
-
-		routes = append(routes, ipv4Route{
-			Dst:      dstStr,
-			Gateway:  gwStr,
-			IfIndex:  ifaceIdx,
-			Priority: &metric,
-		})
+		routes = append(routes, route)
 	}
 	if err := s.Err(); err != nil {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
 
+	sortIPv4Routes(routes)
+
+	return routes, nil
+}
+
+func parseProcNetRouteLine(line string) (ipv4Route, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 8 {
+		return ipv4Route{}, false
+	}
+
+	dst, err := parseProcNetHexIPv4(fields[1])
+	if err != nil {
+		return ipv4Route{}, false
+	}
+	gateway, err := parseProcNetHexIPv4(fields[2])
+	if err != nil {
+		return ipv4Route{}, false
+	}
+	mask, err := parseProcNetHexIPv4(fields[7])
+	if err != nil {
+		return ipv4Route{}, false
+	}
+	return buildProcNetRoute(fields[0], dst, gateway, mask, fields[6]), true
+}
+
+func buildProcNetRoute(ifaceName string, dst, gateway, mask net.IP, metricStr string) ipv4Route {
+	metric := 0
+	if v, err := strconv.Atoi(metricStr); err == nil {
+		metric = v
+	}
+	return ipv4Route{
+		Dst:      procNetRouteDestination(dst, mask),
+		Gateway:  procNetRouteGateway(gateway),
+		IfIndex:  procNetInterfaceIndex(ifaceName),
+		Priority: &metric,
+	}
+}
+
+func procNetRouteDestination(dst, mask net.IP) string {
+	ones, _ := net.IPMask(mask.To4()).Size()
+	if dst.Equal(net.IPv4zero) && ones == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/%d", dst.String(), ones)
+}
+
+func procNetRouteGateway(gateway net.IP) string {
+	if gateway.Equal(net.IPv4zero) {
+		return ""
+	}
+	return gateway.String()
+}
+
+func procNetInterfaceIndex(ifaceName string) int {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil || iface == nil {
+		return 0
+	}
+	return iface.Index
+}
+
+func sortIPv4Routes(routes []ipv4Route) {
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Dst == "" && routes[j].Dst != "" {
 			return true
@@ -104,8 +120,6 @@ func listIPv4Routes() ([]ipv4Route, error) {
 		}
 		return routes[i].Dst < routes[j].Dst
 	})
-
-	return routes, nil
 }
 
 func parseProcNetHexIPv4(hexLE string) (net.IP, error) {

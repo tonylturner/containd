@@ -92,6 +92,6 @@ func DetectFormat(filename string, data []byte) string {
 }
 
 var (
-	reYARARule    = regexp.MustCompile(`(?m)^\s*(?:private\s+|global\s+)*rule\s+\w+`)
+	reYARARule     = regexp.MustCompile(`(?m)^\s*(?:private\s+|global\s+)*rule\s+\w+`)
 	reSuricataRule = regexp.MustCompile(`(?m)^\s*(?:alert|drop|pass|reject)\s+(?:tcp|udp|icmp|ip|http|dns|tls|ssh|ftp|smtp|modbus|dnp3|enip)\s+`)
 )

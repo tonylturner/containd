@@ -70,6 +70,14 @@ type conduitResult struct {
 	AVEnabled      bool         `json:"avEnabled"`
 }
 
+type conduitGlobalState struct {
+	zoneNames     []string
+	idsMode       string
+	auditLogged   bool
+	avEnabled     bool
+	defaultAction config.Action
+}
+
 func securityConduitsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
@@ -77,146 +85,164 @@ func securityConduitsHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-
-		// Collect zone names.
-		zoneNames := make([]string, len(cfg.Zones))
-		for i, z := range cfg.Zones {
-			zoneNames[i] = z.Name
-		}
-
-		// Global flags derived from config.
-		idsMode := "none"
-		if cfg.IDS.Enabled {
-			idsMode = "full"
-		}
-
-		auditLogged := false
-		for _, fwd := range cfg.Services.Syslog.Forwarders {
-			if fwd.Address != "" {
-				auditLogged = true
-				break
-			}
-		}
-
-		avEnabled := cfg.Services.AV.Enabled
-
+		globals := computeConduitGlobals(cfg)
 		result := make(map[string]*conduitResult)
-
-		for _, from := range zoneNames {
-			for _, to := range zoneNames {
+		for _, from := range globals.zoneNames {
+			for _, to := range globals.zoneNames {
 				if from == to {
 					continue
 				}
-
-				// Find matching rules.
-				var matching []config.Rule
-				for _, r := range cfg.Firewall.Rules {
-					srcMatch := len(r.SourceZones) == 0 || containsStr(r.SourceZones, from)
-					dstMatch := len(r.DestZones) == 0 || containsStr(r.DestZones, to)
-					if srcMatch && dstMatch {
-						matching = append(matching, r)
-					}
-				}
-
-				// Compute state.
-				state := computeConduitState(matching, cfg.Firewall.DefaultAction)
-
-				// Compute proto entries from ALLOW rules.
-				var protos []protoEntry
-				hasProtoRestrictions := false
-				allPorts := make(map[int]bool)
-				hasICSPredicate := false
-
-				for _, r := range matching {
-					if r.Action != config.ActionAllow {
-						continue
-					}
-					if r.ICS.Protocol != "" {
-						hasICSPredicate = true
-					}
-					if len(r.Protocols) > 0 {
-						hasProtoRestrictions = true
-						for _, p := range r.Protocols {
-							port := parsePort(p.Port)
-							if port > 0 {
-								allPorts[port] = true
-								name := portNameMap[port]
-								if name == "" {
-									name = fmt.Sprintf("%s/%s", strings.ToUpper(p.Name), p.Port)
-								}
-								t := "allowed"
-								if hasICSPredicate || r.ICS.Protocol != "" {
-									t = "inspect"
-								}
-								protos = append(protos, protoEntry{N: name, T: t})
-							}
-						}
-					}
-				}
-
-				// Compute boolean flags.
-				defaultDeny := cfg.Firewall.DefaultAction == config.ActionDeny || hasExplicitDenyAll(cfg.Firewall.Rules, from)
-
-				tlsEnforced := false
-				if len(allPorts) > 0 {
-					tlsEnforced = true
-					for port := range allPorts {
-						if !encryptedPorts[port] {
-							tlsEnforced = false
-							break
-						}
-					}
-				}
-
-				protoWhitelist := hasProtoRestrictions
-
-				// Compute rule descriptions.
-				var ruleDescs []string
-				for _, r := range matching {
-					ruleDescs = append(ruleDescs, describeRule(r, from, to))
-				}
-
-				// Compute gaps.
-				gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, auditLogged, avEnabled, allPorts, hasICSPredicate)
-
-				// Compute MITRE ATT&CK tags.
-				mitre := computeMitre(state, protoWhitelist, from, protos, allPorts)
-
-				// Ensure non-nil slices so JSON encodes [] not null.
-				if protos == nil {
-					protos = []protoEntry{}
-				}
-				if ruleDescs == nil {
-					ruleDescs = []string{}
-				}
-				if gaps == nil {
-					gaps = []string{}
-				}
-				if mitre == nil {
-					mitre = []string{}
-				}
-
 				key := from + "\u2192" + to
-				result[key] = &conduitResult{
-					State:          state,
-					IDS:            idsMode,
-					Proto:          protos,
-					Traffic:        0.0,
-					Rules:          ruleDescs,
-					Gaps:           gaps,
-					Mitre:          mitre,
-					DefaultDeny:    defaultDeny,
-					TLSEnforced:    tlsEnforced,
-					ProtoWhitelist: protoWhitelist,
-					MFARequired:    false,
-					AuditLogged:    auditLogged,
-					AVEnabled:      avEnabled,
-				}
+				result[key] = buildConduitResult(cfg, globals, from, to)
 			}
 		}
-
 		c.JSON(http.StatusOK, result)
 	}
+}
+
+func computeConduitGlobals(cfg *config.Config) conduitGlobalState {
+	zoneNames := make([]string, len(cfg.Zones))
+	for i, z := range cfg.Zones {
+		zoneNames[i] = z.Name
+	}
+	return conduitGlobalState{
+		zoneNames:     zoneNames,
+		idsMode:       conduitIDSMode(cfg),
+		auditLogged:   conduitAuditLogged(cfg),
+		avEnabled:     cfg.Services.AV.Enabled,
+		defaultAction: cfg.Firewall.DefaultAction,
+	}
+}
+
+func conduitIDSMode(cfg *config.Config) string {
+	if cfg.IDS.Enabled {
+		return "full"
+	}
+	return "none"
+}
+
+func conduitAuditLogged(cfg *config.Config) bool {
+	for _, fwd := range cfg.Services.Syslog.Forwarders {
+		if fwd.Address != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to string) *conduitResult {
+	matching := matchingConduitRules(cfg.Firewall.Rules, from, to)
+	state := computeConduitState(matching, globals.defaultAction)
+	protos, allPorts, hasProtoRestrictions, hasICSPredicate := conduitProtocols(matching)
+	defaultDeny := globals.defaultAction == config.ActionDeny || hasExplicitDenyAll(cfg.Firewall.Rules, from)
+	tlsEnforced := conduitTLSEnforced(allPorts)
+	protoWhitelist := hasProtoRestrictions
+	ruleDescs := conduitRuleDescriptions(matching, from, to)
+	gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
+	mitre := computeMitre(state, protoWhitelist, from, protos, allPorts)
+	return &conduitResult{
+		State:          state,
+		IDS:            globals.idsMode,
+		Proto:          nonNilProtoEntries(protos),
+		Traffic:        0.0,
+		Rules:          nonNilStrings(ruleDescs),
+		Gaps:           nonNilStrings(gaps),
+		Mitre:          nonNilStrings(mitre),
+		DefaultDeny:    defaultDeny,
+		TLSEnforced:    tlsEnforced,
+		ProtoWhitelist: protoWhitelist,
+		MFARequired:    false,
+		AuditLogged:    globals.auditLogged,
+		AVEnabled:      globals.avEnabled,
+	}
+}
+
+func matchingConduitRules(rules []config.Rule, from, to string) []config.Rule {
+	var matching []config.Rule
+	for _, r := range rules {
+		srcMatch := len(r.SourceZones) == 0 || containsStr(r.SourceZones, from)
+		dstMatch := len(r.DestZones) == 0 || containsStr(r.DestZones, to)
+		if srcMatch && dstMatch {
+			matching = append(matching, r)
+		}
+	}
+	return matching
+}
+
+func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool, bool) {
+	var protos []protoEntry
+	allPorts := make(map[int]bool)
+	hasProtoRestrictions := false
+	hasICSPredicate := false
+	for _, r := range matching {
+		if r.Action != config.ActionAllow {
+			continue
+		}
+		if r.ICS.Protocol != "" {
+			hasICSPredicate = true
+		}
+		if len(r.Protocols) == 0 {
+			continue
+		}
+		hasProtoRestrictions = true
+		protos = append(protos, protocolEntriesForRule(r, hasICSPredicate, allPorts)...)
+	}
+	return protos, allPorts, hasProtoRestrictions, hasICSPredicate
+}
+
+func protocolEntriesForRule(r config.Rule, hasICSPredicate bool, allPorts map[int]bool) []protoEntry {
+	var protos []protoEntry
+	for _, p := range r.Protocols {
+		port := parsePort(p.Port)
+		if port <= 0 {
+			continue
+		}
+		allPorts[port] = true
+		name := portNameMap[port]
+		if name == "" {
+			name = fmt.Sprintf("%s/%s", strings.ToUpper(p.Name), p.Port)
+		}
+		t := "allowed"
+		if hasICSPredicate || r.ICS.Protocol != "" {
+			t = "inspect"
+		}
+		protos = append(protos, protoEntry{N: name, T: t})
+	}
+	return protos
+}
+
+func conduitTLSEnforced(allPorts map[int]bool) bool {
+	if len(allPorts) == 0 {
+		return false
+	}
+	for port := range allPorts {
+		if !encryptedPorts[port] {
+			return false
+		}
+	}
+	return true
+}
+
+func conduitRuleDescriptions(matching []config.Rule, from, to string) []string {
+	var ruleDescs []string
+	for _, r := range matching {
+		ruleDescs = append(ruleDescs, describeRule(r, from, to))
+	}
+	return ruleDescs
+}
+
+func nonNilProtoEntries(in []protoEntry) []protoEntry {
+	if in == nil {
+		return []protoEntry{}
+	}
+	return in
+}
+
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func computeConduitState(rules []config.Rule, defaultAction config.Action) string {

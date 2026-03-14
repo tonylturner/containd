@@ -31,10 +31,10 @@ func analyzePcapAPI(api *API) Command {
 
 		// Build a multipart upload to /api/v1/pcap/analyze.
 		type analysisResult struct {
-			PacketCount int              `json:"packetCount"`
-			ByteCount   int              `json:"byteCount"`
-			Duration    float64          `json:"duration"` // nanoseconds
-			Protocols   map[string]int   `json:"protocols"`
+			PacketCount int            `json:"packetCount"`
+			ByteCount   int            `json:"byteCount"`
+			Duration    float64        `json:"duration"` // nanoseconds
+			Protocols   map[string]int `json:"protocols"`
 			Flows       []struct {
 				Key      string `json:"key"`
 				Protocol string `json:"protocol"`

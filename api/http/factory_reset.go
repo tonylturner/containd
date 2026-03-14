@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
-	"github.com/gin-gonic/gin"
 )
 
 type factoryResetRequest struct {
@@ -109,7 +109,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "reset",
 			"loggedOut": true,
-			"message": "Factory reset completed. Log in with the default credentials and change the password immediately.",
+			"message":   "Factory reset completed. Log in with the default credentials and change the password immediately.",
 		})
 	}
 }

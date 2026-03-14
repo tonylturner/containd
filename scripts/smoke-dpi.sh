@@ -206,6 +206,21 @@ export START_TS
 export MODBUS_SRC="172.31.0.5"
 export MODBUS_DST="172.30.0.4"
 
+modbus_event_filter=$(cat <<'EOF'
+any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
+EOF
+)
+
+modbus_deny_filter=$(cat <<'EOF'
+any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
+EOF
+)
+
+modbus_inventory_filter=$(cat <<'EOF'
+any(.[]; .protocol == "modbus" and ((.lastSeen | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)) and (.ip == env.MODBUS_SRC or .ip == env.MODBUS_DST))
+EOF
+)
+
 log "Programming OT client and Modbus server routes through engine..."
 {
   set +e
@@ -235,7 +250,7 @@ if [[ $READ_STATUS -ne 0 ]]; then
 fi
 pass "Modbus read allowed ($(tr -d '\r' </tmp/modbus-read.out))"
 
-if ! wait_for_jq "${BASE}/events?limit=100" 'any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .timestamp >= env.START_TS)'; then
+if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
   $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=20" | jq '.'
   exit 1
@@ -249,7 +264,7 @@ else
   log "Initial Modbus write blocked immediately ($(tr -d '\r' </tmp/modbus-write-trigger.err))"
 fi
 
-if ! wait_for_jq "${BASE}/events?limit=100" 'any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and .timestamp >= env.START_TS)'; then
+if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
   log "expected Modbus deny rule hit not found"
   $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
   exit 1
@@ -272,7 +287,7 @@ if ! wait_for_jq "${BASE}/stats/protocols" 'any(.[]; .protocol == "modbus" and .
 fi
 pass "Protocol stats recorded Modbus read and write traffic"
 
-if ! wait_for_jq "${BASE}/inventory" 'any(.[]; .protocol == "modbus" and .lastSeen >= env.START_TS and (.ip == env.MODBUS_SRC or .ip == env.MODBUS_DST))'; then
+if ! wait_for_jq "${BASE}/inventory" "$modbus_inventory_filter"; then
   log "expected modbus inventory asset not found"
   $CURL -H "$AUTH_HEADER" "${BASE}/inventory" | jq '.'
   exit 1

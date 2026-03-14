@@ -16,4 +16,3 @@ func showIPRule() Command {
 		return fmt.Errorf("show ip rule is only supported on Linux (run inside the containd container/appliance)")
 	}
 }
-

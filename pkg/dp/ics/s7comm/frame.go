@@ -24,9 +24,9 @@ type COTPHeader struct {
 
 // S7Header represents the S7comm protocol header.
 type S7Header struct {
-	ProtocolID  uint8  // always 0x32
-	MessageType uint8  // 0x01=Job, 0x02=Ack, 0x03=Ack-Data, 0x07=Userdata
-	Reserved    uint16
+	ProtocolID   uint8 // always 0x32
+	MessageType  uint8 // 0x01=Job, 0x02=Ack, 0x03=Ack-Data, 0x07=Userdata
+	Reserved     uint16
 	PDUReference uint16
 	ParamLength  uint16
 	DataLength   uint16
@@ -43,25 +43,25 @@ const (
 
 // S7comm message types.
 const (
-	MsgTypeJob     = 0x01
-	MsgTypeAck     = 0x02
-	MsgTypeAckData = 0x03
+	MsgTypeJob      = 0x01
+	MsgTypeAck      = 0x02
+	MsgTypeAckData  = 0x03
 	MsgTypeUserdata = 0x07
 )
 
 // S7comm function codes.
 const (
-	FuncCPUServices      = 0x00
-	FuncReadVar          = 0x04
-	FuncWriteVar         = 0x05
-	FuncRequestDownload  = 0x1A
-	FuncDownloadBlock    = 0x1B
-	FuncDownloadEnded    = 0x1C
-	FuncStartUpload      = 0x1D
-	FuncUpload           = 0x1E
-	FuncEndUpload        = 0x1F
-	FuncPLCControl       = 0x28
-	FuncPLCStop          = 0x29
+	FuncCPUServices        = 0x00
+	FuncReadVar            = 0x04
+	FuncWriteVar           = 0x05
+	FuncRequestDownload    = 0x1A
+	FuncDownloadBlock      = 0x1B
+	FuncDownloadEnded      = 0x1C
+	FuncStartUpload        = 0x1D
+	FuncUpload             = 0x1E
+	FuncEndUpload          = 0x1F
+	FuncPLCControl         = 0x28
+	FuncPLCStop            = 0x29
 	FuncSetupCommunication = 0xF0
 )
 
@@ -144,6 +144,9 @@ func ParseTPKT(data []byte) (*TPKTHeader, []byte, error) {
 		return nil, nil, ErrInvalidTPKT
 	}
 	length := binary.BigEndian.Uint16(data[2:4])
+	if length < 4 {
+		return nil, nil, ErrInvalidTPKT
+	}
 	if int(length) > len(data) {
 		return nil, nil, fmt.Errorf("s7comm TPKT length %d exceeds data length %d", length, len(data))
 	}

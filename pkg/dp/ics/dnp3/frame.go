@@ -144,12 +144,12 @@ const (
 
 // IIN2 bits (second byte).
 const (
-	IINNoFuncSupport   = 0x01 // IIN2.0
-	IINObjectUnknown   = 0x02 // IIN2.1
-	IINParameterError  = 0x04 // IIN2.2
-	IINEventOverflow   = 0x08 // IIN2.3
+	IINNoFuncSupport    = 0x01 // IIN2.0
+	IINObjectUnknown    = 0x02 // IIN2.1
+	IINParameterError   = 0x04 // IIN2.2
+	IINEventOverflow    = 0x08 // IIN2.3
 	IINAlreadyExecuting = 0x10 // IIN2.4
-	IINConfigCorrupt   = 0x20 // IIN2.5
+	IINConfigCorrupt    = 0x20 // IIN2.5
 )
 
 // iinFlagName pairs for IIN1 byte.

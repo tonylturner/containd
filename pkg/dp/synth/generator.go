@@ -14,7 +14,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- synthetic lab traffic does not require cryptographic randomness.
 	"net"
 	"time"
 
@@ -415,7 +415,7 @@ func synthModbusRequest(rng *rand.Rand) map[string]any {
 	}
 	requests := []mbReq{
 		{1, false}, {2, false}, {3, false}, {4, false}, // reads
-		{5, true}, {6, true}, {15, true}, {16, true},   // writes
+		{5, true}, {6, true}, {15, true}, {16, true}, // writes
 		{8, false},  // diagnostics
 		{43, false}, // MEI
 	}

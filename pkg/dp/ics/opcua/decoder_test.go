@@ -271,7 +271,6 @@ func TestDecoderEmitsMSGResponseEvent(t *testing.T) {
 	raw[25] = 0x00
 	binary.LittleEndian.PutUint16(raw[26:28], ServiceWriteResponse)
 
-
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
 		t.Fatalf("onpacket: %v", err)

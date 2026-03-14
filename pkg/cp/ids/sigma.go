@@ -18,18 +18,18 @@ import (
 // SigmaRule is a minimal Sigma-like rule structure sufficient for conversion.
 // It intentionally supports only a common subset of Sigma v1 fields.
 type SigmaRule struct {
-	Title       string                 `yaml:"title"`
-	ID          string                 `yaml:"id"`
-	Description string                 `yaml:"description"`
-	Level       string                 `yaml:"level"`
-	Tags        []string               `yaml:"tags"`
-	LogSource   map[string]any         `yaml:"logsource"`
-	Detection   map[string]any         `yaml:"detection"`
-	Fields      []string               `yaml:"fields"`
-	Status      string                 `yaml:"status"`
-	References  []string               `yaml:"references"`
-	FalsePos    []string               `yaml:"falsepositives"`
-	Custom      map[string]any         `yaml:",inline"`
+	Title       string         `yaml:"title"`
+	ID          string         `yaml:"id"`
+	Description string         `yaml:"description"`
+	Level       string         `yaml:"level"`
+	Tags        []string       `yaml:"tags"`
+	LogSource   map[string]any `yaml:"logsource"`
+	Detection   map[string]any `yaml:"detection"`
+	Fields      []string       `yaml:"fields"`
+	Status      string         `yaml:"status"`
+	References  []string       `yaml:"references"`
+	FalsePos    []string       `yaml:"falsepositives"`
+	Custom      map[string]any `yaml:",inline"`
 }
 
 // ConvertSigmaYAML reads a Sigma YAML rule (single document) and returns a containd IDSRule.
@@ -116,8 +116,8 @@ func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 // The output schema is {version: 1, rules: [...] }.
 func ConvertSigmaFiles(paths []string) ([]byte, error) {
 	out := struct {
-		Version int               `yaml:"version"`
-		Rules   []config.IDSRule  `yaml:"rules"`
+		Version int              `yaml:"version"`
+		Rules   []config.IDSRule `yaml:"rules"`
 	}{Version: 1}
 
 	for _, p := range paths {
@@ -204,4 +204,3 @@ func slugify(s string) string {
 	}
 	return s
 }
-

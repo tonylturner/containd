@@ -17,13 +17,13 @@ import (
 )
 
 type systemStatsResponse struct {
-	CPU        cpuStats       `json:"cpu"`
-	Memory     memoryStats    `json:"memory"`
-	Disk       diskStats      `json:"disk"`
-	RuleEval   ruleEvalStats  `json:"ruleEval"`
-	Container  containerStats `json:"container"`
-	Runtime    runtimeStats   `json:"runtime"`
-	CollectedAt string        `json:"collectedAt"`
+	CPU         cpuStats       `json:"cpu"`
+	Memory      memoryStats    `json:"memory"`
+	Disk        diskStats      `json:"disk"`
+	RuleEval    ruleEvalStats  `json:"ruleEval"`
+	Container   containerStats `json:"container"`
+	Runtime     runtimeStats   `json:"runtime"`
+	CollectedAt string         `json:"collectedAt"`
 }
 
 type cpuStats struct {
@@ -46,26 +46,26 @@ type diskStats struct {
 }
 
 type ruleEvalStats struct {
-	RulesLoaded int     `json:"rulesLoaded"`
+	RulesLoaded  int     `json:"rulesLoaded"`
 	AvgLatencyMs float64 `json:"avgLatencyMs"`
 }
 
 type containerStats struct {
-	Running bool   `json:"running"`
-	ID      string `json:"id,omitempty"`
-	Image   string `json:"image,omitempty"`
-	Uptime  string `json:"uptime,omitempty"`
+	Running       bool    `json:"running"`
+	ID            string  `json:"id,omitempty"`
+	Image         string  `json:"image,omitempty"`
+	Uptime        string  `json:"uptime,omitempty"`
 	MemUsedBytes  uint64  `json:"memUsedBytes"`
 	MemLimitBytes uint64  `json:"memLimitBytes"`
 	MemPercent    float64 `json:"memPercent"`
 }
 
 type runtimeStats struct {
-	Goroutines   int    `json:"goroutines"`
+	Goroutines   int     `json:"goroutines"`
 	HeapAllocMB  float64 `json:"heapAllocMB"`
 	HeapSysMB    float64 `json:"heapSysMB"`
 	GCPauseMsAvg float64 `json:"gcPauseMsAvg"`
-	Uptime       string `json:"uptime"`
+	Uptime       string  `json:"uptime"`
 }
 
 var processStartTime = time.Now()
@@ -250,4 +250,3 @@ func dockerSockAvailable() bool {
 	conn.Close()
 	return true
 }
-

@@ -16,10 +16,10 @@ import (
 )
 
 type arpEntry struct {
-	ip     string
-	mac    string
-	iface  string
-	state  string
+	ip    string
+	mac   string
+	iface string
+	state string
 }
 
 func showNeighbors() Command {
@@ -91,4 +91,3 @@ func listARP() ([]arpEntry, error) {
 	})
 	return out, nil
 }
-

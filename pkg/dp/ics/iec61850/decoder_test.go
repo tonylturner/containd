@@ -189,11 +189,11 @@ func TestMMSConnectionRequest(t *testing.T) {
 	// TPKT + COTP CR (Connection Request).
 	pkt := []byte{
 		0x03, 0x00, 0x00, 0x0B, // TPKT: version 3, length 11
-		0x06,                   // COTP length indicator = 6
-		0xE0,                   // COTP CR PDU type
-		0x00, 0x00,             // DST ref
-		0x00, 0x01,             // SRC ref
-		0x00,                   // Class 0
+		0x06,       // COTP length indicator = 6
+		0xE0,       // COTP CR PDU type
+		0x00, 0x00, // DST ref
+		0x00, 0x01, // SRC ref
+		0x00, // Class 0
 	}
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: pkt})
@@ -271,4 +271,3 @@ func buildTPKTCOTP(mmsPayload []byte) []byte {
 	copy(buf[tpktHdrLen+len(cotpHdr):], mmsPayload)
 	return buf
 }
-

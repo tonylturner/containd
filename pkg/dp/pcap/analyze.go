@@ -20,12 +20,12 @@ const maxPCAPRecordSize = 16 << 20 // 16 MiB
 
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
-	Events      []dpi.Event      `json:"events"`
-	Flows       []FlowSummary    `json:"flows"`
-	Protocols   map[string]int   `json:"protocols"`
-	Duration    time.Duration    `json:"duration"`
-	PacketCount int              `json:"packetCount"`
-	ByteCount   int              `json:"byteCount"`
+	Events      []dpi.Event    `json:"events"`
+	Flows       []FlowSummary  `json:"flows"`
+	Protocols   map[string]int `json:"protocols"`
+	Duration    time.Duration  `json:"duration"`
+	PacketCount int            `json:"packetCount"`
+	ByteCount   int            `json:"byteCount"`
 }
 
 // FlowSummary describes a single network flow observed in the PCAP.
@@ -68,109 +68,115 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 	for {
 		ts, data, err := readPCAPRecord(r, snaplen)
 		if err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if endOfPCAP(err) {
 				break
 			}
 			return nil, fmt.Errorf("pcap record: %w", err)
 		}
-
-		result.PacketCount++
-		result.ByteCount += len(data)
-
-		if firstTS.IsZero() || ts.Before(firstTS) {
-			firstTS = ts
-		}
-		if ts.After(lastTS) {
-			lastTS = ts
-		}
-
-		// Parse Ethernet frame to extract IP packet.
+		updateAnalysisPacketStats(result, ts, len(data), &firstTS, &lastTS)
 		pkt, ok := decodeEthernetPacket(data, ts)
 		if !ok {
 			continue
 		}
-
-		// Build flow key.
-		key := flow.Key{
-			SrcIP:   pkt.srcIP,
-			DstIP:   pkt.dstIP,
-			SrcPort: pkt.srcPort,
-			DstPort: pkt.dstPort,
-			Proto:   pkt.proto,
-			Dir:     flow.DirForward,
-		}
-		hash := key.Hash()
-
-		state, exists := flows[hash]
-		if !exists {
-			state = flow.NewState(key, ts)
-			flows[hash] = state
-		}
-		state.Touch(uint64(len(pkt.payload)), ts)
-
-		parsed := &dpi.ParsedPacket{
-			Payload: pkt.payload,
-			Proto:   pkt.transport,
-			SrcPort: pkt.srcPort,
-			DstPort: pkt.dstPort,
-		}
-
-		events, err := mgr.OnPacket(state, parsed)
+		hash, state := analysisFlowState(flows, pkt, ts)
+		events, err := analyzePacket(mgr, state, pkt, ts)
 		if err != nil {
 			continue
 		}
-		srcStr := pkt.srcIP.String()
-		dstStr := pkt.dstIP.String()
-		for i := range events {
-			if events[i].Timestamp.IsZero() {
-				events[i].Timestamp = ts
-			}
-			if onEvent != nil {
-				onEvent(srcStr, dstStr, events[i])
-			}
-		}
-		result.Events = append(result.Events, events...)
-		flowEvents[hash] += len(events)
-		for _, ev := range events {
-			result.Protocols[ev.Proto]++
-		}
+		recordAnalysisEvents(result, flowEvents, hash, pkt.srcIP.String(), pkt.dstIP.String(), events, onEvent)
 	}
 
-	// End all flows.
+	finalizeAnalysisFlows(mgr, flows, result, flowEvents, onEvent)
+
+	result.Flows = buildFlowSummaries(flows, flowEvents)
+
+	if !firstTS.IsZero() && !lastTS.IsZero() {
+		result.Duration = lastTS.Sub(firstTS)
+	}
+
+	return result, nil
+}
+
+func endOfPCAP(err error) bool {
+	return err == io.EOF || err == io.ErrUnexpectedEOF
+}
+
+func updateAnalysisPacketStats(result *AnalysisResult, ts time.Time, size int, firstTS, lastTS *time.Time) {
+	result.PacketCount++
+	result.ByteCount += size
+	if firstTS.IsZero() || ts.Before(*firstTS) {
+		*firstTS = ts
+	}
+	if ts.After(*lastTS) {
+		*lastTS = ts
+	}
+}
+
+func analysisFlowState(flows map[string]*flow.State, pkt parsedPacketInfo, ts time.Time) (string, *flow.State) {
+	key := flow.Key{
+		SrcIP:   pkt.srcIP,
+		DstIP:   pkt.dstIP,
+		SrcPort: pkt.srcPort,
+		DstPort: pkt.dstPort,
+		Proto:   pkt.proto,
+		Dir:     flow.DirForward,
+	}
+	hash := key.Hash()
+	state, exists := flows[hash]
+	if !exists {
+		state = flow.NewState(key, ts)
+		flows[hash] = state
+	}
+	state.Touch(uint64(len(pkt.payload)), ts)
+	return hash, state
+}
+
+func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt parsedPacketInfo, ts time.Time) ([]dpi.Event, error) {
+	parsed := &dpi.ParsedPacket{
+		Payload: pkt.payload,
+		Proto:   pkt.transport,
+		SrcPort: pkt.srcPort,
+		DstPort: pkt.dstPort,
+	}
+	events, err := mgr.OnPacket(state, parsed)
+	if err != nil {
+		return nil, err
+	}
+	for i := range events {
+		if events[i].Timestamp.IsZero() {
+			events[i].Timestamp = ts
+		}
+	}
+	return events, nil
+}
+
+func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash, srcStr, dstStr string, events []dpi.Event, onEvent eventCallback) {
+	for _, ev := range events {
+		if onEvent != nil {
+			onEvent(srcStr, dstStr, ev)
+		}
+		result.Protocols[ev.Proto]++
+	}
+	result.Events = append(result.Events, events...)
+	flowEvents[hash] += len(events)
+}
+
+func finalizeAnalysisFlows(mgr *dpi.Manager, flows map[string]*flow.State, result *AnalysisResult, flowEvents map[string]int, onEvent eventCallback) {
 	for hash, state := range flows {
 		events, err := mgr.OnFlowEnd(state)
 		if err != nil {
 			continue
 		}
-		if onEvent != nil {
-			srcStr := state.Key.SrcIP.String()
-			dstStr := state.Key.DstIP.String()
-			for _, ev := range events {
-				onEvent(srcStr, dstStr, ev)
-			}
-		}
-		result.Events = append(result.Events, events...)
-		flowEvents[hash] += len(events)
-		for _, ev := range events {
-			result.Protocols[ev.Proto]++
-		}
+		recordAnalysisEvents(result, flowEvents, hash, state.Key.SrcIP.String(), state.Key.DstIP.String(), events, onEvent)
 	}
+}
 
-	// Build flow summaries.
+func buildFlowSummaries(flows map[string]*flow.State, flowEvents map[string]int) []FlowSummary {
+	summaries := make([]FlowSummary, 0, len(flows))
 	for hash, state := range flows {
-		transport := "unknown"
-		switch state.Key.Proto {
-		case 6:
-			transport = "tcp"
-		case 17:
-			transport = "udp"
-		}
-		fiveTuple := fmt.Sprintf("%s:%d -> %s:%d (%s)",
-			state.Key.SrcIP, state.Key.SrcPort,
-			state.Key.DstIP, state.Key.DstPort,
-			transport)
-		result.Flows = append(result.Flows, FlowSummary{
-			Key:       fiveTuple,
+		transport := flowTransport(state.Key.Proto)
+		summaries = append(summaries, FlowSummary{
+			Key:       fmt.Sprintf("%s:%d -> %s:%d (%s)", state.Key.SrcIP, state.Key.SrcPort, state.Key.DstIP, state.Key.DstPort, transport),
 			Protocol:  transport,
 			Packets:   int(state.Packets),
 			Bytes:     int(state.Bytes),
@@ -179,12 +185,18 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 			LastSeen:  state.LastSeen,
 		})
 	}
+	return summaries
+}
 
-	if !firstTS.IsZero() && !lastTS.IsZero() {
-		result.Duration = lastTS.Sub(firstTS)
+func flowTransport(proto uint8) string {
+	switch proto {
+	case 6:
+		return "tcp"
+	case 17:
+		return "udp"
+	default:
+		return "unknown"
 	}
-
-	return result, nil
 }
 
 // Analyze reads a PCAP file from r, runs each packet through the supplied DPI

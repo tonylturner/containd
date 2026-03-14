@@ -278,11 +278,17 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 	}
 
 	var out []dprules.LocalServiceRule
+	out = append(out, compileMgmtLocalInput(cfg)...)
+	out = append(out, compileInfraServiceLocalInput(cfg)...)
+	out = append(out, compileProxyLocalInput(cfg)...)
+	out = append(out, compileVPNLocalInput(cfg)...)
+	return out
+}
 
-	// Determine ports.
+func compileMgmtLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
+	var out []dprules.LocalServiceRule
 	httpPort := listenPortOrDefault(cfg.System.Mgmt.HTTPListenAddr, 8080)
 	httpsPort := listenPortOrDefault(cfg.System.Mgmt.HTTPSListenAddr, 8443)
-	// Legacy listenAddr (single HTTP addr); fall back if HTTPListenAddr is empty.
 	if strings.TrimSpace(cfg.System.Mgmt.HTTPListenAddr) == "" && strings.TrimSpace(cfg.System.Mgmt.ListenAddr) != "" {
 		httpPort = listenPortOrDefault(cfg.System.Mgmt.ListenAddr, 8080)
 	}
@@ -291,37 +297,10 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 	enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
 	enableHTTPS := cfg.System.Mgmt.EnableHTTPS != nil && *cfg.System.Mgmt.EnableHTTPS
 	if cfg.System.Mgmt.EnableHTTPS == nil {
-		// If unspecified, assume HTTPS enabled when HTTPSListenAddr is set.
 		enableHTTPS = strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) != ""
 	}
 
-	// Build per-port iface allow-lists honoring per-interface access toggles.
-	mgmtHTTPIfaces := make([]string, 0, len(cfg.Interfaces))
-	mgmtHTTPSIfaces := make([]string, 0, len(cfg.Interfaces))
-	sshIfaces := make([]string, 0, len(cfg.Interfaces))
-	for _, iface := range cfg.Interfaces {
-		dev := iface.Name
-		if strings.TrimSpace(iface.Device) != "" {
-			dev = iface.Device
-		}
-		if dev == "" {
-			continue
-		}
-		allowMgmt := iface.Access.Mgmt == nil || *iface.Access.Mgmt
-		allowHTTP := iface.Access.HTTP == nil || *iface.Access.HTTP
-		allowHTTPS := iface.Access.HTTPS == nil || *iface.Access.HTTPS
-		allowSSH := iface.Access.SSH == nil || *iface.Access.SSH
-
-		if allowMgmt && enableHTTP && allowHTTP {
-			mgmtHTTPIfaces = append(mgmtHTTPIfaces, dev)
-		}
-		if allowMgmt && enableHTTPS && allowHTTPS {
-			mgmtHTTPSIfaces = append(mgmtHTTPSIfaces, dev)
-		}
-		if allowSSH {
-			sshIfaces = append(sshIfaces, dev)
-		}
-	}
+	mgmtHTTPIfaces, mgmtHTTPSIfaces, sshIfaces := localAccessIfaces(cfg.Interfaces, enableHTTP, enableHTTPS)
 	sort.Strings(mgmtHTTPIfaces)
 	sort.Strings(mgmtHTTPSIfaces)
 	sort.Strings(sshIfaces)
@@ -350,8 +329,40 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			Port:   sshPort,
 		})
 	}
+	return out
+}
 
-	// DNS resolver (Unbound): allow TCP/UDP on configured zones (or all if unspecified).
+func localAccessIfaces(ifaces []config.Interface, enableHTTP, enableHTTPS bool) ([]string, []string, []string) {
+	mgmtHTTPIfaces := make([]string, 0, len(ifaces))
+	mgmtHTTPSIfaces := make([]string, 0, len(ifaces))
+	sshIfaces := make([]string, 0, len(ifaces))
+	for _, iface := range ifaces {
+		dev := iface.Name
+		if strings.TrimSpace(iface.Device) != "" {
+			dev = iface.Device
+		}
+		if dev == "" {
+			continue
+		}
+		allowMgmt := iface.Access.Mgmt == nil || *iface.Access.Mgmt
+		allowHTTP := iface.Access.HTTP == nil || *iface.Access.HTTP
+		allowHTTPS := iface.Access.HTTPS == nil || *iface.Access.HTTPS
+		allowSSH := iface.Access.SSH == nil || *iface.Access.SSH
+		if allowMgmt && enableHTTP && allowHTTP {
+			mgmtHTTPIfaces = append(mgmtHTTPIfaces, dev)
+		}
+		if allowMgmt && enableHTTPS && allowHTTPS {
+			mgmtHTTPSIfaces = append(mgmtHTTPSIfaces, dev)
+		}
+		if allowSSH {
+			sshIfaces = append(sshIfaces, dev)
+		}
+	}
+	return mgmtHTTPIfaces, mgmtHTTPSIfaces, sshIfaces
+}
+
+func compileInfraServiceLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
+	var out []dprules.LocalServiceRule
 	if cfg.Services.DNS.Enabled {
 		dnsPort := cfg.Services.DNS.ListenPort
 		if dnsPort == 0 {
@@ -373,8 +384,11 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			})
 		}
 	}
+	return out
+}
 
-	// Forward proxy: allow TCP on configured zones (or all if unspecified).
+func compileProxyLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
+	var out []dprules.LocalServiceRule
 	if cfg.Services.Proxy.Forward.Enabled {
 		port := cfg.Services.Proxy.Forward.ListenPort
 		if port == 0 {
@@ -397,8 +411,11 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			})
 		}
 	}
+	return out
+}
 
-	// WireGuard: allow inbound to server listen port on wan zone (default).
+func compileVPNLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
+	var out []dprules.LocalServiceRule
 	if cfg.Services.VPN.WireGuard.Enabled && cfg.Services.VPN.WireGuard.ListenPort > 0 {
 		rule := dprules.LocalServiceRule{
 			ID:    "auto-allow-wireguard",
@@ -429,7 +446,6 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			out = append(out, rule)
 		}
 	}
-
 	return out
 }
 

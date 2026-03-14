@@ -38,9 +38,3 @@ func (p *Program) SyncBlockFlows(flows []FlowKey) error { return errNotSupported
 
 // ReadStats returns an unsupported error on non-Linux platforms.
 func (p *Program) ReadStats() (packets, bytes uint64, err error) { return 0, 0, errNotSupported }
-
-// lpmKey stub for non-Linux.
-type lpmKey struct {
-	PrefixLen uint32
-	Addr      [4]byte
-}

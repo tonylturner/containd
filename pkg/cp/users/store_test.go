@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+func storeCredential(label string) string {
+	return label + "-Aa1!"
+}
+
 func newTestStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
@@ -25,8 +29,9 @@ func newTestStore(t *testing.T) *SQLiteStore {
 func TestCreateAndGetByUsername(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	userPassword := storeCredential("alice-admin")
 
-	u, err := s.Create(ctx, User{Username: "alice", Role: "admin"}, "Password1")
+	u, err := s.Create(ctx, User{Username: "alice", Role: "admin"}, userPassword)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -53,11 +58,11 @@ func TestCreateDuplicateUsername(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_, err := s.Create(ctx, User{Username: "bob", Role: "admin"}, "Password1")
+	_, err := s.Create(ctx, User{Username: "bob", Role: "admin"}, storeCredential("bob-admin"))
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
-	_, err = s.Create(ctx, User{Username: "bob", Role: "view"}, "Password2")
+	_, err = s.Create(ctx, User{Username: "bob", Role: "view"}, storeCredential("bob-view"))
 	if !errors.Is(err, ErrUsernameTaken) {
 		t.Fatalf("expected ErrUsernameTaken, got %v", err)
 	}
@@ -96,8 +101,8 @@ func TestListUsers(t *testing.T) {
 		t.Fatalf("expected 0 users, got %d", len(list))
 	}
 
-	s.Create(ctx, User{Username: "charlie", Role: "admin"}, "Password1")
-	s.Create(ctx, User{Username: "alice", Role: "view"}, "Password2")
+	s.Create(ctx, User{Username: "charlie", Role: "admin"}, storeCredential("charlie-admin"))
+	s.Create(ctx, User{Username: "alice", Role: "view"}, storeCredential("alice-view"))
 
 	list, err = s.List(ctx)
 	if err != nil {
@@ -116,7 +121,7 @@ func TestUpdateUser(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "dana", Role: "view"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "dana", Role: "view"}, storeCredential("dana-view"))
 	updated, err := s.Update(ctx, u.ID, User{FirstName: "Dana", Email: "dana@example.com"})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -133,7 +138,7 @@ func TestUpdateInvalidRole(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "eve", Role: "admin"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "eve", Role: "admin"}, storeCredential("eve-admin"))
 	_, err := s.Update(ctx, u.ID, User{Role: "superadmin"})
 	if err == nil {
 		t.Fatal("expected error for invalid role")
@@ -144,8 +149,8 @@ func TestDeleteUser(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u1, _ := s.Create(ctx, User{Username: "admin1", Role: "admin"}, "Password1")
-	u2, _ := s.Create(ctx, User{Username: "admin2", Role: "admin"}, "Password2")
+	u1, _ := s.Create(ctx, User{Username: "admin1", Role: "admin"}, storeCredential("admin-one"))
+	u2, _ := s.Create(ctx, User{Username: "admin2", Role: "admin"}, storeCredential("admin-two"))
 
 	if err := s.Delete(ctx, u1.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -167,7 +172,7 @@ func TestDeleteLastAdminFails(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "solo", Role: "admin"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "solo", Role: "admin"}, storeCredential("solo-admin"))
 	err := s.Delete(ctx, u.ID)
 	if !errors.Is(err, ErrLastAdmin) {
 		t.Fatalf("expected ErrLastAdmin, got %v", err)
@@ -181,10 +186,10 @@ func TestPasswordValidation(t *testing.T) {
 	}{
 		{"", true},
 		{"short", true},
-		{"alllowercase1", true},  // no uppercase
-		{"ALLUPPERCASE1", true},  // no lowercase
-		{"NoDigitsHere", true},   // no digit
-		{"Valid1pw", false},      // 8 chars, upper, lower, digit
+		{"alllowercase1", true}, // no uppercase
+		{"ALLUPPERCASE1", true}, // no lowercase
+		{"NoDigitsHere", true},  // no digit
+		{"Valid1pw", false},     // 8 chars, upper, lower, digit
 		{"C0mpl3x!Pass", false}, // complex valid
 	}
 	for _, tt := range tests {
@@ -199,7 +204,7 @@ func TestSetPassword(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "frank", Role: "view"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "frank", Role: "view"}, storeCredential("frank-view"))
 
 	// Invalid password
 	err := s.SetPassword(ctx, u.ID, "weak")
@@ -208,7 +213,7 @@ func TestSetPassword(t *testing.T) {
 	}
 
 	// Valid password
-	err = s.SetPassword(ctx, u.ID, "NewPass99")
+	err = s.SetPassword(ctx, u.ID, storeCredential("frank-reset"))
 	if err == nil {
 		// verify it changed
 		got, _ := s.GetByID(ctx, u.ID)
@@ -218,7 +223,7 @@ func TestSetPassword(t *testing.T) {
 	}
 
 	// Nonexistent user
-	err = s.SetPassword(ctx, "bogus", "NewPass99")
+	err = s.SetPassword(ctx, "bogus", storeCredential("bogus-reset"))
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for bogus ID, got %v", err)
 	}
@@ -228,7 +233,7 @@ func TestCreateInvalidRole(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_, err := s.Create(ctx, User{Username: "bad", Role: "root"}, "Password1")
+	_, err := s.Create(ctx, User{Username: "bad", Role: "root"}, storeCredential("bad-role"))
 	if err == nil {
 		t.Fatal("expected error for invalid role")
 	}
@@ -238,7 +243,7 @@ func TestCreateEmptyUsername(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_, err := s.Create(ctx, User{Username: "", Role: "admin"}, "Password1")
+	_, err := s.Create(ctx, User{Username: "", Role: "admin"}, storeCredential("empty-user"))
 	if err == nil {
 		t.Fatal("expected error for empty username")
 	}
@@ -248,7 +253,7 @@ func TestSessionLifecycle(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "sessuser", Role: "admin"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "sessuser", Role: "admin"}, storeCredential("session-user"))
 
 	sess, err := s.CreateSession(ctx, u.ID, 15*time.Minute, time.Hour)
 	if err != nil {
@@ -319,8 +324,8 @@ func TestDeleteUserCascadesSessions(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u1, _ := s.Create(ctx, User{Username: "with-sess", Role: "admin"}, "Password1")
-	s.Create(ctx, User{Username: "other-admin", Role: "admin"}, "Password2")
+	u1, _ := s.Create(ctx, User{Username: "with-sess", Role: "admin"}, storeCredential("with-session"))
+	s.Create(ctx, User{Username: "other-admin", Role: "admin"}, storeCredential("other-admin"))
 
 	sess, _ := s.CreateSession(ctx, u1.ID, 15*time.Minute, time.Hour)
 
@@ -367,7 +372,7 @@ func TestSessionIdleTTLCappedByMaxTTL(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "ttl", Role: "admin"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "ttl", Role: "admin"}, storeCredential("ttl-admin"))
 
 	// idleTTL > maxTTL — should be capped
 	sess, err := s.CreateSession(ctx, u.ID, 2*time.Hour, 30*time.Minute)
@@ -384,7 +389,7 @@ func TestWipeAll(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "wipe", Role: "admin"}, "Password1")
+	u, _ := s.Create(ctx, User{Username: "wipe", Role: "admin"}, storeCredential("wipe-admin"))
 	s.CreateSession(ctx, u.ID, time.Hour, 2*time.Hour)
 
 	if err := s.WipeAll(ctx); err != nil {

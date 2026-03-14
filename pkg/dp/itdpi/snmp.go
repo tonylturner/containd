@@ -80,114 +80,27 @@ func (d *SNMPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil
 	}
-
-	p := pkt.Payload
-
-	// Outer SEQUENCE tag.
-	if len(p) < 2 || p[0] != 0x30 {
-		return nil, nil
-	}
-	seqLen, seqOff, ok := readBERLength(p, 1)
-	if !ok || seqOff+seqLen > len(p) {
-		return nil, nil
-	}
-	msg := p[seqOff : seqOff+seqLen]
-
-	// Version INTEGER.
-	if len(msg) < 2 || msg[0] != 0x02 {
-		return nil, nil
-	}
-	version, vOff, ok := readBERInteger(msg, 0)
+	msg, version, off, ok := parseSNMPMessage(pkt.Payload)
 	if !ok {
 		return nil, nil
 	}
-
-	var versionStr string
-	switch version {
-	case 0:
-		versionStr = "v1"
-	case 1:
-		versionStr = "v2c"
-	case 3:
-		versionStr = "v3"
-	default:
-		versionStr = fmt.Sprintf("unknown(%d)", version)
-	}
-
-	attrs := map[string]any{
-		"version":   versionStr,
-		"src_port":  pkt.SrcPort,
-		"dst_port":  pkt.DstPort,
-		"transport": pkt.Proto,
-	}
-
-	off := vOff
-
+	attrs := snmpBaseAttrs(pkt, version)
 	if version == 3 {
-		// SNMPv3: after version comes msgGlobalData (SEQUENCE).
-		// Try to extract msgSecurityModel from it.
 		d.parseV3Header(msg, off, attrs)
-
-		// We cannot easily determine PDU type for v3 without decryption,
-		// so emit a generic event.
-		ev := dpi.Event{
-			FlowID:     state.Key.Hash(),
-			Proto:      "snmp",
-			Kind:       "v3_message",
-			Attributes: attrs,
-			Timestamp:  time.Now().UTC(),
-		}
-		return []dpi.Event{ev}, nil
+		return []dpi.Event{newSNMPEvent(state, "v3_message", attrs)}, nil
 	}
 
-	// v1/v2c: community string (OCTET STRING, tag 0x04).
-	if off >= len(msg) || msg[off] != 0x04 {
+	pduName, pduTag, pduBody, ok := parseSNMPPDU(msg, off, attrs)
+	if !ok {
 		return nil, nil
 	}
-	commLen, commOff, ok := readBERLength(msg, off+1)
-	if !ok || commLen > maxCommunityLen || commOff+commLen > len(msg) {
-		return nil, nil
-	}
-	// REDACT: only record the length, never the actual community string.
-	attrs["community_length"] = commLen
-	attrs["community_auth"] = true
-	off = commOff + commLen
-
-	// PDU: context-specific tag 0xA0-0xA8.
-	if off >= len(msg) {
-		return nil, nil
-	}
-	pduTag := msg[off]
-	pduName, known := pduTypeNames[pduTag]
-	if !known {
-		return nil, nil
-	}
-	attrs["pdu_type"] = pduName
-
-	pduLen, pduOff, ok := readBERLength(msg, off+1)
-	if !ok || pduOff+pduLen > len(msg) {
-		return nil, nil
-	}
-	pduBody := msg[pduOff : pduOff+pduLen]
-
 	if pduTag == pduSetRequest {
 		attrs["write_operation"] = true
 	}
-
-	// Parse request-id, error-status, error-index from PDU body.
-	// (v1 Trap has a different structure, skip for that.)
 	if pduTag != pduTrapV1 {
 		d.parsePDUFields(pduBody, attrs)
 	}
-
-	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
-		Proto:      "snmp",
-		Kind:       pduName,
-		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
-	}
-	return []dpi.Event{ev}, nil
+	return []dpi.Event{newSNMPEvent(state, pduName, attrs)}, nil
 }
 
 func (d *SNMPDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
@@ -196,71 +109,147 @@ func (d *SNMPDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return
 // first OID from the variable bindings in a non-Trap PDU body.
 func (d *SNMPDecoder) parsePDUFields(body []byte, attrs map[string]any) {
 	off := 0
-
-	// request-id (INTEGER).
-	if off >= len(body) || body[off] != 0x02 {
-		return
-	}
-	reqID, next, ok := readBERInteger(body, off)
+	reqID, next, ok := parseSNMPIntegerField(body, off)
 	if !ok {
 		return
 	}
 	attrs["request_id"] = reqID
-	off = next
-
-	// error-status (INTEGER).
-	if off >= len(body) || body[off] != 0x02 {
-		return
-	}
-	errStatus, next, ok := readBERInteger(body, off)
+	errStatus, next, ok := parseSNMPIntegerField(body, next)
 	if !ok {
 		return
 	}
-	if name, known := errorStatusNames[errStatus]; known {
-		attrs["error_status"] = name
-	} else {
-		attrs["error_status"] = fmt.Sprintf("%d", errStatus)
-	}
-	off = next
-
-	// error-index (INTEGER).
-	if off >= len(body) || body[off] != 0x02 {
-		return
-	}
-	_, next, ok = readBERInteger(body, off)
+	attrs["error_status"] = snmpErrorStatus(errStatus)
+	_, next, ok = parseSNMPIntegerField(body, next)
 	if !ok {
 		return
 	}
-	off = next
-
-	// Variable bindings: SEQUENCE of SEQUENCE { OID, value }.
-	if off >= len(body) || body[off] != 0x30 {
-		return
-	}
-	vbLen, vbOff, ok := readBERLength(body, off+1)
-	if !ok || vbOff+vbLen > len(body) {
-		return
-	}
-	vb := body[vbOff : vbOff+vbLen]
-
-	// Extract just the first binding.
-	if len(vb) < 2 || vb[0] != 0x30 {
-		return
-	}
-	bindLen, bindOff, ok := readBERLength(vb, 1)
-	if !ok || bindOff+bindLen > len(vb) {
-		return
-	}
-	binding := vb[bindOff : bindOff+bindLen]
-
-	// First element should be an OID (tag 0x06).
-	if len(binding) < 2 || binding[0] != 0x06 {
+	binding, ok := firstSNMPBinding(body, next)
+	if !ok {
 		return
 	}
 	oid, _, ok := readBEROID(binding, 0)
 	if ok && len(oid) <= maxOIDLen {
 		attrs["first_oid"] = oid
 	}
+}
+
+func parseSNMPMessage(p []byte) ([]byte, int64, int, bool) {
+	if len(p) < 2 || p[0] != 0x30 {
+		return nil, 0, 0, false
+	}
+	seqLen, seqOff, ok := readBERLength(p, 1)
+	if !ok || seqOff+seqLen > len(p) {
+		return nil, 0, 0, false
+	}
+	msg := p[seqOff : seqOff+seqLen]
+	if len(msg) < 2 || msg[0] != 0x02 {
+		return nil, 0, 0, false
+	}
+	version, off, ok := readBERInteger(msg, 0)
+	if !ok {
+		return nil, 0, 0, false
+	}
+	return msg, version, off, true
+}
+
+func snmpBaseAttrs(pkt *dpi.ParsedPacket, version int64) map[string]any {
+	return map[string]any{
+		"version":   snmpVersionString(version),
+		"src_port":  pkt.SrcPort,
+		"dst_port":  pkt.DstPort,
+		"transport": pkt.Proto,
+	}
+}
+
+func snmpVersionString(version int64) string {
+	switch version {
+	case 0:
+		return "v1"
+	case 1:
+		return "v2c"
+	case 3:
+		return "v3"
+	default:
+		return fmt.Sprintf("unknown(%d)", version)
+	}
+}
+
+func parseSNMPPDU(msg []byte, off int, attrs map[string]any) (string, byte, []byte, bool) {
+	next, ok := parseSNMPCommunity(msg, off, attrs)
+	if !ok || next >= len(msg) {
+		return "", 0, nil, false
+	}
+	pduTag := msg[next]
+	pduName, known := pduTypeNames[pduTag]
+	if !known {
+		return "", 0, nil, false
+	}
+	attrs["pdu_type"] = pduName
+	pduLen, pduOff, ok := readBERLength(msg, next+1)
+	if !ok || pduOff+pduLen > len(msg) {
+		return "", 0, nil, false
+	}
+	return pduName, pduTag, msg[pduOff : pduOff+pduLen], true
+}
+
+func parseSNMPCommunity(msg []byte, off int, attrs map[string]any) (int, bool) {
+	if off >= len(msg) || msg[off] != 0x04 {
+		return 0, false
+	}
+	commLen, commOff, ok := readBERLength(msg, off+1)
+	if !ok || commLen > maxCommunityLen || commOff+commLen > len(msg) {
+		return 0, false
+	}
+	attrs["community_length"] = commLen
+	attrs["community_auth"] = true
+	return commOff + commLen, true
+}
+
+func newSNMPEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
+	return dpi.Event{
+		FlowID:     state.Key.Hash(),
+		Proto:      "snmp",
+		Kind:       kind,
+		Attributes: attrs,
+		Timestamp:  time.Now().UTC(),
+	}
+}
+
+func parseSNMPIntegerField(body []byte, off int) (int64, int, bool) {
+	if off >= len(body) || body[off] != 0x02 {
+		return 0, 0, false
+	}
+	return readBERInteger(body, off)
+}
+
+func snmpErrorStatus(code int64) string {
+	if name, known := errorStatusNames[code]; known {
+		return name
+	}
+	return fmt.Sprintf("%d", code)
+}
+
+func firstSNMPBinding(body []byte, off int) ([]byte, bool) {
+	if off >= len(body) || body[off] != 0x30 {
+		return nil, false
+	}
+	vbLen, vbOff, ok := readBERLength(body, off+1)
+	if !ok || vbOff+vbLen > len(body) {
+		return nil, false
+	}
+	vb := body[vbOff : vbOff+vbLen]
+	if len(vb) < 2 || vb[0] != 0x30 {
+		return nil, false
+	}
+	bindLen, bindOff, ok := readBERLength(vb, 1)
+	if !ok || bindOff+bindLen > len(vb) {
+		return nil, false
+	}
+	binding := vb[bindOff : bindOff+bindLen]
+	if len(binding) < 2 || binding[0] != 0x06 {
+		return nil, false
+	}
+	return binding, true
 }
 
 // parseV3Header extracts msgSecurityModel from the SNMPv3 msgGlobalData.

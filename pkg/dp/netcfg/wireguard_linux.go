@@ -631,7 +631,7 @@ func encodeSockaddr(endpoint string) ([]byte, error) {
 		}
 		host, portStr = parts[0], parts[1]
 	}
-	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	port, err := strconv.Atoi(strings.TrimSpace(portStr)) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 1..65535 below before conversion.
 	if err != nil || port < 1 || port > 65535 {
 		return nil, fmt.Errorf("invalid port %q", portStr)
 	}

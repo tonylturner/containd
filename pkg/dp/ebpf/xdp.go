@@ -19,8 +19,8 @@ func xdpMapSpecs() map[string]*ebpf.MapSpec {
 		"block_hosts": {
 			Name:       "block_hosts",
 			Type:       ebpf.LPMTrie,
-			KeySize:    8,  // 4-byte prefix length + 4-byte IPv4 addr
-			ValueSize:  4,  // uint32 (1 = blocked)
+			KeySize:    8, // 4-byte prefix length + 4-byte IPv4 addr
+			ValueSize:  4, // uint32 (1 = blocked)
 			MaxEntries: 16384,
 			Flags:      1, // BPF_F_NO_PREALLOC required for LPM trie
 		},

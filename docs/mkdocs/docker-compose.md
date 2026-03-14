@@ -55,6 +55,7 @@ Docker Compose automatically loads `.env` from the same directory as the compose
 - `CONTAIND_ENFORCE_ENABLED`: starter compose default is `1` so nftables enforcement is active once policy is committed. Set `0` only for observe-only runs.
 - `CONTAIND_COOKIE_SECURE`: set to `1` when running behind HTTPS (or a TLS-terminating proxy) to force the `Secure` cookie flag.
 - `CONTAIND_TRUSTED_PROXIES`: comma-separated list of proxy IPs/CIDRs you trust for client IP resolution (e.g. `127.0.0.1,::1,10.0.0.0/8`).
+- `CONTAIND_ALLOWED_ORIGINS`: optional comma-separated browser origins that may embed or call the appliance cross-origin. Leave empty unless you intentionally integrate containd into another UI or portal.
 
 ### Management ↔ Engine connectivity
 

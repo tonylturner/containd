@@ -29,4 +29,3 @@ func TestIsRawSocketDenied(t *testing.T) {
 		})
 	}
 }
-

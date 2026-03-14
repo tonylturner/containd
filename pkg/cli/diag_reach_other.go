@@ -12,4 +12,3 @@ func bindToDeviceControl(dev string) func(network, address string, c syscall.Raw
 	// but interface binding is not enforced.
 	return nil
 }
-

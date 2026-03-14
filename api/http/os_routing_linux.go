@@ -62,53 +62,12 @@ func readProcNetRoute() (*osRoutingSnapshot, error) {
 			continue
 		}
 		fields := strings.Fields(line)
-		// Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
-		if len(fields) < 8 {
+		r, isDefault, ok := parseProcRouteLine(fields)
+		if !ok {
 			continue
-		}
-		ifaceName := fields[0]
-		dstHex := fields[1]
-		gwHex := fields[2]
-		metricStr := fields[6]
-		maskHex := fields[7]
-
-		dst, err := parseProcNetHexIPv4(dstHex)
-		if err != nil {
-			continue
-		}
-		gw, err := parseProcNetHexIPv4(gwHex)
-		if err != nil {
-			continue
-		}
-		mask, err := parseProcNetHexIPv4(maskHex)
-		if err != nil {
-			continue
-		}
-		ones, _ := net.IPMask(mask.To4()).Size()
-
-		dstStr := dst.String() + "/" + strconv.Itoa(ones)
-		if dst.Equal(net.IPv4zero) && ones == 0 {
-			dstStr = "default"
-		}
-
-		gwStr := ""
-		if !gw.Equal(net.IPv4zero) {
-			gwStr = gw.String()
-		}
-
-		var metricPtr *int
-		if v, err := strconv.Atoi(metricStr); err == nil {
-			metricPtr = &v
-		}
-
-		r := osRoute{
-			Dst:     dstStr,
-			Gateway: gwStr,
-			Iface:   ifaceName,
-			Metric:  metricPtr,
 		}
 		routes = append(routes, r)
-		if dstStr == "default" && gwStr != "" && def == nil {
+		if isDefault && def == nil {
 			rr := r
 			def = &rr
 		}
@@ -131,6 +90,61 @@ func readProcNetRoute() (*osRoutingSnapshot, error) {
 	})
 
 	return &osRoutingSnapshot{Routes: routes, DefaultRoute: def}, nil
+}
+
+func parseProcRouteLine(fields []string) (osRoute, bool, bool) {
+	if len(fields) < 8 {
+		return osRoute{}, false, false
+	}
+	dst, gw, ones, ok := parseProcRouteNetwork(fields[1], fields[2], fields[7])
+	if !ok {
+		return osRoute{}, false, false
+	}
+	route := osRoute{
+		Dst:     routeDestination(dst, ones),
+		Gateway: routeGateway(gw),
+		Iface:   fields[0],
+		Metric:  routeMetric(fields[6]),
+	}
+	return route, route.Dst == "default" && route.Gateway != "", true
+}
+
+func parseProcRouteNetwork(dstHex, gwHex, maskHex string) (net.IP, net.IP, int, bool) {
+	dst, err := parseProcNetHexIPv4(dstHex)
+	if err != nil {
+		return nil, nil, 0, false
+	}
+	gw, err := parseProcNetHexIPv4(gwHex)
+	if err != nil {
+		return nil, nil, 0, false
+	}
+	mask, err := parseProcNetHexIPv4(maskHex)
+	if err != nil {
+		return nil, nil, 0, false
+	}
+	ones, _ := net.IPMask(mask.To4()).Size()
+	return dst, gw, ones, true
+}
+
+func routeDestination(dst net.IP, ones int) string {
+	if dst.Equal(net.IPv4zero) && ones == 0 {
+		return "default"
+	}
+	return dst.String() + "/" + strconv.Itoa(ones)
+}
+
+func routeGateway(gw net.IP) string {
+	if gw.Equal(net.IPv4zero) {
+		return ""
+	}
+	return gw.String()
+}
+
+func routeMetric(raw string) *int {
+	if v, err := strconv.Atoi(raw); err == nil {
+		return &v
+	}
+	return nil
 }
 
 func detectKernelDefaultRouteIface() string {

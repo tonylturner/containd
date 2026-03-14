@@ -111,7 +111,7 @@ func parseClientHello(ch []byte) clientHelloMeta {
 		return clientHelloMeta{}
 	}
 	clientVersion := binary.BigEndian.Uint16(ch[0:2])
-	off += 2 // client_version
+	off += 2  // client_version
 	off += 32 // random
 	if off >= len(ch) {
 		return clientHelloMeta{}
@@ -169,7 +169,7 @@ func parseClientHello(ch []byte) clientHelloMeta {
 	}
 	meta.JA3 = buildJA3(clientVersion, meta.CipherSuites, meta.Extensions)
 	if meta.JA3 != "" {
-		sum := md5.Sum([]byte(meta.JA3))
+		sum := md5.Sum([]byte(meta.JA3)) // nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5 -- JA3 fingerprints are standardized as MD5 over the canonical JA3 string.
 		meta.JA3Hash = fmt.Sprintf("%x", sum)
 	}
 	return meta

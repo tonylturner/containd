@@ -13,6 +13,7 @@ SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 TESTS_PASSED=0
 TESTS_EXPECTED=9
+DNAT_PORT=${DNAT_PORT:-8088}
 
 GREEN="\033[32m"
 RED="\033[31m"
@@ -88,8 +89,8 @@ log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 log "Fetching current config..."
 CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
 
-log "Applying dataplane + firewall config (enforcement, SNAT, allow lan->wan, DNAT 8081 -> lan_target)..."
-UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" '
+log "Applying dataplane + firewall config (enforcement, SNAT, allow lan->wan, DNAT ${DNAT_PORT} -> lan_target)..."
+UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg dnatPort "$DNAT_PORT" '
   .interfaces |= map(
     if .name=="wan" then .device=$wan
     elif .name=="lan1" then .device=$lan | .zone="lan"
@@ -108,10 +109,10 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" '
         {
           id:"lan-http",
           enabled:true,
-          description:"WAN:8081 -> lan_target:80",
+          description:("WAN:" + $dnatPort + " -> lan_target:80"),
           ingressZone:"wan",
           proto:"tcp",
-          listenPort:8081,
+          listenPort:($dnatPort | tonumber),
           destIP:"172.31.0.4",
           destPort:80,
           allowedSources:[]
@@ -220,8 +221,8 @@ else
   pass "LAN target blocked from WAN as expected"
 fi
 
-log "Testing DNAT WAN:8081 -> LAN target:80 (from wan_server)..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_dnat.out 2>/tmp/wan_dnat.err
+log "Testing DNAT WAN:${DNAT_PORT} -> LAN target:80 (from wan_server)..."
+docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_dnat.out 2>/tmp/wan_dnat.err
 DNAT_STATUS=$?
 if [[ $DNAT_STATUS -ne 0 ]]; then
   log "WAN DNAT failed (exit $DNAT_STATUS):"; cat /tmp/wan_dnat.err; exit 1
@@ -262,7 +263,7 @@ docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del 172.30.0.0/24 
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del default || true
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable 172.30.0.0/24 || true
 docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable default || true
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_noroute.out 2>/tmp/wan_noroute.err; then
+if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_noroute.out 2>/tmp/wan_noroute.err; then
   log "Unexpected success with no route present"; exit 1
 else
   pass "No-route check passed (traffic failed as expected)"
@@ -283,8 +284,7 @@ else
 fi
 
 log "Re-testing DNAT after route restoration..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:8081" >/tmp/wan_dnat2.out 2>/tmp/wan_dnat2.err
-if [[ $? -ne 0 ]]; then
+if ! docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_dnat2.out 2>/tmp/wan_dnat2.err; then
   log "WAN DNAT after restore failed:"; cat /tmp/wan_dnat2.err; exit 1
 fi
 pass "WAN DNAT after restore success (first line: $(head -n1 /tmp/wan_dnat2.out))"

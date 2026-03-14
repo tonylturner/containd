@@ -50,16 +50,16 @@ func (k Key) Hash() string {
 
 // State holds runtime flow state and timestamps.
 type State struct {
-	Key           Key
-	FirstSeen     time.Time
-	LastSeen      time.Time
-	Bytes         uint64
-	Packets       uint64
-	Application   string
-	TCPState      string
-	IdleTimeout   time.Duration
-	HardTimeout   time.Duration
-	LastAction    string
+	Key         Key
+	FirstSeen   time.Time
+	LastSeen    time.Time
+	Bytes       uint64
+	Packets     uint64
+	Application string
+	TCPState    string
+	IdleTimeout time.Duration
+	HardTimeout time.Duration
+	LastAction  string
 }
 
 func NewState(key Key, now time.Time) *State {

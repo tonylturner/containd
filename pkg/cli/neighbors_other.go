@@ -16,4 +16,3 @@ func showNeighbors() Command {
 		return fmt.Errorf("show neighbors is only supported on Linux (run inside the containd container/appliance)")
 	}
 }
-

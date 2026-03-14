@@ -10,6 +10,9 @@ func TestApplyBootstrapEnvDefaults(t *testing.T) {
 	t.Setenv("CONTAIND_CAPTURE_IFACES", "eth0, eth1")
 
 	cfg := DefaultConfig()
+	if !cfg.DataPlane.DPIEnabled {
+		t.Fatal("expected default config to enable DPI")
+	}
 	ApplyBootstrapEnvDefaults(cfg)
 
 	if !cfg.DataPlane.Enforcement {

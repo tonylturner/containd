@@ -24,46 +24,9 @@ func diagReach(store config.Store) Command {
 		if out == nil {
 			return nil
 		}
-		if len(args) < 2 {
-			return fmt.Errorf("usage: diag reach <src_iface> <dst_host|dst_ip|dst_iface> [tcp_port] | diag reach <src_iface> <dst> <tcp|udp|icmp> [port]")
-		}
-		src := strings.TrimSpace(args[0])
-		dst := strings.TrimSpace(args[1])
-		if src == "" || dst == "" {
-			return fmt.Errorf("usage: diag reach <src_iface> <dst_host|dst_ip|dst_iface> [tcp_port] | diag reach <src_iface> <dst> <tcp|udp|icmp> [port]")
-		}
-
-		proto := "tcp"
-		port := 0
-		if len(args) >= 3 {
-			a2 := strings.TrimSpace(args[2])
-			if a2 != "" {
-				// Backward compatible: diag reach <src> <dst> <port>
-				if p, err := strconv.Atoi(a2); err == nil {
-					if p < 1 || p > 65535 {
-						return fmt.Errorf("invalid port: %q", args[2])
-					}
-					proto = "tcp"
-					port = p
-				} else {
-					switch strings.ToLower(a2) {
-					case "tcp", "udp", "icmp":
-						proto = strings.ToLower(a2)
-					default:
-						return fmt.Errorf("invalid protocol %q (expected tcp|udp|icmp)", a2)
-					}
-					if len(args) >= 4 && strings.TrimSpace(args[3]) != "" {
-						if proto == "icmp" {
-							return fmt.Errorf("icmp does not take a port")
-						}
-						p, err := strconv.Atoi(strings.TrimSpace(args[3]))
-						if err != nil || p < 1 || p > 65535 {
-							return fmt.Errorf("invalid port: %q", args[3])
-						}
-						port = p
-					}
-				}
-			}
+		src, dst, proto, port, err := parseDiagReachArgs(args)
+		if err != nil {
+			return err
 		}
 
 		dev, srcIP, err := resolveSourceInterfaceIPv4(ctx, store, src)
@@ -86,40 +49,119 @@ func diagReach(store config.Store) Command {
 			t.addRow("route", "ok", "local="+routeLocal)
 		}
 
-		switch proto {
-		case "tcp":
-			switch {
-			case port != 0:
-				status, detail := probeTCP(ctx, dev, srcIP, dstIP, port, true)
-				t.addRow("tcp", status, detail)
-			case dstIsIface:
-				// For interface destinations, a blank port runs a safe self-test.
-				status, detail := probeTCPSelf(ctx, srcIP, dstIP, 0)
-				t.addRow("tcp", status, detail)
-			default:
-				t.addRow("tcp", "skipped", "no port provided")
-			}
-		case "udp":
-			switch {
-			case port != 0:
-				status, detail := probeUDP(ctx, dev, srcIP, dstIP, port, true)
-				t.addRow("udp", status, detail)
-			case dstIsIface:
-				status, detail := probeUDPSelf(ctx, dev, srcIP, dstIP, 0)
-				t.addRow("udp", status, detail)
-			default:
-				t.addRow("udp", "skipped", "no port provided")
-			}
-		case "icmp":
-			status, detail := probeICMPOnce(ctx, srcIP, dstIP)
-			t.addRow("icmp", status, detail)
-		default:
-			_ = dstDev
-			t.addRow("tcp", "error", "invalid protocol")
-		}
+		runDiagReachProbe(ctx, t, diagReachRequest{
+			dev:        dev,
+			srcIP:      srcIP,
+			dstIP:      dstIP,
+			dstIsIface: dstIsIface,
+			proto:      proto,
+			port:       port,
+		})
+		_ = dstDev
 
 		t.render(out)
 		return nil
+	}
+}
+
+type diagReachRequest struct {
+	dev        string
+	srcIP      net.IP
+	dstIP      net.IP
+	dstIsIface bool
+	proto      string
+	port       int
+}
+
+func parseDiagReachArgs(args []string) (src, dst, proto string, port int, err error) {
+	if len(args) < 2 {
+		return "", "", "", 0, diagReachUsageError()
+	}
+	src = strings.TrimSpace(args[0])
+	dst = strings.TrimSpace(args[1])
+	if src == "" || dst == "" {
+		return "", "", "", 0, diagReachUsageError()
+	}
+	proto, port, err = parseDiagReachProtocol(args[2:])
+	return src, dst, proto, port, err
+}
+
+func parseDiagReachProtocol(args []string) (string, int, error) {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return "tcp", 0, nil
+	}
+	if port, err := parseDiagReachPort(args[0]); err == nil {
+		return "tcp", port, nil
+	}
+	proto := strings.ToLower(strings.TrimSpace(args[0]))
+	switch proto {
+	case "tcp", "udp", "icmp":
+	default:
+		return "", 0, fmt.Errorf("invalid protocol %q (expected tcp|udp|icmp)", args[0])
+	}
+	port, err := parseDiagReachOptionalPort(proto, args[1:])
+	return proto, port, err
+}
+
+func parseDiagReachOptionalPort(proto string, args []string) (int, error) {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return 0, nil
+	}
+	if proto == "icmp" {
+		return 0, fmt.Errorf("icmp does not take a port")
+	}
+	return parseDiagReachPort(args[0])
+}
+
+func parseDiagReachPort(raw string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid port: %q", raw)
+	}
+	return port, nil
+}
+
+func diagReachUsageError() error {
+	return fmt.Errorf("usage: diag reach <src_iface> <dst_host|dst_ip|dst_iface> [tcp_port] | diag reach <src_iface> <dst> <tcp|udp|icmp> [port]")
+}
+
+func runDiagReachProbe(ctx context.Context, t *table, req diagReachRequest) {
+	switch req.proto {
+	case "tcp":
+		runDiagTCPProbe(ctx, t, req)
+	case "udp":
+		runDiagUDPProbe(ctx, t, req)
+	case "icmp":
+		status, detail := probeICMPOnce(ctx, req.srcIP, req.dstIP)
+		t.addRow("icmp", status, detail)
+	default:
+		t.addRow("tcp", "error", "invalid protocol")
+	}
+}
+
+func runDiagTCPProbe(ctx context.Context, t *table, req diagReachRequest) {
+	switch {
+	case req.port != 0:
+		status, detail := probeTCP(ctx, req.dev, req.srcIP, req.dstIP, req.port, true)
+		t.addRow("tcp", status, detail)
+	case req.dstIsIface:
+		status, detail := probeTCPSelf(ctx, req.srcIP, req.dstIP, 0)
+		t.addRow("tcp", status, detail)
+	default:
+		t.addRow("tcp", "skipped", "no port provided")
+	}
+}
+
+func runDiagUDPProbe(ctx context.Context, t *table, req diagReachRequest) {
+	switch {
+	case req.port != 0:
+		status, detail := probeUDP(ctx, req.dev, req.srcIP, req.dstIP, req.port, true)
+		t.addRow("udp", status, detail)
+	case req.dstIsIface:
+		status, detail := probeUDPSelf(ctx, req.dev, req.srcIP, req.dstIP, 0)
+		t.addRow("udp", status, detail)
+	default:
+		t.addRow("udp", "skipped", "no port provided")
 	}
 }
 

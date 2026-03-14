@@ -13,7 +13,7 @@ import (
 )
 
 func buildDetectionConditions(det map[string]any) (config.IDSCondition, error) {
-	if det == nil || len(det) == 0 {
+	if len(det) == 0 {
 		return config.IDSCondition{}, nil
 	}
 	selections := map[string]config.IDSCondition{}
@@ -272,4 +272,3 @@ func (p *conditionParser) match(t string) bool {
 	}
 	return false
 }
-

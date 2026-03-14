@@ -25,15 +25,15 @@ import (
 // Minimal fib_rule support (IPv4) for "show ip rule" without requiring iproute2 in the image.
 // We only decode selectors and table/priority.
 type fibRuleHdr struct {
-	Family  uint8
-	DstLen  uint8
-	SrcLen  uint8
-	Tos     uint8
-	Table   uint8
-Res1   uint8
-Res2   uint8
-Action  uint8
-Flags   uint32
+	Family uint8
+	DstLen uint8
+	SrcLen uint8
+	Tos    uint8
+	Table  uint8
+	Res1   uint8
+	Res2   uint8
+	Action uint8
+	Flags  uint32
 }
 
 const (
@@ -116,84 +116,111 @@ func listIPv4Rules(ctx context.Context) ([]ipRule, error) {
 	buf := make([]byte, 1<<16)
 	hdrSize := int(unsafe.Sizeof(fibRuleHdr{}))
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		n, _, err := unix.Recvfrom(fd, buf, 0)
+		msgs, err := recvIPRuleMessages(ctx, fd, buf)
 		if err != nil {
 			return nil, err
 		}
-		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+		done, parsed, err := extractIPRules(msgs, seq, hdrSize)
 		if err != nil {
 			return nil, err
 		}
-		for _, m := range msgs {
-			if m.Header.Seq != seq {
+		rules = append(rules, parsed...)
+		if done {
+			sortIPRules(rules)
+			return rules, nil
+		}
+	}
+}
+
+func recvIPRuleMessages(ctx context.Context, fd int, buf []byte) ([]syscall.NetlinkMessage, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	n, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		return nil, err
+	}
+	return syscall.ParseNetlinkMessage(buf[:n])
+}
+
+func extractIPRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int) (bool, []ipRule, error) {
+	var rules []ipRule
+	for _, m := range msgs {
+		if m.Header.Seq != seq {
+			continue
+		}
+		switch m.Header.Type {
+		case unix.NLMSG_DONE:
+			return true, rules, nil
+		case unix.NLMSG_ERROR:
+			if len(m.Data) < 4 {
+				return false, nil, errors.New("netlink error")
+			}
+			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+			if code == 0 {
 				continue
 			}
-			switch m.Header.Type {
-			case unix.NLMSG_DONE:
-				sort.Slice(rules, func(i, j int) bool {
-					if rules[i].priority != rules[j].priority {
-						return rules[i].priority < rules[j].priority
-					}
-					if rules[i].table != rules[j].table {
-						return rules[i].table < rules[j].table
-					}
-					if rules[i].src != rules[j].src {
-						return rules[i].src < rules[j].src
-					}
-					return rules[i].dst < rules[j].dst
-				})
-				return rules, nil
-			case unix.NLMSG_ERROR:
-				if len(m.Data) < 4 {
-					return nil, errors.New("netlink error")
-				}
-				code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
-				if code == 0 {
-					continue
-				}
-				return nil, unix.Errno(-code)
-			case unix.RTM_NEWRULE:
-				if len(m.Data) < hdrSize {
-					continue
-				}
-				fr := (*fibRuleHdr)(unsafe.Pointer(&m.Data[0]))
-				if fr.Family != unix.AF_INET {
-					continue
-				}
-				r := ipRule{table: uint32(fr.Table)}
-				for _, a := range parseNetlinkAttrs(m.Data[hdrSize:]) {
-					switch a.Type {
-					case fraPriority:
-						if len(a.Value) >= 4 {
-							r.priority = binary.LittleEndian.Uint32(a.Value[:4])
-						}
-					case fraTable:
-						if len(a.Value) >= 4 {
-							r.table = binary.LittleEndian.Uint32(a.Value[:4])
-						}
-					case fraSrc:
-						if ip := net.IP(append([]byte(nil), a.Value...)).To4(); ip != nil {
-							r.src = fmt.Sprintf("%s/%d", ip.String(), fr.SrcLen)
-						}
-					case fraDst:
-						if ip := net.IP(append([]byte(nil), a.Value...)).To4(); ip != nil {
-							r.dst = fmt.Sprintf("%s/%d", ip.String(), fr.DstLen)
-						}
-					case fraIifname:
-						r.iif = string(bytes.TrimRight(a.Value, "\x00"))
-					case fraOifname:
-						r.oif = string(bytes.TrimRight(a.Value, "\x00"))
-					}
-				}
-				rules = append(rules, r)
+			return false, nil, unix.Errno(-code)
+		case unix.RTM_NEWRULE:
+			if rule, ok := decodeIPRuleMessage(m.Data, hdrSize); ok {
+				rules = append(rules, rule)
 			}
 		}
 	}
+	return false, rules, nil
+}
+
+func decodeIPRuleMessage(data []byte, hdrSize int) (ipRule, bool) {
+	if len(data) < hdrSize {
+		return ipRule{}, false
+	}
+	fr := (*fibRuleHdr)(unsafe.Pointer(&data[0]))
+	if fr.Family != unix.AF_INET {
+		return ipRule{}, false
+	}
+	r := ipRule{table: uint32(fr.Table)}
+	for _, a := range parseNetlinkAttrs(data[hdrSize:]) {
+		switch a.Type {
+		case fraPriority:
+			if len(a.Value) >= 4 {
+				r.priority = binary.LittleEndian.Uint32(a.Value[:4])
+			}
+		case fraTable:
+			if len(a.Value) >= 4 {
+				r.table = binary.LittleEndian.Uint32(a.Value[:4])
+			}
+		case fraSrc:
+			if ip := net.IP(append([]byte(nil), a.Value...)).To4(); ip != nil {
+				r.src = fmt.Sprintf("%s/%d", ip.String(), fr.SrcLen)
+			}
+		case fraDst:
+			if ip := net.IP(append([]byte(nil), a.Value...)).To4(); ip != nil {
+				r.dst = fmt.Sprintf("%s/%d", ip.String(), fr.DstLen)
+			}
+		case fraIifname:
+			r.iif = string(bytes.TrimRight(a.Value, "\x00"))
+		case fraOifname:
+			r.oif = string(bytes.TrimRight(a.Value, "\x00"))
+		}
+	}
+	return r, true
+}
+
+func sortIPRules(rules []ipRule) {
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].priority != rules[j].priority {
+			return rules[i].priority < rules[j].priority
+		}
+		if rules[i].table != rules[j].table {
+			return rules[i].table < rules[j].table
+		}
+		if rules[i].src != rules[j].src {
+			return rules[i].src < rules[j].src
+		}
+		return rules[i].dst < rules[j].dst
+	})
 }
 
 type netlinkAttr struct {
@@ -220,4 +247,3 @@ func parseNetlinkAttrs(b []byte) []netlinkAttr {
 	}
 	return out
 }
-

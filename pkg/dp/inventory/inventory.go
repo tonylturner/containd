@@ -14,16 +14,16 @@ import (
 
 // DiscoveredAsset represents an ICS device discovered from observed traffic.
 type DiscoveredAsset struct {
-	IP               string   `json:"ip"`
-	Protocol         string   `json:"protocol"`
-	Role             string   `json:"role"`
-	UnitIDs          []uint8  `json:"unitIds,omitempty"`
-	FunctionCodes    []uint8  `json:"functionCodes,omitempty"`
-	StationAddresses []uint16 `json:"stationAddresses,omitempty"`
+	IP               string    `json:"ip"`
+	Protocol         string    `json:"protocol"`
+	Role             string    `json:"role"`
+	UnitIDs          []uint8   `json:"unitIds,omitempty"`
+	FunctionCodes    []uint8   `json:"functionCodes,omitempty"`
+	StationAddresses []uint16  `json:"stationAddresses,omitempty"`
 	FirstSeen        time.Time `json:"firstSeen"`
 	LastSeen         time.Time `json:"lastSeen"`
-	PacketCount      int      `json:"packetCount"`
-	Peers            []string `json:"peers,omitempty"`
+	PacketCount      int       `json:"packetCount"`
+	Peers            []string  `json:"peers,omitempty"`
 }
 
 // Inventory maintains a thread-safe map of discovered ICS assets.

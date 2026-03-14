@@ -183,4 +183,3 @@ func netfilterRequest(ctx context.Context, msgType uint16, payload []byte) error
 		return fmt.Errorf("conntrack delete: %w", e)
 	}
 }
-

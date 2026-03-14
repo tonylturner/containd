@@ -25,8 +25,8 @@ func tcMapSpecs() map[string]*ciliumebpf.MapSpec {
 		"block_flows": {
 			Name:       "block_flows",
 			Type:       ciliumebpf.Hash,
-			KeySize:    8,  // bpfFlowKey: srcAddr(4) + dstAddr(4) + proto(1) + pad(1) + dport(2) = 8? No — 12 bytes
-			ValueSize:  4,  // uint32 (1 = blocked)
+			KeySize:    8, // bpfFlowKey: srcAddr(4) + dstAddr(4) + proto(1) + pad(1) + dport(2) = 8? No — 12 bytes
+			ValueSize:  4, // uint32 (1 = blocked)
 			MaxEntries: 65536,
 		},
 	}

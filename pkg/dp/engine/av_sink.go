@@ -50,4 +50,3 @@ func srcDestStrings(state *flow.State) (string, string) {
 	}
 	return src, dst
 }
-

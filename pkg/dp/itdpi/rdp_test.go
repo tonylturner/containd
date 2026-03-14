@@ -63,8 +63,8 @@ func buildX224CC(data []byte) []byte {
 // buildNegReq builds an RDP Negotiation Request structure.
 func buildNegReq(requestedProtocols uint32) []byte {
 	buf := make([]byte, 8)
-	buf[0] = 0x01 // type: Negotiation Request
-	buf[1] = 0x00 // flags
+	buf[0] = 0x01                              // type: Negotiation Request
+	buf[1] = 0x00                              // flags
 	binary.LittleEndian.PutUint16(buf[2:4], 8) // length
 	binary.LittleEndian.PutUint32(buf[4:8], requestedProtocols)
 	return buf
@@ -73,8 +73,8 @@ func buildNegReq(requestedProtocols uint32) []byte {
 // buildNegResp builds an RDP Negotiation Response structure.
 func buildNegResp(selectedProtocol uint32) []byte {
 	buf := make([]byte, 8)
-	buf[0] = 0x02 // type: Negotiation Response
-	buf[1] = 0x00 // flags
+	buf[0] = 0x02                              // type: Negotiation Response
+	buf[1] = 0x00                              // flags
 	binary.LittleEndian.PutUint16(buf[2:4], 8) // length
 	binary.LittleEndian.PutUint32(buf[4:8], selectedProtocol)
 	return buf

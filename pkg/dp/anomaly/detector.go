@@ -13,9 +13,9 @@ import (
 
 // Anomaly represents a detected protocol-level anomaly in ICS traffic.
 type Anomaly struct {
-	Type       string         `json:"type"`       // malformed_frame, protocol_violation, rate_anomaly
-	Protocol   string         `json:"protocol"`   // modbus, dnp3, cip
-	Severity   string         `json:"severity"`   // low, medium, high, critical
+	Type       string         `json:"type"`     // malformed_frame, protocol_violation, rate_anomaly
+	Protocol   string         `json:"protocol"` // modbus, dnp3, cip
+	Severity   string         `json:"severity"` // low, medium, high, critical
 	Message    string         `json:"message"`
 	SourceIP   string         `json:"source_ip"`
 	DestIP     string         `json:"dest_ip"`

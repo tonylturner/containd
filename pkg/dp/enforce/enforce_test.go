@@ -180,3 +180,94 @@ func TestNftUpdaterArgsFormatting(t *testing.T) {
 		t.Fatalf("unexpected flow args: %s", fjoined)
 	}
 }
+
+func TestCompileFirewallNATChains(t *testing.T) {
+	compiler := NewCompiler()
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		ZoneIfaces: map[string][]string{
+			"wan": {"wan0"},
+			"lan": {"lan0"},
+		},
+		NAT: rules.NATConfig{
+			Enabled:     true,
+			EgressZone:  "wan",
+			SourceZones: []string{"lan"},
+			PortForwards: []rules.PortForward{{
+				ID:             "pf1",
+				Enabled:        true,
+				IngressZone:    "wan",
+				Proto:          "tcp",
+				ListenPort:     443,
+				DestIP:         "10.0.0.10",
+				DestPort:       8443,
+				AllowedSources: []string{"198.51.100.10", "203.0.113.0/24"},
+			}},
+		},
+	}
+
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(ruleset, "chain prerouting") {
+		t.Fatalf("missing prerouting chain:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
+		t.Fatalf("missing prerouting DNAT rule:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
+		t.Fatalf("missing DNAT accept rule:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, "chain postrouting") {
+		t.Fatalf("missing postrouting chain:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, `iifname @zone_lan_ifaces oifname @zone_wan_ifaces masquerade`) {
+		t.Fatalf("missing zone masquerade rule:\n%s", ruleset)
+	}
+}
+
+func TestCompileLocalInputRule(t *testing.T) {
+	line, err := compileLocalInputRule(rules.LocalServiceRule{
+		ID:    "ssh",
+		Zone:  "mgmt",
+		Proto: "tcp",
+		Port:  22,
+	}, map[string][]string{"mgmt": {"eth7"}})
+	if err != nil {
+		t.Fatalf("compileLocalInputRule(valid): %v", err)
+	}
+	if line != `iifname @zone_mgmt_ifaces tcp dport 22 accept` {
+		t.Fatalf("unexpected local input rule %q", line)
+	}
+
+	line, err = compileLocalInputRule(rules.LocalServiceRule{
+		ID:    "dns",
+		Ifaces: []string{"eth1", "eth0"},
+		Proto: "udp",
+		Port:  53,
+	}, nil)
+	if err != nil {
+		t.Fatalf("compileLocalInputRule(ifaces): %v", err)
+	}
+	if line != `iifname { "eth0", "eth1" } udp dport 53 accept` {
+		t.Fatalf("unexpected iface local input rule %q", line)
+	}
+
+	if _, err := compileLocalInputRule(rules.LocalServiceRule{ID: "bad", Proto: "icmp", Port: 53}, nil); err == nil {
+		t.Fatal("expected invalid proto error")
+	}
+}
+
+func TestValidateCIDRList(t *testing.T) {
+	validated, err := validateCIDRList([]string{" 198.51.100.10 ", "203.0.113.0/24", ""})
+	if err != nil {
+		t.Fatalf("validateCIDRList(valid): %v", err)
+	}
+	if got := strings.Join(validated, ","); got != "198.51.100.10,203.0.113.0/24" {
+		t.Fatalf("validateCIDRList(valid) = %q", got)
+	}
+	if _, err := validateCIDRList([]string{"not-an-ip"}); err == nil {
+		t.Fatal("expected invalid CIDR list error")
+	}
+}

@@ -81,18 +81,18 @@ func (d *DNSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		kind = "response"
 	}
 	attrs := map[string]any{
-		"id":            id,
-		"qr":            qr,
-		"opcode":        opcode,
-		"rcode":         rcode,
-		"questions":     qd,
-		"answers":       an,
-		"qname":         qname,
-		"qtype":         qtype,
-		"qclass":        qclass,
-		"transport":     pkt.Proto,
-		"src_port":      pkt.SrcPort,
-		"dst_port":      pkt.DstPort,
+		"id":        id,
+		"qr":        qr,
+		"opcode":    opcode,
+		"rcode":     rcode,
+		"questions": qd,
+		"answers":   an,
+		"qname":     qname,
+		"qtype":     qtype,
+		"qclass":    qclass,
+		"transport": pkt.Proto,
+		"src_port":  pkt.SrcPort,
+		"dst_port":  pkt.DstPort,
 	}
 	ev := dpi.Event{
 		FlowID:     state.Key.Hash(),
@@ -117,8 +117,8 @@ func parseQname(buf []byte, off int) (string, int, bool) {
 	var nameBuf [maxNameLen + 1]byte
 	nameLen := 0
 
-	cur := off      // current read position (follows pointers)
-	endOff := -1    // original stream offset after the name field
+	cur := off   // current read position (follows pointers)
+	endOff := -1 // original stream offset after the name field
 	ptrCount := 0
 	followed := false
 
@@ -193,4 +193,3 @@ func parseQname(buf []byte, off int) (string, int, bool) {
 
 	return string(nameBuf[:nameLen]), endOff, true
 }
-

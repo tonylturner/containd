@@ -23,20 +23,20 @@ import (
 )
 
 type WireGuardStatus struct {
-	Interface string               `json:"interface"`
-	Present   bool                 `json:"present"`
-	PublicKey string               `json:"publicKey,omitempty"` // base64
-	ListenPort int                 `json:"listenPort,omitempty"`
-	Peers     []WireGuardPeerStatus `json:"peers,omitempty"`
+	Interface  string                `json:"interface"`
+	Present    bool                  `json:"present"`
+	PublicKey  string                `json:"publicKey,omitempty"` // base64
+	ListenPort int                   `json:"listenPort,omitempty"`
+	Peers      []WireGuardPeerStatus `json:"peers,omitempty"`
 }
 
 type WireGuardPeerStatus struct {
-	PublicKey      string   `json:"publicKey"` // base64
-	Endpoint       string   `json:"endpoint,omitempty"`
-	LastHandshake  string   `json:"lastHandshake,omitempty"` // RFC3339Nano UTC
-	RxBytes        uint64   `json:"rxBytes,omitempty"`
-	TxBytes        uint64   `json:"txBytes,omitempty"`
-	AllowedIPs     []string `json:"allowedIPs,omitempty"`
+	PublicKey     string   `json:"publicKey"` // base64
+	Endpoint      string   `json:"endpoint,omitempty"`
+	LastHandshake string   `json:"lastHandshake,omitempty"` // RFC3339Nano UTC
+	RxBytes       uint64   `json:"rxBytes,omitempty"`
+	TxBytes       uint64   `json:"txBytes,omitempty"`
+	AllowedIPs    []string `json:"allowedIPs,omitempty"`
 }
 
 // GetWireGuardStatus returns kernel WireGuard runtime status for a given interface name.
@@ -54,14 +54,11 @@ func GetWireGuardStatus(ctx context.Context, ifaceName string) (WireGuardStatus,
 	}
 	status.Present = true
 
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_GENERIC)
+	fd, err := openWireGuardNetlinkSocket()
 	if err != nil {
-		return status, fmt.Errorf("wireguard: netlink generic socket: %w", err)
+		return status, err
 	}
 	defer unix.Close(fd)
-	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return status, fmt.Errorf("wireguard: netlink bind: %w", err)
-	}
 
 	familyID, err := genlFamilyID(ctx, fd, wgGenlName)
 	if err != nil {
@@ -69,75 +66,114 @@ func GetWireGuardStatus(ctx context.Context, ifaceName string) (WireGuardStatus,
 	}
 
 	seq := atomic.AddUint32(&nlSeq, 1)
-	var req bytes.Buffer
-	nlh := unix.NlMsghdr{
-		Type:  uint16(familyID),
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_DUMP,
-		Seq:   seq,
-		Pid:   uint32(unix.Getpid()),
-	}
-	_ = binary.Write(&req, binary.LittleEndian, nlh)
-	_ = binary.Write(&req, binary.LittleEndian, genlMsgHdr{Cmd: wgCmdGetDevice, Version: wgGenlVersion})
-
-	ifi := make([]byte, 4)
-	binary.LittleEndian.PutUint32(ifi, uint32(nic.Index))
-	addNLAttr(&req, wgDeviceAIfindex, ifi)
-
-	b := req.Bytes()
-	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	b := buildWireGuardStatusRequest(seq, familyID, nic.Index)
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return status, fmt.Errorf("wireguard: send: %w", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
-		deadline = dl
-	}
+	return collectWireGuardStatus(ctx, fd, seq, &status)
+}
 
-	// Multi-part netlink response.
+func openWireGuardNetlinkSocket() (int, error) {
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_GENERIC)
+	if err != nil {
+		return 0, fmt.Errorf("wireguard: netlink generic socket: %w", err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		unix.Close(fd)
+		return 0, fmt.Errorf("wireguard: netlink bind: %w", err)
+	}
+	return fd, nil
+}
+
+func buildWireGuardStatusRequest(seq uint32, familyID, ifIndex int) []byte {
+	var req bytes.Buffer
+	_ = binary.Write(&req, binary.LittleEndian, unix.NlMsghdr{
+		Type:  uint16(familyID),
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_DUMP,
+		Seq:   seq,
+		Pid:   uint32(unix.Getpid()),
+	})
+	_ = binary.Write(&req, binary.LittleEndian, genlMsgHdr{Cmd: wgCmdGetDevice, Version: wgGenlVersion})
+
+	ifi := make([]byte, 4)
+	binary.LittleEndian.PutUint32(ifi, uint32(ifIndex))
+	addNLAttr(&req, wgDeviceAIfindex, ifi)
+
+	b := req.Bytes()
+	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
+	return b
+}
+
+func collectWireGuardStatus(ctx context.Context, fd int, seq uint32, status *WireGuardStatus) (WireGuardStatus, error) {
+	deadline := wireGuardStatusDeadline(ctx)
+	buf := make([]byte, 1<<16)
 	for {
 		if time.Now().After(deadline) {
-			return status, context.DeadlineExceeded
+			return *status, context.DeadlineExceeded
 		}
-		buf := make([]byte, 1<<16)
-		tv := unix.NsecToTimeval(time.Until(deadline).Nanoseconds())
-		_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv)
-		n, _, err := unix.Recvfrom(fd, buf, 0)
+		if err := setWireGuardRecvDeadline(fd, deadline); err != nil {
+			return *status, err
+		}
+		done, err := recvWireGuardStatusBatch(fd, buf, seq, status)
 		if err != nil {
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
 				continue
 			}
-			return status, err
+			return *status, err
 		}
-		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
-		if err != nil {
-			return status, err
+		if done {
+			return *status, nil
 		}
-		for _, m := range msgs {
-			if m.Header.Seq != seq {
-				continue
-			}
-			switch m.Header.Type {
-			case unix.NLMSG_DONE:
-				return status, nil
-			case unix.NLMSG_ERROR:
-				if len(m.Data) < 4 {
-					return status, errors.New("netlink error")
-				}
-				code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
-				if code == 0 {
-					continue
-				}
-				return status, unix.Errno(-code)
-			default:
-				// Skip generic netlink header (4 bytes).
-				if len(m.Data) < 4 {
-					continue
-				}
-				devAttrs := m.Data[4:]
-				parseWireGuardDeviceAttrs(&status, devAttrs)
-			}
+	}
+}
+
+func wireGuardStatusDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(2 * time.Second)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		return dl
+	}
+	return deadline
+}
+
+func setWireGuardRecvDeadline(fd int, deadline time.Time) error {
+	tv := unix.NsecToTimeval(time.Until(deadline).Nanoseconds())
+	return unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv)
+}
+
+func recvWireGuardStatusBatch(fd int, buf []byte, seq uint32, status *WireGuardStatus) (bool, error) {
+	n, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		return false, err
+	}
+	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+	if err != nil {
+		return false, err
+	}
+	for _, m := range msgs {
+		done, err := handleWireGuardStatusMessage(m, seq, status)
+		if err != nil || done {
+			return done, err
 		}
+	}
+	return false, nil
+}
+
+func handleWireGuardStatusMessage(msg syscall.NetlinkMessage, seq uint32, status *WireGuardStatus) (bool, error) {
+	if msg.Header.Seq != seq {
+		return false, nil
+	}
+	switch msg.Header.Type {
+	case unix.NLMSG_DONE:
+		return true, nil
+	case unix.NLMSG_ERROR:
+		return false, netlinkMessageError(msg.Data)
+	default:
+		if len(msg.Data) < 4 {
+			return false, nil
+		}
+		parseWireGuardDeviceAttrs(status, msg.Data[4:])
+		return false, nil
 	}
 }
 

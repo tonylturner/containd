@@ -33,37 +33,12 @@ func newWorker(dir, iface string, cfg config.PCAPConfig) *worker {
 }
 
 func (w *worker) run(ctx context.Context, mgr *Manager) error {
-	iface, err := net.InterfaceByName(w.iface)
-	if err != nil {
-		return fmt.Errorf("unknown interface %q: %w", w.iface, err)
-	}
-	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons16(unix.ETH_P_ALL)))
+	fd, fwds, err := w.openCaptureSocket()
 	if err != nil {
 		return err
 	}
 	defer unix.Close(fd)
-	if err := unix.SetNonblock(fd, true); err != nil {
-		return err
-	}
-	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons16(unix.ETH_P_ALL), Ifindex: iface.Index}); err != nil {
-		return err
-	}
-	if w.cfg.BufferMB > 0 {
-		_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, w.cfg.BufferMB*1024*1024)
-	}
-	if w.cfg.Promisc {
-		_ = unix.SetsockoptPacketMreq(fd, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &unix.PacketMreq{
-			Ifindex: int32(iface.Index),
-			Type:    unix.PACKET_MR_PROMISC,
-		})
-	}
-
-	fwds := buildForwarders(w.iface, w.cfg)
-	defer func() {
-		for _, f := range fwds {
-			f.Close()
-		}
-	}()
+	defer closeForwarders(fwds)
 
 	pc, err := w.openFile()
 	if err != nil {
@@ -71,6 +46,49 @@ func (w *worker) run(ctx context.Context, mgr *Manager) error {
 	}
 	defer pc.close()
 
+	return w.runCaptureLoop(ctx, mgr, fd, fwds, pc)
+}
+
+func (w *worker) openCaptureSocket() (int, []*forwardSink, error) {
+	iface, err := net.InterfaceByName(w.iface)
+	if err != nil {
+		return 0, nil, fmt.Errorf("unknown interface %q: %w", w.iface, err)
+	}
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons16(unix.ETH_P_ALL)))
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := unix.SetNonblock(fd, true); err != nil {
+		_ = unix.Close(fd)
+		return 0, nil, err
+	}
+	if err := unix.Bind(fd, &unix.SockaddrLinklayer{Protocol: htons16(unix.ETH_P_ALL), Ifindex: iface.Index}); err != nil {
+		_ = unix.Close(fd)
+		return 0, nil, err
+	}
+	applyCaptureSocketOptions(fd, iface.Index, w.cfg)
+	return fd, buildForwarders(w.iface, w.cfg), nil
+}
+
+func applyCaptureSocketOptions(fd int, ifIndex int, cfg config.PCAPConfig) {
+	if cfg.BufferMB > 0 {
+		_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_RCVBUF, cfg.BufferMB*1024*1024)
+	}
+	if cfg.Promisc {
+		_ = unix.SetsockoptPacketMreq(fd, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &unix.PacketMreq{
+			Ifindex: int32(ifIndex),
+			Type:    unix.PACKET_MR_PROMISC,
+		})
+	}
+}
+
+func closeForwarders(fwds []*forwardSink) {
+	for _, f := range fwds {
+		f.Close()
+	}
+}
+
+func (w *worker) runCaptureLoop(ctx context.Context, mgr *Manager, fd int, fwds []*forwardSink, pc *pcapFile) error {
 	buf := make([]byte, w.cfg.Snaplen)
 	rotateAt := w.nextRotate()
 
@@ -78,54 +96,95 @@ func (w *worker) run(ctx context.Context, mgr *Manager) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if w.shouldRotate(pc, rotateAt) {
-			if w.cfg.Mode == "once" {
-				mgr.requestStop()
-				return nil
-			}
-			pc.close()
-			pc, err = w.openFile()
-			if err != nil {
-				return err
-			}
-			rotateAt = w.nextRotate()
-		}
-		timeout := 250
-		pollfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		n, err := unix.Poll(pollfds, timeout)
+		var err error
+		pc, rotateAt, err = w.maybeRotateCapture(mgr, pc, rotateAt)
 		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
 			return err
 		}
-		if n == 0 || pollfds[0].Revents&unix.POLLIN == 0 {
-			continue
-		}
-		rn, _, err := unix.Recvfrom(fd, buf, 0)
+		ready, err := pollCapturePacket(fd)
 		if err != nil {
-			if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
-				continue
-			}
 			return err
 		}
-		if rn <= 0 {
+		if !ready {
 			continue
 		}
-		data := buf[:rn]
-		if w.cfg.Snaplen > 0 && rn > w.cfg.Snaplen {
-			data = data[:w.cfg.Snaplen]
-		}
-		if !matchFilter(data, w.cfg.Filter) {
-			continue
-		}
-		if err := pc.writePacket(time.Now(), data); err != nil {
+		data, err := w.recvCapturePacket(fd, buf)
+		if err != nil {
 			return err
 		}
-		for _, f := range fwds {
-			_ = f.WritePacket(time.Now(), data)
+		if data == nil {
+			continue
+		}
+		if !w.shouldWritePacket(data) {
+			continue
+		}
+		if err := writeCapturePacket(pc, fwds, data); err != nil {
+			return err
 		}
 	}
+}
+
+func (w *worker) maybeRotateCapture(mgr *Manager, pc *pcapFile, rotateAt time.Time) (*pcapFile, time.Time, error) {
+	if !w.shouldRotate(pc, rotateAt) {
+		return pc, rotateAt, nil
+	}
+	if w.cfg.Mode == "once" {
+		if mgr != nil {
+			mgr.requestStop()
+		}
+		return pc, rotateAt, nil
+	}
+	pc.close()
+	next, err := w.openFile()
+	if err != nil {
+		return nil, rotateAt, err
+	}
+	return next, w.nextRotate(), nil
+}
+
+func pollCapturePacket(fd int) (bool, error) {
+	pollfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	n, err := unix.Poll(pollfds, 250)
+	if err != nil {
+		if err == unix.EINTR {
+			return false, nil
+		}
+		return false, err
+	}
+	return n > 0 && pollfds[0].Revents&unix.POLLIN != 0, nil
+}
+
+func (w *worker) recvCapturePacket(fd int, buf []byte) ([]byte, error) {
+	rn, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if rn <= 0 {
+		return nil, nil
+	}
+	data := buf[:rn]
+	if w.cfg.Snaplen > 0 && rn > w.cfg.Snaplen {
+		data = data[:w.cfg.Snaplen]
+	}
+	return data, nil
+}
+
+func (w *worker) shouldWritePacket(data []byte) bool {
+	return matchFilter(data, w.cfg.Filter)
+}
+
+func writeCapturePacket(pc *pcapFile, fwds []*forwardSink, data []byte) error {
+	now := time.Now()
+	if err := pc.writePacket(now, data); err != nil {
+		return err
+	}
+	for _, f := range fwds {
+		_ = f.WritePacket(now, data)
+	}
+	return nil
 }
 
 func (w *worker) openFile() (*pcapFile, error) {

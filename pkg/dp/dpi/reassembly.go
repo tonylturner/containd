@@ -56,7 +56,7 @@ type Reassembler struct {
 	idleTimeout time.Duration
 
 	// Stats – protected by mu.
-	ActiveStreams  int
+	ActiveStreams int
 	BytesBuffered int
 }
 
