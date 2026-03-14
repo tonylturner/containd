@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-03-13
+
+### Added
+- Added a repeatable audit/verification toolchain with coverage, performance, complexity, Semgrep, race, and smoke workflows so release validation can exercise correctness, security, and runtime behavior from a single documented path.
+- Added threat-model, testing, performance, audit-baseline, and code-boundary documentation plus broader regression coverage, fuzz targets, and benchmark baselines across the API, services, CLI, SSH, dataplane, and ICS/IT-DPI parser surfaces.
+
+### Changed
+- Refactored oversized runtime, HTTP, CLI, dataplane, and UI modules into bounded domain files, resolving the oversized-file and high-complexity audit findings without changing the supported user-facing workflows.
+- Refreshed Secure by Design documentation to reflect completed pledge items and added a simpler adherence status table for operators and reviewers.
+
+### Fixed
+- Hardened browser cookie-auth writes so same-origin enforcement now runs before session-refresh/auth side effects and correctly treats default ports as equivalent during origin checks.
+- Fixed config import and factory reset flows so IDS rules are fully cleared or replaced instead of silently retaining stale table contents from prior state.
+- Enabled DPI by default in the bootstrap/runtime startup path and validated config tab query parameters so first-run behavior matches the expected appliance defaults more reliably.
+- Fixed race-only service supervision regressions in the VPN and syslog test/runtime paths, stabilized ClamAV/socket test fixtures for `-race`, and removed committed secret-looking test credential literals that tripped PR scanners.
+
 ## [0.1.13] - 2026-03-12
 
 ### Added
