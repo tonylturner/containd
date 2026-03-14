@@ -135,7 +135,7 @@ jobs:
             exit 1
           fi
 
-      - name: Package CSAF materials
+      - name: Package CSAF provider metadata and published advisories
         run: |
           set -euo pipefail
           mkdir -p release-csaf

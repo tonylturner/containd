@@ -32,7 +32,11 @@ Current project artifacts:
 - advisory source layout: [`security/csaf/`](https://github.com/tonylturner/containd/tree/main/security/csaf)
 - authoring template: [`security/csaf/templates/csaf-v2.0-template.json`](https://github.com/tonylturner/containd/blob/main/security/csaf/templates/csaf-v2.0-template.json)
 
-The release workflow packages CSAF materials alongside SBOM assets so release consumers can retrieve the current provider metadata and any published advisory documents from the same release run.
+Current publication state:
+
+- containd publishes CSAF provider metadata today
+- containd does not currently publish any CSAF advisory JSON documents because there is no real vulnerability advisory to disclose yet
+- the release workflow packages the current provider metadata and any published advisory documents from the same release run
 
 ## When containd Publishes a Security Advisory
 
@@ -77,7 +81,7 @@ If a CVE is not yet assigned, containd may publish the advisory first and update
 The repository separates ongoing process from published artifacts:
 
 - [`security/csaf/README.md`](https://github.com/tonylturner/containd/blob/main/security/csaf/README.md) explains the process
-- [`security/csaf/advisories/`](https://github.com/tonylturner/containd/tree/main/security/csaf/advisories) is for published advisory JSON
+- [`security/csaf/advisories/`](https://github.com/tonylturner/containd/tree/main/security/csaf/advisories) is for published advisory JSON and is intentionally empty until the first real advisory exists
 - [`security/csaf/templates/`](https://github.com/tonylturner/containd/tree/main/security/csaf/templates) contains authoring skeletons
 
 This keeps the machine-readable advisory process versioned with the codebase instead of being an undocumented afterthought.

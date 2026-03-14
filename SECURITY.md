@@ -7,6 +7,8 @@ Machine-readable discovery:
 - `/.well-known/security.txt` when served from the appliance UI
 - [`ui/public/.well-known/security.txt`](ui/public/.well-known/security.txt) in the repository
 
+The `.well-known` segment is the literal standards-defined URL path for these files. This repository stores them under `ui/public/.well-known/...` so shipped UI builds serve the same `/.well-known/...` paths at runtime.
+
 ## Supported Versions
 
 | Version | Supported |
@@ -117,7 +119,13 @@ Machine-readable publication points:
 
 - `/.well-known/security.txt`
 - `/.well-known/csaf/provider-metadata.json`
-- `security/csaf/advisories/` in the repository for published CSAF documents
+- `security/csaf/advisories/` in the repository for published CSAF documents when real vulnerability advisories exist
+
+Current CSAF posture:
+
+- containd publishes CSAF provider metadata today
+- the repository includes CSAF authoring templates and the advisory output directory
+- no published CSAF advisory JSON documents exist yet because the project has not issued a vulnerability advisory that warrants one
 
 The presence of CVEs is not treated as a failure by itself. The project cares more about root-cause reduction, clarity, and remediation quality than raw counts.
 

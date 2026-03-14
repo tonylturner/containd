@@ -27,7 +27,7 @@ Release artifacts already include:
 - SBOMs
 - release image digests
 
-The release workflow now also packages CSAF materials so machine-readable advisory data can travel with the release process.
+The release workflow now also packages CSAF provider metadata and any published advisory JSON documents so machine-readable advisory data can travel with the release process.
 
 ## Operator Update Expectations
 

@@ -5,14 +5,14 @@
       "directory_url": "https://github.com/tonylturner/containd/tree/main/security/csaf/advisories"
     }
   ],
-  "last_updated": "2026-03-12T00:00:00Z",
+  "last_updated": "2026-03-14T03:59:12Z",
   "list_on_CSAF_aggregators": true,
   "metadata_version": "2.0",
   "mirror_on_CSAF_aggregators": true,
   "publisher": {
     "category": "vendor",
     "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
-    "issuing_authority": "The containd project publishes CSAF documents and other advisories for vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
+    "issuing_authority": "The containd project currently publishes CSAF provider metadata and will publish CSAF advisory documents for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts when such advisories exist.",
     "name": "containd project",
     "namespace": "https://github.com/tonylturner/containd"
   },

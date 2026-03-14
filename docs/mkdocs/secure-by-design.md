@@ -186,7 +186,7 @@ Current alignment:
 - containd already publishes versioned releases, signed images, SBOMs, and changelogs;
 - security-sensitive dependency fixes are called out in release notes when they occur.
 - containd now documents a lightweight advisory, CVE, and CSAF process in [`Advisories and CSAF`](advisories.md);
-- the project publishes provider metadata and repository layout for machine-readable advisory artifacts.
+- the project publishes provider metadata and repository layout for machine-readable advisory artifacts, with actual advisory JSON to be published when real vulnerabilities require it.
 
 Next steps:
 

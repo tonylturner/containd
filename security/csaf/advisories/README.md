@@ -2,6 +2,11 @@
 
 Place published CSAF advisory JSON documents in this directory.
 
+Current status:
+
+- no published containd CSAF advisory JSON documents exist yet
+- this directory is intentionally empty until the project has a real vulnerability advisory to publish
+
 Suggested naming:
 
 - `CVE-YYYY-NNNNN.json`
