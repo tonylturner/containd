@@ -5,7 +5,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -114,7 +116,12 @@ func runCLI(ctx context.Context) error {
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 
-	api := &cli.API{BaseURL: baseURL}
+	token, err := cliLogin(baseURL)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	api := &cli.API{BaseURL: baseURL, Token: token}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
 
@@ -149,6 +156,32 @@ func runCLI(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func cliLogin(baseURL string) (string, error) {
+	username := common.EnvTrimmed("CONTAIND_CLI_USER", "containd")
+	password := common.EnvTrimmed("CONTAIND_CLI_PASSWORD", "containd")
+
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(baseURL+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("login returned %d", resp.StatusCode)
+	}
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.Token == "" {
+		return "", fmt.Errorf("empty token in login response")
+	}
+	return result.Token, nil
 }
 
 func runAll(ctx context.Context) error {
