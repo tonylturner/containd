@@ -34,9 +34,15 @@ Current project artifacts:
 
 Current publication state:
 
-- containd publishes CSAF provider metadata today
-- containd does not currently publish any CSAF advisory JSON documents because there is no real vulnerability advisory to disclose yet
+- containd publishes CSAF provider metadata and advisory documents
+- advisory source: [`security/csaf/advisories/`](https://github.com/tonylturner/containd/tree/main/security/csaf/advisories)
 - the release workflow packages the current provider metadata and any published advisory documents from the same release run
+
+### Published Advisories
+
+| ID | Title | Severity | Status |
+|----|-------|----------|--------|
+| [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in v0.1.16 container image | HIGH | Active -- tracking in [#16](https://github.com/tonylturner/containd/issues/16) |
 
 ## When containd Publishes a Security Advisory
 
