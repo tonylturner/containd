@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-04-09
+
+### Fixed
+- Fixed daemon lifecycle bug where clamd, envoy, and nginx were started with the HTTP request context, causing them to be killed when the API request completed. All supervised daemons now use a background context.
+- Added CAP_SYS_TIME pre-start check for chrony NTP. Without the capability, chronyd exits immediately; the status API now reports a clear actionable error instead of silent failure.
+- Added post-start stability check for the NTP daemon: if it exits within 1 second, the error is captured and the status API correctly reports running=false.
+
+### Added
+- Added 10 NTP unit tests covering config rendering (chrony and openntpd formats), poll interval conversion, Apply file writes, disable cleanup, status reporting, env var detection, and config path selection.
+- Added SYS_TIME capability and CONTAIND_SSH_SHELL_MODE to the starter docker-compose.yml.
+- Migrated the standalone engine image (Dockerfile.engine) from distroless to Wolfi for consistency with the management image.
+
+### Changed
+- Updated documentation (SPDX.md, sbom.md, audit-baseline.md) to reference Wolfi instead of distroless.
+
 ## [0.1.17] - 2026-04-09
 
 ### Changed
