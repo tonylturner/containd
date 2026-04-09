@@ -167,8 +167,9 @@ func TestStatusReflectsState(t *testing.T) {
 	if status["servers_count"] != 2 {
 		t.Errorf("status servers_count = %v, want 2", status["servers_count"])
 	}
-	if status["ntpd_name"] == nil || status["ntpd_name"] == "" {
-		// ntpd_name should be set even if binary not found (empty string is ok)
+	// ntpd_name is present (may be empty string if no binary found).
+	if _, ok := status["ntpd_name"]; !ok {
+		t.Error("status should include ntpd_name field")
 	}
 	if status["running"] != false {
 		t.Error("status should show running=false when supervise is disabled")
