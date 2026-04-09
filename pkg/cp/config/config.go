@@ -155,7 +155,7 @@ type DNSConfig struct {
 	CacheSizeMB     int      `json:"cacheSizeMB,omitempty"`     // optional cache size
 }
 
-// NTPConfig defines OpenNTPD client settings managed by containd.
+// NTPConfig defines NTP client settings managed by containd (chrony or openntpd).
 type NTPConfig struct {
 	Enabled         bool     `json:"enabled"`
 	Servers         []string `json:"servers,omitempty"`         // NTP servers/pools

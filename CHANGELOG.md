@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Migrated container base image from debian:bookworm-slim to Wolfi (cgr.dev/chainguard/wolfi-base). Wolfi is glibc-based and actively patched, reducing CVE surface significantly compared to Debian while retaining a real Linux shell, tcpdump, and standard troubleshooting tools. Removed 39 Debian-specific CVE suppressions from .trivyignore.
-- Embedded services (nginx, unbound, nftables, openvpn, clamav) are now installed via Wolfi apk. OpenNTPD is not available in Wolfi; NTP service gracefully disables when the binary is absent.
-- Removed tini download stage; tini is now installed from the Wolfi package repository.
+- Embedded services (nginx, unbound, nftables, openvpn, clamav) are now installed via Wolfi apk. Tini is now installed from the Wolfi package repository.
+- Replaced OpenNTPD with chrony for NTP time synchronization. Chrony is available in Wolfi, actively maintained, and is the standard NTP implementation on modern Linux. The NTP manager auto-detects chrony or falls back to openntpd. Config generation, validation, and supervision adapted for chrony's format and CLI.
+- Pinned Wolfi base image by digest for reproducible builds.
 - Updated CSAF advisory containd-2026-001 status to resolved by v0.1.17 base image migration.
 
 ## [0.1.16] - 2026-04-09

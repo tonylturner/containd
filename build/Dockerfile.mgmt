@@ -42,18 +42,20 @@ RUN mkdir -p /data/tls /data/ssh /data/logs /data/services /data/config-backups 
 # Wolfi is glibc-based, actively patched, and has lower CVE surface than Debian.
 # All embedded services are installed via apk. Envoy is from the upstream image
 # because the Wolfi envoy packages are Datawire/Cilium forks, not stock upstream.
-FROM cgr.dev/chainguard/wolfi-base:latest AS envoy-deps
+# Pin digest for reproducibility; bump periodically for security patches.
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a AS envoy-deps
 RUN apk update && apk add --no-cache libstdc++
 
 FROM envoyproxy/envoy:v1.31.2 AS envoy-src
 
-FROM cgr.dev/chainguard/wolfi-base:latest
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a
 
 # Install runtime packages: embedded services + troubleshooting tools.
-# openntpd is not available in Wolfi; NTP service gracefully disables if binary is absent.
+# NTP: chrony replaces openntpd (not available in Wolfi).
 RUN apk update && apk add --no-cache \
       bash \
       ca-certificates-bundle \
+      chrony \
       clamav \
       coreutils \
       curl \
@@ -65,7 +67,11 @@ RUN apk update && apk add --no-cache \
       tcpdump \
       tini \
       unbound \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/cache/apk/* \
+    && addgroup -S chrony 2>/dev/null || true \
+    && adduser -S -G chrony -s /sbin/nologin chrony 2>/dev/null || true \
+    && mkdir -p /var/lib/chrony /var/log/chrony \
+    && chown chrony:chrony /var/lib/chrony /var/log/chrony
 
 # Envoy needs libstdc++ which is not pulled in by default.
 COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
