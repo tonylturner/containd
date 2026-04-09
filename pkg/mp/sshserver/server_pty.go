@@ -82,19 +82,19 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 	}
 	defer cleanup()
 
-	ctx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Copy SSH channel -> PTY (stdin).
 	go func() {
 		defer cancel()
-		io.Copy(ptmx, ch)
+		_, _ = io.Copy(ptmx, ch)
 	}()
 
 	// Copy PTY -> SSH channel (stdout).
 	go func() {
 		defer cancel()
-		io.Copy(ch, ptmx)
+		_, _ = io.Copy(ch, ptmx)
 	}()
 
 	// Handle SSH requests (window-change).
@@ -104,14 +104,14 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 			case "window-change":
 				w, h, ok := parseWindowChange(req.Payload)
 				if ok {
-					pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(h), Cols: uint16(w)})
+					_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(h), Cols: uint16(w)})
 				}
 				if req.WantReply {
-					req.Reply(true, nil)
+					_ = req.Reply(true, nil)
 				}
 			default:
 				if req.WantReply {
-					req.Reply(false, nil)
+					_ = req.Reply(false, nil)
 				}
 			}
 		}
@@ -128,7 +128,7 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 	// Send exit-status to the SSH client.
 	exitPayload := make([]byte, 4)
 	binary.BigEndian.PutUint32(exitPayload, uint32(exitCode))
-	ch.SendRequest("exit-status", false, exitPayload)
+	_, _ = ch.SendRequest("exit-status", false, exitPayload)
 }
 
 // startLinuxShellInline launches a bash shell from within the appliance REPL.
@@ -158,19 +158,19 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ch 
 	}
 	defer cleanup()
 
-	ctx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Copy SSH channel -> PTY (stdin).
 	go func() {
 		defer cancel()
-		io.Copy(ptmx, ch)
+		_, _ = io.Copy(ptmx, ch)
 	}()
 
 	// Copy PTY -> SSH channel (stdout).
 	go func() {
 		defer cancel()
-		io.Copy(ch, ptmx)
+		_, _ = io.Copy(ch, ptmx)
 	}()
 
 	// Handle window-change events forwarded from the session handler.
@@ -184,13 +184,13 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ch 
 					if !ok {
 						return
 					}
-					pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(wc.Height), Cols: uint16(wc.Width)})
+					_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(wc.Height), Cols: uint16(wc.Width)})
 				}
 			}
 		}()
 	}
 
-	cmd.Wait()
+	_ = cmd.Wait()
 }
 
 func buildShellEnv(username string, pr *ptyRequest) []string {
