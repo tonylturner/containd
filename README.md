@@ -48,6 +48,15 @@ That writes `docker-compose.yml`, `.env.example`, and `.env`, auto-adjusts confl
 
 Default credentials: `containd` / `containd` -- change on first login.
 
+### SSH Shell Mode
+
+The SSH server supports two shell modes, controlled by `CONTAIND_SSH_SHELL_MODE` or `set system ssh shell-mode`:
+
+- **`appliance`** (default) -- Drops into the containd CLI. Type `shell` or `bash` to access the underlying Linux shell, `exit` to return.
+- **`linux`** -- Drops into a full bash shell with standard Linux tools (tcpdump, nft, etc.). Type `configure` or `containd cli` to enter the containd CLI, `exit` to return to bash.
+
+Both modes support bidirectional switching. The `linux` mode is useful for lab environments where students need access to industry tools like `tcpdump` alongside the containd CLI.
+
 ### First 5 Minutes
 
 1. Log in and change the default password.
@@ -76,7 +85,7 @@ Traditional IT firewalls don't understand ICS protocols. They can't distinguish 
 
 **Embedded Services** -- DNS (Unbound), NTP (OpenNTPD), DHCP, forward proxy (Envoy), reverse proxy (Nginx), VPN (WireGuard + OpenVPN), antivirus (ClamAV via ICAP).
 
-**Management** -- Web UI with dashboard, topology, firewall rules, routing, NAT, services, monitoring, and diagnostics. SSH console with appliance-style CLI. REST API, Prometheus metrics, syslog forwarding, event export (CEF/JSON/Syslog).
+**Management** -- Web UI with dashboard, topology, firewall rules, routing, NAT, services, monitoring, and diagnostics. SSH console with configurable shell mode (appliance CLI or full Linux shell with tcpdump). REST API, Prometheus metrics, syslog forwarding, event export (CEF/JSON/Syslog).
 
 **Config Lifecycle** -- Candidate/running configs with commit-confirmed and auto-rollback, deterministic JSON export/import, schedule and identity predicates on rules, ICS policy templates for rapid deployment.
 
@@ -135,7 +144,7 @@ CONTAIND_UI_DIR=ui/out ./containd all
 ## Security
 
 - Default-deny firewall posture
-- Distroless container image; the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
+- Minimal Debian-slim container image; the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
 - JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login, and optional app-based TOTP MFA for local accounts
 - TLS 1.2+ with hardened cipher suites, HSTS enabled by default
 - CORS wildcard rejection, same-origin protection for cookie-authenticated browser writes, SameSite=Strict cookies, request body limits, path traversal protection

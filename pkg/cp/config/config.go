@@ -117,6 +117,10 @@ type SSHConfig struct {
 	Banner string `json:"banner,omitempty"`
 	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).
 	HostKeyRotationDays int `json:"hostKeyRotationDays,omitempty"`
+	// ShellMode controls what users get on SSH login.
+	// "appliance" (default): the containd CLI REPL. Type "shell" to enter Linux shell.
+	// "linux": a real bash shell. Type "containd" or "configure" to enter the CLI REPL.
+	ShellMode string `json:"shellMode,omitempty"`
 }
 
 type ServicesConfig struct {

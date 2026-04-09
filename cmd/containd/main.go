@@ -4,18 +4,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
+	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -28,8 +31,14 @@ func main() {
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
 		mode = strings.ToLower(strings.TrimSpace(os.Args[1]))
 	}
+	// When invoked via the "configure" symlink, enter CLI mode automatically.
 	if mode == "" {
-		mode = "all"
+		base := filepath.Base(os.Args[0])
+		if base == "configure" {
+			mode = "cli"
+		} else {
+			mode = "all"
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -55,6 +64,8 @@ func main() {
 	case "version":
 		fmt.Printf("containd %s (%s)\n", config.BuildVersion, config.BuildCommit)
 		return
+	case "cli":
+		err = runCLI(ctx)
 	case "healthcheck":
 		err = runHealthcheck()
 		if err != nil {
@@ -62,7 +73,7 @@ func main() {
 		}
 		return
 	default:
-		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|version|healthcheck)", mode)
+		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|cli|version|healthcheck)", mode)
 	}
 	if err != nil {
 		slog.Error("fatal error", "error", err)
@@ -90,6 +101,54 @@ func runHealthcheck() error {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func runCLI(ctx context.Context) error {
+	addr := common.Env("CONTAIND_MGMT_ADDR", "")
+	if addr == "" {
+		addr = ":8080"
+	}
+	port := addr
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		port = addr[idx+1:]
+	}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+
+	api := &cli.API{BaseURL: baseURL}
+	reg := cli.NewRegistry(nil, api)
+	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
+
+	reader := bufio.NewReader(os.Stdin)
+	prompt := "containd# "
+	fmt.Println("containd CLI. Type 'help' for commands, 'exit' to return to shell.")
+	for {
+		fmt.Print(prompt)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch strings.ToLower(line) {
+		case "exit", "quit", "logout":
+			return nil
+		case "shell", "bash":
+			fmt.Println("Already in Linux shell. Type 'exit' to return.")
+			continue
+		}
+		var buf strings.Builder
+		if err := reg.ParseAndExecute(cmdCtx, line, &buf); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		if buf.Len() > 0 {
+			fmt.Print(buf.String())
+			if !strings.HasSuffix(buf.String(), "\n") {
+				fmt.Println()
+			}
+		}
+	}
 }
 
 func runAll(ctx context.Context) error {

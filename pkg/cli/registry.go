@@ -133,6 +133,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set system ssh authorized-keys-dir", RoleAdmin, setSystemSSHAuthorizedKeysDirAPI(api))
 		r.RegisterRole("set system ssh banner", RoleAdmin, setSystemSSHBannerAPI(api))
 		r.RegisterRole("set system ssh host-key-rotation", RoleAdmin, setSystemSSHHostKeyRotationAPI(api))
+		r.RegisterRole("set system ssh shell-mode", RoleAdmin, setSystemSSHShellModeAPI(api))
 		r.RegisterRole("set proxy forward", RoleAdmin, setForwardProxyAPI(api))
 		r.RegisterRole("set proxy reverse", RoleAdmin, setReverseProxyAPI(api))
 		r.RegisterRole("factory reset", RoleAdmin, factoryResetAPI(api))

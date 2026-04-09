@@ -96,6 +96,11 @@ func showSystem(api *API) Command {
 			fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
 		}
 		fmt.Fprintf(out, "ssh.allow_password: %s\n", yesNoStr(cfg.System.SSH.AllowPassword))
+		shellMode := cfg.System.SSH.ShellMode
+		if shellMode == "" {
+			shellMode = "appliance"
+		}
+		fmt.Fprintf(out, "ssh.shell_mode: %s\n", shellMode)
 		fmt.Fprintf(out, "component: %s\n", h.Component)
 		if h.Build != "" {
 			fmt.Fprintf(out, "build: %s\n", h.Build)
@@ -380,6 +385,24 @@ func setSystemSSHHostKeyRotationAPI(api *API) Command {
 			return err
 		}
 		cfg.System.SSH.HostKeyRotationDays = days
+		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+	}
+}
+
+func setSystemSSHShellModeAPI(api *API) Command {
+	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: set system ssh shell-mode <linux|appliance>")
+		}
+		mode := strings.ToLower(strings.TrimSpace(args[0]))
+		if mode != "linux" && mode != "appliance" {
+			return fmt.Errorf("invalid shell-mode %q (expected linux or appliance)", args[0])
+		}
+		cfg, err := loadCandidateOrRunning(ctx, api)
+		if err != nil {
+			return err
+		}
+		cfg.System.SSH.ShellMode = mode
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }

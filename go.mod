@@ -11,6 +11,7 @@ require gopkg.in/natefinch/lumberjack.v2 v2.2.1
 require (
 	github.com/RackSec/srslog v0.0.0-20180709174129-a4725f04ec91
 	github.com/cilium/ebpf v0.21.0
+	github.com/creack/pty v1.1.24
 	github.com/florianl/go-nfqueue/v2 v2.0.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
