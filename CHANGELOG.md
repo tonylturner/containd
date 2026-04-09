@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-04-09
+
+### Changed
+- Migrated container base image from debian:bookworm-slim to Wolfi (cgr.dev/chainguard/wolfi-base). Wolfi is glibc-based and actively patched, reducing CVE surface significantly compared to Debian while retaining a real Linux shell, tcpdump, and standard troubleshooting tools. Removed 39 Debian-specific CVE suppressions from .trivyignore.
+- Embedded services (nginx, unbound, nftables, openvpn, clamav) are now installed via Wolfi apk. Tini is now installed from the Wolfi package repository.
+- Replaced OpenNTPD with chrony for NTP time synchronization. Chrony is available in Wolfi, actively maintained, and is the standard NTP implementation on modern Linux. The NTP manager auto-detects chrony or falls back to openntpd. Config generation, validation, and supervision adapted for chrony's format and CLI.
+- Pinned Wolfi base image by digest for reproducible builds.
+- Updated CSAF advisory containd-2026-001 status to resolved by v0.1.17 base image migration.
+
+## [0.1.16] - 2026-04-09
+
+### Added
+- Added configurable Linux shell mode to the SSH server. Set `CONTAIND_SSH_SHELL_MODE=linux` or use `set system ssh shell-mode linux` to drop into a real bash shell on SSH login with access to tcpdump and standard Linux tools. Type `configure` to enter the appliance CLI, `exit` to return to bash. The default `appliance` mode preserves existing behavior with a new `shell` command to access Linux.
+- Added `containd cli` subcommand and `/usr/local/bin/configure` symlink for entering the appliance CLI from the Linux shell.
+- Added `set system ssh shell-mode` CLI command and `show system` display of the current shell mode.
+
+### Changed
+- Switched container base image from distroless to debian:bookworm-slim to support real Linux shell access and tcpdump. Service binaries (nginx, unbound, nftables, openvpn, openntpd, clamav) are now installed via apt instead of staged from intermediate build layers.
+- Published CSAF advisory containd-2026-001 documenting inherited Debian 12 CVEs from the base image change. See [advisory](security/csaf/advisories/containd-2026-001.json) and tracking issue #16.
+
+### Security
+- The base image change introduces 39 known HIGH/CRITICAL CVEs from upstream Debian 12 packages with no fixes currently available. These are in OS-level dependencies, not containd code. Operators not needing the Linux shell feature should use v0.1.15. See `.trivyignore` for the full suppression list.
+
 ## [0.1.15] - 2026-03-14
 
 ### Added

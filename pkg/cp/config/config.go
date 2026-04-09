@@ -117,6 +117,10 @@ type SSHConfig struct {
 	Banner string `json:"banner,omitempty"`
 	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).
 	HostKeyRotationDays int `json:"hostKeyRotationDays,omitempty"`
+	// ShellMode controls what users get on SSH login.
+	// "appliance" (default): the containd CLI REPL. Type "shell" to enter Linux shell.
+	// "linux": a real bash shell. Type "containd" or "configure" to enter the CLI REPL.
+	ShellMode string `json:"shellMode,omitempty"`
 }
 
 type ServicesConfig struct {
@@ -151,7 +155,7 @@ type DNSConfig struct {
 	CacheSizeMB     int      `json:"cacheSizeMB,omitempty"`     // optional cache size
 }
 
-// NTPConfig defines OpenNTPD client settings managed by containd.
+// NTPConfig defines NTP client settings managed by containd (chrony or openntpd).
 type NTPConfig struct {
 	Enabled         bool     `json:"enabled"`
 	Servers         []string `json:"servers,omitempty"`         // NTP servers/pools

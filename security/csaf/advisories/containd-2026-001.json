@@ -1,0 +1,137 @@
+{
+  "document": {
+    "aggregate_severity": {
+      "namespace": "https://www.first.org/cvss/v3.1",
+      "text": "HIGH"
+    },
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "lang": "en-US",
+    "notes": [
+      {
+        "category": "summary",
+        "text": "containd v0.1.16 switched the container base image from distroless to debian:bookworm-slim to support a real Linux shell with tcpdump for lab and training use. This change inherits 39 known HIGH/CRITICAL CVEs from upstream Debian 12 packages for which no fixes are currently available in bookworm. These vulnerabilities exist in third-party OS packages (nginx, clamav/python, ncurses, systemd, zlib, sqlite, nghttp2, openldap, libexpat) and are not in containd's own code.",
+        "title": "Summary"
+      }
+    ],
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "Email tony@defendics.com and follow SECURITY.md in the containd repository.",
+      "issuing_authority": "The containd project publishes advisories for vulnerabilities affecting the containd codebase, official images, and directly maintained release artifacts.",
+      "name": "containd project",
+      "namespace": "https://github.com/tonylturner/containd"
+    },
+    "references": [
+      {
+        "category": "self",
+        "summary": "This advisory",
+        "url": "https://raw.githubusercontent.com/tonylturner/containd/main/security/csaf/advisories/containd-2026-001.json"
+      },
+      {
+        "category": "external",
+        "summary": "Tracking issue for base image evaluation",
+        "url": "https://github.com/tonylturner/containd/issues/16"
+      }
+    ],
+    "title": "Inherited Debian 12 CVEs in v0.1.16 container image due to base image change",
+    "tracking": {
+      "current_release_date": "2026-04-09T00:00:00Z",
+      "generator": {
+        "date": "2026-04-09T00:00:00Z",
+        "engine": {
+          "name": "manual"
+        }
+      },
+      "id": "containd-2026-001",
+      "initial_release_date": "2026-04-09T00:00:00Z",
+      "revision_history": [
+        {
+          "date": "2026-04-09T00:00:00Z",
+          "number": "1",
+          "summary": "Initial publication"
+        },
+        {
+          "date": "2026-04-09T00:00:00Z",
+          "number": "2",
+          "summary": "Resolved: v0.1.17 migrates to Wolfi base image, eliminating inherited Debian CVEs"
+        }
+      ],
+      "status": "final",
+      "version": "2"
+    }
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "vendor",
+        "name": "containd",
+        "branches": [
+          {
+            "category": "product_name",
+            "name": "containd management appliance",
+            "product": {
+              "name": "containd",
+              "product_id": "containd"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cwe": {
+        "id": "CWE-1395",
+        "name": "Dependency on Vulnerable Third-Party Component"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "The v0.1.16 container image switched from a distroless base to debian:bookworm-slim and installs nginx, clamav, nftables, unbound, openvpn, openntpd, and tcpdump via apt. This introduces known CVEs from upstream Debian packages including: libexpat1 (CVE-2026-25210), openldap (CVE-2023-2953), ncurses (CVE-2025-69720), nghttp2 (CVE-2026-27135), cpython/libpython3.11 (CVE-2025-13836, CVE-2025-15366, CVE-2025-15367, CVE-2025-69534, CVE-2025-8194, CVE-2026-1299, CVE-2026-4519), sqlite (CVE-2025-7458), systemd (CVE-2026-29111), nginx (CVE-2026-27651, CVE-2026-27654, CVE-2026-32647), and zlib (CVE-2023-45853). None of these have fixed versions in Debian 12 bookworm at the time of publication.",
+          "title": "Description"
+        },
+        {
+          "category": "general",
+          "text": "These CVEs are in OS-level packages, not in containd's own code. Operators deploying containd in production environments should: (1) monitor upstream Debian security updates and rebuild images when fixes become available, (2) restrict network access to the containd container to trusted management networks, (3) consider using v0.1.15 with the distroless base image if the Linux shell feature is not required. The project is tracking evaluation of more secure base image alternatives in GitHub issue #16.",
+          "title": "Mitigations"
+        }
+      ],
+      "product_status": {
+        "first_affected": [
+          "containd"
+        ],
+        "fixed": [
+          "containd"
+        ]
+      },
+      "references": [
+        {
+          "category": "external",
+          "summary": "v0.1.16 release (affected)",
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.16"
+        },
+        {
+          "category": "external",
+          "summary": "v0.1.17 release (fixed via Wolfi migration)",
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.17"
+        },
+        {
+          "category": "external",
+          "summary": "Base image evaluation issue",
+          "url": "https://github.com/tonylturner/containd/issues/16"
+        }
+      ],
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade to v0.1.17 or later. The Debian-slim base image was replaced with Wolfi, eliminating the inherited Debian 12 CVEs.",
+          "product_ids": [
+            "containd"
+          ],
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.17"
+        }
+      ],
+      "title": "Inherited Debian 12 CVEs in container base image"
+    }
+  ]
+}

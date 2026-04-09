@@ -595,8 +595,9 @@ func (m *AVManager) startClamd(ctx context.Context, cfg config.ClamAVConfig) {
 		// already running
 		return
 	}
+	// Use background context so clamd outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	cmd := exec.CommandContext(ctx, m.clamdPath, "--foreground=yes", fmt.Sprintf("--config-file=%s", "/etc/clamav/clamd.conf"))
+	cmd := exec.CommandContext(context.Background(), m.clamdPath, "--foreground=yes", fmt.Sprintf("--config-file=%s", "/etc/clamav/clamd.conf"))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

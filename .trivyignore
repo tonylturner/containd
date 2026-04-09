@@ -1,3 +1,3 @@
-# glibc integer overflow in memalign — no fix available in Debian 12 yet.
-# Re-evaluate when a patched libc6 is released for bookworm.
-CVE-2026-0861
+# Trivy CVE suppressions for Wolfi-based runtime image.
+# Add entries here only for upstream issues with no fix available.
+# Wolfi packages are actively patched; this file should stay minimal.

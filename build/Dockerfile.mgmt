@@ -18,101 +18,6 @@ COPY --from=docs-builder /out/docs ./public/docs
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && test -f out/index.html
 
-FROM envoyproxy/envoy:v1.31.2 AS envoy-src
-FROM debian:bookworm-slim AS envoy
-COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/bin/envoy /out; \
-  ldd /usr/bin/envoy | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS nginx
-RUN apt-get update && apt-get install -y --no-install-recommends nginx ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/nginx /out; \
-  cp -r --parents /etc/nginx /out; \
-  ldd /usr/sbin/nginx | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS unbound
-RUN apt-get update && apt-get install -y --no-install-recommends unbound ca-certificates && rm -rf /var/lib/apt/lists/*
-# Stage the Unbound binaries and their shared library dependencies (for distroless runtime).
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/unbound /out; \
-  cp --parents /usr/sbin/unbound-checkconf /out; \
-  ldd /usr/sbin/unbound | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
-  ldd /usr/sbin/unbound-checkconf | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS nftables
-RUN apt-get update && apt-get install -y --no-install-recommends nftables ca-certificates && rm -rf /var/lib/apt/lists/*
-# Stage the nft binary and its shared library dependencies.
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/nft /out; \
-  ldd /usr/sbin/nft | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS openvpn
-RUN apt-get update && apt-get install -y --no-install-recommends openvpn ca-certificates && rm -rf /var/lib/apt/lists/*
-# Stage the OpenVPN binary and its shared library dependencies (for distroless runtime).
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/openvpn /out; \
-  ldd /usr/sbin/openvpn | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS openntpd
-RUN apt-get update && apt-get install -y --no-install-recommends openntpd ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/openntpd /out; \
-  ldd /usr/sbin/openntpd | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
-
-FROM debian:bookworm-slim AS clamav
-RUN apt-get update && apt-get install -y --no-install-recommends clamav clamav-daemon clamav-freshclam ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/clamd /out; \
-  cp --parents /usr/bin/freshclam /out; \
-  ldd /usr/sbin/clamd | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
-  ldd /usr/bin/freshclam | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out; \
-  mkdir -p /out/etc/clamav /out/var/lib/clamav /out/var/run/clamav; \
-  printf '%s\n' \
-    "User nobody" \
-    "Foreground yes" \
-    "PidFile /var/run/clamav/clamd.pid" \
-    "LocalSocket /var/run/clamav/clamd.ctl" \
-    "LocalSocketMode 666" \
-    "FixStaleSocket yes" \
-    "DatabaseDirectory /var/lib/clamav" \
-    "LogTime yes" \
-    "ScanMail no" \
-    "ScanArchive yes" \
-    "MaxFileSize 100M" \
-    "MaxScanSize 200M" \
-    "TCPSocket 0" \
-    > /out/etc/clamav/clamd.conf; \
-  printf '%s\n' \
-    "DatabaseDirectory /var/lib/clamav" \
-    "Foreground yes" \
-    "DatabaseOwner nobody" \
-    "DNSDatabaseInfo current.cvd.clamav.net" \
-    "CompressLocalDatabase yes" \
-    > /out/etc/clamav/freshclam.conf; \
-  chown -R 65532:65532 /out/var/lib/clamav /out/var/run/clamav
-
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS tini
-ARG TARGETARCH
-RUN set -eux; \
-    apk add --no-cache curl; \
-    case "${TARGETARCH}" in \
-      amd64) TINI_ARCH="tini-static";       TINI_SHA="c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee" ;; \
-      arm64) TINI_ARCH="tini-static-arm64";  TINI_SHA="eae1d3aa50c48fb23b8cbdf4e369d0910dfc538566bfd09df89a774aa84a48b9" ;; \
-      *)     echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
-    esac; \
-    curl -L -o /tini "https://github.com/krallin/tini/releases/download/v0.19.0/${TINI_ARCH}"; \
-    echo "${TINI_SHA}  /tini" | sha256sum -c; \
-    chmod +x /tini
-
 FROM --platform=$BUILDPLATFORM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
 ARG VERSION
@@ -133,9 +38,43 @@ FROM alpine:3.20 AS datadir
 RUN mkdir -p /data/tls /data/ssh /data/logs /data/services /data/config-backups \
     && chown -R 65532:65532 /data
 
-# Final appliance image: distroless glibc base (public, minimal, nonroot).
-# Envoy (Apache-2.0) and Nginx (BSD-2-Clause) binaries are copied in from public images.
-FROM gcr.io/distroless/base-debian12:nonroot
+# Final appliance image: Wolfi-based runtime.
+# Wolfi is glibc-based, actively patched, and has lower CVE surface than Debian.
+# All embedded services are installed via apk. Envoy is from the upstream image
+# because the Wolfi envoy packages are Datawire/Cilium forks, not stock upstream.
+# Pin digest for reproducibility; bump periodically for security patches.
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a AS envoy-deps
+RUN apk update && apk add --no-cache libstdc++
+
+FROM envoyproxy/envoy:v1.31.2 AS envoy-src
+
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a
+
+# Install runtime packages: embedded services + troubleshooting tools.
+# NTP: chrony replaces openntpd (not available in Wolfi).
+RUN apk update && apk add --no-cache \
+      bash \
+      ca-certificates-bundle \
+      chrony \
+      clamav \
+      coreutils \
+      curl \
+      iproute2 \
+      nftables \
+      nginx-mainline \
+      openvpn \
+      procps \
+      tcpdump \
+      tini \
+      unbound \
+    && rm -rf /var/cache/apk/* \
+    && addgroup -S chrony 2>/dev/null || true \
+    && adduser -S -G chrony -s /sbin/nologin chrony 2>/dev/null || true \
+    && mkdir -p /var/lib/chrony /var/log/chrony \
+    && chown chrony:chrony /var/lib/chrony /var/log/chrony
+
+# Envoy needs libstdc++ which is not pulled in by default.
+COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
 LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.description="ICS/OT next-generation firewall" \
@@ -143,20 +82,14 @@ LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.source="https://github.com/tonylturner/containd" \
       org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=builder /out/containd /usr/bin/containd
-COPY --from=tini /tini /sbin/tini
-COPY --from=envoy /out/ /
-COPY --from=nginx /out/ /
-COPY --from=unbound /out/ /
-COPY --from=nftables /out/ /
-COPY --from=openvpn /out/ /
-COPY --from=openntpd /out/ /
-COPY --from=clamav /out/ /
+COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 COPY --from=datadir --chown=65532:65532 /data /data
+RUN mkdir -p /usr/local/bin && ln -s /usr/bin/containd /usr/local/bin/configure
 VOLUME /data
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/usr/bin/containd", "healthcheck"]
-ENTRYPOINT ["/sbin/tini", "--", "/usr/bin/containd"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/bin/containd"]
 CMD ["all"]

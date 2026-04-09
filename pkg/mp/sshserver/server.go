@@ -33,6 +33,9 @@ type Options struct {
 	Banner              string
 	HostKeyRotationDays int
 	LabMode             bool
+	// ShellMode controls the default SSH login experience.
+	// "linux": drops into a real bash shell; "appliance" (default): the CLI REPL.
+	ShellMode           string
 	JWTSecret           []byte
 	// AllowLocalIP can reject connections based on the destination/local IP.
 	// When nil, all destination IPs are allowed.
@@ -219,13 +222,42 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 		Command string
 	}
 
+	var pr ptyRequest
+	hasPTY := false
+	// Channel for forwarding window-change events to the REPL (for inline shell).
+	windowCh := make(chan ptyRequest, 4)
+	defer close(windowCh)
+
 	for req := range in {
 		switch req.Type {
 		case "pty-req":
+			if parsed, ok := parsePtyReq(req.Payload); ok {
+				pr = parsed
+				hasPTY = true
+			}
 			_ = req.Reply(true, nil)
+		case "window-change":
+			if w, h, ok := parseWindowChange(req.Payload); ok {
+				pr.Width = w
+				pr.Height = h
+				select {
+				case windowCh <- ptyRequest{Width: w, Height: h}:
+				default:
+				}
+			}
+			if req.WantReply {
+				_ = req.Reply(true, nil)
+			}
 		case "shell":
 			_ = req.Reply(true, nil)
-			s.repl(ctx, username, remote, reg, ch)
+			if s.isLinuxShellMode() && hasPTY {
+				s.startLinuxShell(ctx, username, ch, in, &pr)
+			} else {
+				if s.isLinuxShellMode() && !hasPTY {
+					writeTTY(ch, "Warning: no PTY requested, falling back to appliance CLI.\n")
+				}
+				s.repl(ctx, username, remote, reg, ch, &pr, windowCh)
+			}
 			return
 		case "exec":
 			var m execMsg
@@ -268,7 +300,11 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 	}
 }
 
-func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw io.ReadWriter) {
+func (s *Server) isLinuxShellMode() bool {
+	return strings.EqualFold(s.opts.ShellMode, "linux")
+}
+
+func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw io.ReadWriter, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
 	prompt := "containd# "
 	// Gentle bootstrap hint.
@@ -290,6 +326,13 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		switch strings.ToLower(line) {
 		case "exit", "quit", "logout":
 			return
+		case "shell", "bash":
+			if ch, ok := rw.(ssh.Channel); ok && pr != nil {
+				s.startLinuxShellInline(ctx, username, ch, pr, windowCh)
+				continue
+			}
+			writeTTY(rw, "shell access requires a PTY-enabled SSH session\n")
+			continue
 		case "menu":
 			s.runMenu(ctx, username, rw, reader, reg)
 			continue

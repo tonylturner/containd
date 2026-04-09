@@ -27,6 +27,7 @@ type sshRuntimeConfig struct {
 	allowPassword bool
 	banner        string
 	rotationDays  int
+	shellMode     string
 	baseURL       string
 }
 
@@ -42,6 +43,7 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 		AllowPassword:       rt.allowPassword,
 		Banner:              rt.banner,
 		HostKeyRotationDays: rt.rotationDays,
+		ShellMode:           rt.shellMode,
 		LabMode:             isLabMode(),
 		JWTSecret:           []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
 		UserStore:           userStore,
@@ -109,6 +111,10 @@ func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr s
 	if cfg != nil {
 		rt.banner = cfg.System.SSH.Banner
 		rt.rotationDays = cfg.System.SSH.HostKeyRotationDays
+		rt.shellMode = cfg.System.SSH.ShellMode
+	}
+	if env := common.EnvTrimmed("CONTAIND_SSH_SHELL_MODE", ""); env != "" {
+		rt.shellMode = env
 	}
 	rt.allowPassword = resolveSSHAllowPassword(cfg, rt.authKeysDir)
 	rt.baseURL = resolveSSHBaseURL(httpAddr, loopbackAddr)

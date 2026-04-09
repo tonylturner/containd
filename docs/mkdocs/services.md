@@ -19,9 +19,10 @@ Tracks syslog, DNS, NTP, DHCP, VPN, proxy, and AV service configuration plus run
   - `GET/POST /api/v1/services/dns`
 - Status and runtime events surface in `/api/v1/services/status` and `/api/v1/events`.
 
-## NTP (OpenNTPD)
+## NTP (chrony)
 
 - Config model: `services.ntp` with `enabled`, `servers`, `intervalSeconds`.
+- Uses chrony as the NTP implementation on Wolfi-based images. Falls back to openntpd if chrony is not available.
 - API:
   - `GET/POST /api/v1/services/ntp`
 - Status and runtime events surface in `/api/v1/services/status` and `/api/v1/events`.
