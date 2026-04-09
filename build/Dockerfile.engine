@@ -19,14 +19,10 @@ RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
     -ldflags "-s -w -X github.com/tonylturner/containd/pkg/cp/config.BuildVersion=${version} -X github.com/tonylturner/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
     -o /out/containd ./cmd/containd
 
-FROM debian:bookworm-slim AS nft
-RUN apt-get update && apt-get install -y --no-install-recommends nftables ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-  mkdir -p /out; \
-  cp --parents /usr/sbin/nft /out; \
-  ldd /usr/sbin/nft | awk '{print $3}' | grep -E '^/' | xargs -r -I{} cp --parents {} /out
+# Wolfi-based runtime with nftables (the only runtime dependency for the engine).
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a
 
-FROM gcr.io/distroless/base-debian12:nonroot
+RUN apk update && apk add --no-cache nftables && rm -rf /var/cache/apk/*
 
 LABEL org.opencontainers.image.title="containd-engine" \
       org.opencontainers.image.description="containd data plane (engine-only)" \
@@ -35,7 +31,6 @@ LABEL org.opencontainers.image.title="containd-engine" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=builder /out/containd /usr/bin/containd
-COPY --from=nft /out/ /
 EXPOSE 8081
 ENTRYPOINT ["/usr/bin/containd"]
 CMD ["engine"]

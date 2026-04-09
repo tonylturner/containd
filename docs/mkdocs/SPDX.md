@@ -35,7 +35,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 | tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
 | React Flow | Topology UI | MIT | Used for topology/graph screens in the UI. |
 | Recharts | Charts | MIT | Used for dashboard charts and sparklines. |
-| Distroless base (`base-debian12`) | Minimal runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
+| Wolfi base (`cgr.dev/chainguard/wolfi-base`) | Minimal glibc runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
 ---
 

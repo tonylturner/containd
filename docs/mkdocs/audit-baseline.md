@@ -113,7 +113,7 @@ This is materially better than the first branch snapshot: `api/http` is now `48.
 | Performance audit | Partial | Initial benchmark baselines and a repeatable profiling workflow now exist, but broader dataplane benchmark coverage and regression thresholds are still needed. |
 | Observability | Done | Structured logging, audit/event surfaces, metrics endpoint, and logging guidance are already in place. |
 | Config safety | Done | Candidate/running, validation, commit, rollback, and backup flows are implemented. |
-| Release engineering | Done | Reproducible container builds, distroless runtime image, cosign signing, and SBOM generation are already part of the release path. |
+| Release engineering | Done | Reproducible container builds, Wolfi runtime image (pinned by digest), cosign signing, and SBOM generation are already part of the release path. |
 | Documentation | Done | Strong public docs now include deployment, security posture, code boundaries, audit status, and a dedicated threat model. |
 
 ## Recommended Next Steps

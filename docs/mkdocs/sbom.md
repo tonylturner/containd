@@ -24,7 +24,7 @@ The SBOMs enumerate:
 
 - Go modules compiled into the `containd` binary (from `go.mod`)
 - npm packages included in the UI static export (from `package-lock.json`)
-- OS packages from the base image (Distroless Debian 12)
+- OS packages from the base image (Wolfi)
 - Embedded service binaries (Envoy, Nginx, Unbound, ClamAV, etc.)
 
 ## How SBOMs Are Published
