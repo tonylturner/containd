@@ -144,7 +144,7 @@ CONTAIND_UI_DIR=ui/out ./containd all
 ## Security
 
 - Default-deny firewall posture
-- Minimal Debian-slim container image; the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
+- Wolfi-based container image (glibc, actively patched, minimal CVE surface); the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
 - JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login, and optional app-based TOTP MFA for local accounts
 - TLS 1.2+ with hardened cipher suites, HSTS enabled by default
 - CORS wildcard rejection, same-origin protection for cookie-authenticated browser writes, SameSite=Strict cookies, request body limits, path traversal protection

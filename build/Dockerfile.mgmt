@@ -18,21 +18,6 @@ COPY --from=docs-builder /out/docs ./public/docs
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && test -f out/index.html
 
-FROM envoyproxy/envoy:v1.31.2 AS envoy-src
-
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS tini
-ARG TARGETARCH
-RUN set -eux; \
-    apk add --no-cache curl; \
-    case "${TARGETARCH}" in \
-      amd64) TINI_ARCH="tini-static";       TINI_SHA="c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee" ;; \
-      arm64) TINI_ARCH="tini-static-arm64";  TINI_SHA="eae1d3aa50c48fb23b8cbdf4e369d0910dfc538566bfd09df89a774aa84a48b9" ;; \
-      *)     echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
-    esac; \
-    curl -L -o /tini "https://github.com/krallin/tini/releases/download/v0.19.0/${TINI_ARCH}"; \
-    echo "${TINI_SHA}  /tini" | sha256sum -c; \
-    chmod +x /tini
-
 FROM --platform=$BUILDPLATFORM golang:1.25.8-alpine AS builder
 ARG TARGETARCH
 ARG VERSION
@@ -53,22 +38,37 @@ FROM alpine:3.20 AS datadir
 RUN mkdir -p /data/tls /data/ssh /data/logs /data/services /data/config-backups \
     && chown -R 65532:65532 /data
 
-# Final appliance image: debian-slim base for real Linux shell + tcpdump support.
-# Envoy (Apache-2.0) binary is copied from upstream; other services installed via apt.
-FROM debian:bookworm-slim
+# Final appliance image: Wolfi-based runtime.
+# Wolfi is glibc-based, actively patched, and has lower CVE surface than Debian.
+# All embedded services are installed via apk. Envoy is from the upstream image
+# because the Wolfi envoy packages are Datawire/Cilium forks, not stock upstream.
+FROM cgr.dev/chainguard/wolfi-base:latest AS envoy-deps
+RUN apk update && apk add --no-cache libstdc++
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      tcpdump \
-      nginx \
-      unbound \
-      nftables \
-      openvpn \
-      openntpd \
+FROM envoyproxy/envoy:v1.31.2 AS envoy-src
+
+FROM cgr.dev/chainguard/wolfi-base:latest
+
+# Install runtime packages: embedded services + troubleshooting tools.
+# openntpd is not available in Wolfi; NTP service gracefully disables if binary is absent.
+RUN apk update && apk add --no-cache \
+      bash \
+      ca-certificates-bundle \
       clamav \
-      clamav-daemon \
-      clamav-freshclam \
-      ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+      coreutils \
+      curl \
+      iproute2 \
+      nftables \
+      nginx-mainline \
+      openvpn \
+      procps \
+      tcpdump \
+      tini \
+      unbound \
+    && rm -rf /var/cache/apk/*
+
+# Envoy needs libstdc++ which is not pulled in by default.
+COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
 LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.description="ICS/OT next-generation firewall" \
@@ -76,15 +76,14 @@ LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.source="https://github.com/tonylturner/containd" \
       org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=builder /out/containd /usr/bin/containd
-COPY --from=tini /tini /sbin/tini
 COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 COPY --from=datadir --chown=65532:65532 /data /data
-RUN ln -s /usr/bin/containd /usr/local/bin/configure
+RUN mkdir -p /usr/local/bin && ln -s /usr/bin/containd /usr/local/bin/configure
 VOLUME /data
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/usr/bin/containd", "healthcheck"]
-ENTRYPOINT ["/sbin/tini", "--", "/usr/bin/containd"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/bin/containd"]
 CMD ["all"]

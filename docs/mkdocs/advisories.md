@@ -42,7 +42,7 @@ Current publication state:
 
 | ID | Title | Severity | Status |
 |----|-------|----------|--------|
-| [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in v0.1.16 container image | HIGH | Active -- tracking in [#16](https://github.com/tonylturner/containd/issues/16) |
+| [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in v0.1.16 container image | HIGH | Resolved in v0.1.17 (Wolfi migration) |
 
 ## When containd Publishes a Security Advisory
 
