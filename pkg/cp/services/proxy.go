@@ -349,8 +349,9 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		_ = m.envoyCmd.Process.Signal(os.Interrupt)
 		time.Sleep(50 * time.Millisecond)
 	}
+	// Use background context so envoy outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	cmd := exec.CommandContext(ctx, m.EnvoyPath, "-c", configPath, "--log-level", "info")
+	cmd := exec.CommandContext(context.Background(), m.EnvoyPath, "-c", configPath, "--log-level", "info")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -414,8 +415,9 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		stopManagedProcess(m.nginxCmd.Process)
 	}
+	// Use background context so nginx outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	cmd := exec.CommandContext(ctx, m.NginxPath, "-c", configPath, "-g", "daemon off;")
+	cmd := exec.CommandContext(context.Background(), m.NginxPath, "-c", configPath, "-g", "daemon off;")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
