@@ -4,19 +4,23 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/peterh/liner"
 
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
@@ -125,19 +129,65 @@ func runCLI(ctx context.Context) error {
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
 
-	reader := bufio.NewReader(os.Stdin)
 	prompt := "containd# "
-	fmt.Println("containd CLI. Type 'help' for commands, 'exit' to return to shell.")
+	fmt.Println("containd CLI. Type 'help' for commands, 'exit' to return to shell. Tab to complete.")
+
+	// peterh/liner provides line editing + tab completion + history.
+	// It falls back to plain line reading when stdin isn't a TTY (the
+	// CLI is also used non-interactively from scripts), so the same
+	// loop works in both modes.
+	state := liner.NewLiner()
+	defer state.Close()
+	state.SetCtrlCAborts(true)
+
+	// Completer: prefix-match against every registered command.
+	// Registry.Commands() returns the list (e.g., "show running-config",
+	// "set firewall rule") and the completer just filters by the
+	// current line. Liner handles single-match auto-fill + multi-match
+	// listing on its own.
+	commands := reg.Commands()
+	sort.Strings(commands)
+	state.SetCompleter(func(line string) []string {
+		needle := strings.ToLower(line)
+		var matches []string
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, needle) {
+				matches = append(matches, cmd)
+			}
+		}
+		return matches
+	})
+
+	// History across CLI sessions. Best-effort: failures (e.g., no
+	// home dir, read-only fs) just disable persistence.
+	historyPath := cliHistoryPath()
+	if historyPath != "" {
+		if f, err := os.Open(historyPath); err == nil {
+			_, _ = state.ReadHistory(f)
+			f.Close()
+		}
+		defer func() {
+			if f, err := os.Create(historyPath); err == nil {
+				_, _ = state.WriteHistory(f)
+				f.Close()
+			}
+		}()
+	}
+
 	for {
-		fmt.Print(prompt)
-		line, err := reader.ReadString('\n')
+		line, err := state.Prompt(prompt)
 		if err != nil {
-			return nil
+			if errors.Is(err, liner.ErrPromptAborted) || errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		state.AppendHistory(line)
+
 		switch strings.ToLower(line) {
 		// Both "exit"/"quit"/"logout" and "shell"/"bash" leave the
 		// containd CLI. The wrapper that launched `containd cli`
@@ -159,6 +209,19 @@ func runCLI(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// cliHistoryPath returns the per-user history file path or "" if
+// the home directory is unavailable.
+func cliHistoryPath() string {
+	if v := os.Getenv("CONTAIND_CLI_HISTORY"); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".containd_history")
 }
 
 func cliLogin(baseURL string) (string, error) {
