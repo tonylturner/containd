@@ -139,11 +139,14 @@ func runCLI(ctx context.Context) error {
 			continue
 		}
 		switch strings.ToLower(line) {
-		case "exit", "quit", "logout":
+		// Both "exit"/"quit"/"logout" and "shell"/"bash" leave the
+		// containd CLI. The wrapper that launched `containd cli`
+		// (e.g., the SSH appliance shell or RangerDanger's in-app
+		// firewall terminal) drops the operator back into a Linux
+		// shell on return — so `shell` and `bash` are equivalent
+		// to `exit` here, not a separate sub-shell.
+		case "exit", "quit", "logout", "shell", "bash":
 			return nil
-		case "shell", "bash":
-			fmt.Println("Already in Linux shell. Type 'exit' to return.")
-			continue
 		}
 		var buf strings.Builder
 		if err := reg.ParseAndExecute(cmdCtx, line, &buf); err != nil {
