@@ -563,6 +563,16 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		}
 		return nil, err
 	}
+	// Re-bind logical interface names to physical kernel devices at commit
+	// time. Imports that use logical names (wan/dmz/lan1/lan2) with empty
+	// or stale device fields would otherwise compile to nft rules that
+	// reference the wrong eth and silently black-hole all forwarded
+	// traffic. autoBindDefaultInterfaceDevices is a no-op for configs
+	// that already have correct device fields, so this is safe to call
+	// on every commit.
+	if autoBindDefaultInterfaceDevices(cfg) {
+		_ = store.Save(ctx, cfg)
+	}
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
 			return nil, err

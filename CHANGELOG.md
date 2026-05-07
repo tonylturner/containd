@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-05-07
+
+### Fixed
+- `compileEntry` now emits one nft rule per protocol on the entry instead of only the first. A rule declaring `[tcp/502, tcp/20000, tcp/8080]` was silently compiling to a single tcp/502 line — every other protocol black-holed. The skeleton "only first protocol supported" code path was finished.
+- `writeForwardChain` now emits ALLOW rules before DENY rules. nftables is first-match, so a broad deny ("block lan1->lan2 for tcp/8080") emitted before a narrow allow exception ("rtac/10.30.30.20->lan2/8080") would silently shadow the allow. Within each action, sort by ID for determinism.
+- `applyRunningConfig` now calls `autoBindDefaultInterfaceDevices` after loading the committed config. Imports that use logical names (`wan`/`dmz`/`lan1`/`lan2`) with empty or stale `device` fields would otherwise compile to nft rules referencing whatever eth name the JSON happened to specify — silently wrong if the kernel's actual device order differs (e.g. docker assigns ethN by alphabetical network name, not compose order). Now resolved against the running kernel state at commit time.
+
 ## [0.1.20] - 2026-05-07
 
 ### Security

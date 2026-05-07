@@ -42,6 +42,113 @@ func TestCompileFirewallBasic(t *testing.T) {
 	}
 }
 
+// TestCompileFirewallAllowsBeforeDrops pins the fix for a real-world
+// bug: a broad deny ("block lan1->lan2 for tcp/8080") and a narrow
+// allow exception ("rtac->lan2/8080 from 10.30.30.20") used to be
+// emitted in alphabetical-by-ID order. nftables is first-match, so a
+// broad drop emitted before its narrow exception silently shadowed
+// the allow — RTAC's canonical Modbus traffic black-holed even though
+// the policy declared it permitted. Allows must emit before drops so
+// the more-specific exception wins.
+func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
+	compiler := NewCompiler()
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		ZoneIfaces: map[string][]string{
+			"lan1": {"eth2"},
+			"lan2": {"eth3"},
+		},
+		Firewall: []rules.Entry{
+			// Sorted alphabetically, "deny..." < "rtac..." — the bad
+			// ordering. Action sort must override.
+			{
+				ID:          "deny-ot-to-field-broad",
+				SourceZones: []string{"lan1"},
+				DestZones:   []string{"lan2"},
+				Protocols:   []rules.Protocol{{Name: "tcp", Port: "8080"}},
+				Action:      rules.ActionDeny,
+			},
+			{
+				ID:          "rtac-to-field-narrow",
+				SourceZones: []string{"lan1"},
+				DestZones:   []string{"lan2"},
+				Sources:     []string{"10.30.30.20/32"},
+				Protocols:   []rules.Protocol{{Name: "tcp", Port: "8080"}},
+				Action:      rules.ActionAllow,
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	allowIdx := strings.Index(ruleset, "ip saddr { 10.30.30.20/32 } accept")
+	denyIdx := strings.Index(ruleset, "tcp dport 8080 drop")
+	if allowIdx < 0 || denyIdx < 0 {
+		t.Fatalf("expected both allow and deny lines, got:\n%s", ruleset)
+	}
+	if allowIdx > denyIdx {
+		t.Errorf("allow line must come before deny line; got allow@%d deny@%d in:\n%s",
+			allowIdx, denyIdx, ruleset)
+	}
+}
+
+// TestCompileFirewallMultiProtocol pins the fix for a real-world bug:
+// rules declaring multiple protocols (e.g. an enterprise->field allow
+// for tcp/502 + tcp/20000 + tcp/8080) used to compile to a single nft
+// line for the FIRST protocol only, silently dropping the rest. The
+// substation lab in RangerDanger hit this — Modbus and DNP3 traffic
+// black-holed under both weak and improved policies because only the
+// 8080 line ever made it to the kernel ruleset.
+func TestCompileFirewallMultiProtocol(t *testing.T) {
+	compiler := NewCompiler()
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:     "multi",
+				Action: rules.ActionAllow,
+				Protocols: []rules.Protocol{
+					{Name: "tcp", Port: "502"},
+					{Name: "tcp", Port: "20000"},
+					{Name: "tcp", Port: "8080"},
+				},
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	for _, want := range []string{
+		"tcp dport 502 accept",
+		"tcp dport 20000 accept",
+		"tcp dport 8080 accept",
+	} {
+		if !strings.Contains(ruleset, want) {
+			t.Errorf("expected %q in compiled ruleset, got:\n%s", want, ruleset)
+		}
+	}
+}
+
+func TestCompileFirewallNoProtocolsStillEmits(t *testing.T) {
+	// Rules constrained only by zones / sources should still compile.
+	compiler := NewCompiler()
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{ID: "no-proto", Action: rules.ActionDeny, Sources: []string{"10.10.10.0/24"}},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(ruleset, "ip saddr { 10.10.10.0/24 } drop") {
+		t.Fatalf("expected source-only deny line, got:\n%s", ruleset)
+	}
+}
+
 func TestCompileFirewallZoneBindings(t *testing.T) {
 	compiler := NewCompiler()
 	snap := &rules.Snapshot{

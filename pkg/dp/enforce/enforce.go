@@ -138,14 +138,30 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	if err := c.writeDNATAccepts(buf, snap); err != nil {
 		return err
 	}
+	// Emit ALLOW rules before DENY rules. nftables is first-match, and a
+	// broad deny (e.g. "block all OT->Field except RTAC") that emits
+	// before a narrow allow (e.g. "RTAC->Field/502 from 10.30.30.20")
+	// will shadow the allow. Sorting allows ahead preserves the
+	// firewall convention that more-specific allow exceptions punch
+	// through broader deny rules. Within each action, sort by ID for
+	// determinism. This matters mostly for policies authored as
+	// "deny-broad + allow-narrow" exception lists.
 	entries := append([]rules.Entry(nil), snap.Firewall...)
-	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	sort.SliceStable(entries, func(i, j int) bool {
+		ai, aj := entries[i].Action, entries[j].Action
+		if ai != aj {
+			return ai == rules.ActionAllow
+		}
+		return entries[i].ID < entries[j].ID
+	})
 	for _, e := range entries {
-		line, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
+		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
 		if err != nil {
 			return err
 		}
-		buf.WriteString("    " + line + ";\n")
+		for _, line := range lines {
+			buf.WriteString("    " + line + ";\n")
+		}
 	}
 	buf.WriteString("  }\n")
 	return nil
@@ -311,63 +327,77 @@ func defaultPolicy(a rules.Action) string {
 	return "drop"
 }
 
-func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) (string, error) {
-	parts := []string{}
+// compileEntry returns one nft rule line per protocol on the entry. Rules
+// declaring multiple protocols (e.g. one ALLOW for tcp/502 + tcp/20000 +
+// tcp/8080) used to compile to a single nft line for the first protocol
+// only — silently dropping every other protocol the operator declared.
+// Now each protocol becomes its own line, matching the operator's intent.
+//
+// Entries with zero protocols emit a single line with no proto/port match
+// (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
+func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) ([]string, error) {
+	base := []string{}
 
 	if len(e.SourceZones) > 0 {
 		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
 		if len(ifs) > 0 {
-			parts = append(parts, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
+			base = append(base, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
 		} else {
 			// No interfaces for these zones -> rule never matches.
-			parts = append(parts, "iifname { }")
+			base = append(base, "iifname { }")
 		}
 	}
 	if len(e.DestZones) > 0 {
 		ifs := collectZoneIfaces(e.DestZones, zoneIfaces)
 		if len(ifs) > 0 {
-			parts = append(parts, fmt.Sprintf("oifname { %s }", strings.Join(ifs, ", ")))
+			base = append(base, fmt.Sprintf("oifname { %s }", strings.Join(ifs, ", ")))
 		} else {
-			parts = append(parts, "oifname { }")
+			base = append(base, "oifname { }")
 		}
 	}
 
-	if len(e.Protocols) > 0 {
-		// Only first protocol supported in skeleton.
-		p := e.Protocols[0]
+	// Pick the verdict once — same for every emitted protocol-variant line.
+	verdict := ""
+	if queueID > 0 && isDPIEligible(e) {
+		verdict = fmt.Sprintf("queue num %d", queueID)
+	} else {
+		switch e.Action {
+		case rules.ActionAllow:
+			verdict = "accept"
+		case rules.ActionDeny:
+			verdict = "drop"
+		default:
+			return nil, fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
+		}
+	}
+
+	// Treat "no protocols" as a single iteration with no proto match — the
+	// rule is constrained by zones/CIDRs alone.
+	protos := e.Protocols
+	if len(protos) == 0 {
+		protos = []rules.Protocol{{}}
+	}
+
+	lines := make([]string, 0, len(protos))
+	for _, p := range protos {
+		parts := append([]string(nil), base...)
 		if p.Name != "" {
 			parts = append(parts, p.Name)
 		}
 		if p.Port != "" {
 			parts = append(parts, fmt.Sprintf("dport %s", p.Port))
 		}
+		// CIDR matching (skeleton uses ip saddr/daddr; no v6 yet).
+		if len(e.Sources) > 0 {
+			parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(e.Sources, ", ")))
+		}
+		if len(e.Destinations) > 0 {
+			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
+		}
+		parts = append(parts, verdict)
+		lines = append(lines, strings.Join(parts, " "))
 	}
-
-	// CIDR matching (skeleton uses ip saddr/daddr; no v6 yet).
-	if len(e.Sources) > 0 {
-		parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(e.Sources, ", ")))
-	}
-	if len(e.Destinations) > 0 {
-		parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
-	}
-
-	// If QueueID is set and the entry has DPI/ICS inspection enabled,
-	// emit a queue verdict instead of accept/drop so the traffic is
-	// steered through NFQUEUE for selective DPI inspection.
-	if queueID > 0 && isDPIEligible(e) {
-		parts = append(parts, fmt.Sprintf("queue num %d", queueID))
-		return strings.Join(parts, " "), nil
-	}
-
-	switch e.Action {
-	case rules.ActionAllow:
-		parts = append(parts, "accept")
-	case rules.ActionDeny:
-		parts = append(parts, "drop")
-	default:
-		return "", fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
-	}
-	return strings.Join(parts, " "), nil
+	return lines, nil
 }
 
 // isDPIEligible returns true if an entry requires DPI/ICS inspection and
