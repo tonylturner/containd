@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-05-07
+
+### Security
+- Bumped Go toolchain in `build/Dockerfile.mgmt` and `build/Dockerfile.engine` from `golang:1.25.8-alpine` to `golang:1.25.9-alpine`, clearing three Trivy HIGH findings against the published image: `CVE-2026-32280` and `CVE-2026-32281` (crypto/x509 chain-validation DoS) and `CVE-2026-32283` (crypto/tls KeyUpdate DoS). All fixed in Go 1.25.9.
+
 ## [0.1.19] - 2026-05-07
 
 ### Added
