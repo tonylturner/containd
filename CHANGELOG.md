@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-05-07
+
+### Added
+- Tab-completion in the containd CLI. The `containd cli` shell now uses `peterh/liner` for line editing, prefix-match tab-completion against the registered command set (`Registry.Commands()`), and persistent history (`~/.containd_history`, override with `CONTAIND_CLI_HISTORY`). Falls back to plain reading when stdin isn't a TTY so non-interactive scripts keep working.
+
+### Changed
+- `shell` / `bash` in the CLI loop now exit the loop alongside `exit` / `quit` / `logout`, instead of printing the misleading "Already in Linux shell. Type 'exit' to return." Wrappers that launch `containd cli` (the SSH appliance shell, RangerDanger's in-app firewall terminal) drop the operator back to bash on return — so `shell` and `bash` are equivalent to `exit` here, not a separate sub-shell.
+
 ## [0.1.18] - 2026-04-09
 
 ### Fixed
