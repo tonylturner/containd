@@ -195,14 +195,23 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 		return err
 	}
 
-	// Fresh DB: always seed the default admin with password change required.
+	// Fresh DB: seed the default admin. The must-change-password flag is
+	// raised when the seeded password is the well-known default
+	// `containd`, except in lab mode where the canonical credential is
+	// pinned by design (workshop docs, lab YAMLs, and SSH-on-:2222 all
+	// expect `containd/containd`). The HTTP password-change endpoints
+	// also lock in lab mode (see api/http/auth_handlers.go and
+	// users_handlers.go), so this flag would never be cleared in lab
+	// deployments anyway — clearing it at seed time keeps the API
+	// responses consistent with the enforcement.
+	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	_, err := s.createUser(ctx, User{
 		Username:           username,
 		FirstName:          "Default",
 		LastName:           "Admin",
 		Role:               "admin",
 		Email:              "",
-		MustChangePassword: password == "containd",
+		MustChangePassword: password == "containd" && !lab,
 	}, password, true)
 	return err
 }

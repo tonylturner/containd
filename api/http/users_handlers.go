@@ -5,6 +5,8 @@ package httpapi
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -95,7 +97,16 @@ type setPasswordRequest struct {
 }
 
 func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
+	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
+		// Mirror changeMyPasswordHandler: in lab mode the canonical
+		// credential is pinned. Admins reaching this endpoint via the
+		// users-management UI also get the same lock so a single
+		// codepath enforces the cred-pinning invariant.
+		if lab {
+			apiError(c, http.StatusForbidden, "password change disabled in lab mode (CONTAIND_LAB_MODE=1) — credentials are pinned to the documented canonical default for reproducible workshop runs")
+			return
+		}
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return

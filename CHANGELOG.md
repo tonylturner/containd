@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-05-08
+
+### Fixed
+- `CONTAIND_LAB_MODE=1` now pins the canonical credential. The HTTP password-change endpoints (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password`) return 403 with a clear lab-mode message instead of accepting the change. `GET /api/v1/auth/me` no longer advertises `mustChangePassword: true` in lab mode, so the UI doesn't trigger a force-change flow that would (a) drift the credential away from the documented `containd/containd` default that workshop docs and SSH-on-:2222 depend on, and (b) hit the now-locked endpoint with a confusing CSRF/Origin error when accessed via a reverse proxy. `seedDefaultAdmin` also clears `MustChangePassword` at seed time in lab mode so the flag is never persisted. Surfaced by the RangerDanger workshop integration where students were forced to change the password on first login, breaking subsequent SSH-terminal labs and triggering CORS/CSRF errors when the change was attempted through the proxy. New `TestLabModeLocksPasswordChange` pins the contract.
+
 ## [0.1.21] - 2026-05-07
 
 ### Fixed

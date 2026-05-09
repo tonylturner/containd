@@ -175,7 +175,14 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		if u.MFAGraceUntil != nil {
 			resp["mfaGraceUntil"] = u.MFAGraceUntil.Format(time.RFC3339Nano)
 		}
-		if u.MustChangePassword {
+		// In lab mode the canonical credential (containd/containd) is the
+		// reproducible default students depend on across docs and SSH. We
+		// suppress the must-change-password flag so the UI doesn't prompt
+		// for a change that would (a) drift the cred away from what the
+		// labs document and (b) hit the password-change endpoint which is
+		// itself locked in lab mode (see changeMyPasswordHandler /
+		// setUserPasswordHandler).
+		if u.MustChangePassword && !lab {
 			resp["mustChangePassword"] = true
 		}
 		c.JSON(http.StatusOK, resp)
@@ -245,7 +252,17 @@ type changePasswordRequest struct {
 }
 
 func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
+	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
+		// Lab mode pins credentials to the documented canonical default
+		// (containd/containd) so workshop docs, lab YAMLs, and SSH
+		// terminal commands keep working across student runs. Allowing
+		// password change here would drift the cred and break SSH-on-:2222
+		// auth in every lab that uses the firewall terminal.
+		if lab {
+			apiError(c, http.StatusForbidden, "password change disabled in lab mode (CONTAIND_LAB_MODE=1) — credentials are pinned to the documented canonical default for reproducible workshop runs")
+			return
+		}
 		if userStore == nil {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
