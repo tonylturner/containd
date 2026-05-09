@@ -108,17 +108,59 @@ Next steps:
 
 Current alignment:
 
-- containd forces password change on first login for the default bootstrap account;
+- containd forces password change on first login for the default bootstrap account in standard deployments;
 - operators can replace password-based access with SSH key bootstrap and stronger local credentials.
 
 Current caveat:
 
 - the first-install bootstrap password is still universal.
 
+#### Lab-mode credential pinning (transparency note)
+
+When `CONTAIND_LAB_MODE=1` is set in the environment, containd >= 0.1.22 pins the canonical credential (`containd / containd`) and **disables password change**:
+
+- `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`, so the UI does not prompt for a first-login change;
+- `POST /api/v1/auth/me/password` returns 403 with a clear lab-mode message;
+- `POST /api/v1/users/:id/password` returns the same 403 (admins also cannot rotate);
+- `seedDefaultAdmin` clears the `MustChangePassword` flag at seed time so the DB and the API responses stay consistent.
+
+This is a **deliberate weakening** of the default-password posture, scoped to the lab-mode boundary, and we are documenting it openly rather than hiding it.
+
+Why it exists:
+
+- workshop and classroom deployments rely on a documented canonical credential (`containd / containd`) for SSH-on-`:2222`, lab-doc CLI examples, and proxied UI access. If a student completes the standard first-login forced change, every subsequent SSH-terminal step in the lab silently breaks because the credential drifted off the documented default;
+- the same forced-change endpoint also rejects requests through some reverse-proxy paths with a CORS/CSRF error that confused students into thinking the lab was broken. Locking the endpoint replaces that confusing failure mode with a clear 403 that says "lab mode";
+- without this lock, the only paths to a working lab were: ship a bespoke containd build with the prompt removed, document a manual recovery, or accept silent failure mid-workshop. Pinning the credential under an explicit lab-mode flag is the most transparent option.
+
+What this trades away:
+
+- credential rotation against the universal bootstrap is impossible inside a lab-mode deployment. A compromised lab credential cannot be rotated in place — the operator must redeploy the appliance to clear state;
+- there is no MFA path in lab mode that can substitute for password change today;
+- the SSH-on-`:2222` admin shell uses the same pinned credential, so any inbound network reach to that port is high-risk in lab mode.
+
+Boundary conditions (when lab mode is appropriate):
+
+- single-tenant single-host lab deployments (e.g. a student running the full stack on their own laptop with all containd ports bound to `127.0.0.1`);
+- offline or air-gapped classroom deployments where the appliance is not network-reachable from production systems;
+- ephemeral demo and training environments that get rebuilt per-cohort.
+
+When lab mode is **not** appropriate:
+
+- any deployment where containd's HTTP UI or `:2222` SSH is reachable from a hostile or shared network;
+- any deployment where containd holds policy or audit data that needs to survive credential exposure;
+- production substations, customer engagements, or anything that resembles a real ICS deployment.
+
+Operator-facing surface area:
+
+- the lab-mode lock is opt-in (default is unset → standard force-change behavior);
+- the 403 response body explicitly names `CONTAIND_LAB_MODE=1` so operators can identify the mechanism;
+- `RangerDanger` and other lab-platform integrations document the lab-mode boundary in their own SECURITY notes and bind containd's host ports to loopback only.
+
 Roadmap:
 
-- keep documenting the current rationale clearly;
-- evaluate a future per-instance bootstrap path that preserves classroom usability without relying on a universal shared credential.
+- keep documenting the lab-mode trade-off openly in this section;
+- evaluate a future per-instance bootstrap path that preserves classroom usability without relying on a universal shared credential — that would let lab-mode pin a deployment-unique credential rather than the well-known `containd/containd`;
+- consider a lab-mode-compatible MFA bootstrap (e.g. instructor-distributed TOTP seeds) as an additional defensive layer.
 
 ### 3. Reducing Entire Classes of Vulnerability
 

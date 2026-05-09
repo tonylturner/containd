@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-05-08
+
+### Documentation
+- Transparency note in `docs/mkdocs/secure-by-design.md` under **§ 2 Default Passwords** documenting the v0.1.22 lab-mode credential pinning openly. Calls it out as a deliberate weakening of the default-password posture, scoped to the lab boundary, with explicit "when lab mode is appropriate" and "when lab mode is NOT appropriate" lists, the trade-offs (no credential rotation, SSH-on-:2222 uses the same pinned cred), and roadmap for a future per-instance bootstrap that preserves classroom usability without a universal shared credential.
+- `docs/mkdocs/threat-model.md` § Auth Bypass / Privilege Escalation residual-risk list now flags lab mode and links to the secure-by-design transparency note.
+- `docs/mkdocs/lab-compose.md` `.env` reference documents `CONTAIND_LAB_MODE` and explicitly warns it should not be enabled on deployments reachable from hostile or shared networks.
+- This is a docs-only release rolling the transparency content into the published image alongside the v0.1.22 code change. No new behavior beyond v0.1.22.
+
 ## [0.1.22] - 2026-05-08
 
 ### Fixed

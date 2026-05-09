@@ -44,6 +44,7 @@ Use `.env` when you only need to change addressing or published ports:
 - `CONTAIND_WAN_IP`, `CONTAIND_DMZ_IP`, `CONTAIND_LAN1_IP` ... `CONTAIND_LAN6_IP`
 - `CONTAIND_PUBLISH_HTTP_PORT`, `CONTAIND_PUBLISH_HTTPS_PORT`, `CONTAIND_PUBLISH_SSH_PORT`
 - `CONTAIND_JWT_SECRET`
+- `CONTAIND_LAB_MODE` — set to `1` for workshop / classroom / single-host lab deployments. Pins the canonical credential (`containd/containd`) and disables password change so reproducible lab docs and SSH-on-`:2222` keep working across student runs. Also relaxes session lifetime defaults for instructor-paced exercises. **This is a deliberate weakening of the default-password posture, scoped to the lab boundary.** Read the [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) transparency note before enabling. Do NOT set this on any deployment whose HTTP UI or SSH port is reachable from a hostile or shared network.
 
 If you change the starter subnets, keep the auto-assign hints aligned too:
 

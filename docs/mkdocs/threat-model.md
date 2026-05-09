@@ -89,7 +89,7 @@ Examples:
 
 Current mitigations:
 
-- session auth with forced password change on first login
+- session auth with forced password change on first login (default deployments only — see lab-mode caveat below)
 - optional TOTP MFA and admin-required MFA with grace periods
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
@@ -99,6 +99,7 @@ Residual risk:
 
 - RBAC is still intentionally simple compared with a mature enterprise policy model
 - the bootstrap password remains a conscious lab-usability tradeoff
+- when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and password change is disabled (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag; standard deployments retain the forced first-login change. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
 
 ### 3. Configuration Tampering
 
