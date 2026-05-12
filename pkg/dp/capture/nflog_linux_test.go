@@ -147,3 +147,25 @@ func TestRulePrefixREAcceptsTypicalForms(t *testing.T) {
 		})
 	}
 }
+
+func TestRulePrefixRERejectsUnsafeRuleIDs(t *testing.T) {
+	// Producer side sanitizes — these prefixes shouldn't reach us in
+	// practice. But if a packet's prefix is somehow malformed (bug,
+	// foreign log message, manually-applied rule), we should drop the
+	// packet rather than emit a garbage event with a broken ruleId.
+	cases := []string{
+		`containd:id with spaces:DENY `, // space breaks the ID match
+		`containd::DENY `,               // empty ID
+		`containd:id"q:DENY `,           // unescaped quote
+		`containd:id/slash:DENY `,       // slash
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c, func(t *testing.T) {
+			a := nflog.Attribute{Prefix: strPtr(c)}
+			if _, ok := buildRuleHitEvent(a); ok {
+				t.Errorf("expected !ok for malformed prefix %q", c)
+			}
+		})
+	}
+}

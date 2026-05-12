@@ -501,3 +501,43 @@ func TestValidateCIDRList(t *testing.T) {
 		t.Fatal("expected invalid CIDR list error")
 	}
 }
+
+func TestLogPrefixSanitizesUnsafeRuleIDChars(t *testing.T) {
+	// Config validation doesn't forbid `:`, `"`, spaces, or other
+	// shell/quote-breaking characters in rule IDs. The producer side
+	// must sanitize so the emitted nft `log prefix "..."` clause stays
+	// well-formed AND the consumer-side regex (also restricted to
+	// [A-Za-z0-9_-]) can match it.
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"plain-id", `containd:plain-id:DENY `},
+		{"id_with_underscores", `containd:id_with_underscores:DENY `},
+		{`id"with"quotes`, `containd:id_with_quotes:DENY `},
+		{"id:with:colons", `containd:id_with_colons:DENY `},
+		{"id with spaces", `containd:id_with_spaces:DENY `},
+		{"id*with$shell?chars", `containd:id_with_shell_chars:DENY `},
+		{"id/with/slashes", `containd:id_with_slashes:DENY `},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.in, func(t *testing.T) {
+			got := logPrefix(c.in, rules.ActionDeny)
+			if got != c.want {
+				t.Errorf("logPrefix(%q): got %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestLogPrefixSanitizationFitsBudgetAfterTruncation(t *testing.T) {
+	// 50-char ID with mixed safe/unsafe chars — sanitize then truncate
+	// to maxIDLen=40 to keep the full prefix under the 64-byte nflog
+	// limit.
+	id := "rule-id-with-many-bad?chars*and/slashes-everywhere"
+	got := logPrefix(id, rules.ActionAllow)
+	if len(got) > 64 {
+		t.Fatalf("prefix exceeds 64-byte budget: %d bytes %q", len(got), got)
+	}
+}

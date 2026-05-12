@@ -25,9 +25,16 @@ type RuleHitSink interface {
 	Append(e events.Event) events.Event
 }
 
-// nflog log-prefix shape produced by enforce.logPrefix: "containd:<id>:<ACTION> ".
-// Group 1 = rule ID, group 2 = action (ALLOW/DENY).
-var rulePrefixRE = regexp.MustCompile(`^containd:([^:]+):([A-Z]+)\s*$`)
+// nflog log-prefix shape produced by enforce.logPrefix:
+//
+//	containd:<sanitized-id>:<ACTION><space>
+//
+// The producer sanitizes rule IDs to [A-Za-z0-9_-] at log-prefix time,
+// so the consumer-side regex restricts to the same character set. This
+// ensures rule IDs containing `:` (which would otherwise be valid per
+// config validation) don't silently get dropped here. The trailing
+// space is consumed by \s* and then anchored by $.
+var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
 
 // StartNFLog opens an nflog subscription on the given group and emits a
 // firewall.rule.hit event to sink for each logged packet whose prefix

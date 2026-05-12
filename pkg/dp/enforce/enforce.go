@@ -426,19 +426,49 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 
 // logPrefix builds the nflog prefix string for a rule. Format:
 //
-//	containd:<rule-id>:<ACTION><space>
+//	containd:<sanitized-rule-id>:<ACTION><space>
 //
 // The trailing space is conventional — operators reading kernel logs
-// expect a separator between the prefix and packet metadata. The nflog
-// kernel-side prefix is limited to 64 bytes; truncate the rule ID if
-// needed so the full prefix fits comfortably.
+// expect a separator between the prefix and packet metadata.
+//
+// Sanitization (also performed at the nflog consumer side):
+//   - Only [A-Za-z0-9_-] from the rule ID survive into the on-wire
+//     prefix. Other characters become '_'.
+//   - The nflog kernel-side prefix is limited to 64 bytes; truncate
+//     the rule ID after sanitization so the full prefix fits.
+//
+// Why sanitize: containd's config validator doesn't forbid colons or
+// double-quote characters in rule IDs. Without sanitization, an ID
+// containing `"` would emit broken nft syntax (the prefix is quoted),
+// and an ID containing `:` would confuse the parser on the consumer
+// side (`:` is the field delimiter). Lossy but predictable.
 func logPrefix(ruleID string, action rules.Action) string {
 	const maxIDLen = 40
-	id := ruleID
+	id := sanitizeRuleIDForLog(ruleID)
 	if len(id) > maxIDLen {
 		id = id[:maxIDLen]
 	}
 	return fmt.Sprintf("containd:%s:%s ", id, action)
+}
+
+// sanitizeRuleIDForLog replaces any character outside [A-Za-z0-9_-]
+// with an underscore. The same predicate is reproduced in the nflog
+// consumer's prefix regex so the two sides agree on the safe-char set.
+func sanitizeRuleIDForLog(id string) string {
+	b := make([]byte, len(id))
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '_', c == '-':
+			b[i] = c
+		default:
+			b[i] = '_'
+		}
+	}
+	return string(b)
 }
 
 // isDPIEligible returns true if an entry requires DPI/ICS inspection and
