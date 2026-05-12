@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-05-12
+
+### Added — closes #19
+
+- **L4 firewall rule events** now flow into `/api/v1/events` for rules
+  with `log: true` that don't have an `ics:` block. `Compiler.NFLogGroup`
+  emits an `nft log prefix "containd:<id>:<ACTION> " group <N>` clause
+  before the verdict on non-DPI rules with `Log: true`. New userspace
+  consumer at `pkg/dp/capture/nflog_linux.go` (using
+  `github.com/florianl/go-nflog/v2`) subscribes to the configured
+  group and appends `firewall.rule.hit` events to the event store.
+  Rule IDs are sanitized to `[A-Za-z0-9_-]` in the prefix so quote/
+  colon/shell-meta characters in IDs don't produce broken nft syntax
+  or unparseable consumer events.
+
+- **Per-rule `ICSPredicate.Mode` is honored.** New
+  `(*Engine).effectiveMode(matched)` helper resolves with 3-tier
+  precedence: per-rule `Mode` > global `DPIMode` > `"learn"` (safe
+  default). `enforceDPIEvents` evaluates per-event and skips verdict
+  application unless effective mode is `"enforce"`. The
+  `firewall.rule.hit` log event fires regardless of mode so operators
+  in monitor-mode still get visibility for the observation phase
+  before promoting rules to enforce.
+
+- **ICS templates ship with `Log: true`** (Mode left blank to inherit
+  global). All 6 protocol templates + ModbusRegisterGuard. Purdue
+  Model's 4 explicit deny rules also gain `Log: true`. Operators
+  applying a template under monitor mode now see what would have
+  been blocked.
+
+- **Apply-time `mode` parameter** on both
+  `POST /api/v1/templates/apply` and `POST /api/v1/templates/ics/apply`
+  HTTP endpoints. When set (`"learn"` or `"enforce"`), overrides each
+  generated rule's `ICSPredicate.Mode`. Invalid values return 400.
+
+- **`containd templates apply <name> [--mode <learn|enforce>]`** CLI
+  flag. Threads through to the HTTP endpoint with the existing
+  `validateFirewallICSMode` validator.
+
+- **UI embed-path autodetect** in `ui/lib/api-core.ts`. If the page
+  is loaded from `/containd/*` (the convention for embedding the
+  containd UI behind a path-prefixed reverse proxy), prefix all API
+  calls with `/containd`. `NEXT_PUBLIC_API_BASE` env var still wins
+  if set. Fixes the templates UI returning "Failed to preview" when
+  accessed via an embedded `/containd/templates/` URL. Wizard's ICS
+  Communication card now also sets `log: true` on its generated rule.
+
+### Changed
+
+- `templates.Apply(name, cfg)` retains its existing signature; a new
+  sibling `templates.ApplyWithOpts(name, cfg, ApplyOpts{Mode: ...})`
+  is the mode-aware path used by the new handler/CLI surfaces.
+
+### Security / dependencies
+
+- Bumped Go toolchain `1.25.8` → `1.25.10` (in go.mod and both
+  build/Dockerfile.{mgmt,engine}) to clear 5 HIGH stdlib CVEs flagged
+  by Trivy: CVE-2026-33811, CVE-2026-33814, CVE-2026-39820,
+  CVE-2026-39836, CVE-2026-42499.
+
+- Added `github.com/florianl/go-nflog/v2 v2.3.0`.
+
+### Tests
+
+23 new test functions across the changed packages, covering log
+clause emission, DPI suppression, no-group disables logging, prefix
+truncation, rule-ID sanitization for unsafe characters, nflog prefix
+parse + foreign-prefix rejection + malformed-prefix rejection +
+packet field decode, effectiveMode resolution (per-rule wins,
+global fallback, learn default, case normalization), template
+factories ship `Log: true`, `ApplyWithOpts` overrides, HTTP apply
+with `mode=enforce`/blank/invalid.
+
+### Note on v0.1.24
+
+v0.1.24 was tagged briefly but the release workflow failed at its
+VERSION-vs-tag guard (VERSION file lagged the tag). No image was
+published for that tag. v0.1.25 is the first release containing
+these changes.
+
 ## [0.1.23] - 2026-05-08
 
 ### Documentation
