@@ -1,6 +1,26 @@
-const API_BASE =
-  typeof window === "undefined" ? process.env.NEXT_PUBLIC_API_BASE || "" : "";
+// API base path resolution. Three precedence rules:
+//   1. NEXT_PUBLIC_API_BASE env var (build-time, explicit override)
+//   2. Runtime auto-detect: if the page is hosted at /containd/* (the
+//      convention rangerdanger uses when embedding containd's UI under
+//      a path prefix), assume the backend is mounted at the same prefix
+//   3. Empty → API calls go to the same origin's root
+// The runtime branch makes the embedded UX Just Work without requiring
+// the embedder to rebuild containd with a baked-in env var.
+function resolveAPIBase(): string {
+  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/containd/")) {
+    return "/containd";
+  }
+  return "";
+}
+
+const API_BASE = resolveAPIBase();
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
+
+// apiURL is defined below; both bespoke fetch sites and the apiFetch
+// helper read API_BASE through it (or directly), so updating
+// resolveAPIBase() above is the single source of truth for path
+// prefixing.
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";

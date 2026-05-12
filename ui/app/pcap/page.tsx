@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import {
   api,
+  apiURL,
   isAdmin,
   uploadPcap,
   listPcaps,
@@ -77,7 +78,7 @@ async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
   try {
     const form = new FormData();
     form.append("file", file, file.name);
-    const res = await fetch("/api/v1/pcap/analyze", {
+    const res = await fetch(apiURL("/api/v1/pcap/analyze"), {
       method: "POST",
       credentials: "include",
       body: form,
@@ -104,7 +105,7 @@ async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
 
 async function applyGeneratedRules(rules: PolicyRule[]): Promise<boolean> {
   try {
-    const res = await fetch("/api/v1/firewall/rules", {
+    const res = await fetch(apiURL("/api/v1/firewall/rules"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

@@ -769,3 +769,97 @@ func TestObjectCRUD(t *testing.T) {
 		t.Fatalf("object delete expected 204, got %d", rec.Code)
 	}
 }
+
+func TestApplyICSTemplateModeEnforce(t *testing.T) {
+	// Apply-time mode=enforce should overwrite ICSPredicate.Mode on
+	// every generated rule. This is the lab path: bypass monitor-first
+	// for pedagogical clarity.
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_read_only",
+		"mode":"enforce"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	found := 0
+	for _, rule := range store.cfg.Firewall.Rules {
+		if strings.HasPrefix(rule.ID, "tpl-modbus-") {
+			if rule.ICS.Mode != "enforce" {
+				t.Errorf("rule %s has Mode:%q, want enforce", rule.ID, rule.ICS.Mode)
+			}
+			found++
+		}
+	}
+	if found != 2 {
+		t.Fatalf("expected 2 tpl-modbus-* rules persisted, found %d", found)
+	}
+}
+
+func TestApplyICSTemplateModeBlankPreservesTemplate(t *testing.T) {
+	// No mode in request → rules persist with template's default Mode
+	// (which is blank). Confirms operational-safety default: applying
+	// a template does not silently enforce.
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_read_only"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, rule := range store.cfg.Firewall.Rules {
+		if strings.HasPrefix(rule.ID, "tpl-modbus-") {
+			if rule.ICS.Mode != "" {
+				t.Errorf("rule %s has Mode:%q without explicit override, want blank", rule.ID, rule.ICS.Mode)
+			}
+		}
+	}
+}
+
+func TestApplyICSTemplateModeInvalid(t *testing.T) {
+	// Modes outside the documented set are rejected with 400.
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus_read_only",
+		"mode":"observe"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid mode, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestApplyGenericTemplateModeEnforce(t *testing.T) {
+	// Generic /api/v1/templates/apply endpoint also accepts mode and
+	// applies it to the rules from the registry.
+	store := &mockStore{cfg: config.DefaultConfig()}
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/apply", bytes.NewBufferString(`{
+		"name":"modbus-read-only",
+		"mode":"enforce"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, rule := range store.cfg.Firewall.Rules {
+		if strings.HasPrefix(rule.ID, "tpl-modbus-") {
+			if rule.ICS.Mode != "enforce" {
+				t.Errorf("rule %s has Mode:%q, want enforce (generic apply path)", rule.ID, rule.ICS.Mode)
+			}
+		}
+	}
+}

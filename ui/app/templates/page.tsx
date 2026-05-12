@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, isAdmin, type Zone } from "../../lib/api";
+import { api, apiURL, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 
@@ -52,7 +52,7 @@ type TemplateApplyResponse = {
 
 async function fetchTemplates(): Promise<ICSTemplate[]> {
   try {
-    const res = await fetch("/api/v1/templates/ics", {
+    const res = await fetch(apiURL("/api/v1/templates/ics"), {
       credentials: "include",
       cache: "no-store",
     });
@@ -67,7 +67,7 @@ async function previewTemplate(
   req: TemplateApplyRequest,
 ): Promise<TemplateApplyResponse | null> {
   try {
-    const res = await fetch("/api/v1/templates/ics/apply", {
+    const res = await fetch(apiURL("/api/v1/templates/ics/apply"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -84,7 +84,7 @@ async function applyTemplate(
   req: TemplateApplyRequest,
 ): Promise<TemplateApplyResponse | null> {
   try {
-    const res = await fetch("/api/v1/templates/ics/apply", {
+    const res = await fetch(apiURL("/api/v1/templates/ics/apply"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

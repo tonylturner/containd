@@ -219,6 +219,11 @@ export default function WizardPage() {
         destZones: [icsDstZone],
         protocols,
         ics,
+        // Always log wizard-created ICS rules so operators in monitor
+        // mode see what would have been blocked (the whole point of
+        // monitor-first), and operators in enforce mode get an audit
+        // trail of what *was* blocked.
+        log: true,
         action: "ALLOW",
       });
       if (!ruleRes.ok) {

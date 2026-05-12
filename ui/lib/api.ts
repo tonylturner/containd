@@ -15,6 +15,7 @@ export type ApiResult<T> =
 // domain modules and generic transport/session helpers in api-core/request.
 
 export {
+  apiURL,
   clearLocalAuth,
   getLastAuthError,
   getSessionToken,

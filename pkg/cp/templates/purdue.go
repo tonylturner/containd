@@ -117,11 +117,16 @@ func purdueRules() []config.Rule {
 			Action:      config.ActionAllow,
 		},
 		// ── Block L4 → L2/L1/L0: enterprise must never reach control ─
+		// Log:true on every explicit deny so operators see attempted
+		// north-south policy violations in /api/v1/events (the events
+		// flow regardless of whether the rule is enforcing — useful
+		// during the monitor-first observation phase before promotion).
 		{
 			ID:          "purdue-block-l4-to-l2",
 			Description: "Block Enterprise (L4) to Supervisory (L2)",
 			SourceZones: []string{ZoneL4},
 			DestZones:   []string{ZoneL2},
+			Log:         true,
 			Action:      config.ActionDeny,
 		},
 		{
@@ -129,6 +134,7 @@ func purdueRules() []config.Rule {
 			Description: "Block Enterprise (L4) to Basic Control (L1)",
 			SourceZones: []string{ZoneL4},
 			DestZones:   []string{ZoneL1},
+			Log:         true,
 			Action:      config.ActionDeny,
 		},
 		{
@@ -136,6 +142,7 @@ func purdueRules() []config.Rule {
 			Description: "Block Enterprise (L4) to Process (L0)",
 			SourceZones: []string{ZoneL4},
 			DestZones:   []string{ZoneL0},
+			Log:         true,
 			Action:      config.ActionDeny,
 		},
 		// ── Block L5 → everything except L4 ─────────────────────────
@@ -144,6 +151,7 @@ func purdueRules() []config.Rule {
 			Description: "Block Internet (L5) to all OT zones",
 			SourceZones: []string{ZoneL5},
 			DestZones:   []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35},
+			Log:         true,
 			Action:      config.ActionDeny,
 		},
 	}
