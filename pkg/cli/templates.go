@@ -31,9 +31,29 @@ func showTemplatesAPI(api *API) Command {
 func applyTemplateAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("usage: apply template <name>")
+			return fmt.Errorf("usage: apply template <name> [--mode <learn|enforce>]")
 		}
-		payload := map[string]string{"name": args[0]}
+		name := args[0]
+		mode := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--mode":
+				if i+1 >= len(args) {
+					return fmt.Errorf("--mode requires a value")
+				}
+				mode = args[i+1]
+				if err := validateFirewallICSMode(mode); err != nil {
+					return err
+				}
+				i++
+			default:
+				return fmt.Errorf("unknown option: %s", args[i])
+			}
+		}
+		payload := map[string]string{"name": name}
+		if mode != "" {
+			payload["mode"] = mode
+		}
 		return api.postJSON(ctx, "/api/v1/templates/apply", payload, out)
 	}
 }

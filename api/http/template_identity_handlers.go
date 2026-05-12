@@ -75,11 +75,20 @@ func listTemplatesHandler() gin.HandlerFunc {
 func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 	type req struct {
 		Name string `json:"name"`
+		// Mode, when set ("learn" or "enforce"), overrides the
+		// per-rule ICSPredicate.Mode on every rule the template
+		// generates. Default (blank) leaves the field blank so rules
+		// inherit the global DPIMode at evaluation time.
+		Mode string `json:"mode,omitempty"`
 	}
 	return func(c *gin.Context) {
 		var r req
 		if err := c.ShouldBindJSON(&r); err != nil || r.Name == "" {
 			apiError(c, http.StatusBadRequest, "name is required")
+			return
+		}
+		if err := validateTemplateApplyMode(r.Mode); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		ctx := c.Request.Context()
@@ -88,7 +97,7 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		if err := templates.Apply(r.Name, cfg); err != nil {
+		if err := templates.ApplyWithOpts(r.Name, cfg, templates.ApplyOpts{Mode: r.Mode}); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -96,7 +105,19 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules)})
+		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules), "mode": r.Mode})
+	}
+}
+
+// validateTemplateApplyMode rejects modes outside the documented set.
+// Empty is accepted: it means "inherit from global", which is the safe
+// production default (monitor-first).
+func validateTemplateApplyMode(mode string) error {
+	switch mode {
+	case "", "learn", "enforce":
+		return nil
+	default:
+		return fmt.Errorf("mode must be one of: \"\" (inherit), \"learn\", or \"enforce\"; got %q", mode)
 	}
 }
 
@@ -129,6 +150,11 @@ type icsTemplateRequest struct {
 	Parameters        map[string]string `json:"parameters,omitempty"`
 	Params            icsTemplateParams `json:"params,omitempty"`
 	Preview           bool              `json:"preview,omitempty"`
+	// Mode, when set ("learn" or "enforce"), overrides each generated
+	// rule's ICSPredicate.Mode. Empty means inherit from global DPIMode
+	// (which itself defaults to learn — the operationally-safe default
+	// for production deployments).
+	Mode string `json:"mode,omitempty"`
 }
 
 func listICSTemplatesHandler() gin.HandlerFunc {
@@ -165,6 +191,10 @@ func applyICSTemplateHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "template name is required")
 			return
 		}
+		if err := validateTemplateApplyMode(r.Mode); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		sourceZones, destZones, ranges := normalizeICSTemplateRequest(r)
 		generated, err := buildICSTemplateRules(r.Template, ranges)
 		if err != nil {
@@ -172,9 +202,10 @@ func applyICSTemplateHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		applyICSTemplateZones(generated, sourceZones, destZones)
+		applyICSTemplateMode(generated, r.Mode)
 
 		if r.Preview {
-			c.JSON(http.StatusOK, gin.H{"template": r.Template, "preview": true, "rules": generated})
+			c.JSON(http.StatusOK, gin.H{"template": r.Template, "preview": true, "rules": generated, "mode": r.Mode})
 			return
 		}
 
@@ -252,6 +283,18 @@ func applyICSTemplateZones(generated []config.Rule, sourceZones, destZones []str
 		if len(destZones) > 0 {
 			generated[i].DestZones = append([]string(nil), destZones...)
 		}
+	}
+}
+
+// applyICSTemplateMode overwrites ICSPredicate.Mode on every generated
+// rule when mode is non-empty. Blank mode preserves the template's
+// default (also blank, inheriting from global DPIMode at runtime).
+func applyICSTemplateMode(generated []config.Rule, mode string) {
+	if mode == "" {
+		return
+	}
+	for i := range generated {
+		generated[i].ICS.Mode = mode
 	}
 }
 

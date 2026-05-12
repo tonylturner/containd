@@ -239,6 +239,129 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 	}
 }
 
+func TestCompileFirewallEmitsLogClauseForL4Rules(t *testing.T) {
+	compiler := NewCompiler()
+	compiler.NFLogGroup = 100
+
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:        "deny-ent-to-field",
+				Action:    rules.ActionDeny,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				Log:       true,
+			},
+			{
+				ID:        "allow-rtac-to-field",
+				Action:    rules.ActionAllow,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				Sources:   []string{"10.30.30.20/32"},
+				Log:       true,
+			},
+			{
+				ID:        "silent-deny",
+				Action:    rules.ActionDeny,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}},
+				// Log left as false — no log clause expected.
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	wantDeny := `log prefix "containd:deny-ent-to-field:DENY " group 100 drop`
+	if !strings.Contains(ruleset, wantDeny) {
+		t.Fatalf("expected deny rule to include log clause %q, got:\n%s", wantDeny, ruleset)
+	}
+	wantAllow := `log prefix "containd:allow-rtac-to-field:ALLOW " group 100 accept`
+	if !strings.Contains(ruleset, wantAllow) {
+		t.Fatalf("expected allow rule to include log clause %q, got:\n%s", wantAllow, ruleset)
+	}
+	// The Log:false rule must NOT have a log clause.
+	if strings.Contains(ruleset, "silent-deny") && strings.Contains(ruleset, `containd:silent-deny`) {
+		t.Fatalf("did not expect log clause on silent-deny rule, got:\n%s", ruleset)
+	}
+}
+
+func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
+	// DPI-eligible rules (those with an ICS predicate) route through
+	// NFQUEUE. The userspace handler emits firewall.rule.hit events via
+	// EvaluateVerdict, so adding an nflog clause here would double-count
+	// the event in the consumer-facing event store.
+	compiler := NewCompiler()
+	compiler.QueueID = 42
+	compiler.NFLogGroup = 100
+
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:        "modbus-fc-guard",
+				Action:    rules.ActionDeny,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				ICS:       rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{5, 6}},
+				Log:       true,
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(ruleset, "log prefix") {
+		t.Fatalf("did not expect log clause on DPI-eligible rule, got:\n%s", ruleset)
+	}
+	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+		t.Fatalf("expected queue verdict on DPI rule, got:\n%s", ruleset)
+	}
+}
+
+func TestCompileFirewallNoLogWithoutNFLogGroup(t *testing.T) {
+	// NFLogGroup is 0 (default) — no log clauses should be emitted even
+	// when Log:true is set on rules. This preserves backward compatibility
+	// for deployments that haven't wired the nflog consumer.
+	compiler := NewCompiler()
+	// NFLogGroup intentionally left at 0.
+	snap := &rules.Snapshot{
+		Default: rules.ActionDeny,
+		Firewall: []rules.Entry{
+			{
+				ID:        "deny-ent",
+				Action:    rules.ActionDeny,
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+				Log:       true,
+			},
+		},
+	}
+	ruleset, err := compiler.CompileFirewall(snap)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(ruleset, "log prefix") {
+		t.Fatalf("did not expect log clause when NFLogGroup is 0, got:\n%s", ruleset)
+	}
+}
+
+func TestLogPrefixTruncatesLongRuleID(t *testing.T) {
+	// nflog kernel-side prefix is 64 bytes. Verify long rule IDs are
+	// truncated to keep the full prefix string under that limit with room
+	// for "containd:" + ":<ACTION> " framing.
+	longID := strings.Repeat("a", 60)
+	got := logPrefix(longID, rules.ActionDeny)
+	// 9 ("containd:") + 40 (truncated id) + 6 (":DENY ") = 55 bytes.
+	if len(got) > 64 {
+		t.Fatalf("expected prefix <= 64 bytes, got %d: %q", len(got), got)
+	}
+	if !strings.HasPrefix(got, "containd:aaaa") {
+		t.Fatalf("unexpected prefix shape: %q", got)
+	}
+	if !strings.HasSuffix(got, ":DENY ") {
+		t.Fatalf("expected DENY suffix, got: %q", got)
+	}
+}
+
 func TestIsDPIEligible(t *testing.T) {
 	tests := []struct {
 		name     string

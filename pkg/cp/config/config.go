@@ -468,6 +468,14 @@ type DataPlaneConfig struct {
 	DPIProtocols    map[string]bool `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
 	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua"
 	DPIExclusions   []DPIExclusion  `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
+
+	// NFLogGroup, when non-zero, enables kernel-side logging for rules
+	// with Log:true and starts a userspace nflog consumer that emits a
+	// firewall.rule.hit event per logged packet. Closes the L4
+	// visibility gap (rules without an ICS predicate go through
+	// nftables drop/accept directly and so never reached the
+	// userspace event pipeline before this). Recommended value: 100.
+	NFLogGroup uint16 `json:"nflogGroup,omitempty"`
 }
 
 // DPIExclusion represents an IP address, CIDR range, or domain name

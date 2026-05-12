@@ -44,6 +44,13 @@ func init() {
 
 // ModbusReadOnly returns rules that allow Modbus read function codes (1-4) and
 // deny write function codes (5, 6, 15, 16, 22, 23).
+//
+// Log:true is set on every rule so the operator has visibility into both
+// what the deny rule would block AND what the allow rule actually passes —
+// essential for the monitor-first observation phase. ICSPredicate.Mode is
+// left blank so the rule inherits the global DPIMode (which defaults to
+// "learn"). Operators promote to enforce by setting the global mode or
+// re-applying via the apply-time `mode` parameter.
 func ModbusReadOnly() []config.Rule {
 	return []config.Rule{
 		{
@@ -55,6 +62,7 @@ func ModbusReadOnly() []config.Rule {
 				FunctionCode: []uint8{1, 2, 3, 4},
 				ReadOnly:     true,
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -65,6 +73,7 @@ func ModbusReadOnly() []config.Rule {
 				Protocol:     "modbus",
 				FunctionCode: []uint8{5, 6, 15, 16, 22, 23},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}
@@ -83,6 +92,7 @@ func ModbusRegisterGuard(allowedRanges []string) []config.Rule {
 				Protocol:  "modbus",
 				Addresses: allowedRanges,
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 	}
@@ -101,6 +111,7 @@ func DNP3SecureOperations() []config.Rule {
 				Protocol:     "dnp3",
 				FunctionCode: []uint8{1, 2, 20},
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -111,6 +122,7 @@ func DNP3SecureOperations() []config.Rule {
 				Protocol:     "dnp3",
 				FunctionCode: []uint8{13, 14, 18},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}
@@ -129,6 +141,7 @@ func S7commReadOnly() []config.Rule {
 				FunctionCode: []uint8{0x04},
 				ReadOnly:     true,
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -139,6 +152,7 @@ func S7commReadOnly() []config.Rule {
 				Protocol:     "s7comm",
 				FunctionCode: []uint8{0x05, 0x28, 0x29},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}
@@ -156,6 +170,7 @@ func CIPMonitorOnly() []config.Rule {
 				Protocol:     "cip",
 				FunctionCode: []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E},
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -166,6 +181,7 @@ func CIPMonitorOnly() []config.Rule {
 				Protocol:     "cip",
 				FunctionCode: []uint8{0x05, 0x06, 0x07, 0x4D, 0x4F},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}
@@ -183,6 +199,7 @@ func BACnetReadOnly() []config.Rule {
 				Protocol:     "bacnet",
 				FunctionCode: []uint8{12, 14, 26},
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -193,6 +210,7 @@ func BACnetReadOnly() []config.Rule {
 				Protocol:     "bacnet",
 				FunctionCode: []uint8{15, 16, 20, 17},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}
@@ -213,6 +231,7 @@ func OPCUAMonitorOnly() []config.Rule {
 				Addresses: []string{"525", "629", "785", "749"},
 				ReadOnly:  true,
 			},
+			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
@@ -223,6 +242,7 @@ func OPCUAMonitorOnly() []config.Rule {
 				Protocol:  "opcua",
 				Addresses: []string{"671", "710", "486", "498"},
 			},
+			Log:    true,
 			Action: config.ActionDeny,
 		},
 	}

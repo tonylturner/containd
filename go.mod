@@ -1,6 +1,6 @@
 module github.com/tonylturner/containd
 
-go 1.25.8
+go 1.25.10
 
 require github.com/gin-gonic/gin v1.9.1
 
@@ -12,6 +12,7 @@ require (
 	github.com/RackSec/srslog v0.0.0-20180709174129-a4725f04ec91
 	github.com/cilium/ebpf v0.21.0
 	github.com/creack/pty v1.1.24
+	github.com/florianl/go-nflog/v2 v2.3.0
 	github.com/florianl/go-nfqueue/v2 v2.0.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
@@ -30,9 +31,8 @@ require (
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/josharian/native v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.3 // indirect
-	github.com/mdlayher/netlink v1.7.2 // indirect
+	github.com/mdlayher/netlink v1.9.1-0.20260312172110-2a932c0fc1ae // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

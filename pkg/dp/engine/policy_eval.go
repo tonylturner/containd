@@ -64,7 +64,16 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 }
 
 func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, bool) {
-	if e == nil || state == nil || pkt == nil || len(evs) == 0 || !strings.EqualFold(e.dpiMode, "enforce") {
+	// The early-return on global mode that used to live here was removed
+	// in favor of per-rule mode resolution: a rule may opt into enforce
+	// even when the global default is learn (the safe production
+	// default). The matched rule's effective mode is consulted below
+	// after evaluation. The firewall.rule.hit log event still fires for
+	// every matched-with-Log rule regardless of mode (logging is safe in
+	// both monitor and enforce modes) — that's how operators get the
+	// visibility they need during the monitor-first observation phase
+	// before flipping rules to enforce.
+	if e == nil || state == nil || pkt == nil || len(evs) == 0 {
 		return verdict.Verdict{}, false
 	}
 	snap := e.ruleSnap.Load()
@@ -77,8 +86,14 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 		if !ok {
 			continue
 		}
-		v := e.EvaluateVerdict(ctx)
+		v, matched := e.EvaluateVerdictMatch(ctx)
 		if v.Action == verdict.AllowContinue {
+			continue
+		}
+		if e.effectiveMode(matched) != "enforce" {
+			// Match logged above via EvaluateVerdictMatch — operator sees
+			// "this would have been blocked" — but verdict not applied
+			// because the rule is in learn mode (or no enforce override).
 			continue
 		}
 		if v.Action == verdict.DenyDrop {

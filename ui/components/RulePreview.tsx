@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { apiURL } from "../lib/api";
+
 /* ── Types ─────────────────────────────────────────────────────── */
 
 type PreviewResult = {
@@ -26,7 +28,7 @@ async function previewRuleImpact(
   rule: Record<string, unknown>,
 ): Promise<PreviewResult | null> {
   try {
-    const res = await fetch("/api/v1/firewall/rules/preview", {
+    const res = await fetch(apiURL("/api/v1/firewall/rules/preview"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
