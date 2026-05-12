@@ -307,7 +307,18 @@ func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
 }
 
 // EvaluateVerdict returns a baseline verdict for the current snapshot.
+// Callers that need access to the matched rule (e.g. to consult its
+// per-rule Mode) should use EvaluateVerdictMatch directly.
 func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
+	v, _ := e.EvaluateVerdictMatch(ctx)
+	return v
+}
+
+// EvaluateVerdictMatch returns the baseline verdict and the matched rule
+// entry (may be nil if no rule matched and the default action applies).
+// Side-effect: appends a firewall.rule.hit event to the event store when
+// the matched rule has Log:true.
+func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	snap := e.ruleSnap.Load()
 	ev := rules.NewEvaluator(snap)
@@ -353,7 +364,26 @@ func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 		}
 		e.eventStore.Append(logEvent)
 	}
-	return v
+	return v, matched
+}
+
+// effectiveMode returns the mode that should govern verdict application
+// for the matched rule, following the 3-tier resolution:
+//
+//	per-rule ICSPredicate.Mode > global Engine.dpiMode > "learn" (safe default)
+//
+// The safe default makes new deployments operate in monitor-only mode
+// unless an operator explicitly opts into enforce — a real OT environment
+// should never silently start blocking traffic just because containd is
+// installed.
+func (e *Engine) effectiveMode(matched *rules.Entry) string {
+	if matched != nil && strings.TrimSpace(matched.ICS.Mode) != "" {
+		return strings.ToLower(strings.TrimSpace(matched.ICS.Mode))
+	}
+	if e != nil && strings.TrimSpace(e.dpiMode) != "" {
+		return strings.ToLower(strings.TrimSpace(e.dpiMode))
+	}
+	return "learn"
 }
 
 // ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.

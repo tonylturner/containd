@@ -26,6 +26,16 @@ type Compiler struct {
 	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
 	// steering matched traffic through NFQUEUE for selective DPI.
 	QueueID int
+	// NFLogGroup, when non-zero, causes rules with Log:true to emit a
+	// "log prefix ... group <NFLogGroup>" statement before their verdict.
+	// The userspace nflog consumer subscribes to this group, parses the
+	// prefix to recover (ruleId, action), and appends firewall.rule.hit
+	// events to the engine's event store — this is how L4-only rules
+	// (no ICS predicate, so no NFQUEUE handoff) become visible in
+	// /api/v1/events. DPI-eligible rules emit their visibility through
+	// the existing NFQUEUE userspace path, so this log statement is
+	// suppressed for them to avoid double-counting.
+	NFLogGroup int
 }
 
 func NewCompiler() *Compiler {
@@ -155,7 +165,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 		return entries[i].ID < entries[j].ID
 	})
 	for _, e := range entries {
-		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID)
+		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
 		if err != nil {
 			return err
 		}
@@ -335,7 +345,7 @@ func defaultPolicy(a rules.Action) string {
 //
 // Entries with zero protocols emit a single line with no proto/port match
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
-func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) ([]string, error) {
+func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	base := []string{}
 
 	if len(e.SourceZones) > 0 {
@@ -357,8 +367,9 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) ([
 	}
 
 	// Pick the verdict once — same for every emitted protocol-variant line.
+	dpiEligible := isDPIEligible(e)
 	verdict := ""
-	if queueID > 0 && isDPIEligible(e) {
+	if queueID > 0 && dpiEligible {
 		verdict = fmt.Sprintf("queue num %d", queueID)
 	} else {
 		switch e.Action {
@@ -369,6 +380,16 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) ([
 		default:
 			return nil, fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
 		}
+	}
+
+	// Build the optional log statement. Only emit for non-DPI rules:
+	// DPI-eligible rules already get visibility through the NFQUEUE
+	// userspace path (RecordDPIEvents → eventStore.Record, plus the
+	// firewall.rule.hit event from EvaluateVerdict when an enforce-mode
+	// verdict is applied). Adding a kernel log here would double-count.
+	logStmt := ""
+	if e.Log && nflogGroup > 0 && !dpiEligible {
+		logStmt = fmt.Sprintf(`log prefix "%s" group %d`, logPrefix(e.ID, e.Action), nflogGroup)
 	}
 
 	// Treat "no protocols" as a single iteration with no proto match — the
@@ -394,10 +415,30 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int) ([
 		if len(e.Destinations) > 0 {
 			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
 		}
+		if logStmt != "" {
+			parts = append(parts, logStmt)
+		}
 		parts = append(parts, verdict)
 		lines = append(lines, strings.Join(parts, " "))
 	}
 	return lines, nil
+}
+
+// logPrefix builds the nflog prefix string for a rule. Format:
+//
+//	containd:<rule-id>:<ACTION><space>
+//
+// The trailing space is conventional — operators reading kernel logs
+// expect a separator between the prefix and packet metadata. The nflog
+// kernel-side prefix is limited to 64 bytes; truncate the rule ID if
+// needed so the full prefix fits comfortably.
+func logPrefix(ruleID string, action rules.Action) string {
+	const maxIDLen = 40
+	id := ruleID
+	if len(id) > maxIDLen {
+		id = id[:maxIDLen]
+	}
+	return fmt.Sprintf("containd:%s:%s ", id, action)
 }
 
 // isDPIEligible returns true if an entry requires DPI/ICS inspection and

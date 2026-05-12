@@ -453,3 +453,55 @@ func TestShouldInspectICSHeuristics(t *testing.T) {
 		t.Fatal("expected no inspect for non-ICS port")
 	}
 }
+
+func TestEffectiveModePerRuleOverrideWins(t *testing.T) {
+	// Per-rule Mode beats global, no matter what global is.
+	e := &Engine{dpiMode: "enforce"}
+	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "learn"}}
+	if got := e.effectiveMode(entry); got != "learn" {
+		t.Errorf("per-rule learn should win over global enforce, got %q", got)
+	}
+	e.dpiMode = "learn"
+	entry.ICS.Mode = "enforce"
+	if got := e.effectiveMode(entry); got != "enforce" {
+		t.Errorf("per-rule enforce should win over global learn, got %q", got)
+	}
+}
+
+func TestEffectiveModeFallsBackToGlobal(t *testing.T) {
+	e := &Engine{dpiMode: "enforce"}
+	entry := &rules.Entry{} // no per-rule Mode
+	if got := e.effectiveMode(entry); got != "enforce" {
+		t.Errorf("empty per-rule should fall back to global, got %q", got)
+	}
+	e.dpiMode = "learn"
+	if got := e.effectiveMode(entry); got != "learn" {
+		t.Errorf("empty per-rule, global learn = learn, got %q", got)
+	}
+}
+
+func TestEffectiveModeDefaultsToLearn(t *testing.T) {
+	// Safe default — both per-rule and global blank → learn. This is the
+	// operationally-safe behavior: a fresh deploy with no mode set
+	// anywhere should not silently enforce.
+	e := &Engine{}
+	if got := e.effectiveMode(nil); got != "learn" {
+		t.Errorf("nil matched + empty global should default to learn, got %q", got)
+	}
+	if got := e.effectiveMode(&rules.Entry{}); got != "learn" {
+		t.Errorf("blank rule + empty global should default to learn, got %q", got)
+	}
+}
+
+func TestEffectiveModeNormalizesCase(t *testing.T) {
+	e := &Engine{dpiMode: "ENFORCE"}
+	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "  Learn  "}}
+	// Per-rule wins; case+whitespace normalized.
+	if got := e.effectiveMode(entry); got != "learn" {
+		t.Errorf("expected normalized learn, got %q", got)
+	}
+	entry.ICS.Mode = ""
+	if got := e.effectiveMode(entry); got != "enforce" {
+		t.Errorf("expected normalized enforce from global, got %q", got)
+	}
+}

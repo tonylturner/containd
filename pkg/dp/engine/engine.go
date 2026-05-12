@@ -45,6 +45,7 @@ type Engine struct {
 	dpiEnabled      bool           // master DPI on/off
 	dpiMode         string         // "learn" or "enforce"
 	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
+	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
 	flowMu          sync.Mutex
 	flows           map[string]*flow.State
 	lastSweep       time.Time
@@ -79,6 +80,12 @@ type Config struct {
 	DPIProtocols    map[string]bool // per-IT-protocol enable/disable
 	DPIICSProtocols map[string]bool // per-ICS-protocol enable/disable
 	DPIExclusions   []DPIExclusion  // IPs/domains excluded from DPI
+	// NFLogGroup, when non-zero, enables kernel-side logging for rules
+	// with Log:true via nftables `log group <N>` and starts a userspace
+	// nflog consumer that translates each logged packet into a
+	// firewall.rule.hit event in the engine's event store. Zero disables
+	// (no log clause emitted, no consumer started).
+	NFLogGroup uint16
 }
 
 // DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
@@ -98,6 +105,7 @@ func New(cfg Config) (*Engine, error) {
 		dpiEnabled:    cfg.DPIEnabled,
 		dpiMode:       cfg.DPIMode,
 		dpiExclusions: cfg.DPIExclusions,
+		nflogGroup:    cfg.NFLogGroup,
 		flows:         make(map[string]*flow.State),
 		verdictCache:  NewVerdictCache(30*time.Second, 65536),
 	}
@@ -114,6 +122,10 @@ func New(cfg Config) (*Engine, error) {
 		if cfg.Enforce.TableName != "" {
 			comp.TableName = cfg.Enforce.TableName
 		}
+		// Wire the nflog group through to the compiler so rules with
+		// Log:true emit the appropriate `log prefix ... group N` clause.
+		// Compiler operates on int; cast safely (NFLogGroup is uint16).
+		comp.NFLogGroup = int(cfg.NFLogGroup)
 		e.compiler = comp
 		if cfg.Enforce.Applier != nil {
 			e.applier = cfg.Enforce.Applier
@@ -148,6 +160,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
 	e.dpiExclusions = fresh.dpiExclusions
+	e.nflogGroup = fresh.nflogGroup
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
@@ -161,6 +174,29 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	if err := e.capture.Start(ctx, e.handlePacket); err != nil {
 		return err
+	}
+	// Start the nflog consumer if configured. This produces
+	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
+	// failure here is non-fatal — log it via the rules-event log so the
+	// admin can see "nflog unavailable" without taking down the rest of
+	// the engine. Common cause: container lacks NET_ADMIN cap; in that
+	// case the kernel log clause still fires but the userspace consumer
+	// just won't translate the packets into events.
+	if e.nflogGroup != 0 && e.eventStore != nil {
+		if err := capture.StartNFLog(ctx, e.nflogGroup, e.eventStore, func(perr error) {
+			// Per-packet hook errors — drop. Surface only at debug.
+			_ = perr
+		}); err != nil {
+			// Surface as a system event so it's visible in /api/v1/events.
+			e.eventStore.Append(events.Event{
+				Kind:      "service.nflog.unavailable",
+				Timestamp: time.Now().UTC(),
+				Attributes: map[string]any{
+					"group": int(e.nflogGroup),
+					"error": err.Error(),
+				},
+			})
+		}
 	}
 	// Periodically update the active goroutine gauge.
 	go func() {
