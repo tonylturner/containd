@@ -8,6 +8,7 @@ package capture
 import (
 	"context"
 	"fmt"
+	"time"
 
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 )
@@ -17,6 +18,41 @@ type nfqueueSource struct {
 	queueID int
 	cfg     Config
 	handler Handler
+
+	// runFn lets tests inject a fake inner-loop implementation. Production
+	// uses s.run (the real go-nfqueue consumer). Tests override this to
+	// exercise the supervise retry/backoff/give-up logic without needing
+	// the netfilter kernel surface.
+	runFn func(context.Context) error
+}
+
+// Bounded retry envelope for the NFQUEUE consumer goroutine. If the
+// inner run loop panics or returns an error, restart with exponential
+// backoff up to maxRetries; after that, give up and leave the queue
+// dark (logged via OnError) so we don't pathologically spin on a
+// permanent kernel-side failure. Each successful run that exits via
+// ctx-cancel resets the retry counter.
+//
+// These are vars rather than consts so the tests can compress the
+// backoff to sub-millisecond and finish in well under a second
+// rather than the production envelope's ~62s worst case.
+var (
+	nfqueueRetryInitial = 250 * time.Millisecond
+	nfqueueRetryMax     = 30 * time.Second
+	nfqueueMaxRetries   = 8
+)
+
+// withFastBackoff swaps the package-level backoff for fast values
+// suitable for unit tests and returns a deferred reset. Used in
+// nfqueue_linux_test.go.
+func withFastBackoff(d time.Duration) func() {
+	prevInit, prevMax := nfqueueRetryInitial, nfqueueRetryMax
+	nfqueueRetryInitial = d
+	nfqueueRetryMax = d
+	return func() {
+		nfqueueRetryInitial = prevInit
+		nfqueueRetryMax = prevMax
+	}
 }
 
 func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
@@ -25,29 +61,68 @@ func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
 		cfg:     m.cfg,
 		handler: handler,
 	}
-	go func() {
-		// go-nfqueue/v2 + mdlayher/netlink occasionally panic with
-		// "slice bounds out of range" when parsing truncated/oversized
-		// netlink messages from the kernel (observed in the LinuxKit
-		// kernel under macOS Docker Desktop). Without recover, that
-		// panic kills the whole engine process. Recover here so a
-		// single malformed message just drops that packet — the
-		// consumer keeps running and subsequent packets still flow
-		// through DPI. Upstream issue tracked in florianl/go-nfqueue.
-		defer func() {
-			if r := recover(); r != nil {
-				if m.cfg.OnError != nil {
-					m.cfg.OnError(fmt.Errorf("nfqueue consumer panicked, recovered: %v", r))
-				}
+	src.runFn = src.run
+	go src.supervise(ctx, m.cfg.OnError)
+	return nil
+}
+
+// supervise runs the NFQUEUE consumer in a retry loop. Without this,
+// a single panic from go-nfqueue/v2 + mdlayher/netlink (observed on
+// LinuxKit kernels parsing truncated netlink messages) would silently
+// leave the kernel queue undrained — ICS traffic queues to a sink
+// nobody reads, and the queue eventually fills (MaxQueueLen=1024)
+// and either drops new packets or stalls them until full engine
+// restart. The recover here logs the panic via onError, then attempts
+// to re-establish the consumer via fresh nfqueue.Open + RegisterWithErrorFunc.
+// Bounded retries (nfqueueMaxRetries with exponential backoff) prevent
+// a permanent kernel-side failure from busy-looping. Cancellation via
+// ctx.Done() exits cleanly without consuming a retry.
+func (s *nfqueueSource) supervise(ctx context.Context, onError func(error)) {
+	backoff := nfqueueRetryInitial
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		err := s.runWithRecover(ctx, onError)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil && onError != nil {
+			onError(fmt.Errorf("nfqueue consumer exited (attempt %d/%d): %w", attempt+1, nfqueueMaxRetries, err))
+		}
+		if attempt+1 >= nfqueueMaxRetries {
+			if onError != nil {
+				onError(fmt.Errorf("nfqueue consumer giving up after %d failed attempts; queue %d will be undrained until engine restart",
+					nfqueueMaxRetries, s.queueID))
 			}
-		}()
-		if err := src.run(ctx); err != nil {
-			if m.cfg.OnError != nil {
-				m.cfg.OnError(err)
+			return
+		}
+		// Sleep with cancellation-awareness so a ctx cancel doesn't
+		// have to wait out the full backoff before exiting.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > nfqueueRetryMax {
+			backoff = nfqueueRetryMax
+		}
+	}
+}
+
+// runWithRecover converts a panic in runFn() into a returned error so
+// supervise() can retry it the same way it retries normal errors.
+func (s *nfqueueSource) runWithRecover(ctx context.Context, onError func(error)) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if onError != nil {
+				onError(fmt.Errorf("nfqueue consumer panicked, recovered: %v", r))
 			}
+			err = fmt.Errorf("nfqueue consumer panic: %v", r)
 		}
 	}()
-	return nil
+	return s.runFn(ctx)
 }
 
 func (s *nfqueueSource) run(ctx context.Context) error {
