@@ -249,6 +249,14 @@ func normalizeICSTemplateRequest(r icsTemplateRequest) ([]string, []string, []st
 }
 
 func buildICSTemplateRules(template string, ranges []string) ([]config.Rule, error) {
+	// Normalize hyphens to underscores so callers can use either form.
+	// GET /api/v1/templates returns hyphenated names (the registry's
+	// canonical user-facing form, e.g. "modbus-read-only"); the apply
+	// switch below was written with underscores. Without this, anyone
+	// copy-pasting from the list endpoint into apply gets a 400. Both
+	// forms are unambiguous because template names contain at most one
+	// separator and that separator is the only divergence point.
+	template = strings.ReplaceAll(template, "-", "_")
 	switch template {
 	case "modbus_read_only":
 		return templates.ModbusReadOnly(), nil

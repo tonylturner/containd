@@ -476,6 +476,20 @@ type DataPlaneConfig struct {
 	// nftables drop/accept directly and so never reached the
 	// userspace event pipeline before this). Recommended value: 100.
 	NFLogGroup uint16 `json:"nflogGroup,omitempty"`
+
+	// NFQueueGroup, when non-zero, enables NFQUEUE-based DPI enforcement
+	// for rules with an ICS predicate. The enforce compiler emits
+	// `queue num N` as the verdict for dpiEligible rules (instead of
+	// plain accept/drop), and the engine starts an NFQUEUE capture
+	// consumer at that group ID. Packets land in handlePacket → DPI
+	// decoders → enforceDPIEvents, which evaluates the rule's ICS
+	// predicate (function-code allowlist, register ranges, etc.) and
+	// uses ApplyVerdict / BlockFlowTemp to block out-of-policy flows.
+	// Without this, ICS rules compile to plain accept and the
+	// function-code allowlist is never enforced. Distinct from
+	// NFLogGroup since the two kernel subsystems (NFLOG vs NFQUEUE)
+	// are independent. Recommended value: 101.
+	NFQueueGroup uint16 `json:"nfqueueGroup,omitempty"`
 }
 
 // DPIExclusion represents an IP address, CIDR range, or domain name

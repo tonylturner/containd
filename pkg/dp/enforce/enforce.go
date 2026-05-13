@@ -141,21 +141,17 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
-	buf.WriteString("    ct state { established, related } accept;\n")
+
+	// block_hosts/block_flows must fire BEFORE ct established so that
+	// retroactive blocks (added by enforceDPIEvents.ApplyVerdict when a
+	// DPI verdict denies a function-code-violating Modbus PDU, for
+	// example) actually drop subsequent packets of an already-established
+	// flow. Without this ordering, ct established below would short-
+	// circuit and the block_flows entry would only catch new flows.
 	buf.WriteString("    ip saddr @block_hosts drop;\n")
 	buf.WriteString("    ip daddr @block_hosts drop;\n")
 	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
-	if err := c.writeDNATAccepts(buf, snap); err != nil {
-		return err
-	}
-	// Emit ALLOW rules before DENY rules. nftables is first-match, and a
-	// broad deny (e.g. "block all OT->Field except RTAC") that emits
-	// before a narrow allow (e.g. "RTAC->Field/502 from 10.30.30.20")
-	// will shadow the allow. Sorting allows ahead preserves the
-	// firewall convention that more-specific allow exceptions punch
-	// through broader deny rules. Within each action, sort by ID for
-	// determinism. This matters mostly for policies authored as
-	// "deny-broad + allow-narrow" exception lists.
+
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.SliceStable(entries, func(i, j int) bool {
 		ai, aj := entries[i].Action, entries[j].Action
@@ -164,7 +160,43 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 		}
 		return entries[i].ID < entries[j].ID
 	})
+
+	// Emit dpiEligible rules (those with ICS predicates compiled to
+	// `queue num N`) BEFORE the ct established fast-path. Otherwise only
+	// the SYN of an inspected flow reaches the queue — subsequent data-
+	// bearing packets (the ones actually carrying the Modbus/DNP3/CIP
+	// PDU we need to inspect) match ct established and skip the queue
+	// entirely, so the userspace DPI decoder never sees a payload to
+	// parse. With QueueID=0 this is a no-op (compileEntry emits plain
+	// accept/drop for everything, ct established below stays optimal).
+	if c.QueueID > 0 {
+		for _, e := range entries {
+			if !isDPIEligible(e) {
+				continue
+			}
+			lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
+			if err != nil {
+				return err
+			}
+			for _, line := range lines {
+				buf.WriteString("    " + line + ";\n")
+			}
+		}
+	}
+
+	buf.WriteString("    ct state { established, related } accept;\n")
+	if err := c.writeDNATAccepts(buf, snap); err != nil {
+		return err
+	}
+	// Emit non-dpiEligible rules after the conntrack fast-path so plain
+	// L4 traffic gets the established-flow optimization. dpiEligible
+	// rules already emitted above with QueueID > 0 are skipped here.
+	// nftables is first-match, so ALLOW exceptions (more specific) must
+	// emit before DENY rules (broader) — preserved by the sort above.
 	for _, e := range entries {
+		if c.QueueID > 0 && isDPIEligible(e) {
+			continue
+		}
 		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
 		if err != nil {
 			return err

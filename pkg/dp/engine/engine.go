@@ -46,6 +46,8 @@ type Engine struct {
 	dpiMode         string         // "learn" or "enforce"
 	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
 	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
+	nflogCancel     context.CancelFunc // stops the running nflog consumer; nil before Start or after disable
+	nfqueueGroup    uint16         // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
 	flowMu          sync.Mutex
 	flows           map[string]*flow.State
 	lastSweep       time.Time
@@ -86,6 +88,15 @@ type Config struct {
 	// firewall.rule.hit event in the engine's event store. Zero disables
 	// (no log clause emitted, no consumer started).
 	NFLogGroup uint16
+
+	// NFQueueGroup, when non-zero, enables NFQUEUE-based DPI enforcement
+	// for dpiEligible rules. The compiler emits `queue num <N>` instead
+	// of accept/drop on rules with an ICS predicate, and the capture
+	// manager runs an NFQUEUE consumer at that group. Zero disables
+	// (ICS rules fall back to plain accept/drop with no function-code
+	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
+	// for full rationale.
+	NFQueueGroup uint16
 }
 
 // DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
@@ -95,6 +106,16 @@ type DPIExclusion struct {
 }
 
 func New(cfg Config) (*Engine, error) {
+	// If NFQueueGroup is set, drive the capture manager via NFQUEUE
+	// rather than AFPACKET. This pairs with the compiler emitting
+	// `queue num <NFQueueGroup>` as the verdict for dpiEligible rules
+	// (below), so ICS-flagged packets land in handlePacket where the
+	// DPI decoders + enforceDPIEvents can apply function-code-level
+	// verdicts. Explicit NFQUEUE config overrides any inherited Mode.
+	if cfg.NFQueueGroup != 0 {
+		cfg.Capture.Mode = "nfqueue"
+		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
+	}
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
 		return nil, err
@@ -106,6 +127,7 @@ func New(cfg Config) (*Engine, error) {
 		dpiMode:       cfg.DPIMode,
 		dpiExclusions: cfg.DPIExclusions,
 		nflogGroup:    cfg.NFLogGroup,
+		nfqueueGroup:  cfg.NFQueueGroup,
 		flows:         make(map[string]*flow.State),
 		verdictCache:  NewVerdictCache(30*time.Second, 65536),
 	}
@@ -126,6 +148,12 @@ func New(cfg Config) (*Engine, error) {
 		// Log:true emit the appropriate `log prefix ... group N` clause.
 		// Compiler operates on int; cast safely (NFLogGroup is uint16).
 		comp.NFLogGroup = int(cfg.NFLogGroup)
+		// Wire NFQueueGroup so dpiEligible rules compile to
+		// `queue num N` instead of plain accept/drop. The capture
+		// manager (above) is set to nfqueue mode at the same group
+		// so the queued packets reach handlePacket → DPI →
+		// enforceDPIEvents and get an ICS-aware verdict.
+		comp.QueueID = int(cfg.NFQueueGroup)
 		e.compiler = comp
 		if cfg.Enforce.Applier != nil {
 			e.applier = cfg.Enforce.Applier
@@ -143,8 +171,17 @@ func New(cfg Config) (*Engine, error) {
 
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
+//
+// Stops the previous nflog consumer before swapping state so the next Start
+// can re-register the netfilter log group. Without this the old consumer
+// stays bound to the kernel group with a closure over the now-defunct event
+// store; the new Start sees EPERM on re-register and emits
+// service.nflog.unavailable, while drops from log+drop rules are silently
+// queued to a sink nobody reads.
 func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Lock()
+	prevNflogCancel := e.nflogCancel
+	e.nflogCancel = nil
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
 	e.applier = fresh.applier
@@ -161,10 +198,14 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.dpiMode = fresh.dpiMode
 	e.dpiExclusions = fresh.dpiExclusions
 	e.nflogGroup = fresh.nflogGroup
+	e.nfqueueGroup = fresh.nfqueueGroup
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.flowMu.Unlock()
+	if prevNflogCancel != nil {
+		prevNflogCancel()
+	}
 	e.started.Store(false)
 }
 
@@ -183,10 +224,22 @@ func (e *Engine) Start(ctx context.Context) error {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		if err := capture.StartNFLog(ctx, e.nflogGroup, e.eventStore, func(perr error) {
+		// Use a child context tied to the engine's lifetime so Reconfigure
+		// can stop this consumer cleanly via nflogCancel before swapping in
+		// a new engine state (otherwise the old consumer keeps the kernel
+		// group bound + writes to a defunct event store).
+		nflogCtx, cancel := context.WithCancel(ctx)
+		e.flowMu.Lock()
+		e.nflogCancel = cancel
+		e.flowMu.Unlock()
+		if err := capture.StartNFLog(nflogCtx, e.nflogGroup, e.eventStore, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
 		}); err != nil {
+			cancel()
+			e.flowMu.Lock()
+			e.nflogCancel = nil
+			e.flowMu.Unlock()
 			// Surface as a system event so it's visible in /api/v1/events.
 			e.eventStore.Append(events.Event{
 				Kind:      "service.nflog.unavailable",

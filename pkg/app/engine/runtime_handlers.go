@@ -377,6 +377,7 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 				DPIICSProtocols: dp.DPIICSProtocols,
 				DPIExclusions:   excl,
 				NFLogGroup:      dp.NFLogGroup,
+				NFQueueGroup:    dp.NFQueueGroup,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)

@@ -7,6 +7,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-05-13
+
+Cross-platform ICS DPI enforcement, boot-time interface autobind, and a
+batch of fixes surfaced by an end-to-end lab integration shakedown on
+macOS Docker Desktop. Builds on v0.1.25's L4 event pipeline.
+
+### Added
+
+- **NFQUEUE-based ICS DPI enforcement.** New `dataplane.nfqueueGroup`
+  config field. When non-zero, the compiler emits `queue num <N>` as
+  the verdict for dpiEligible rules (those with an ICS predicate)
+  instead of plain accept/drop, and the engine starts an NFQUEUE
+  capture consumer at that group. Packets flow `kernel → queue →
+  handlePacket → DPI decoders → enforceDPIEvents`, which evaluates
+  the rule's ICS predicate (function-code allowlist, register
+  ranges, etc.) and applies `BlockFlowTemp` via the `block_flows`
+  nft set when a violation is detected. Without this, ICS rules
+  compiled to plain accept and the function-code allowlist was
+  decorative. Verified end-to-end: RTAC Modbus FC3 (in allowlist
+  `[1..6]`) passes; FC8 (not in allowlist) triggers a `block_flows`
+  entry within seconds, blocking the flow.
+
+- **Forward-chain rule ordering reworked to support DPI.** The
+  compiler now emits dpiEligible queue rules BEFORE the
+  `ct state established accept` fast-path; otherwise only the SYN
+  of an inspected flow reaches the queue and the data-bearing
+  packets (carrying the actual Modbus/DNP3/CIP PDUs we need to
+  inspect) match ct established and skip DPI entirely. Also moved
+  `block_hosts`/`block_flows` drop rules above `ct established` so
+  retroactive DPI verdicts actually drop subsequent packets of an
+  already-established flow. Non-DPI rules continue to benefit from
+  the conntrack fast-path.
+
+- **`AutoBindDefaultInterfaceDevices` runs at mgmt boot.** Before
+  the HTTP server begins accepting traffic, mgmt blanks any stale
+  `interfaces[].device` references in the stored config and re-runs
+  the subnet-match autobind (the existing `CONTAIND_AUTO_*_SUBNET`
+  -driven logic). Without this, Docker/LinuxKit ethN reshuffles
+  across container restarts left the stored device fields pointing
+  at the wrong kernel interface; mgmt-access checks then used the
+  wrong iface and the first API request from the management plane
+  could 403. The function is exported as
+  `AutoBindDefaultInterfaceDevices` so other startup paths can
+  trigger the same logic.
+
+### Fixed
+
+- **`mdlayher/netlink` bumped to v1.11.1** (was a pre-release
+  pseudo-version that predated the upstream fix). The old version
+  panicked with `slice bounds out of range [:140] capacity 138`
+  when `getBuffer` allocated raw `n` bytes for the message and
+  later sliced to `nlmsgAlign(n)` which rounds up. Upstream fixed
+  this by allocating `nlmsgAlign(n)` directly — the comment in
+  `getBuffer` now explicitly says "aligned to the next multiple of
+  the alignment of a netlink message, to avoid panic when parsing
+  messages from the buffer." Visible on the LinuxKit kernel
+  underlying macOS Docker Desktop, where it killed the engine
+  process the moment the NFQUEUE consumer received a non-aligned
+  message. Also bumped `florianl/go-nfqueue/v2` to v2.0.3 for
+  compat. No fork needed — upstream already had it.
+
+- **`nflog` consumer is cancelled before Reconfigure swap.**
+  Previously `Engine.Configure(dataPlane)` built a fresh engine and
+  `Reconfigure` swapped state, but the old nflog consumer goroutine
+  kept the netfilter group registration with a closure over the
+  now-defunct event store. The new `Start` then hit EPERM trying to
+  re-register the group → `service.nflog.unavailable` event with no
+  firewall.rule.hit events flowing despite kernel drops queuing to
+  nflog. Engine now tracks `nflogCancel context.CancelFunc`;
+  `Reconfigure` cancels the previous consumer after swap, so the
+  new `Start` finds the group free.
+
+- **`capture.Manager` accepts `Mode: "nfqueue"` without
+  `Interfaces`.** Previously short-circuited when `len(Interfaces)
+  == 0`, which made NFQUEUE mode unreachable from any config that
+  didn't also pin specific eth devices. NFQUEUE is interface-
+  agnostic (packets arrive via the kernel queue), so the check now
+  only applies to AFPACKET mode.
+
+- **`X-Containd-Warnings` is now a multi-value header.**
+  `setWarningHeader` was joining warnings with `\n` into a single
+  `Header.Set` value. Go's `net/http` strips control characters
+  from header values for security, which collapsed all warnings
+  into one space-separated string on the receiver. Each warning
+  now gets its own `Header.Add` call so clients can read them
+  cleanly via `Header.Values("X-Containd-Warnings")`. Embedded
+  newlines within a single warning are converted to spaces to keep
+  the value RFC 7230 §3.2 compliant.
+
+- **`POST /api/v1/templates/ics/apply` accepts both hyphenated and
+  underscored template names.** `GET /api/v1/templates` returns the
+  canonical hyphenated form (e.g. `modbus-read-only`) but the apply
+  switch was written with underscores (`modbus_read_only`). Anyone
+  copy-pasting from the list endpoint would get a 400 "unknown ICS
+  template". `buildICSTemplateRules` now normalizes hyphens to
+  underscores at the boundary.
+
+### Tests
+
+10 new test functions across affected packages: hyphenated template
+acceptance, multi-value warning header propagation, NFQUEUE manager
+with no interfaces, NFQUEUE + chain-reorder snapshot fixtures,
+boot-time autobind no-op vs repair paths.
+
+### Note for downstream consumers
+
+The `Compiler.QueueID` field added in this release pairs with
+`NFQueueGroup` in the runtime config. Set both or neither — a queue
+verdict in the compiled ruleset without a userspace consumer attached
+would freeze inspected traffic at the kernel hook.
+
 ## [0.1.25] - 2026-05-12
 
 ### Added — closes #19

@@ -74,16 +74,26 @@ func setWarningHeader(c *gin.Context, warnings []string) {
 	if len(warnings) == 0 {
 		return
 	}
-	trimmed := make([]string, 0, len(warnings))
+	// Emit one header line per warning via Header().Add — Go's net/http
+	// will write them as repeated `X-Containd-Warnings:` lines. Joining
+	// with "\n" into a single Header().Set value loses the separator
+	// because Go strips control characters from header values, so all
+	// warnings concatenate into one space-separated string on the
+	// receiver. Multi-value headers are the standard HTTP idiom for
+	// this pattern (cf. Set-Cookie, Warning, Link).
 	for _, warning := range warnings {
-		if msg := strings.TrimSpace(warning); msg != "" {
-			trimmed = append(trimmed, msg)
+		msg := strings.TrimSpace(warning)
+		if msg == "" {
+			continue
 		}
+		// http.Header values must not contain bare LF/CR per RFC 7230 §3.2.
+		// Replace any embedded newlines with spaces so a single warning
+		// that internally spans multiple lines remains a single header
+		// value (rather than splitting mid-message).
+		msg = strings.ReplaceAll(msg, "\r\n", " ")
+		msg = strings.ReplaceAll(msg, "\n", " ")
+		c.Writer.Header().Add("X-Containd-Warnings", msg)
 	}
-	if len(trimmed) == 0 {
-		return
-	}
-	c.Header("X-Containd-Warnings", strings.Join(trimmed, "\n"))
 }
 
 func httpError(c *gin.Context, err error) {
