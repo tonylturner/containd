@@ -26,6 +26,21 @@ func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
 		handler: handler,
 	}
 	go func() {
+		// go-nfqueue/v2 + mdlayher/netlink occasionally panic with
+		// "slice bounds out of range" when parsing truncated/oversized
+		// netlink messages from the kernel (observed in the LinuxKit
+		// kernel under macOS Docker Desktop). Without recover, that
+		// panic kills the whole engine process. Recover here so a
+		// single malformed message just drops that packet — the
+		// consumer keeps running and subsequent packets still flow
+		// through DPI. Upstream issue tracked in florianl/go-nfqueue.
+		defer func() {
+			if r := recover(); r != nil {
+				if m.cfg.OnError != nil {
+					m.cfg.OnError(fmt.Errorf("nfqueue consumer panicked, recovered: %v", r))
+				}
+			}
+		}()
 		if err := src.run(ctx); err != nil {
 			if m.cfg.OnError != nil {
 				m.cfg.OnError(err)

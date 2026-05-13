@@ -119,6 +119,31 @@ func TestApplyICSTemplatePersistsRules(t *testing.T) {
 	}
 }
 
+// TestApplyICSTemplateAcceptsHyphenatedName confirms that the hyphenated
+// template name from GET /api/v1/templates (e.g. "modbus-read-only")
+// works as input to POST /api/v1/templates/ics/apply, not just the
+// underscore form. Callers copy-pasting from the list endpoint would
+// otherwise get a 400 "unknown ICS template".
+func TestApplyICSTemplateAcceptsHyphenatedName(t *testing.T) {
+	store := &mockStore{cfg: config.DefaultConfig()}
+	beforeCount := len(store.cfg.Firewall.Rules)
+	s := NewServer(store, nil)
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
+		"template":"modbus-read-only",
+		"sourceZones":["lan"],
+		"destZones":["wan"]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(store.cfg.Firewall.Rules) != beforeCount+2 {
+		t.Fatalf("expected 2 new persisted rules with hyphenated name, got before=%d after=%d", beforeCount, len(store.cfg.Firewall.Rules))
+	}
+}
+
 func TestApplyICSTemplateListFirewallRulesReturnsArraySafeShapes(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
 	s := NewServer(store, nil)

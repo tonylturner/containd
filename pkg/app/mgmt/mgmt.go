@@ -151,7 +151,48 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 	if err != nil && !errors.Is(err, config.ErrNotFound) {
 		logger.Warnf("failed to load config on startup: %v", err)
 	}
+	// Repair stale interface.device bindings before the HTTP server begins
+	// serving traffic. Without this, mgmtAccessHandler reads the stored
+	// config with device fields pointing at kernel devices the OS may have
+	// renumbered across container restarts — leading to false 403s on the
+	// very first API call from the management plane.
+	//
+	// Blank the device fields on default-named logical interfaces first so
+	// AutoBindDefaultInterfaceDevices reliably re-runs subnet-match
+	// assignment. The "shouldRepair" gate inside autobind only triggers
+	// when bindings are blank OR match the legacy eth0..ethN index pattern;
+	// docker-shuffled bindings look neither, so without blanking, the
+	// scrambled state survives. Subnet-based reassignment is the
+	// authoritative determinism source (see CONTAIND_AUTO_*_SUBNET env vars
+	// + assignBySubnet); we're not changing that, just making sure it runs.
+	if cfg != nil {
+		blankDefaultInterfaceDevices(cfg)
+		if httpapi.AutoBindDefaultInterfaceDevices(cfg) {
+			if saveErr := stores.store.Save(context.Background(), cfg); saveErr != nil {
+				logger.Warnf("failed to persist autobound interface devices on startup: %v", saveErr)
+			}
+		}
+	}
 	return stores, cfg, nil
+}
+
+// blankDefaultInterfaceDevices clears the Device field on each default
+// logical interface (wan/dmz/lan1..lan6) so the subsequent
+// AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
+// Non-default interfaces (custom user-named) are left untouched.
+func blankDefaultInterfaceDevices(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	defaults := map[string]struct{}{}
+	for _, name := range config.DefaultPhysicalInterfaces() {
+		defaults[name] = struct{}{}
+	}
+	for i := range cfg.Interfaces {
+		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
+			cfg.Interfaces[i].Device = ""
+		}
+	}
 }
 
 func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config) (mgmtListenerConfig, error) {

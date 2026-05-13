@@ -51,8 +51,10 @@ type Config struct {
 func NewManager(cfg Config) (*Manager, error) {
 	cfg = normalizeConfig(cfg)
 	// Allow empty capture config for early phases and mgmt-only runs.
-	// Capture start will be a no-op in this case.
-	if len(cfg.Interfaces) == 0 {
+	// Capture start will be a no-op in this case. NFQUEUE mode does not
+	// need interface names (packets arrive via the kernel queue, not an
+	// eth listener) — only the QueueID matters.
+	if len(cfg.Interfaces) == 0 && !strings.EqualFold(cfg.Mode, "nfqueue") {
 		return &Manager{interfaces: nil, cfg: cfg}, nil
 	}
 	return &Manager{interfaces: cfg.Interfaces, cfg: cfg}, nil
@@ -60,7 +62,8 @@ func NewManager(cfg Config) (*Manager, error) {
 
 // Start begins capture on configured interfaces after validating they exist.
 func (m *Manager) Start(ctx context.Context, handler Handler) error {
-	if len(m.interfaces) == 0 {
+	mode := strings.ToLower(m.cfg.Mode)
+	if len(m.interfaces) == 0 && mode != "nfqueue" {
 		return nil
 	}
 	if handler == nil {
@@ -69,13 +72,16 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	if m.started.Swap(true) {
 		return nil
 	}
-	// Placeholder: validate interfaces exist locally.
-	for _, iface := range m.interfaces {
-		if _, err := net.InterfaceByName(iface); err != nil {
-			return fmt.Errorf("interface %s not found: %w", iface, err)
+	// Validate AFPACKET-style interfaces exist locally. NFQUEUE mode
+	// skips this — it has no interface dependency.
+	if mode != "nfqueue" {
+		for _, iface := range m.interfaces {
+			if _, err := net.InterfaceByName(iface); err != nil {
+				return fmt.Errorf("interface %s not found: %w", iface, err)
+			}
 		}
 	}
-	switch strings.ToLower(m.cfg.Mode) {
+	switch mode {
 	case "", "afpacket":
 		return m.startAFPacket(ctx, handler)
 	case "nfqueue":
