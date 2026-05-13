@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-05-13
+
+Second hardening follow-up after Codex review on
+[PR #22](https://github.com/tonylturner/containd/pull/22) flagged
+a sharp gap in v0.1.27's supervise loop.
+
+### Fixed
+
+- **NFQUEUE handle is unconditionally closed before retry.** v0.1.27
+  added supervise+retry to the NFQUEUE consumer, but a panic inside
+  `run()` skipped the `nf.Close()` call: the close paths were a
+  separate ctx-watcher goroutine and the register-error early
+  return, neither of which fire on a recovered panic. Result: the
+  kernel kept the old binding while supervise immediately called
+  `nfqueue.Open` again — every retry hit EBUSY, supervise burned
+  through all 8 attempts, then gave up. The "restart after panic"
+  path was actually "restart-and-loop-fail until giveup". Now
+  `defer nf.Close()` runs immediately after `nfqueue.Open()` so
+  every return path — normal, error, or panic-via-recover —
+  releases the handle. The separate ctx-watcher goroutine is gone
+  (redundant with the deferred close + the main `<-ctx.Done()`).
+  Codex review on PR #22 caught this as P1.
+
+### Tests
+
+1 new test (`TestNFQueueSuperviseCleansUpBetweenRetries`) that
+asserts the supervise loop cannot re-enter `runFn` while a previous
+attempt's deferred cleanup is still in flight — a regression in the
+defer-close path would surface as an overlap flag flip.
+
 ## [0.1.27] - 2026-05-13
 
 Hardening follow-up to v0.1.26. No behavior changes on the happy path —

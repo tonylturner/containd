@@ -137,6 +137,74 @@ func TestNFQueueSuperviseGivesUpAfterMaxRetries(t *testing.T) {
 	}
 }
 
+// TestNFQueueSuperviseCleansUpBetweenRetries asserts that the
+// supervise loop does not call runFn while a previous attempt's
+// kernel-side resource is still held. With the `defer nf.Close()`
+// fix, a panic in run() unwinds the deferred close before
+// runWithRecover returns, so by the time supervise calls runFn
+// again the handle is gone. We model this here by having the fake
+// runFn observe an "in-flight" flag — if supervise re-entered
+// runFn before the previous attempt's defer ran, the flag would
+// still be true and we'd fail the test. (Codex review on PR #22
+// caught the original missing-defer as P1: it kept the kernel
+// binding alive across retries, so each retry's nfqueue.Open hit
+// EBUSY and the consumer never recovered.)
+func TestNFQueueSuperviseCleansUpBetweenRetries(t *testing.T) {
+	defer withFastBackoff(1 * time.Millisecond)()
+
+	var inFlight atomic.Bool
+	var overlap atomic.Bool
+	var calls atomic.Int32
+
+	src := &nfqueueSource{queueID: 100}
+	src.runFn = func(ctx context.Context) error {
+		// If supervise re-entered before the previous attempt's
+		// defer chain finished, inFlight is still true.
+		if inFlight.Load() {
+			overlap.Store(true)
+		}
+		inFlight.Store(true)
+		// Deferred reset stands in for the real defer nf.Close().
+		// Production: defer fires when run() unwinds (including
+		// panic-via-recover).
+		defer inFlight.Store(false)
+
+		n := calls.Add(1)
+		switch n {
+		case 1:
+			panic("simulated panic mid-flight")
+		case 2:
+			return fmt.Errorf("simulated error")
+		default:
+			// Third attempt: run cleanly until cancel.
+			<-ctx.Done()
+			return nil
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		src.supervise(ctx, func(error) {})
+		close(done)
+	}()
+	deadline := time.After(3 * time.Second)
+	for calls.Load() < 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("expected runFn called >=3 times, got %d", calls.Load())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+
+	if overlap.Load() {
+		t.Error("supervise re-entered runFn while a previous attempt was still in-flight " +
+			"— defer cleanup must complete before the retry restarts")
+	}
+}
+
 // TestNFQueueSuperviseExitsOnContextCancel confirms a clean exit on
 // ctx.Done() doesn't consume a retry slot — student stopping the lab
 // shouldn't spam onError with 'attempt N/M failed' messages.
