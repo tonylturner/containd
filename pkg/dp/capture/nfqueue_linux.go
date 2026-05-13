@@ -137,12 +137,17 @@ func (s *nfqueueSource) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nfqueue open queue %d: %w", s.queueID, err)
 	}
-
-	// Close the nfqueue handle when the context is done.
-	go func() {
-		<-ctx.Done()
-		_ = nf.Close()
-	}()
+	// Unconditional release so that ANY return path — normal ctx
+	// cancel, register error, or a panic propagating up through
+	// runWithRecover — closes the netfilter group binding before
+	// supervise's retry calls nfqueue.Open again. Without this,
+	// the old binding sat with the kernel while supervise burned
+	// retries on EBUSY/EPERM Opens, turning panic-recovery into a
+	// recover-and-loop-fail loop until the retry envelope gave up.
+	// nf.Close is idempotent; safe to defer here even though
+	// RegisterWithErrorFunc's internal goroutine also closes on
+	// ctx cancel.
+	defer func() { _ = nf.Close() }()
 
 	hookFn := func(a nfqueue.Attribute) int {
 		if a.Payload == nil || len(*a.Payload) == 0 {
@@ -182,11 +187,13 @@ func (s *nfqueueSource) run(ctx context.Context) error {
 	}
 
 	if err := nf.RegisterWithErrorFunc(ctx, hookFn, errFn); err != nil {
-		_ = nf.Close()
+		// nf.Close runs via defer above; no explicit close needed.
 		return fmt.Errorf("nfqueue register: %w", err)
 	}
 
-	// Block until context is cancelled.
+	// Block until context is cancelled. nf.Close fires via defer
+	// on the way out, which signals RegisterWithErrorFunc's internal
+	// goroutine to exit cleanly.
 	<-ctx.Done()
 	return nil
 }
