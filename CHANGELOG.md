@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-05-13
+
+Hardening follow-up to v0.1.26. No behavior changes on the happy path —
+addresses a defensive-only code path that didn't actually recover the
+way the comment claimed it did.
+
+### Fixed
+
+- **NFQUEUE consumer is supervised with bounded retries** instead of
+  silently exiting on panic. v0.1.26 added a `defer recover()` around
+  the consumer goroutine to keep a malformed-netlink panic from
+  killing the engine, but the recovered path returned from the
+  goroutine without restarting the consumer — leaving the kernel
+  queue permanently undrained. In practice the panic is unreachable
+  with the v0.1.26 `mdlayher/netlink` v1.11.1 bump, but as defense in
+  depth the recover should restart. New `supervise()` loop with
+  exponential backoff (250ms → 30s, capped) and a hard ceiling of 8
+  retries; a permanently-failing kernel surface logs "giving up"
+  via `OnError` rather than spinning forever. Context-cancel exits
+  cleanly without consuming a retry. Codex review on
+  [PR #21](https://github.com/tonylturner/containd/pull/21) caught
+  the original silent-exit as P1.
+
+### Tests
+
+3 new tests covering panic-then-restart, give-up-after-max-retries,
+and clean-cancel paths. Test-only `withFastBackoff` seam compresses
+the production envelope to sub-millisecond so the giveup test runs
+in ~10ms instead of ~62s.
+
 ## [0.1.26] - 2026-05-13
 
 Cross-platform ICS DPI enforcement, boot-time interface autobind, and a
