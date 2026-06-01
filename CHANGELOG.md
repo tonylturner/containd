@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-06-01
+
+### Added
+
+- **Inline Commit on the candidate-changes status bar.** The site-wide
+  "candidate config differs from running config" bar (rendered on every
+  page via the app shell, including the Firewall page) now has an inline
+  **Commit** button beside "Review Candidate Diff". A staged candidate
+  can be applied from wherever the bar appears instead of only from the
+  Config page, reducing the "where do I commit?" friction when editing
+  firewall rules. Commit errors surface inline; the Review link is kept
+  for review-before-commit.
+
 ## [0.1.28] - 2026-05-13
 
 Second hardening follow-up after Codex review on
