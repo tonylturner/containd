@@ -102,6 +102,17 @@ func builtinSignatures() []Signature {
 			References: []string{"https://attack.mitre.org/techniques/T0881/"},
 		},
 		{
+			ID:          "DNP3-DIRECT-OPERATE",
+			Name:        "DNP3 Direct Operate",
+			Description: "DNP3 Direct Operate (function code 5) or Direct Operate No Ack (function code 6) writes a control output without the select-before-operate safety handshake. FC 6 also suppresses the outstation response.",
+			Severity:    "high",
+			Protocol:    "dnp3",
+			Conditions: []Condition{
+				{Field: "function_code", Op: "in", Value: []any{float64(5), float64(6)}},
+			},
+			References: []string{"https://attack.mitre.org/techniques/T0855/"},
+		},
+		{
 			ID:          "DNP3-FILE-AUTH",
 			Name:        "DNP3 File Authentication",
 			Description: "DNP3 file authentication request (object group 70) may indicate unauthorized file access attempts.",

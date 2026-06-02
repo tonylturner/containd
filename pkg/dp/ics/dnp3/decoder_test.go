@@ -272,6 +272,53 @@ func TestDecoderOnPacketWriteControl(t *testing.T) {
 	}
 }
 
+// TestDecoderOnPacketDirectOperateVariants verifies that Direct Operate
+// (FC 0x05) and Direct Operate No Ack (FC 0x06) each decode to their distinct
+// function_name and are flagged is_write+is_control. The lab teaches FC 0x06
+// as a No-Ack variant of the FC 0x05 attack; a DPI rule keying on
+// function_code/function_name must be able to tell them apart on the wire.
+func TestDecoderOnPacketDirectOperateVariants(t *testing.T) {
+	cases := []struct {
+		name     string
+		fc       uint8
+		wantName string
+	}{
+		{"direct operate", FuncDirectOperate, "direct_operate"},
+		{"direct operate no ack", FuncDirectOperateNoAck, "direct_operate_no_ack"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dec := NewDecoder()
+			state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 20000), time.Now())
+
+			// CROB group (12), variation 1, qualifier 0x07 (1-byte count), count=1.
+			userData := []byte{0xC0, 0xC0, tc.fc, 0x0C, 0x01, 0x07, 0x01}
+			raw := buildTestFrame(uint8(5+len(userData)), 0xC0, 0x0001, 0x0002, userData)
+
+			events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
+			if err != nil {
+				t.Fatalf("OnPacket: %v", err)
+			}
+			if len(events) != 1 {
+				t.Fatalf("expected 1 event, got %d", len(events))
+			}
+			ev := events[0]
+			if ev.Attributes["function_code"] != tc.fc {
+				t.Errorf("function_code = %v, want %d", ev.Attributes["function_code"], tc.fc)
+			}
+			if ev.Attributes["function_name"] != tc.wantName {
+				t.Errorf("function_name = %v, want %q", ev.Attributes["function_name"], tc.wantName)
+			}
+			if ev.Attributes["is_write"] != true {
+				t.Errorf("is_write should be true for %s", tc.name)
+			}
+			if ev.Attributes["is_control"] != true {
+				t.Errorf("is_control should be true for %s", tc.name)
+			}
+		})
+	}
+}
+
 func TestDecoderOnPacketNilPayload(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 20000), time.Now())

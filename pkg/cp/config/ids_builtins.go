@@ -97,13 +97,13 @@ func builtinIDSRules() []IDSRule {
 		},
 		{
 			ID:          "IDS-DNP3-003",
-			Title:       "DNP3 Direct Operate No Ack",
-			Description: "Direct Operate No Ack (FC 5) bypasses select-before-operate safety pattern.",
+			Title:       "DNP3 Direct Operate",
+			Description: "Direct Operate (FC 5) or Direct Operate No Ack (FC 6) writes a control output bypassing the select-before-operate safety pattern. FC 6 additionally suppresses the outstation response.",
 			Proto:       "dnp3",
 			Severity:    "high",
-			Message:     "DNP3 direct operate without acknowledgment",
+			Message:     "DNP3 direct operate control write",
 			When: IDSCondition{
-				Field: "attr.function_code", Op: "equals", Value: float64(5),
+				Field: "attr.function_code", Op: "in", Value: []any{float64(5), float64(6)},
 			},
 			Labels: map[string]string{"mitre": "T0855", "category": "ics"},
 		},
