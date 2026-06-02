@@ -83,6 +83,58 @@ func TestNoMatchForReadEvents(t *testing.T) {
 	}
 }
 
+// TestMatchDNP3DirectOperateBothVariants pins the fix for the
+// DNP3-DIRECT-OPERATE signature: both Direct Operate (FC 5) and Direct
+// Operate No Ack (FC 6) must match. FC 6 is the No-Ack variant an attacker
+// would reach for to evade a signature that only matched FC 5 — the gap this
+// signature previously had. A read (FC 1) must not match.
+func TestMatchDNP3DirectOperateBothVariants(t *testing.T) {
+	e := New()
+	e.LoadBuiltins()
+
+	matchesDirectOperate := func(fc uint8) bool {
+		ev := dpi.Event{
+			Proto:     "dnp3",
+			Kind:      "request",
+			Timestamp: time.Now(),
+			Attributes: map[string]any{
+				"function_code": fc,
+				"is_write":      true,
+				"is_control":    true,
+			},
+		}
+		for _, m := range e.Match(ev) {
+			if m.Signature.ID == "DNP3-DIRECT-OPERATE" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !matchesDirectOperate(5) {
+		t.Error("DNP3-DIRECT-OPERATE must match Direct Operate (FC 5)")
+	}
+	if !matchesDirectOperate(6) {
+		t.Error("DNP3-DIRECT-OPERATE must match Direct Operate No Ack (FC 6) — No-Ack must not be an evasion path")
+	}
+
+	// A read (FC 1) is not a control write and must not match.
+	readEv := dpi.Event{
+		Proto:     "dnp3",
+		Kind:      "request",
+		Timestamp: time.Now(),
+		Attributes: map[string]any{
+			"function_code": uint8(1),
+			"is_write":      false,
+		},
+	}
+	for _, m := range e.Match(readEv) {
+		if m.Signature.ID == "DNP3-DIRECT-OPERATE" {
+			t.Error("DNP3-DIRECT-OPERATE must not match a DNP3 read (FC 1)")
+		}
+	}
+}
+
 func TestCustomSignatureLoadFromJSON(t *testing.T) {
 	e := New()
 
