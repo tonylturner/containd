@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DNP3 Direct Operate IDS signature missed FC 6 (No-Ack).** The
+  built-in `IDS-DNP3-003` rule was titled "Direct Operate No Ack" but
+  matched `function_code == 5` only — FC 5 is Direct Operate (with ack),
+  FC 6 is the actual No-Ack variant. An attacker using Direct Operate No
+  Ack (FC 6), the exact command the signature is named after, evaded it
+  entirely. Both FC 5 and FC 6 write a control output bypassing
+  select-before-operate, so the rule now matches `[5, 6]`, and the title
+  and description are corrected. Also added the equivalent
+  `DNP3-DIRECT-OPERATE` rule to the dataplane signature builtins, which
+  previously had no Direct Operate rule at all.
+
 ## [0.1.29] - 2026-06-01
 
 ### Added
