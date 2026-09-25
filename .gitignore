@@ -52,6 +52,8 @@ ui/node_modules/
 ui/.turbo/
 ui/.vercel/
 ui/out/
+ui/test-results/
+ui/playwright-report/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
