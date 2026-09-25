@@ -7,24 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-- Updated the Go toolchain and vulnerable dependencies, refreshed the pinned
-  Wolfi runtime base, and upgraded UI dependencies to clear HIGH/CRITICAL
-  Trivy findings. No application behavior changed.
+## [0.1.30] - 2026-09-25
 
 ### Fixed
 
-- **NFLOG group is released before reconfiguration rebinds.** Reconfigure
-  now waits for the previous consumer to cancel and close its netlink
-  socket before returning, preventing an immediate bind from racing the
-  previous consumer's group unbind. NFLOG registration failures are also
-  reported through the process logger at error level.
+- **NFLOG group is released before reconfiguration rebinds.** Every config
+  commit rebuilds the data-plane engine, and the new engine bound NFLOG
+  group 100 while the previous consumer's socket was still open, so the
+  bind failed with `operation not permitted`, the engine emitted
+  `service.nflog.unavailable` once, and L4 log rules went silent until a
+  restart. `StartNFLog` now returns a stop function that cancels the
+  receive loop and closes the netlink socket synchronously, `Reconfigure`
+  calls it before swapping state, and `Start`/`Reconfigure` are serialized
+  so a commit that lands while the previous start is still binding cannot
+  interleave. NFLOG registration failures are also reported through the
+  process logger at error level instead of only the event stream.
 
 - **Config commits no longer deadlock when the candidate is missing.**
-  Commits load or seed the candidate while holding the store lock, avoiding
-  recursively acquiring the non-reentrant lock after a prior commit removed
-  the candidate row.
+  `Commit` and `CommitConfirmed` held the store lock and then called
+  `LoadCandidate`, which re-acquired the same non-reentrant lock to seed a
+  missing candidate from running. The second commit after any successful
+  commit therefore hung forever, and every later config request queued
+  behind it. Commits now load or seed the candidate while already holding
+  the lock.
 
 - **DNP3 Direct Operate IDS signature missed FC 6 (No-Ack).** The
   built-in `IDS-DNP3-003` rule was titled "Direct Operate No Ack" but
@@ -36,6 +41,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and description are corrected. Also added the equivalent
   `DNP3-DIRECT-OPERATE` rule to the dataplane signature builtins, which
   previously had no Direct Operate rule at all.
+
+### Security
+
+- **Cleared all HIGH/CRITICAL Trivy findings** in the runtime image, the
+  Go module graph, and the UI lockfile. No application behavior changed.
+  - Go toolchain 1.25.10 → 1.25.13 (`go.mod` and both Dockerfile builder
+    stages), fixing stdlib `crypto/x509` CVE-2026-27145 and later
+    advisories.
+  - `golang.org/x/crypto` 0.49 → 0.55 (CVE-2026-39828 in `x/crypto/ssh`),
+    `x/net` 0.52 → 0.58 (CVE-2026-25681), `x/text` 0.35 → 0.41
+    (CVE-2026-56852), with `x/sys`, `x/mod`, `x/sync`, `x/tools` to
+    matching versions.
+  - Wolfi runtime base digest refreshed, picking up OpenSSL 3.6.2
+    (CVE-2026-31789, CRITICAL) and BusyBox 1.37.0-r58 (CVE-2023-39810).
+  - UI: `next` and `eslint-config-next` 15.5.10 → 15.5.24 (CVE-2026-75604
+    unauthenticated RCE, CVE-2026-44573 middleware information disclosure),
+    `postcss` 8.5.18, `nanoid` (CVE-2026-67213) and `sharp` lock bumps,
+    plus dev-dependency fixes for `brace-expansion`, `browserslist`,
+    `flatted`, `js-yaml`, and `picomatch`. The UI stays on the 15.5 line.
+
+### Changed
+
+- **Test harness.** The Playwright route smoke honors `PLAYWRIGHT_PORT`
+  so it cannot silently reuse an unrelated server on port 3100, and
+  `ui/test-results/` is git-ignored. New regression tests cover the NFLOG
+  lifecycle (including a 100-commit concurrent Reconfigure/Start loop) and
+  commits without a candidate.
 
 ## [0.1.29] - 2026-06-01
 
