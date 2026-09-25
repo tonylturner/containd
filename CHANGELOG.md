@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Updated the Go toolchain and vulnerable dependencies, refreshed the pinned
+  Wolfi runtime base, and upgraded UI dependencies to clear HIGH/CRITICAL
+  Trivy findings. No application behavior changed.
+
 ### Fixed
 
 - **NFLOG group is released before reconfiguration rebinds.** Reconfigure
