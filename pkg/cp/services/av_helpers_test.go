@@ -4,9 +4,11 @@
 package services
 
 import (
-	"bytes"
+	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -78,17 +80,26 @@ func startClamAVTestSocket(t *testing.T, response string) string {
 			go func(c net.Conn) {
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-				buf := make([]byte, 4096)
-				var payload []byte
+				// Parse the INSTREAM protocol the client speaks: a
+				// NUL-terminated command, then length-prefixed chunks until a
+				// zero-length chunk. Scanning the raw bytes for four zeros
+				// instead would match the command's NUL plus the length
+				// prefix of a short payload and reply before the client has
+				// finished writing, which the client sees as a broken pipe.
+				r := bufio.NewReader(c)
+				if _, err := r.ReadBytes(0); err != nil {
+					return
+				}
 				for {
-					n, err := c.Read(buf)
-					if n > 0 {
-						payload = append(payload, buf[:n]...)
-						if bytes.Contains(payload, []byte{0, 0, 0, 0}) {
-							break
-						}
+					var hdr [4]byte
+					if _, err := io.ReadFull(r, hdr[:]); err != nil {
+						return
 					}
-					if err != nil {
+					n := binary.BigEndian.Uint32(hdr[:])
+					if n == 0 {
+						break
+					}
+					if _, err := io.CopyN(io.Discard, r, int64(n)); err != nil {
 						return
 					}
 				}
