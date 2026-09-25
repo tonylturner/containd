@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	nflog "github.com/florianl/go-nflog/v2"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -21,6 +22,7 @@ type fakeNFLogHandle struct {
 	errFn             nflog.ErrorFunc
 	closeCalls        int
 	closeBeforeCancel bool
+	closed            chan struct{} // closed on first Close when non-nil
 }
 
 func (f *fakeNFLogHandle) RegisterWithErrorFunc(ctx context.Context, _ nflog.HookFunc, errFn nflog.ErrorFunc) error {
@@ -31,6 +33,9 @@ func (f *fakeNFLogHandle) RegisterWithErrorFunc(ctx context.Context, _ nflog.Hoo
 
 func (f *fakeNFLogHandle) Close() error {
 	f.closeCalls++
+	if f.closed != nil && f.closeCalls == 1 {
+		close(f.closed)
+	}
 	if f.ctx == nil || f.ctx.Err() == nil {
 		f.closeBeforeCancel = true
 		return errors.New("Close called before context cancellation")
@@ -103,6 +108,40 @@ func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
 	stop()
 	if fake.closeCalls != 1 {
 		t.Fatalf("no-op stop Close calls = %d, want 1", fake.closeCalls)
+	}
+}
+
+func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
+	oldOpenNFLog := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpenNFLog })
+	fake := &fakeNFLogHandle{closed: make(chan struct{})}
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stop, err := StartNFLog(ctx, 100, events.NewStore(1), nil)
+	if err != nil {
+		t.Fatalf("StartNFLog: %v", err)
+	}
+	select {
+	case <-fake.closed:
+		t.Fatal("handle closed before the parent context ended")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	// Engine shutdown without a subsequent Reconfigure: the caller's context
+	// ends and stop is never called. The socket must still be released.
+	cancel()
+	select {
+	case <-fake.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handle not closed after parent context cancellation")
+	}
+	if fake.closeBeforeCancel {
+		t.Fatal("Close ran before cancellation")
+	}
+	stop()
+	if fake.closeCalls != 1 {
+		t.Fatalf("Close calls after stop = %d, want 1", fake.closeCalls)
 	}
 }
 

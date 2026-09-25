@@ -51,7 +51,8 @@ var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
 // matches the containd format.
 //
 // Returns immediately on success with an idempotent stop function that
-// cancels the consumer and waits for the netlink socket to close. The stop
+// cancels the consumer and waits for the netlink socket to close. The
+// socket is also closed if ctx ends before stop is called. The stop
 // function is a no-op when group == 0 or sink == nil — this matches the
 // Compiler.NFLogGroup contract (0 = don't emit log clauses, no consumer
 // needed). On registration failure it returns a no-op stop and an error.
@@ -98,12 +99,21 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		return func() {}, fmt.Errorf("nflog register group %d: %w", group, err)
 	}
 
+	// The handle closes exactly once, either from the explicit stop or when
+	// the caller's context ends without stop being called (engine shutdown
+	// without a subsequent Reconfigure). Context cancellation alone does not
+	// release the netlink socket or the kernel group binding.
 	var once sync.Once
+	closeHandle := func() {
+		once.Do(func() { _ = nf.Close() })
+	}
+	go func() {
+		<-nflogCtx.Done()
+		closeHandle()
+	}()
 	stop := func() {
-		once.Do(func() {
-			cancel()
-			_ = nf.Close()
-		})
+		cancel()
+		closeHandle()
 	}
 	return stop, nil
 }
