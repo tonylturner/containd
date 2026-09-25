@@ -7,6 +7,7 @@ package capture
 
 import (
 	"context"
+	"errors"
 
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -17,8 +18,11 @@ type RuleHitSink interface {
 	Append(e events.Event) events.Event
 }
 
-// StartNFLog is a no-op on non-linux platforms — nflog netlink only
-// exists on Linux.
-func StartNFLog(_ context.Context, _ uint16, _ RuleHitSink, _ func(error)) (func(), error) {
-	return func() {}, nil
+// StartNFLog is a no-op on non-linux platforms when disabled or without a
+// sink. A configured group reports that nflog is unavailable on this OS.
+func StartNFLog(_ context.Context, group uint16, sink RuleHitSink, _ func(error)) (func(), error) {
+	if group == 0 || sink == nil {
+		return func() {}, nil
+	}
+	return func() {}, errors.New("nflog capture is only supported on linux")
 }

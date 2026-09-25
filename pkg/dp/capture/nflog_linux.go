@@ -37,6 +37,15 @@ type RuleHitSink interface {
 // space is consumed by \s* and then anchored by $.
 var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
 
+type nfLogHandle interface {
+	Close() error
+	RegisterWithErrorFunc(context.Context, nflog.HookFunc, nflog.ErrorFunc) error
+}
+
+var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
+	return nflog.Open(cfg)
+}
+
 // StartNFLog opens an nflog subscription on the given group and emits a
 // firewall.rule.hit event to sink for each logged packet whose prefix
 // matches the containd format.
@@ -49,15 +58,6 @@ var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
 //
 // onErr, if non-nil, is called for each non-fatal error from the netlink
 // hook (e.g., parse errors on a single packet). It should not block.
-type nfLogHandle interface {
-	Close() error
-	RegisterWithErrorFunc(context.Context, nflog.HookFunc, nflog.ErrorFunc) error
-}
-
-var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
-	return nflog.Open(cfg)
-}
-
 func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(error)) (func(), error) {
 	if sink == nil || group == 0 {
 		return func() {}, nil

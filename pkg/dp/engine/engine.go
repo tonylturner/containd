@@ -51,7 +51,8 @@ type Engine struct {
 	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
 	nflogStop       func()         // stops the running nflog consumer; nil before Start or after disable
 	onError         func(error)
-	nfqueueGroup    uint16 // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
+	nfqueueGroup    uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
+	lifecycleMu     sync.Mutex // serializes Start and Reconfigure
 	flowMu          sync.Mutex
 	flows           map[string]*flow.State
 	lastSweep       time.Time
@@ -184,7 +185,13 @@ func New(cfg Config) (*Engine, error) {
 //
 // Reconfigure returns only after the previous nflog consumer has closed its
 // socket and released its kernel group, so the following Start can bind it.
+// The lifecycle lock serializes the full swap/stop with Start: if Reconfigure
+// finishes before a queued Start runs, that Start binds the latest state and
+// later Start calls see the engine as already started.
 func (e *Engine) Reconfigure(fresh *Engine) {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+
 	e.flowMu.Lock()
 	prevNflogStop := e.nflogStop
 	e.nflogStop = nil
@@ -205,6 +212,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.dpiExclusions = fresh.dpiExclusions
 	e.nflogGroup = fresh.nflogGroup
 	e.nfqueueGroup = fresh.nfqueueGroup
+	e.onError = fresh.onError
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
@@ -216,6 +224,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 }
 
 func (e *Engine) Start(ctx context.Context) error {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+
 	if e.started.Swap(true) {
 		return nil
 	}
