@@ -18,13 +18,11 @@ type RuleHitSink interface {
 	Append(e events.Event) events.Event
 }
 
-// StartNFLog is a no-op on non-linux platforms — nflog netlink only
-// exists on Linux. Returns an explicit error if the caller passed a
-// non-zero group, so the engine can surface "nflog requested but
-// unavailable on this platform" rather than silently dropping events.
-func StartNFLog(_ context.Context, group uint16, _ RuleHitSink, _ func(error)) error {
-	if group == 0 {
-		return nil
+// StartNFLog is a no-op on non-linux platforms when disabled or without a
+// sink. A configured group reports that nflog is unavailable on this OS.
+func StartNFLog(_ context.Context, group uint16, sink RuleHitSink, _ func(error)) (func(), error) {
+	if group == 0 || sink == nil {
+		return func() {}, nil
 	}
-	return errors.New("nflog capture is only supported on linux")
+	return func() {}, errors.New("nflog capture is only supported on linux")
 }

@@ -115,6 +115,67 @@ func TestCandidateCommitRollback(t *testing.T) {
 	}
 }
 
+func TestCommitWithoutCandidateDoesNotDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewSQLiteStore(filepath.Join(dir, "cfg.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	running := Config{System: SystemConfig{Hostname: "running"}}
+	if err := store.Save(context.Background(), &running); err != nil {
+		t.Fatalf("save running: %v", err)
+	}
+	if err := store.Commit(context.Background()); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- store.Commit(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("second commit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second commit deadlocked with no candidate")
+	}
+
+	got, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load running: %v", err)
+	}
+	if got.System.Hostname != running.System.Hostname {
+		t.Fatalf("running config changed: got %q want %q", got.System.Hostname, running.System.Hostname)
+	}
+}
+
+func TestCommitConfirmedWithoutCandidateDoesNotDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewSQLiteStore(filepath.Join(dir, "cfg.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	running := Config{System: SystemConfig{Hostname: "running"}}
+	if err := store.Save(context.Background(), &running); err != nil {
+		t.Fatalf("save running: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- store.CommitConfirmed(context.Background(), time.Minute) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("commit confirmed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("commit confirmed deadlocked with no candidate")
+	}
+}
+
 func TestCommitConfirmedAutoRollback(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewSQLiteStore(filepath.Join(dir, "cfg.db"))

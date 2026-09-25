@@ -80,7 +80,11 @@ func Run(ctx context.Context, opts Options) error {
 		enforceTable = "containd"
 	}
 
-	dpEngine, err := engine.New(initialEngineConfig(ifaces, enforceEnabled, enforceTable))
+	engineCfg := initialEngineConfig(ifaces, enforceEnabled, enforceTable)
+	engineCfg.OnError = func(err error) {
+		logger.Errorf("data plane capture error: %v", err)
+	}
+	dpEngine, err := engine.New(engineCfg)
 	if err != nil {
 		return fmt.Errorf("failed to init dp engine: %w", err)
 	}

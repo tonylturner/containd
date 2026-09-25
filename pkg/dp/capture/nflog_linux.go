@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	nflog "github.com/florianl/go-nflog/v2"
@@ -36,20 +37,31 @@ type RuleHitSink interface {
 // space is consumed by \s* and then anchored by $.
 var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
 
+type nfLogHandle interface {
+	Close() error
+	RegisterWithErrorFunc(context.Context, nflog.HookFunc, nflog.ErrorFunc) error
+}
+
+var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
+	return nflog.Open(cfg)
+}
+
 // StartNFLog opens an nflog subscription on the given group and emits a
 // firewall.rule.hit event to sink for each logged packet whose prefix
 // matches the containd format.
 //
-// Returns immediately on success; the consumer goroutine runs until ctx
-// is cancelled. A no-op when group == 0 or sink == nil — this matches the
+// Returns immediately on success with an idempotent stop function that
+// cancels the consumer and waits for the netlink socket to close. The
+// socket is also closed if ctx ends before stop is called. The stop
+// function is a no-op when group == 0 or sink == nil — this matches the
 // Compiler.NFLogGroup contract (0 = don't emit log clauses, no consumer
-// needed).
+// needed). On registration failure it returns a no-op stop and an error.
 //
 // onErr, if non-nil, is called for each non-fatal error from the netlink
 // hook (e.g., parse errors on a single packet). It should not block.
-func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(error)) error {
+func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(error)) (func(), error) {
 	if sink == nil || group == 0 {
-		return nil
+		return func() {}, nil
 	}
 
 	cfg := nflog.Config{
@@ -57,17 +69,12 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		Copymode: nflog.CopyPacket,
 	}
 
-	nf, err := nflog.Open(&cfg)
+	nf, err := openNFLog(&cfg)
 	if err != nil {
-		return fmt.Errorf("nflog open group %d: %w", group, err)
+		return func() {}, fmt.Errorf("nflog open group %d: %w", group, err)
 	}
 
-	// Close the netlink socket when the caller's context is done. Mirrors
-	// the nfqueue source's lifecycle pattern.
-	go func() {
-		<-ctx.Done()
-		_ = nf.Close()
-	}()
+	nflogCtx, cancel := context.WithCancel(ctx)
 
 	hook := func(a nflog.Attribute) int {
 		if ev, ok := buildRuleHitEvent(a); ok {
@@ -80,14 +87,35 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		if onErr != nil {
 			onErr(e)
 		}
+		if nflogCtx.Err() != nil {
+			return 1
+		}
 		return 0
 	}
 
-	if err := nf.RegisterWithErrorFunc(ctx, hook, errFn); err != nil {
+	if err := nf.RegisterWithErrorFunc(nflogCtx, hook, errFn); err != nil {
+		cancel()
 		_ = nf.Close()
-		return fmt.Errorf("nflog register group %d: %w", group, err)
+		return func() {}, fmt.Errorf("nflog register group %d: %w", group, err)
 	}
-	return nil
+
+	// The handle closes exactly once, either from the explicit stop or when
+	// the caller's context ends without stop being called (engine shutdown
+	// without a subsequent Reconfigure). Context cancellation alone does not
+	// release the netlink socket or the kernel group binding.
+	var once sync.Once
+	closeHandle := func() {
+		once.Do(func() { _ = nf.Close() })
+	}
+	go func() {
+		<-nflogCtx.Done()
+		closeHandle()
+	}()
+	stop := func() {
+		cancel()
+		closeHandle()
+	}
+	return stop, nil
 }
 
 // buildRuleHitEvent converts an nflog Attribute into a firewall.rule.hit

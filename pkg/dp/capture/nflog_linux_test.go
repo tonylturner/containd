@@ -6,11 +6,176 @@
 package capture
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	nflog "github.com/florianl/go-nflog/v2"
+	"github.com/tonylturner/containd/pkg/dp/events"
 )
+
+type fakeNFLogHandle struct {
+	ctx               context.Context
+	registerErr       error
+	errFn             nflog.ErrorFunc
+	closeCalls        int
+	closeBeforeCancel bool
+	closed            chan struct{} // closed on first Close when non-nil
+}
+
+func (f *fakeNFLogHandle) RegisterWithErrorFunc(ctx context.Context, _ nflog.HookFunc, errFn nflog.ErrorFunc) error {
+	f.ctx = ctx
+	f.errFn = errFn
+	return f.registerErr
+}
+
+func (f *fakeNFLogHandle) Close() error {
+	f.closeCalls++
+	if f.closed != nil && f.closeCalls == 1 {
+		close(f.closed)
+	}
+	if f.ctx == nil || f.ctx.Err() == nil {
+		f.closeBeforeCancel = true
+		return errors.New("Close called before context cancellation")
+	}
+	return nil
+}
+
+func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
+	oldOpenNFLog := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpenNFLog })
+	fake := &fakeNFLogHandle{}
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+
+	var reported int
+	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), func(error) { reported++ })
+	if err != nil {
+		t.Fatalf("StartNFLog: %v", err)
+	}
+	if stop == nil {
+		t.Fatal("StartNFLog returned nil stop function")
+	}
+	if fake.ctx == nil || fake.ctx.Err() != nil {
+		t.Fatalf("registration context before stop = %v, want active child context", fake.ctx)
+	}
+	stop()
+	if fake.ctx.Err() != context.Canceled {
+		t.Fatalf("registration context after stop = %v, want canceled", fake.ctx.Err())
+	}
+	if fake.closeCalls != 1 {
+		t.Fatalf("Close calls after first stop = %d, want 1", fake.closeCalls)
+	}
+	if fake.closeBeforeCancel {
+		t.Fatal("Close ran before cancellation")
+	}
+	stop()
+	if fake.closeCalls != 1 {
+		t.Fatalf("Close calls after second stop = %d, want 1", fake.closeCalls)
+	}
+	if got := fake.errFn(errors.New("closed")); got != 1 {
+		t.Fatalf("error callback return after cancellation = %d, want 1", got)
+	}
+	if reported != 1 {
+		t.Fatalf("onErr calls = %d, want 1", reported)
+	}
+}
+
+func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
+	oldOpenNFLog := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpenNFLog })
+	wantErr := errors.New("register failed")
+	fake := &fakeNFLogHandle{registerErr: wantErr}
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+
+	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("StartNFLog error = %v, want wrapped %v", err, wantErr)
+	}
+	if stop == nil {
+		t.Fatal("StartNFLog returned nil stop function on registration error")
+	}
+	if fake.ctx == nil || fake.ctx.Err() != context.Canceled {
+		t.Fatalf("registration context after error = %v, want canceled", fake.ctx)
+	}
+	if fake.closeCalls != 1 {
+		t.Fatalf("Close calls = %d, want 1", fake.closeCalls)
+	}
+	if fake.closeBeforeCancel {
+		t.Fatal("registration failure cleanup closed before cancellation")
+	}
+	stop()
+	if fake.closeCalls != 1 {
+		t.Fatalf("no-op stop Close calls = %d, want 1", fake.closeCalls)
+	}
+}
+
+func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
+	oldOpenNFLog := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpenNFLog })
+	fake := &fakeNFLogHandle{closed: make(chan struct{})}
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stop, err := StartNFLog(ctx, 100, events.NewStore(1), nil)
+	if err != nil {
+		t.Fatalf("StartNFLog: %v", err)
+	}
+	select {
+	case <-fake.closed:
+		t.Fatal("handle closed before the parent context ended")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	// Engine shutdown without a subsequent Reconfigure: the caller's context
+	// ends and stop is never called. The socket must still be released.
+	cancel()
+	select {
+	case <-fake.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handle not closed after parent context cancellation")
+	}
+	if fake.closeBeforeCancel {
+		t.Fatal("Close ran before cancellation")
+	}
+	stop()
+	if fake.closeCalls != 1 {
+		t.Fatalf("Close calls after stop = %d, want 1", fake.closeCalls)
+	}
+}
+
+func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
+	oldOpenNFLog := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpenNFLog })
+	var opens int
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) {
+		opens++
+		return &fakeNFLogHandle{}, nil
+	}
+	for _, tc := range []struct {
+		name  string
+		group uint16
+		sink  RuleHitSink
+	}{
+		{name: "zero group", group: 0, sink: events.NewStore(1)},
+		{name: "nil sink", group: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stop, err := StartNFLog(context.Background(), tc.group, tc.sink, nil)
+			if err != nil {
+				t.Fatalf("StartNFLog: %v", err)
+			}
+			if stop == nil {
+				t.Fatal("StartNFLog returned nil stop function")
+			}
+			stop()
+		})
+	}
+	if opens != 0 {
+		t.Fatalf("openNFLog calls = %d, want 0", opens)
+	}
+}
 
 // strPtr is a small helper to build nflog.Attribute.Prefix (which is a
 // *string in the upstream API).
@@ -72,25 +237,25 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 	// 20-byte IPv4 header (no options) + 20-byte TCP header, no payload.
 	pkt := []byte{
 		// IPv4 header
-		0x45,             // version=4, ihl=5
-		0x00,             // dscp+ecn
-		0x00, 0x28,       // total length = 40
-		0x00, 0x00,       // identification
-		0x40, 0x00,       // flags + fragment offset
-		0x40,             // ttl
-		0x06,             // protocol = TCP
-		0x00, 0x00,       // header checksum (zero, not validated)
-		10, 10, 10, 50,   // src 10.10.10.50
-		10, 40, 40, 20,   // dst 10.40.40.20
+		0x45,       // version=4, ihl=5
+		0x00,       // dscp+ecn
+		0x00, 0x28, // total length = 40
+		0x00, 0x00, // identification
+		0x40, 0x00, // flags + fragment offset
+		0x40,       // ttl
+		0x06,       // protocol = TCP
+		0x00, 0x00, // header checksum (zero, not validated)
+		10, 10, 10, 50, // src 10.10.10.50
+		10, 40, 40, 20, // dst 10.40.40.20
 		// TCP header (20 bytes)
-		0xc0, 0x00,       // src port 49152
-		0x01, 0xf6,       // dst port 502 (Modbus)
+		0xc0, 0x00, // src port 49152
+		0x01, 0xf6, // dst port 502 (Modbus)
 		0x00, 0x00, 0x00, 0x00, // seq
 		0x00, 0x00, 0x00, 0x00, // ack
-		0x50, 0x02,       // data offset 5, SYN flag
-		0x20, 0x00,       // window
-		0x00, 0x00,       // checksum
-		0x00, 0x00,       // urgent
+		0x50, 0x02, // data offset 5, SYN flag
+		0x20, 0x00, // window
+		0x00, 0x00, // checksum
+		0x00, 0x00, // urgent
 	}
 	a := nflog.Attribute{
 		Prefix:  strPtr("containd:fw-test:DENY "),

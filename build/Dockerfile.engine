@@ -3,7 +3,7 @@
 # Optional: standalone engine image for split mgmt/engine deployments.
 # For most users, use build/Dockerfile.mgmt which builds the combined appliance.
 
-FROM --platform=$BUILDPLATFORM golang:1.25.10-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.13-alpine AS builder
 ARG TARGETARCH
 ARG VERSION
 ARG COMMIT=unknown
@@ -20,7 +20,7 @@ RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
     -o /out/containd ./cmd/containd
 
 # Wolfi-based runtime with nftables (the only runtime dependency for the engine).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:52e71f61c6afd1f8d2625cff4465d8ecee156668ca665f7e9c582d1cc914eb6a
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:08df5982c3d27e70a4ce1607e3bb9af09d746f8722cf135a7694afef879fc5a2
 
 RUN apk update && apk add --no-cache nftables && rm -rf /var/cache/apk/*
 
