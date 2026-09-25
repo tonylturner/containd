@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previous consumer's group unbind. NFLOG registration failures are also
   reported through the process logger at error level.
 
+- **Config commits no longer deadlock when the candidate is missing.**
+  Commits load or seed the candidate while holding the store lock, avoiding
+  recursively acquiring the non-reentrant lock after a prior commit removed
+  the candidate row.
+
 - **DNP3 Direct Operate IDS signature missed FC 6 (No-Ack).** The
   built-in `IDS-DNP3-003` rule was titled "Direct Operate No Ack" but
   matched `function_code == 5` only — FC 5 is Direct Operate (with ack),

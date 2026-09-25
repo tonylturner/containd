@@ -234,6 +234,21 @@ func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadCandidateLocked(ctx)
+}
+
+// loadCandidateLocked loads the candidate, lazily seeding it from running
+// when absent. The caller must hold s.mu.
+func (s *SQLiteStore) loadCandidateLocked(ctx context.Context) (*Config, error) {
+	candidate, err := s.loadKind(ctx, configKeyCandidate)
+	if err == nil {
+		return candidate, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
 
 	// Appliance UX: treat "candidate missing" as "candidate == running" and
 	// lazily seed candidate so operations like `diff` and `commit` behave
@@ -241,12 +256,6 @@ func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
 	running, rerr := s.Load(ctx)
 	if rerr != nil {
 		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Double-check after acquiring the lock.
-	if existing, eerr := s.loadKind(ctx, configKeyCandidate); eerr == nil {
-		return existing, nil
 	}
 	_ = s.saveKind(ctx, configKeyCandidate, running)
 	return running, nil
@@ -275,7 +284,7 @@ func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error
 func (s *SQLiteStore) Commit(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	candidate, err := s.LoadCandidate(ctx)
+	candidate, err := s.loadCandidateLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("load candidate: %w", err)
 	}
@@ -304,7 +313,7 @@ func (s *SQLiteStore) CommitConfirmed(ctx context.Context, ttl time.Duration) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	candidate, err := s.LoadCandidate(ctx)
+	candidate, err := s.loadCandidateLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("load candidate: %w", err)
 	}
