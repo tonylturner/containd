@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ import (
 
 const dpiEnforceBlockTTL = 10 * time.Minute
 
+var startNFLog = capture.StartNFLog
+
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
 	capture         *capture.Manager
@@ -46,8 +49,9 @@ type Engine struct {
 	dpiMode         string         // "learn" or "enforce"
 	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
 	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
-	nflogCancel     context.CancelFunc // stops the running nflog consumer; nil before Start or after disable
-	nfqueueGroup    uint16         // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
+	nflogStop       func()         // stops the running nflog consumer; nil before Start or after disable
+	onError         func(error)
+	nfqueueGroup    uint16 // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
 	flowMu          sync.Mutex
 	flows           map[string]*flow.State
 	lastSweep       time.Time
@@ -74,7 +78,9 @@ type EnforceConfig struct {
 }
 
 type Config struct {
-	Capture         capture.Config
+	Capture capture.Config
+	// OnError is the fallback for capture errors and also receives non-fatal NFLOG registration errors.
+	OnError         func(error)
 	Enforce         EnforceConfig
 	InspectAll      bool
 	DPIEnabled      bool            // master DPI toggle
@@ -106,6 +112,9 @@ type DPIExclusion struct {
 }
 
 func New(cfg Config) (*Engine, error) {
+	if cfg.Capture.OnError == nil {
+		cfg.Capture.OnError = cfg.OnError
+	}
 	// If NFQueueGroup is set, drive the capture manager via NFQUEUE
 	// rather than AFPACKET. This pairs with the compiler emitting
 	// `queue num <NFQueueGroup>` as the verdict for dpiEligible rules
@@ -122,6 +131,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e := &Engine{
 		capture:       capManager,
+		onError:       cfg.OnError,
 		inspectAll:    cfg.InspectAll,
 		dpiEnabled:    cfg.DPIEnabled,
 		dpiMode:       cfg.DPIMode,
@@ -172,16 +182,12 @@ func New(cfg Config) (*Engine, error) {
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
 //
-// Stops the previous nflog consumer before swapping state so the next Start
-// can re-register the netfilter log group. Without this the old consumer
-// stays bound to the kernel group with a closure over the now-defunct event
-// store; the new Start sees EPERM on re-register and emits
-// service.nflog.unavailable, while drops from log+drop rules are silently
-// queued to a sink nobody reads.
+// Reconfigure returns only after the previous nflog consumer has closed its
+// socket and released its kernel group, so the following Start can bind it.
 func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Lock()
-	prevNflogCancel := e.nflogCancel
-	e.nflogCancel = nil
+	prevNflogStop := e.nflogStop
+	e.nflogStop = nil
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
 	e.applier = fresh.applier
@@ -203,8 +209,8 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.flowMu.Unlock()
-	if prevNflogCancel != nil {
-		prevNflogCancel()
+	if prevNflogStop != nil {
+		prevNflogStop()
 	}
 	e.started.Store(false)
 }
@@ -224,21 +230,13 @@ func (e *Engine) Start(ctx context.Context) error {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		// Use a child context tied to the engine's lifetime so Reconfigure
-		// can stop this consumer cleanly via nflogCancel before swapping in
-		// a new engine state (otherwise the old consumer keeps the kernel
-		// group bound + writes to a defunct event store).
-		nflogCtx, cancel := context.WithCancel(ctx)
-		e.flowMu.Lock()
-		e.nflogCancel = cancel
-		e.flowMu.Unlock()
-		if err := capture.StartNFLog(nflogCtx, e.nflogGroup, e.eventStore, func(perr error) {
+		stop, err := startNFLog(ctx, e.nflogGroup, e.eventStore, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
-		}); err != nil {
-			cancel()
+		})
+		if err != nil {
 			e.flowMu.Lock()
-			e.nflogCancel = nil
+			e.nflogStop = nil
 			e.flowMu.Unlock()
 			// Surface as a system event so it's visible in /api/v1/events.
 			e.eventStore.Append(events.Event{
@@ -249,6 +247,13 @@ func (e *Engine) Start(ctx context.Context) error {
 					"error": err.Error(),
 				},
 			})
+			if e.onError != nil {
+				e.onError(fmt.Errorf("nflog group %d unavailable: %w", e.nflogGroup, err))
+			}
+		} else {
+			e.flowMu.Lock()
+			e.nflogStop = stop
+			e.flowMu.Unlock()
 		}
 	}
 	// Periodically update the active goroutine gauge.

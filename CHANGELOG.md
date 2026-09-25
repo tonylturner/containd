@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **NFLOG group is released before reconfiguration rebinds.** Reconfigure
+  now waits for the previous consumer to cancel and close its netlink
+  socket before returning, preventing an immediate bind from racing the
+  previous consumer's group unbind. NFLOG registration failures are also
+  reported through the process logger at error level.
+
 - **DNP3 Direct Operate IDS signature missed FC 6 (No-Ack).** The
   built-in `IDS-DNP3-003` rule was titled "Direct Operate No Ack" but
   matched `function_code == 5` only — FC 5 is Direct Operate (with ack),

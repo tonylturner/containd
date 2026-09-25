@@ -368,7 +368,10 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 				excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
 			}
 			newEngine, err := engine.New(engine.Config{
-				Capture:         capture.Config{Interfaces: dp.CaptureInterfaces},
+				Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
+				OnError: func(err error) {
+					logger.Errorf("data plane capture error: %v", err)
+				},
 				Enforce:         engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
 				InspectAll:      dp.DPIMock,
 				DPIEnabled:      dp.DPIEnabled,
