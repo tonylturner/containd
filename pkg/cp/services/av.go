@@ -433,8 +433,8 @@ func (m *AVManager) runFreshclam(ctx context.Context, cfg config.ClamAVConfig) {
 	if configPath := "/etc/clamav/freshclam.conf"; fileExists(configPath) {
 		args = append(args, "--config-file", configPath)
 	}
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd := exec.CommandContext(ctx, path, args...)
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

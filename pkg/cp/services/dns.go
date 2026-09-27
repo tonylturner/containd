@@ -314,8 +314,8 @@ func (m *DNSManager) startOrReload(configPath string) error {
 
 	if m.CheckConfPath != "" {
 		var out bytes.Buffer
-			// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-			testCmd := exec.Command(m.CheckConfPath, configPath)
+		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		testCmd := exec.Command(m.CheckConfPath, configPath)
 		testCmd.Stdout = &out
 		testCmd.Stderr = &out
 		if err := testCmd.Run(); err != nil {

@@ -172,16 +172,16 @@ func TestShowTelemetryViews(t *testing.T) {
 			"GET /api/v1/events": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, []dpevents.Event{
 					{
-						ID:        1,
-						FlowID:    "flow-1",
-						Proto:     "modbus",
-						Kind:      "modbus.read",
+						ID:         1,
+						FlowID:     "flow-1",
+						Proto:      "modbus",
+						Kind:       "modbus.read",
 						Attributes: map[string]any{"unit_id": float64(1), "function_code": float64(3)},
-						Timestamp: now,
-						SrcIP:     "10.0.0.10",
-						DstIP:     "10.0.0.20",
-						SrcPort:   12345,
-						DstPort:   502,
+						Timestamp:  now,
+						SrcIP:      "10.0.0.10",
+						DstIP:      "10.0.0.20",
+						SrcPort:    12345,
+						DstPort:    502,
 					},
 				}, nil), nil
 			},

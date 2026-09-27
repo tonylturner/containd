@@ -51,3 +51,7 @@ linters:
         text: "ST1003"
       - linters: [unused]
         path: "_stub\\.go$|_other\\.go$"
+
+formatters:
+  enable:
+    - gofmt
