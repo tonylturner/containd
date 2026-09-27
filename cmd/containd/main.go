@@ -82,6 +82,10 @@ func main() {
 		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|cli|version|healthcheck)", mode)
 	}
 	if err != nil {
+		if exitCode(ctx, err) == 0 {
+			slog.Info("shutdown complete", "reason", err)
+			return
+		}
 		slog.Error("fatal error", "error", err)
 		os.Exit(1)
 	}
