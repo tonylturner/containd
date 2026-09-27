@@ -62,7 +62,11 @@ func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
 		handler: handler,
 	}
 	src.runFn = src.run
-	go src.supervise(ctx, m.cfg.OnError)
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		src.supervise(ctx, m.cfg.OnError)
+	}()
 	return nil
 }
 

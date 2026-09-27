@@ -5,6 +5,7 @@ package capture
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +36,36 @@ func TestManagerStartValidatesInterface(t *testing.T) {
 	}
 	if err := m.Start(context.Background(), func(Packet) {}); err == nil {
 		t.Fatalf("expected error for missing interface")
+	}
+}
+
+func TestManagerStopBeforeStartIsIdempotent(t *testing.T) {
+	m, err := NewManager(Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	m.Stop()
+	m.Stop()
+	if err := m.Start(context.Background(), func(Packet) {}); err == nil || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("Start after Stop error = %v, want stopped manager error", err)
+	}
+}
+
+func TestManagerStopCancelsAndWaitsForConsumers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &Manager{started: true, cancel: cancel}
+	workerDone := make(chan struct{})
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		<-ctx.Done()
+		close(workerDone)
+	}()
+
+	m.Stop()
+	select {
+	case <-workerDone:
+	default:
+		t.Fatal("Stop returned before capture consumer exited")
 	}
 }
