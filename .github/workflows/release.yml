@@ -24,15 +24,15 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: linux/amd64,linux/arm64
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -52,7 +52,7 @@ jobs:
 
       - name: Build and push mgmt image
         id: build-mgmt
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: build/Dockerfile.mgmt
@@ -69,7 +69,7 @@ jobs:
 
       - name: Build and push engine image
         id: build-engine
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: build/Dockerfile.engine
@@ -85,7 +85,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       # Cosign keyless signing (uses GitHub OIDC identity)
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
       - name: Sign mgmt image
         run: cosign sign --yes ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
@@ -94,13 +94,13 @@ jobs:
         run: cosign sign --yes ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
       # SBOM generation with Syft (CycloneDX 1.6), attached to the signed images
-      - uses: anchore/sbom-action@v0
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
           output-file: sbom-mgmt.cdx.json
           format: cyclonedx-json
 
-      - uses: anchore/sbom-action@v0
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
           output-file: sbom-engine.cdx.json
@@ -146,7 +146,7 @@ jobs:
           tar -czf csaf-documents.tgz -C release-csaf .
 
       - name: Upload SBOMs as release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sboms
           path: |
@@ -156,7 +156,7 @@ jobs:
             csaf-documents.tgz
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body_path: release-notes.md
           prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
