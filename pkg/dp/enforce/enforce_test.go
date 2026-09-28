@@ -472,10 +472,10 @@ func TestCompileLocalInputRule(t *testing.T) {
 	}
 
 	line, err = compileLocalInputRule(rules.LocalServiceRule{
-		ID:    "dns",
+		ID:     "dns",
 		Ifaces: []string{"eth1", "eth0"},
-		Proto: "udp",
-		Port:  53,
+		Proto:  "udp",
+		Port:   53,
 	}, nil)
 	if err != nil {
 		t.Fatalf("compileLocalInputRule(ifaces): %v", err)

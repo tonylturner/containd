@@ -78,9 +78,9 @@ func TestCanonicalServicesFromKind(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		kind    string
+		kind     string
 		services []string
-		isErr   bool
+		isErr    bool
 	}{
 		{kind: "service.envoy.requests", services: []string{"proxy", "envoy"}, isErr: false},
 		{kind: "service.envoy.error", services: []string{"proxy", "envoy"}, isErr: true},

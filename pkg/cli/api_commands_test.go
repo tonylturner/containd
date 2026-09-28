@@ -178,9 +178,9 @@ func TestSystemCommandsAndViews(t *testing.T) {
 		System: config.SystemConfig{
 			Hostname: "containd",
 			Mgmt: config.MgmtConfig{
-				ListenAddr:        ":8080",
-				HTTPListenAddr:    ":8080",
-				HTTPSListenAddr:   ":8443",
+				ListenAddr:          ":8080",
+				HTTPListenAddr:      ":8080",
+				HTTPSListenAddr:     ":8443",
 				RedirectHTTPToHTTPS: boolPtr(false),
 			},
 			SSH: config.SSHConfig{

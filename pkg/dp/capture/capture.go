@@ -10,7 +10,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -34,7 +33,12 @@ type Packet struct {
 type Manager struct {
 	interfaces []string
 	cfg        Config
-	started    atomic.Bool
+
+	mu      sync.Mutex
+	started bool
+	stopped bool
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // Config holds capture configuration.
@@ -61,34 +65,77 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 // Start begins capture on configured interfaces after validating they exist.
+// A failed Start leaves the manager retryable; no consumer goroutines remain
+// when Start returns an error.
 func (m *Manager) Start(ctx context.Context, handler Handler) error {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return errors.New("capture manager is stopped")
+	}
+	if m.started {
+		m.mu.Unlock()
+		return nil
+	}
 	mode := strings.ToLower(m.cfg.Mode)
 	if len(m.interfaces) == 0 && mode != "nfqueue" {
+		m.started = true
+		m.mu.Unlock()
 		return nil
 	}
 	if handler == nil {
+		m.mu.Unlock()
 		return errors.New("capture handler is required")
-	}
-	if m.started.Swap(true) {
-		return nil
 	}
 	// Validate AFPACKET-style interfaces exist locally. NFQUEUE mode
 	// skips this — it has no interface dependency.
 	if mode != "nfqueue" {
 		for _, iface := range m.interfaces {
 			if _, err := net.InterfaceByName(iface); err != nil {
+				m.mu.Unlock()
 				return fmt.Errorf("interface %s not found: %w", iface, err)
 			}
 		}
 	}
-	switch mode {
-	case "", "afpacket":
-		return m.startAFPacket(ctx, handler)
-	case "nfqueue":
-		return m.startNFQueue(ctx, handler)
-	default:
+	if mode != "" && mode != "afpacket" && mode != "nfqueue" {
+		m.mu.Unlock()
 		return fmt.Errorf("unsupported capture mode %q", m.cfg.Mode)
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	m.started = true
+	m.cancel = cancel
+	var err error
+	switch mode {
+	case "", "afpacket":
+		err = m.startAFPacket(runCtx, handler)
+	case "nfqueue":
+		err = m.startNFQueue(runCtx, handler)
+	}
+	if err != nil {
+		m.started = false
+		m.cancel = nil
+		m.mu.Unlock()
+		cancel()
+		m.wg.Wait()
+		return err
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// Stop permanently stops the manager, cancels capture, and waits for all
+// consumer goroutines to exit. It is safe to call repeatedly, including
+// before Start or after a failed Start.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	m.stopped = true
+	cancel := m.cancel
+	m.cancel = nil
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	m.wg.Wait()
 }
 
 func normalizeConfig(cfg Config) Config {
@@ -102,12 +149,11 @@ func normalizeConfig(cfg Config) Config {
 }
 
 func (m *Manager) startAFPacket(ctx context.Context, handler Handler) error {
-	var wg sync.WaitGroup
 	for _, iface := range m.interfaces {
 		w := &worker{iface: iface, cfg: m.cfg, handler: handler}
-		wg.Add(1)
+		m.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer m.wg.Done()
 			if err := w.run(ctx); err != nil {
 				if m.cfg.OnError != nil {
 					m.cfg.OnError(err)
@@ -115,9 +161,6 @@ func (m *Manager) startAFPacket(ctx context.Context, handler Handler) error {
 			}
 		}()
 	}
-	go func() {
-		wg.Wait()
-	}()
 	return nil
 }
 

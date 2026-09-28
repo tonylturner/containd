@@ -27,12 +27,16 @@ func sshTestValue(label string) string {
 	return label + "-Aa1!"
 }
 
-func (m testConnMetadata) User() string            { return m.user }
-func (m testConnMetadata) SessionID() []byte       { return []byte("session") }
-func (m testConnMetadata) ClientVersion() []byte   { return []byte("SSH-2.0-test-client") }
-func (m testConnMetadata) ServerVersion() []byte   { return []byte("SSH-2.0-test-server") }
-func (m testConnMetadata) RemoteAddr() net.Addr    { return &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 22} }
-func (m testConnMetadata) LocalAddr() net.Addr     { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222} }
+func (m testConnMetadata) User() string          { return m.user }
+func (m testConnMetadata) SessionID() []byte     { return []byte("session") }
+func (m testConnMetadata) ClientVersion() []byte { return []byte("SSH-2.0-test-client") }
+func (m testConnMetadata) ServerVersion() []byte { return []byte("SSH-2.0-test-server") }
+func (m testConnMetadata) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 22}
+}
+func (m testConnMetadata) LocalAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}
+}
 
 func TestNewValidatesRequiredOptions(t *testing.T) {
 	t.Parallel()

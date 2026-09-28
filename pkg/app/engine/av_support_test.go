@@ -77,10 +77,10 @@ func TestWireAVEventsAndVerdicts(t *testing.T) {
 	}
 
 	handleAVVerdict(dp, services.ScanTask{
-		Hash:    "sha256:def",
-		Proto:   "http",
-		Source:  "10.0.0.1:1234",
-		Dest:    "10.0.0.2:8443",
+		Hash:     "sha256:def",
+		Proto:    "http",
+		Source:   "10.0.0.1:1234",
+		Dest:     "10.0.0.2:8443",
 		Metadata: map[string]any{"flow_id": "flow-2"},
 	}, services.ScanResult{Verdict: "clean"})
 

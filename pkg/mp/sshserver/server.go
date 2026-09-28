@@ -35,8 +35,8 @@ type Options struct {
 	LabMode             bool
 	// ShellMode controls the default SSH login experience.
 	// "linux": drops into a real bash shell; "appliance" (default): the CLI REPL.
-	ShellMode           string
-	JWTSecret           []byte
+	ShellMode string
+	JWTSecret []byte
 	// AllowLocalIP can reject connections based on the destination/local IP.
 	// When nil, all destination IPs are allowed.
 	AllowLocalIP func(ip net.IP) bool

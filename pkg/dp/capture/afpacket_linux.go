@@ -51,6 +51,9 @@ func (w *worker) run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		// Poll, rather than a blocking Recvfrom, bounds cancellation latency
+		// on a quiet interface to the 250ms poll timeout without a socket
+		// closer goroutine racing this worker's descriptor lifetime.
 		timeout := 250
 		pollfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		n, err := unix.Poll(pollfds, timeout)

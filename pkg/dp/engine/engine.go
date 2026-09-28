@@ -32,9 +32,18 @@ const dpiEnforceBlockTTL = 10 * time.Minute
 
 var startNFLog = capture.StartNFLog
 
+type captureRunner interface {
+	Start(context.Context, capture.Handler) error
+	Stop()
+	Interfaces() []string
+}
+
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture         *capture.Manager
+	capture         captureRunner
+	runCapture      captureRunner
+	runCancel       context.CancelFunc
+	runDone         chan struct{}
 	ruleSnap        atomic.Pointer[rules.Snapshot]
 	started         atomic.Bool
 	compiler        *enforce.Compiler
@@ -183,8 +192,9 @@ func New(cfg Config) (*Engine, error) {
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
 //
-// Reconfigure returns only after the previous nflog consumer has closed its
-// socket and released its kernel group, so the following Start can bind it.
+// Reconfigure returns only after the previous data-plane run has stopped,
+// including its capture consumers and nflog socket, so the following Start
+// cannot overlap the old run.
 // The lifecycle lock serializes the full swap/stop with Start: if Reconfigure
 // finishes before a queued Start runs, that Start binds the latest state and
 // later Start calls see the engine as already started.
@@ -192,9 +202,30 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 
+	prevCancel := e.runCancel
+	prevCapture := e.runCapture
 	e.flowMu.Lock()
 	prevNflogStop := e.nflogStop
 	e.nflogStop = nil
+	e.flowMu.Unlock()
+	prevRunDone := e.runDone
+	if prevCancel != nil {
+		prevCancel()
+	}
+	if prevCapture != nil {
+		prevCapture.Stop()
+	}
+	if prevNflogStop != nil {
+		prevNflogStop()
+	}
+	if prevRunDone != nil {
+		<-prevRunDone
+	}
+	e.runCancel = nil
+	e.runCapture = nil
+	e.runDone = nil
+
+	e.flowMu.Lock()
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
 	e.applier = fresh.applier
@@ -217,9 +248,6 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.flowMu.Unlock()
-	if prevNflogStop != nil {
-		prevNflogStop()
-	}
 	e.started.Store(false)
 }
 
@@ -230,7 +258,15 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.started.Swap(true) {
 		return nil
 	}
-	if err := e.capture.Start(ctx, e.handlePacket); err != nil {
+	runCtx, runCancel := context.WithCancel(ctx)
+	runCapture := e.capture
+	e.runCancel = runCancel
+	e.runCapture = runCapture
+	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
+		runCancel()
+		e.runCancel = nil
+		e.runCapture = nil
+		e.started.Store(false)
 		return err
 	}
 	// Start the nflog consumer if configured. This produces
@@ -241,7 +277,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(ctx, e.nflogGroup, e.eventStore, func(perr error) {
+		stop, err := startNFLog(runCtx, e.nflogGroup, e.eventStore, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
 		})
@@ -268,12 +304,15 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 	// Periodically update the active goroutine gauge.
+	runDone := make(chan struct{})
+	e.runDone = runDone
 	go func() {
+		defer close(runDone)
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-runCtx.Done():
 				return
 			case <-ticker.C:
 				metrics.GoroutinesActive.Set(float64(runtime.NumGoroutine()))

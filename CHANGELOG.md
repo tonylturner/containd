@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Config commits no longer leak the previous data-plane run.** Every commit
+  rebuilt the engine and started a new capture run without stopping the old
+  one, so afpacket/NFQUEUE consumers and the per-run metrics goroutine
+  accumulated on each commit (31 leaked goroutines after 15 commits; in
+  NFQUEUE mode every rebind failed against the still-bound consumer and burned
+  its retries). `capture.Manager` now has a synchronous `Stop`, and the engine
+  owns each run's context: `Reconfigure` cancels and stops the previous run
+  before swapping state. Goroutine count is flat across 70+ commits.
+- **Signal-driven shutdown exits 0.** SIGTERM/SIGINT logged
+  `fatal error: context canceled` and exited 1, so orchestrators treated every
+  graceful stop as a crash. The daemon now logs `shutdown complete` and exits 0;
+  real run errors still exit 1.
+
+### Changed
+
+- GitHub Actions in the CI and release workflows are pinned to full commit
+  SHAs (same majors, version noted in a trailing comment), clearing the
+  semgrep mutable-action-tag findings.
+- `golangci-lint` now enforces `gofmt`; the tree was reformatted in one
+  formatting-only commit.
+
 ## [0.1.30] - 2026-09-25
 
 ### Fixed

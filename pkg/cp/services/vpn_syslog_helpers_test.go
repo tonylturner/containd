@@ -36,10 +36,10 @@ func TestValidateOpenVPNManagedClient(t *testing.T) {
 		t.Fatal("expected nil managed client validation error")
 	}
 	if _, err := validateOpenVPNManagedClient(&config.OpenVPNManagedClientConfig{
-		Remote: "vpn.example.test",
-		CA:     "ca-pem",
-		Cert:   "cert-pem",
-		Key:    "key-pem",
+		Remote:   "vpn.example.test",
+		CA:       "ca-pem",
+		Cert:     "cert-pem",
+		Key:      "key-pem",
 		Username: "alice",
 	}); err == nil {
 		t.Fatal("expected username/password pair validation error")

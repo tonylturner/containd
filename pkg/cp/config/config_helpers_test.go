@@ -165,13 +165,13 @@ func TestValidateVPNHelpers(t *testing.T) {
 	zoneSet := map[string]struct{}{"wan": {}}
 	ifaceSet := map[string]struct{}{"eth0": {}}
 	if err := validateOpenVPNServer(&OpenVPNManagedServerConfig{
-		ListenPort:      1194,
-		Proto:           "udp",
-		ListenZone:      "wan",
+		ListenPort:       1194,
+		Proto:            "udp",
+		ListenZone:       "wan",
 		ListenInterfaces: []string{"eth0"},
-		TunnelCIDR:      "10.9.0.0/24",
-		PushDNS:         []string{"1.1.1.1"},
-		PushRoutes:      []string{"10.20.0.0/24"},
+		TunnelCIDR:       "10.9.0.0/24",
+		PushDNS:          []string{"1.1.1.1"},
+		PushRoutes:       []string{"10.20.0.0/24"},
 	}, "server", zoneSet, ifaceSet); err != nil {
 		t.Fatalf("validateOpenVPNServer(valid): %v", err)
 	}

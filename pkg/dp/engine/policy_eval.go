@@ -314,25 +314,25 @@ func parsePortRange(s string) (uint16, uint16, bool) {
 	if s == "" {
 		return 0, 0, false
 	}
-		if !strings.Contains(s, "-") {
-			v, err := strconv.Atoi(s) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
-			if err != nil || v < 0 || v > 65535 {
-				return 0, 0, false
-			}
-			u := uint16(v)
-			return u, u, true
+	if !strings.Contains(s, "-") {
+		v, err := strconv.Atoi(s) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
+		if err != nil || v < 0 || v > 65535 {
+			return 0, 0, false
 		}
+		u := uint16(v)
+		return u, u, true
+	}
 	parts := strings.SplitN(s, "-", 2)
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
-		lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0])) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
-		hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1])) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
-		if err1 != nil || err2 != nil || lo < 0 || hi < 0 || lo > 65535 || hi > 65535 {
-			return 0, 0, false
-		}
-		if lo > hi {
-			lo, hi = hi, lo
-		}
-		return uint16(lo), uint16(hi), true
+	lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0])) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
+	hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1])) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast -- bounded to 0..65535 below before conversion.
+	if err1 != nil || err2 != nil || lo < 0 || hi < 0 || lo > 65535 || hi > 65535 {
+		return 0, 0, false
 	}
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return uint16(lo), uint16(hi), true
+}
