@@ -65,6 +65,8 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 // Start begins capture on configured interfaces after validating they exist.
+// A failed Start leaves the manager retryable; no consumer goroutines remain
+// when Start returns an error.
 func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	m.mu.Lock()
 	if m.stopped {
@@ -111,7 +113,6 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	}
 	if err != nil {
 		m.started = false
-		m.stopped = true
 		m.cancel = nil
 		m.mu.Unlock()
 		cancel()
@@ -122,8 +123,9 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	return nil
 }
 
-// Stop cancels capture and waits for all consumer goroutines to exit.
-// It is safe to call repeatedly, including before Start.
+// Stop permanently stops the manager, cancels capture, and waits for all
+// consumer goroutines to exit. It is safe to call repeatedly, including
+// before Start or after a failed Start.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.stopped = true

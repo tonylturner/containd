@@ -34,9 +34,15 @@ func TestManagerStartValidatesInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
-	if err := m.Start(context.Background(), func(Packet) {}); err == nil {
-		t.Fatalf("expected error for missing interface")
+	firstErr := m.Start(context.Background(), func(Packet) {})
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "interface doesnotexist not found") {
+		t.Fatalf("first Start error = %v, want missing-interface error", firstErr)
 	}
+	secondErr := m.Start(context.Background(), func(Packet) {})
+	if secondErr == nil || secondErr.Error() != firstErr.Error() || strings.Contains(secondErr.Error(), "stopped") {
+		t.Fatalf("second Start error = %v, want same missing-interface error as first: %v", secondErr, firstErr)
+	}
+	m.Stop()
 }
 
 func TestManagerStopBeforeStartIsIdempotent(t *testing.T) {

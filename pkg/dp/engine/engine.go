@@ -264,7 +264,6 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.runCapture = runCapture
 	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
 		runCancel()
-		runCapture.Stop()
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)

@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,62 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 )
+
+var errCapturePreflight = errors.New("capture preflight failed")
+
+type retryCapture struct {
+	startCalls atomic.Int32
+	stopCalls  atomic.Int32
+	done       chan struct{}
+}
+
+func (c *retryCapture) Start(ctx context.Context, _ capture.Handler) error {
+	if c.startCalls.Add(1) == 1 {
+		return errCapturePreflight
+	}
+	c.done = make(chan struct{})
+	go func(done chan struct{}) {
+		<-ctx.Done()
+		close(done)
+	}(c.done)
+	return nil
+}
+
+func (c *retryCapture) Stop() {
+	c.stopCalls.Add(1)
+	if c.done != nil {
+		<-c.done
+	}
+}
+
+func (c *retryCapture) Interfaces() []string { return nil }
+
+func TestStartRetriesAfterCaptureFailure(t *testing.T) {
+	ctx := context.Background()
+	c := &retryCapture{}
+	e := engineWithCapture(t, c)
+	if err := e.Start(ctx); !errors.Is(err, errCapturePreflight) {
+		t.Fatalf("first Start error = %v, want %v", err, errCapturePreflight)
+	}
+	if got := c.stopCalls.Load(); got != 0 {
+		t.Fatalf("capture Stop called after failed Start: %d times", got)
+	}
+	if err := e.Start(ctx); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if got := c.startCalls.Load(); got != 2 {
+		t.Fatalf("capture Start calls = %d, want 2", got)
+	}
+	e.Reconfigure(engineWithCapture(t, newBlockingCapture()))
+	if got := c.stopCalls.Load(); got != 1 {
+		t.Fatalf("capture Stop calls after Reconfigure = %d, want 1", got)
+	}
+	select {
+	case <-c.done:
+	default:
+		t.Fatal("Reconfigure returned before capture run exited")
+	}
+}
 
 type blockingCapture struct {
 	done       chan struct{}
