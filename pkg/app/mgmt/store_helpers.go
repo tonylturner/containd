@@ -42,7 +42,9 @@ func mustInitStore() config.Store {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logging.NewService("mgmt").Fatalf("failed to create config dir: %v", err)
 	}
-	store, err := config.NewSQLiteStore(dbPath)
+	store, err := openStoreWithRetry("config", func() (config.Store, error) {
+		return config.NewSQLiteStore(dbPath)
+	})
 	if err != nil {
 		logging.NewService("mgmt").Fatalf("failed to open config store: %v", err)
 	}
@@ -54,7 +56,9 @@ func mustInitAuditStore() audit.Store {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		logging.NewService("mgmt").Fatalf("failed to create audit dir: %v", err)
 	}
-	store, err := audit.NewSQLiteStore(dbPath)
+	store, err := openStoreWithRetry("audit", func() (audit.Store, error) {
+		return audit.NewSQLiteStore(dbPath)
+	})
 	if err != nil {
 		logging.NewService("mgmt").Fatalf("failed to open audit store: %v", err)
 	}
@@ -73,7 +77,9 @@ func mustInitUsersStore() users.Store {
 			logging.NewService("mgmt").Fatalf("failed to create users dir: %v", err)
 		}
 	}
-	store, err := users.NewSQLiteStore(dbPath)
+	store, err := openStoreWithRetry("users", func() (users.Store, error) {
+		return users.NewSQLiteStore(dbPath)
+	})
 	if err != nil {
 		logging.NewService("mgmt").Fatalf("failed to open users store: %v", err)
 	}
