@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-09-28
+
 ### Fixed
 
+- **Management plane retries SQLite store opens at startup.** A transient
+  `SQLITE_CANTOPEN` on a freshly created bind mount (seen once on Docker
+  Desktop right after the data directory was wiped) killed the first boot with
+  `failed to open users store`. The config, audit, and users stores now retry
+  the open with bounded exponential backoff (6 attempts, 200ms doubling to a
+  2s cap) and log each retry at warn; a persistent failure still exits fatal.
 - **Config commits no longer leak the previous data-plane run.** Every commit
   rebuilt the engine and started a new capture run without stopping the old
   one, so afpacket/NFQUEUE consumers and the per-run metrics goroutine
@@ -29,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   semgrep mutable-action-tag findings.
 - `golangci-lint` now enforces `gofmt`; the tree was reformatted in one
   formatting-only commit.
+- CI runs the curated Semgrep scan (`scripts/semgrep-verify.sh`, pinned
+  semgrep 1.178.0) as a gate alongside go, lint-go, docs, ui, and docker.
 
 ## [0.1.30] - 2026-09-25
 

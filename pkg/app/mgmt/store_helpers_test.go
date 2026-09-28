@@ -5,8 +5,10 @@ package mgmtapp
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -30,6 +32,91 @@ func TestStoreHelperPrimitives(t *testing.T) {
 	}
 	if got := cfgGetInt(nil, func(c *config.Config) int { return c.System.Mgmt.HSTSMaxAgeSeconds }, 5); got != 5 {
 		t.Fatalf("cfgGetInt = %d, want 5", got)
+	}
+}
+
+func TestOpenStoreWithRetrySucceedsAfterFailures(t *testing.T) {
+	oldSleep := storeOpenSleep
+	t.Cleanup(func() { storeOpenSleep = oldSleep })
+	var delays []time.Duration
+	storeOpenSleep = func(delay time.Duration) { delays = append(delays, delay) }
+
+	failures := 2
+	got, err := openStoreWithRetry("test", func() (string, error) {
+		if failures > 0 {
+			failures--
+			return "", errors.New("temporary open failure")
+		}
+		return "opened", nil
+	})
+	if err != nil {
+		t.Fatalf("openStoreWithRetry() error = %v", err)
+	}
+	if got != "opened" {
+		t.Fatalf("openStoreWithRetry() = %q, want %q", got, "opened")
+	}
+	wantDelays := []time.Duration{200 * time.Millisecond, 400 * time.Millisecond}
+	if len(delays) != len(wantDelays) {
+		t.Fatalf("sleep called %d times, want %d", len(delays), len(wantDelays))
+	}
+	for i := range wantDelays {
+		if delays[i] != wantDelays[i] {
+			t.Errorf("sleep delay %d = %s, want %s", i, delays[i], wantDelays[i])
+		}
+	}
+}
+
+func TestOpenStoreWithRetryExhaustsAttempts(t *testing.T) {
+	oldSleep := storeOpenSleep
+	t.Cleanup(func() { storeOpenSleep = oldSleep })
+	var delays []time.Duration
+	storeOpenSleep = func(delay time.Duration) { delays = append(delays, delay) }
+
+	wantErr := errors.New("persistent open failure")
+	attempts := 0
+	_, err := openStoreWithRetry("test", func() (string, error) {
+		attempts++
+		return "", wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("openStoreWithRetry() error = %v, want %v", err, wantErr)
+	}
+	if attempts != storeOpenMaxAttempts {
+		t.Fatalf("open called %d times, want %d", attempts, storeOpenMaxAttempts)
+	}
+	wantDelays := []time.Duration{200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond, 2 * time.Second}
+	if len(delays) != len(wantDelays) {
+		t.Fatalf("sleep called %d times, want %d", len(delays), len(wantDelays))
+	}
+	for i := range wantDelays {
+		if delays[i] != wantDelays[i] {
+			t.Errorf("sleep delay %d = %s, want %s", i, delays[i], wantDelays[i])
+		}
+	}
+}
+
+func TestOpenStoreWithRetryFirstAttemptDoesNotSleep(t *testing.T) {
+	oldSleep := storeOpenSleep
+	t.Cleanup(func() { storeOpenSleep = oldSleep })
+	oldWarnf := storeOpenWarnf
+	t.Cleanup(func() { storeOpenWarnf = oldWarnf })
+	sleeps := 0
+	warnings := 0
+	storeOpenSleep = func(time.Duration) { sleeps++ }
+	storeOpenWarnf = func(string, ...any) { warnings++ }
+
+	got, err := openStoreWithRetry("test", func() (string, error) { return "opened", nil })
+	if err != nil {
+		t.Fatalf("openStoreWithRetry() error = %v", err)
+	}
+	if got != "opened" {
+		t.Fatalf("openStoreWithRetry() = %q, want %q", got, "opened")
+	}
+	if sleeps != 0 {
+		t.Fatalf("sleep called %d times, want 0", sleeps)
+	}
+	if warnings != 0 {
+		t.Fatalf("warn logged %d times, want 0", warnings)
 	}
 }
 
