@@ -223,7 +223,9 @@ run_cmd() {
 ensure_tools
 ensure_images
 mkdir -p "$RESULTS_DIR"
-rm -f "$RESULTS_DIR"/*.log
+# Remove only what this script writes; a caller may keep its own console log
+# in the same directory.
+rm -f "$RESULTS_DIR/compose.log" "$RESULTS_DIR/cc.log"
 printf '{"schema_version":1,"project":"%s","assertions":[],"summary":{}}\n' "$PROJECT" >"$RESULTS_FILE"
 
 log "Building the Go malformer client (Apache-2.0, for malformed/split cases)..."
@@ -728,14 +730,59 @@ else
     "could not install the queueholder in the firewall container"
 fi
 
-# 11. Telemetry stays fresh for > 10 minutes on the long-lived session, which
-#     never drops. Checked every 30 s.
+# 11. The long-lived control centre behaves like a real one (B1): every policy
+#     apply above (learn switch, restores, queue-bind check) changes the IEC
+#     envelope or restarts the queue, so the engine resets its IEC sessions
+#     (§6.4, §8.3) and the control centre reconnects within 1 s and re-runs
+#     GI. Each recovery (close -> GI termination) must fit the B1 budget.
+#     Then telemetry must stay fresh for > 10 minutes on a session that does
+#     not drop at all: no policy changes happen during that window.
+# wait_cc_settled: wait (up to 20 s) until the control centre is connected and
+# its close/connect counts have not changed for 3 s, so a reset caused by the
+# last policy apply cannot land inside the freshness window.
+wait_cc_settled() {
+  local prev="" cur stable=0
+  for _ in $(seq 1 40); do
+    cur="$(cc_count 'CONN closed' cc.log)/$(cc_count 'CC connected' cc.log)"
+    if [[ "$cur" == "$prev" && "${cur#*/}" -gt "${cur%/*}" ]]; then
+      stable=$((stable + 1))
+      ((stable >= 6)) && return 0
+    else
+      stable=0
+    fi
+    prev=$cur
+    sleep 0.5
+  done
+  return 1
+}
+
+# Settle first, so every reset caused by the policy applies above is in the
+# log before the recovery check reads it.
+wait_cc_settled || log "control centre not settled after 20 s; the checks below will show it"
+compose exec -T cc cat /tmp/cc.log >"$RESULTS_DIR/cc.log" 2>/dev/null || true
+# One line per reset: the gap in ms from "CONN closed" to the next GI
+# termination (type 100, COT 10), or -1 if no GI followed.
+GAPS=$(awk '
+  / CONN closed/ { if (open) print -1; open = 1; t0 = substr($1, 3) + 0; next }
+  / RCVD type=100 cot=10 / { if (open) { print substr($1, 3) - t0; open = 0 } }
+  END { if (open) print -1 }
+' "$RESULTS_DIR/cc.log")
+RESETS=$(grep -c . <<<"$GAPS" || true)
+BAD=$(awk '$1 < 0 || $1 > 5000' <<<"$GAPS" | grep -c . || true)
+RECOVERY="resets=$RESETS; close->GI ms: $(tr '\n' ' ' <<<"$GAPS")"
+if [[ "$BAD" == 0 ]]; then
+  pass "the long-lived control centre recovers from every IEC session reset within 5 s (new session + GI)" "$RECOVERY"
+else
+  fail "the long-lived control centre did not recover from an IEC session reset within 5 s" "$RECOVERY"
+fi
+
 if ((FRESHNESS_SECONDS < 600)); then
   not_implemented "spontaneous telemetry stays fresh for more than 10 minutes" \
     "IEC104_FRESHNESS_SECONDS=$FRESHNESS_SECONDS is shorter than the spec's 10 minutes; rerun with the default"
 else
   log "Watching control-centre telemetry freshness for ${FRESHNESS_SECONDS}s..."
   stale=""
+  closed_start=$(cc_count 'CONN closed' cc.log)
   last=$(cc_count 'cot=3 ' cc.log)
   elapsed=0
   while ((elapsed < FRESHNESS_SECONDS)); do
@@ -747,11 +794,13 @@ else
     fi
     last=$now
   done
-  closed=$(cc_count 'CONN closed' cc.log)
-  if [[ -z "$stale" && "$closed" == 0 ]]; then
-    pass "spontaneous telemetry stays fresh for ${FRESHNESS_SECONDS}s on the long-lived session" "$last updates"
+  closed_end=$(cc_count 'CONN closed' cc.log)
+  compose exec -T cc cat /tmp/cc.log >"$RESULTS_DIR/cc.log" 2>/dev/null || true
+  if [[ -z "$stale" && "$closed_end" == "$closed_start" ]]; then
+    pass "spontaneous telemetry stays fresh for ${FRESHNESS_SECONDS}s on the long-lived session" \
+      "$last updates; no session drop in the window (closes before it: $closed_start)"
   else
-    fail "telemetry went stale or the session dropped" "${stale}closed events=$closed"
+    fail "telemetry went stale or the session dropped" "${stale}closes during the window: $closed_start -> $closed_end"
   fi
 fi
 

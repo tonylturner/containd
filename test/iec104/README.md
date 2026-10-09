@@ -89,6 +89,18 @@ The cyclic task sends feeder current as spontaneous data (COT 3) every 2 s
 and busbar voltage as cyclic data (COT 1) every 10 s; `PERIODIC_MS=0`
 disables both. The control-centre client honours `IEC104_T3`.
 
+The long-lived control centre (`iec104ep cc`) behaves like a real one (B1):
+when its session closes or is reset it waits 1 s, reconnects, sends STARTDT
+and re-runs station GI. Every policy apply resets the enforce IEC sessions
+(§6.4 envelope change, §8.3 queue restart), so the harness checks that each
+recovery (close to GI termination) fits the 5 s budget, waits for the session
+to settle after the last apply, and only then watches freshness: more than
+10 minutes with an update in every 30 s window and no session drop. Its log
+lines carry `t=<epoch ms>`; the script copies it to `cc.log` in the results
+directory, next to `compose.log` and `results.json`. The script deletes only
+those two log files at start, so a caller's own console log in the same
+directory survives.
+
 ## Phase 1 result (2026-10-09, before L1-L4 merge)
 
 Full run against `iec104` with only the contract commit (default 660 s
