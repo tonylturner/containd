@@ -13,7 +13,9 @@ CURL="curl -sf --max-time 10 --connect-timeout 5"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 TESTS_PASSED=0
-TESTS_EXPECTED=7
+TESTS_EXPECTED=11
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 GREEN="\033[32m"
 RED="\033[31m"
@@ -24,7 +26,10 @@ timestamp() {
 }
 
 log() { echo "[$(timestamp)] $*"; }
-pass() { ((TESTS_PASSED++)); log "PASS: $*"; }
+pass() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  log "PASS: $*"
+}
 
 ensure_tools() {
   for bin in docker jq curl; do
@@ -82,10 +87,10 @@ apply_snapshot() {
   log "Applying dataplane configuration to engine..."
   tmp_cfg=$(mktemp)
   printf '%s' "$DATAPLANE_CFG" >"$tmp_cfg"
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data-binary @"$tmp_cfg" -o /tmp/smoke-dpi-engine-config.out || true)
+  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data-binary @"$tmp_cfg" -o "$WORK_DIR"/smoke-dpi-engine-config.out || true)
   rm -f "$tmp_cfg"
   if [[ "$code" != "200" ]]; then
-    log "engine config failed (HTTP $code): $(cat /tmp/smoke-dpi-engine-config.out)"
+    log "engine config failed (HTTP $code): $(cat "$WORK_DIR"/smoke-dpi-engine-config.out)"
     exit 1
   fi
 
@@ -233,22 +238,22 @@ log "Programming OT client and Modbus server routes through engine..."
   docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route add default via 172.31.0.2 dev eth0
   docker compose -f "$COMPOSE_FILE" exec -T modbus_server ip route add default via 172.30.0.2 dev eth0
   set -e
-} >/tmp/route-setup-dpi.log 2>&1 || true
-sed 's/^/  /' /tmp/route-setup-dpi.log
+} >"$WORK_DIR"/route-setup-dpi.log 2>&1 || true
+sed 's/^/  /' "$WORK_DIR"/route-setup-dpi.log
 
 OT_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route get 172.30.0.4 | tr -d '\r')
 echo "$OT_ROUTE" | grep -q "via 172.31.0.2" || { log "ot_client route not via engine: $OT_ROUTE"; exit 1; }
 pass "OT client route uses engine for Modbus traffic"
 
 log "Testing Modbus read allow..."
-docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py read 172.30.0.4 502 >/tmp/modbus-read.out 2>/tmp/modbus-read.err
+docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py read 172.30.0.4 502 >"$WORK_DIR"/modbus-read.out 2>"$WORK_DIR"/modbus-read.err
 READ_STATUS=$?
 if [[ $READ_STATUS -ne 0 ]]; then
   log "Modbus read failed (exit $READ_STATUS):"
-  cat /tmp/modbus-read.err
+  cat "$WORK_DIR"/modbus-read.err
   exit 1
 fi
-pass "Modbus read allowed ($(tr -d '\r' </tmp/modbus-read.out))"
+pass "Modbus read allowed ($(tr -d '\r' <"$WORK_DIR"/modbus-read.out))"
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
@@ -258,10 +263,10 @@ fi
 pass "Modbus event recorded in telemetry"
 
 log "Triggering Modbus write enforcement..."
-if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >/tmp/modbus-write-trigger.out 2>/tmp/modbus-write-trigger.err; then
-  log "Initial Modbus write completed before dynamic block took effect ($(tr -d '\r' </tmp/modbus-write-trigger.out))"
+if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >"$WORK_DIR"/modbus-write-trigger.out 2>"$WORK_DIR"/modbus-write-trigger.err; then
+  log "Initial Modbus write completed before dynamic block took effect ($(tr -d '\r' <"$WORK_DIR"/modbus-write-trigger.out))"
 else
-  log "Initial Modbus write blocked immediately ($(tr -d '\r' </tmp/modbus-write-trigger.err))"
+  log "Initial Modbus write blocked immediately ($(tr -d '\r' <"$WORK_DIR"/modbus-write-trigger.err))"
 fi
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
@@ -272,9 +277,9 @@ fi
 pass "Modbus write matched the deny rule"
 
 log "Testing follow-up Modbus write is blocked..."
-if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >/tmp/modbus-write-blocked.out 2>/tmp/modbus-write-blocked.err; then
+if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >"$WORK_DIR"/modbus-write-blocked.out 2>"$WORK_DIR"/modbus-write-blocked.err; then
   log "Unexpected allow: follow-up Modbus write succeeded"
-  cat /tmp/modbus-write-blocked.out
+  cat "$WORK_DIR"/modbus-write-blocked.out
   exit 1
 else
   pass "Follow-up Modbus write blocked after enforcement"
@@ -294,8 +299,64 @@ if ! wait_for_jq "${BASE}/inventory" "$modbus_inventory_filter"; then
 fi
 pass "Inventory discovered Modbus endpoints"
 
+# Persistent connection: read -> write -> read on ONE TCP connection. The
+# write must be decoded and denied even though it is not the first PDU,
+# and the server's replies must not be mistaken for new flows and blocked.
+log "Clearing dynamic flow blocks before the persistent-connection case..."
+docker compose -f "$COMPOSE_FILE" exec -T engine nft flush set inet containd block_flows
+sleep 1
+PERSIST_TS=$(timestamp)
+export PERSIST_TS
+
+log "Testing read -> write -> read on one persistent Modbus connection..."
+if ! docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py persistent 172.30.0.4 502 >"$WORK_DIR"/modbus-persistent.out 2>"$WORK_DIR"/modbus-persistent.err; then
+  log "persistent Modbus client failed:"
+  cat "$WORK_DIR"/modbus-persistent.out "$WORK_DIR"/modbus-persistent.err
+  exit 1
+fi
+sed 's/^/  /' "$WORK_DIR"/modbus-persistent.out
+PERSIST_PORT=$(tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | awk '$1 == "PERSISTENT_PORT" { print $2 }')
+export PERSIST_PORT
+if [[ -z "$PERSIST_PORT" ]] || ! tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 2p | grep -q '^READ_OK'; then
+  log "persistent connection did not complete its first read"
+  exit 1
+fi
+pass "Persistent connection read reply received (client port ${PERSIST_PORT})"
+
+persistent_write_filter=$(cat <<'EOF'
+any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.PERSIST_PORT | tonumber) and .attributes.function_code == 6 and .attributes.is_write == true and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
+EOF
+)
+persistent_deny_filter=$(cat <<'EOF'
+any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
+EOF
+)
+
+if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_write_filter"; then
+  log "write on the persistent connection was not decoded"
+  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '[.[] | select(.proto == "modbus")]'
+  exit 1
+fi
+pass "Persistent-connection write decoded (FC6, is_write=true)"
+
+if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_deny_filter"; then
+  log "write on the persistent connection did not match the deny rule"
+  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
+  exit 1
+fi
+pass "Persistent-connection write matched the deny rule"
+
+BLOCK_FLOWS=$(docker compose -f "$COMPOSE_FILE" exec -T engine nft list set inet containd block_flows | tr -d '\r')
+if echo "$BLOCK_FLOWS" | grep -q "172.30.0.4 . 172.31.0.5"; then
+  log "server replies were dynamically blocked:"
+  echo "$BLOCK_FLOWS"
+  exit 1
+fi
+pass "Server replies were not dynamically blocked"
+
 if [[ $TESTS_PASSED -eq $TESTS_EXPECTED ]]; then
   printf "[%s] %bDPI smoke complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$GREEN" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
 else
   printf "[%s] %bDPI smoke complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$RED" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
+  exit 1
 fi
