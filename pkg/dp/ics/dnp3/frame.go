@@ -47,8 +47,9 @@ const (
 	FuncWarmRestart         = 0x0E
 	FuncStopApplication     = 0x12
 	FuncSaveConfiguration   = 0x13
-	FuncEnableUnsolicited   = 0x15
-	FuncDisableUnsolicited  = 0x16
+	FuncEnableUnsolicited   = 0x14
+	FuncDisableUnsolicited  = 0x15
+	FuncAssignClass         = 0x16
 	FuncResponse            = 0x81
 	FuncUnsolicitedResponse = 0x82
 )
@@ -88,6 +89,8 @@ func FunctionCodeName(fc uint8) string {
 		return "enable_unsolicited"
 	case FuncDisableUnsolicited:
 		return "disable_unsolicited"
+	case FuncAssignClass:
+		return "assign_class"
 	case FuncResponse:
 		return "response"
 	case FuncUnsolicitedResponse:

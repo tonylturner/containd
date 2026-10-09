@@ -159,6 +159,12 @@ func TestFunctionCodeName(t *testing.T) {
 	if name != "unknown_0xff" {
 		t.Errorf("expected 'unknown_0xff', got %q", name)
 	}
+	// IEEE 1815-2012 function codes 20, 21 and 22.
+	for fc, want := range map[uint8]string{20: "enable_unsolicited", 21: "disable_unsolicited", 22: "assign_class"} {
+		if got := FunctionCodeName(fc); got != want {
+			t.Errorf("FunctionCodeName(%d) = %q, want %q", fc, got, want)
+		}
+	}
 }
 
 func TestDecoderSupportsPort20000(t *testing.T) {
