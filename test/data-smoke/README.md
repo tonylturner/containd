@@ -46,19 +46,31 @@ up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
 18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then
 `down --volumes` the project you created.
 
-## Modbus fixtures and the NFQUEUE variant
+## ICS fixtures and the NFQUEUE variant
 
 `modbus/server.py` appends every decoded request to
 `/tmp/modbus-requests.jsonl` and rewrites its register image to
 `/tmp/modbus-state.json` (`{"writes": N, "registers": [...]}`) inside the
-`modbus_server` container. `modbus/client.py` supports `read`, `write` and
-`readwrite` (a read, then a write on the same connection), with
-`--source IP` and `--value N`; exit 3 means the connection was established
-but the write got no response.
+`modbus_server` container. `modbus/client.py` modes: `read`, `write`,
+`readwrite` (a read, then a write on one connection), `read-split` (one read
+whose MBAP header and PDU go out as two TCP segments), `read-coalesced` (two
+reads in one segment) and `diag` (FC 8), with `--source IP` and `--value N`.
+Exit 3 means the connection was established but the write or diagnostics
+request got no response.
+
+`dnp3/dnp3.py` is a minimal DNP3-over-TCP outstation (`server`, port 20000)
+and master (`read`, `operate` = FC 5, `operate-nr` = FC 6). The outstation
+answers a read with FC 129 and then one FC 130 unsolicited response per
+connection, logs every request to `/tmp/dnp3-requests.jsonl` and keeps
+`/tmp/dnp3-state.json` (`{"operations": N, "requests": N}`). The compose file
+does not mount it; `scripts/smoke-dpi.sh` copies it into the `ot_client` and
+`modbus_server` containers with `docker compose cp` and starts the
+outstation itself.
 
 `SMOKE_DPI_CAPTURE=nfqueue bash scripts/smoke-dpi.sh` runs the inline
-variant (`nfqueueGroup` 101). It adds client addresses `.6` and `.7` on the
-`ot_client` container and asserts, from the server's state files, that the
-first write on a fresh connection and the first write after a read on a
-persistent connection never reach the server. Those assertions are an
-expected-fail gate until milestone B lanes L3 and L4 merge.
+variant (`nfqueueGroup` 101). It adds client addresses `.6`-`.10` on the
+`ot_client` container and asserts, from the servers' state files, that the
+first Modbus FC 6 write (fresh connection and after a read), the first
+Modbus FC 8, and the first complete DNP3 FC 5 and FC 6 never reach the
+server. Each probe has its own source address, so the 10-minute dynamic
+block from an earlier deny cannot stand in for the inline drop.
