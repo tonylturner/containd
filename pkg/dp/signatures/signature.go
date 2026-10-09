@@ -181,14 +181,21 @@ func evalCondition(cond Condition, fieldVal any) bool {
 		return equalsAny(fieldVal, cond.Value)
 	case "in":
 		return inAny(fieldVal, cond.Value)
-	case "gt":
-		return compareNumeric(fieldVal, cond.Value) > 0
-	case "lt":
-		return compareNumeric(fieldVal, cond.Value) < 0
-	case "gte":
-		return compareNumeric(fieldVal, cond.Value) >= 0
-	case "lte":
-		return compareNumeric(fieldVal, cond.Value) <= 0
+	case "gt", "lt", "gte", "lte":
+		cmp, ok := compareNumeric(fieldVal, cond.Value)
+		if !ok {
+			return false
+		}
+		switch cond.Op {
+		case "gt":
+			return cmp > 0
+		case "lt":
+			return cmp < 0
+		case "gte":
+			return cmp >= 0
+		default:
+			return cmp <= 0
+		}
 	case "contains":
 		return containsStr(fieldVal, cond.Value)
 	case "has_token":
@@ -243,21 +250,22 @@ func inAny(fieldVal, condVal any) bool {
 	return false
 }
 
-// compareNumeric returns -1, 0, or 1 for a < b, a == b, a > b.
-// Returns 0 if either is not numeric (treated as no match by callers via > 0 / < 0 checks).
-func compareNumeric(a, b any) int {
+// compareNumeric returns -1, 0, or 1 for a < b, a == b, a > b. ok is false
+// when either side is not numeric, including an absent attribute, so no
+// ordering operator matches it.
+func compareNumeric(a, b any) (int, bool) {
 	af, aOk := toFloat64(a)
 	bf, bOk := toFloat64(b)
 	if !aOk || !bOk {
-		return 0
+		return 0, false
 	}
 	if af < bf {
-		return -1
+		return -1, true
 	}
 	if af > bf {
-		return 1
+		return 1, true
 	}
-	return 0
+	return 0, true
 }
 
 func containsStr(fieldVal, condVal any) bool {
