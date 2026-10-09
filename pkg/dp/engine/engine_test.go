@@ -318,12 +318,18 @@ func TestEnforceDPIEventsBlocksDeniedICSFlow(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	}}
 
-	v, enforced := e.enforceDPIEvents(state, pkt, evs)
+	v, evalCtx, enforced := e.enforceDPIEvents(state, pkt, evs)
 	if !enforced {
 		t.Fatal("expected enforcement verdict")
 	}
 	if v.Action != verdict.BlockFlowTemp {
 		t.Fatalf("expected block-flow verdict, got %s", v.Action)
+	}
+	if up.flowKey != "" {
+		t.Fatal("enforceDPIEvents must not perform updater I/O")
+	}
+	if err := e.ApplyVerdict(context.Background(), v, evalCtx); err != nil {
+		t.Fatalf("apply verdict: %v", err)
 	}
 	if up.flowKey != "10.0.0.1->10.0.0.2/tcp:502" {
 		t.Fatalf("unexpected blocked flow key %q", up.flowKey)

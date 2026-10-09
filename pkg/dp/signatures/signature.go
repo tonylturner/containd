@@ -5,7 +5,9 @@ package signatures
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,13 +24,16 @@ type Signature struct {
 	Protocol    string      `json:"protocol"` // modbus, dnp3, cip, s7comm, or "" for any
 	Conditions  []Condition `json:"conditions"`
 	References  []string    `json:"references,omitempty"`
+	// Threshold, when set, alerts once per flow when Count matches fall in
+	// one Window instead of on every match.
+	Threshold *Threshold `json:"threshold,omitempty"`
 }
 
 // Condition is a single matching predicate within a signature.
 // All conditions in a signature must match (AND logic).
 type Condition struct {
 	Field string `json:"field"` // event attribute path: "function_code", "is_write", etc.
-	Op    string `json:"op"`    // equals, in, gt, lt, contains, regex
+	Op    string `json:"op"`    // equals, in, gt, lt, gte, lte, contains, has_token, regex
 	Value any    `json:"value"`
 }
 
@@ -44,9 +49,10 @@ type Engine struct {
 	signatures []Signature
 	mu         sync.RWMutex
 
-	matchesMu sync.Mutex
-	matches   []Match
-	matchCap  int
+	matchesMu  sync.Mutex
+	matches    []Match
+	matchCap   int
+	thresholds map[thresholdKey]*thresholdState // guarded by matchesMu
 }
 
 // New creates a new signature engine with default capacity for match history.
@@ -59,7 +65,7 @@ func New() *Engine {
 
 // LoadBuiltins loads the built-in ICS threat signatures.
 func (e *Engine) LoadBuiltins() {
-	for _, sig := range builtinSignatures() {
+	for _, sig := range append(builtinSignatures(), iec104Signatures()...) {
 		e.Add(sig)
 	}
 }
@@ -124,9 +130,19 @@ func (e *Engine) Match(ev dpi.Event) []Match {
 	sigs := e.signatures
 	e.mu.RUnlock()
 
+	now := ev.Timestamp
+	if now.IsZero() {
+		now = time.Now()
+	}
 	var out []Match
 	for _, sig := range sigs {
 		if !sigMatchesEvent(sig, ev) {
+			continue
+		}
+		e.matchesMu.Lock()
+		alert := e.passThreshold(sig, ev, now)
+		e.matchesMu.Unlock()
+		if !alert {
 			continue
 		}
 		m := Match{
@@ -179,16 +195,25 @@ func evalCondition(cond Condition, fieldVal any) bool {
 		return equalsAny(fieldVal, cond.Value)
 	case "in":
 		return inAny(fieldVal, cond.Value)
-	case "gt":
-		return compareNumeric(fieldVal, cond.Value) > 0
-	case "lt":
-		return compareNumeric(fieldVal, cond.Value) < 0
-	case "gte":
-		return compareNumeric(fieldVal, cond.Value) >= 0
-	case "lte":
-		return compareNumeric(fieldVal, cond.Value) <= 0
+	case "gt", "lt", "gte", "lte":
+		cmp, ok := compareNumeric(fieldVal, cond.Value)
+		if !ok {
+			return false
+		}
+		switch cond.Op {
+		case "gt":
+			return cmp > 0
+		case "lt":
+			return cmp < 0
+		case "gte":
+			return cmp >= 0
+		default:
+			return cmp <= 0
+		}
 	case "contains":
 		return containsStr(fieldVal, cond.Value)
+	case "has_token":
+		return hasToken(fieldVal, cond.Value)
 	case "regex":
 		return matchesRegex(fieldVal, cond.Value)
 	default:
@@ -239,27 +264,75 @@ func inAny(fieldVal, condVal any) bool {
 	return false
 }
 
-// compareNumeric returns -1, 0, or 1 for a < b, a == b, a > b.
-// Returns 0 if either is not numeric (treated as no match by callers via > 0 / < 0 checks).
-func compareNumeric(a, b any) int {
+// compareNumeric returns -1, 0, or 1 for a < b, a == b, a > b. ok is false
+// when either side is not numeric, including an absent attribute, so no
+// ordering operator matches it.
+func compareNumeric(a, b any) (int, bool) {
 	af, aOk := toFloat64(a)
 	bf, bOk := toFloat64(b)
 	if !aOk || !bOk {
-		return 0
+		return 0, false
 	}
 	if af < bf {
-		return -1
+		return -1, true
 	}
 	if af > bf {
-		return 1
+		return 1, true
 	}
-	return 0
+	return 0, true
 }
 
 func containsStr(fieldVal, condVal any) bool {
 	fs := fmt.Sprintf("%v", fieldVal)
 	cs := fmt.Sprintf("%v", condVal)
 	return strings.Contains(fs, cs)
+}
+
+// hasToken reports whether condVal is exactly one of the tokens of fieldVal:
+// a comma-separated string (the DNP3 object_groups form) or a list of
+// strings. Tokens compare whole, so "7" does not match "70" or "170".
+func hasToken(fieldVal, condVal any) bool {
+	want, ok := tokenString(condVal)
+	if !ok {
+		return false
+	}
+	var tokens []string
+	switch v := fieldVal.(type) {
+	case string:
+		tokens = strings.Split(v, ",")
+	case []string:
+		tokens = v
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return false
+			}
+			tokens = append(tokens, s)
+		}
+	default:
+		return false
+	}
+	for _, tok := range tokens {
+		if strings.TrimSpace(tok) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenString renders a condition value as a token: strings as given,
+// integral numbers in decimal.
+func tokenString(v any) (string, bool) {
+	if s, ok := v.(string); ok {
+		t := strings.TrimSpace(s)
+		return t, t != ""
+	}
+	f, ok := toFloat64(v)
+	if !ok || f != math.Trunc(f) || math.IsInf(f, 0) {
+		return "", false
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64), true
 }
 
 // sigRegexCache caches compiled regex patterns to avoid per-packet compilation.

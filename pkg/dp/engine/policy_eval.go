@@ -4,13 +4,13 @@
 package engine
 
 import (
-	"context"
 	"net"
 	"strconv"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
@@ -63,22 +63,18 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 	return false
 }
 
-func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, bool) {
-	// The early-return on global mode that used to live here was removed
-	// in favor of per-rule mode resolution: a rule may opt into enforce
-	// even when the global default is learn (the safe production
-	// default). The matched rule's effective mode is consulted below
-	// after evaluation. The firewall.rule.hit log event still fires for
-	// every matched-with-Log rule regardless of mode (logging is safe in
-	// both monitor and enforce modes) — that's how operators get the
-	// visibility they need during the monitor-first observation phase
-	// before flipping rules to enforce.
+// enforceDPIEvents evaluates decoded ICS events against the firewall rules
+// and returns the first enforced denial with its context. It performs no
+// I/O: the caller drops the packet and installs the dynamic block after the
+// verdict. Logging of matched Log rules still happens in
+// EvaluateVerdictMatch for learn and enforce modes alike.
+func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, rules.EvalContext, bool) {
 	if e == nil || state == nil || pkt == nil || len(evs) == 0 {
-		return verdict.Verdict{}, false
+		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
 	snap := e.ruleSnap.Load()
 	if snap == nil {
-		return verdict.Verdict{}, false
+		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
 	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
 	for _, ev := range evs {
@@ -91,9 +87,8 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			continue
 		}
 		if e.effectiveMode(matched) != "enforce" {
-			// Match logged above via EvaluateVerdictMatch — operator sees
-			// "this would have been blocked" — but verdict not applied
-			// because the rule is in learn mode (or no enforce override).
+			// Logged by EvaluateVerdictMatch ("would have been blocked")
+			// but not applied: the rule is in learn mode.
 			continue
 		}
 		if v.Action == verdict.DenyDrop {
@@ -102,19 +97,19 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 				v.TTL = dpiEnforceBlockTTL
 			}
 		}
-		if err := e.ApplyVerdict(context.Background(), v, ctx); err != nil {
-			continue
-		}
-		return v, true
+		return v, ctx, true
 	}
-	return verdict.Verdict{}, false
+	return verdict.Verdict{}, rules.EvalContext{}, false
 }
 
 func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
-	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) {
+	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
 		return rules.EvalContext{}, false
 	}
 	service := servicePort(state, pkt)
+	// Read/write class comes only from a present is_write: an event that
+	// does not say it is a write is not thereby read-only.
+	isWrite, hasWrite := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
 	ctx := rules.EvalContext{
 		SrcZone: srcZone,
 		DstZone: dstZone,
@@ -125,19 +120,18 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 		ICS: &rules.ICSContext{
 			Protocol:  strings.ToLower(ev.Proto),
 			Address:   attrString(ev.Attributes, "address"),
-			ReadOnly:  !attrBool(ev.Attributes, "is_write"),
-			WriteOnly: attrBool(ev.Attributes, "is_write"),
+			ReadOnly:  hasWrite && !isWrite,
+			WriteOnly: hasWrite && isWrite,
 			Direction: eventDirection(ev.Kind),
 		},
 	}
-	if fc, ok := attrUint8(ev.Attributes, "function_code"); ok {
+	if fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
 		ctx.ICS.FunctionCode = fc
 	}
-	if unitID, ok := attrUint8(ev.Attributes, "unit_id"); ok {
-		unit := unitID
-		ctx.ICS.UnitID = &unit
+	if unitID, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID); ok {
+		ctx.ICS.UnitID = &unitID
 	}
-	if objectClass, ok := attrUint16(ev.Attributes, "object_class"); ok {
+	if objectClass, ok := eventfields.Uint16(ev.Attributes, "object_class"); ok {
 		ctx.ICS.ObjectClass = objectClass
 	}
 	return ctx, true
@@ -205,6 +199,14 @@ func isRuleEvaluableICSEvent(proto string) bool {
 	}
 }
 
+// isStreamErrorEvent reports a malformed or unsupported event. Such events
+// are evidence only: on US protocols the packet passes (spec §4.2), so they
+// never reach rule evaluation, where a missing function code would read as
+// FC 0.
+func isStreamErrorEvent(ev dpi.Event) bool {
+	return ev.Kind == "malformed" || ev.Kind == "unsupported"
+}
+
 func eventDirection(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "response", "exception":
@@ -212,72 +214,6 @@ func eventDirection(kind string) string {
 	default:
 		return "request"
 	}
-}
-
-func attrBool(attrs map[string]any, key string) bool {
-	if attrs == nil {
-		return false
-	}
-	switch v := attrs[key].(type) {
-	case bool:
-		return v
-	case string:
-		return strings.EqualFold(v, "true")
-	default:
-		return false
-	}
-}
-
-func attrUint8(attrs map[string]any, key string) (uint8, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint8:
-		return v, true
-	case uint16:
-		if v <= 255 {
-			return uint8(v), true
-		}
-	case int:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	}
-	return 0, false
-}
-
-func attrUint16(attrs map[string]any, key string) (uint16, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint16:
-		return v, true
-	case uint8:
-		return uint16(v), true
-	case int:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	}
-	return 0, false
 }
 
 func attrString(attrs map[string]any, key string) string {

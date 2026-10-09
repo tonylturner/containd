@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // Anomaly represents a detected protocol-level anomaly in ICS traffic.
@@ -112,6 +113,10 @@ type Detector struct {
 	writeRate *rateTracker
 	totalRate *rateTracker
 
+	// IEC104 APDU IDs already counted for rates (bounded).
+	apduSeen  map[string]struct{}
+	apduOrder []string
+
 	// Ring buffer of recent anomalies.
 	ring    []Anomaly
 	ringPos int
@@ -132,6 +137,7 @@ func New(opts ...Option) *Detector {
 		flowProtos:                make(map[string]map[string]bool),
 		writeRate:                 newRateTracker(),
 		totalRate:                 newRateTracker(),
+		apduSeen:                  make(map[string]struct{}),
 		ring:                      make([]Anomaly, ringSize),
 	}
 	for _, o := range opts {
@@ -178,12 +184,20 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		out = append(out, d.checkS7comm(srcIP, dstIP, ev)...)
 	case "cip":
 		out = append(out, d.checkCIP(srcIP, dstIP, ev)...)
+	case "iec104":
+		out = append(out, d.checkIEC104(srcIP, dstIP, ev)...)
 	}
 
 	// 2b. Cross-protocol violations.
 	out = append(out, d.checkCrossProtocol(srcIP, dstIP, ev)...)
 
-	// 3. Rate anomalies.
+	// 3. Rate anomalies, counted once per APDU.
+	if !d.countsForRate(ev) {
+		for _, a := range out {
+			d.recordAnomaly(a)
+		}
+		return out
+	}
 	fk := flowKey(srcIP, dstIP)
 
 	totalCount := d.totalRate.record(fk)
@@ -238,14 +252,14 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	var out []Anomaly
 
-	fc, _ := ev.Attributes["function_code"].(int)
-	txnID, hasTxn := ev.Attributes["transaction_id"].(uint16)
-	unitID, _ := ev.Attributes["unit_id"].(int)
-	isWrite, _ := ev.Attributes["is_write"].(bool)
+	fc, hasFC := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+	txnID, hasTxn := eventfields.Uint16(ev.Attributes, "transaction_id")
+	unitID, hasUnit := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID)
+	isWrite, _ := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
 
 	// Invalid function code: >= 128 in a request indicates an exception code
 	// being used as a request function code, which is a protocol violation.
-	if ev.Kind == "request" && fc >= 128 {
+	if ev.Kind == "request" && hasFC && fc >= 128 {
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "modbus",
@@ -261,7 +275,7 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	}
 
 	// Broadcast unit ID 0 for write operations is suspicious.
-	if unitID == 0 && isWrite {
+	if hasUnit && unitID == 0 && isWrite {
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "modbus",
@@ -353,6 +367,8 @@ func (d *Detector) Clear() {
 	d.flowProtos = make(map[string]map[string]bool)
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
+	d.apduSeen = make(map[string]struct{})
+	d.apduOrder = nil
 	d.ring = make([]Anomaly, ringSize)
 	d.ringPos = 0
 	d.ringLen = 0
@@ -361,8 +377,11 @@ func (d *Detector) Clear() {
 func (d *Detector) checkDNP3(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	var out []Anomaly
 
-	fc, _ := ev.Attributes["function_code"].(int)
-	direction, _ := ev.Attributes["direction"].(string)
+	fc, hasFC := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+	if !hasFC {
+		return nil
+	}
+	direction, _ := eventfields.String(ev.Attributes, eventfields.KeyDirection)
 
 	if d.dnp3RestartFromNonMaster {
 		// Cold restart (FC 13) or warm restart (FC 14) from non-master direction.
@@ -405,7 +424,7 @@ func (d *Detector) checkDNP3(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 
 	// Invalid function codes in requests: valid request FCs are 0-33 and 129-131.
 	if ev.Kind == "request" {
-		if fc < 0 || (fc > 33 && fc < 129) || fc > 131 {
+		if (fc > 33 && fc < 129) || fc > 131 {
 			out = append(out, Anomaly{
 				Type:     "protocol_violation",
 				Protocol: "dnp3",
@@ -431,7 +450,10 @@ func (d *Detector) checkS7comm(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		return nil
 	}
 
-	fc, _ := ev.Attributes["function_code"].(int)
+	fc, hasFC := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+	if !hasFC {
+		return nil
+	}
 
 	// PLC Stop command (FC 0x29 = 41).
 	if fc == 0x29 {

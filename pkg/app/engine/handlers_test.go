@@ -61,7 +61,7 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 	t.Run("health", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
-		healthHandler(rec, req)
+		healthHandler(dp)(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d", rec.Code)
 		}
@@ -71,6 +71,10 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 		}
 		if out.Status != "ok" || out.Component != "engine" {
 			t.Fatalf("unexpected health response: %#v", out)
+		}
+		// No IEC104 rule is loaded: inactive with no fault (K6).
+		if out.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: false, Healthy: true}) {
+			t.Fatalf("iec104Enforcement = %+v", out.IEC104Enforcement)
 		}
 	})
 

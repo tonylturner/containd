@@ -23,9 +23,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
-	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 const dpiEnforceBlockTTL = 10 * time.Minute
@@ -47,6 +47,7 @@ type Engine struct {
 	runDone         chan struct{}
 	ruleSnap        atomic.Pointer[rules.Snapshot]
 	started         atomic.Bool
+	epoch           atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler        *enforce.Compiler
 	applier         enforce.Applier
 	updater         enforce.Updater
@@ -72,6 +73,8 @@ type Engine struct {
 	learner         *learn.Learner
 	sigEngine       *signatures.Engine
 	stats           *stats.Tracker
+	hooks           *inlineHooks
+	iec             *iecTable
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -114,6 +117,10 @@ type Config struct {
 	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
 	// for full rationale.
 	NFQueueGroup uint16
+
+	// ResetInjector sends the IEC104 abort resets. Nil opens the platform
+	// injector when NFQueueGroup is set.
+	ResetInjector session.Injector
 }
 
 // DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
@@ -136,6 +143,9 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.Mode = "nfqueue"
 		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
 	}
+	hooks := newInlineHooks(cfg.OnError)
+	cfg.Capture.OnVerdict = hooks.onVerdict
+	cfg.Capture.OnSource = hooks.onSource
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
 		return nil, err
@@ -151,6 +161,7 @@ func New(cfg Config) (*Engine, error) {
 		nfqueueGroup:  cfg.NFQueueGroup,
 		flows:         make(map[string]*flow.State),
 		verdictCache:  NewVerdictCache(30*time.Second, 65536),
+		hooks:         hooks,
 	}
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
@@ -160,6 +171,7 @@ func New(cfg Config) (*Engine, error) {
 	e.stats = stats.New()
 	e.eventStore = events.NewStore(4096)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.initIEC(cfg, capManager)
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -210,6 +222,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.nflogStop = nil
 	e.flowMu.Unlock()
 	prevRunDone := e.runDone
+	prevIEC := e.iec
 	if prevCancel != nil {
 		prevCancel()
 	}
@@ -248,27 +261,49 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
+	e.hooks = fresh.hooks
+	e.iec = fresh.iec
 	e.flowMu.Unlock()
+	e.epoch.Add(1)
 	e.started.Store(false)
+	// The fresh table enforces the loaded rules at once; sessions of the
+	// old run are unknown to it and are reset once (spec §8.3).
+	if snap := e.ruleSnap.Load(); snap != nil {
+		e.iec.setPolicy(snap)
+	}
+	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
+		_ = prevIEC.injector.Close()
+	}
 }
 
 func (e *Engine) Start(ctx context.Context) error {
+	_, err := e.start(ctx)
+	return err
+}
+
+// start is Start; it also returns the NFQUEUE group of the configuration
+// it started, read under the lifecycle lock.
+func (e *Engine) start(ctx context.Context) (uint16, error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	group := e.nfqueueGroup
 
 	if e.started.Swap(true) {
-		return nil
+		return group, nil
 	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
 	e.runCapture = runCapture
-	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
+	if err := runCapture.Start(runCtx, e.capturePacket); err != nil {
+		if e.nfqueueGroup != 0 {
+			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
+		}
 		runCancel()
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
-		return err
+		return group, err
 	}
 	// Start the nflog consumer if configured. This produces
 	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
@@ -304,11 +339,21 @@ func (e *Engine) Start(ctx context.Context) error {
 			e.flowMu.Unlock()
 		}
 	}
-	// Periodically update the active goroutine gauge.
 	runDone := make(chan struct{})
 	e.runDone = runDone
+	var run sync.WaitGroup
+	run.Add(3)
 	go func() {
-		defer close(runDone)
+		defer run.Done()
+		e.hooks.blocks.run(runCtx)
+	}()
+	go func() {
+		defer run.Done()
+		e.iec.run(runCtx.Done())
+	}()
+	// Periodically update the active goroutine gauge.
+	go func() {
+		defer run.Done()
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -320,11 +365,16 @@ func (e *Engine) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	return nil
+	go func() {
+		run.Wait()
+		close(runDone)
+	}()
+	return group, nil
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 }
 
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
@@ -353,6 +403,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	}
 
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
 	e.setRulesetStatus(compiled, nil)
 	return nil
@@ -448,68 +499,36 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 		return port == 47808
 	case "opcua":
 		return port == 4840
+	case "iec104":
+		return port == iec104Port
 	default:
 		return false
 	}
 }
 
 // handlePacket runs flow tracking, DPI and enforcement for one captured
-// packet. Every exit accepts the current packet; enforcement acts through
-// the verdict cache and nft updates.
+// packet and decides it.
 func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
-	accept := capture.Decision{Action: capture.Accept}
 	if e == nil {
-		return accept
+		return acceptDecision
 	}
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	if pkt.Invalid != "" {
+		return invalidPacketDecision(pkt)
+	}
 	now := pkt.Timestamp
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 	state := e.trackFlow(pkt, now)
 	if state == nil {
-		return accept
+		return acceptDecision
 	}
-
-	parsed := dpi.ParsedPacket{
-		Payload: pkt.Payload,
-		Proto:   pkt.Transport,
-		SrcPort: pkt.SrcPort,
-		DstPort: pkt.DstPort,
+	if d, ok := e.handleIECPacket(pkt, state); ok {
+		return d
 	}
-
-	flowHash := state.Key.Hash()
-	shouldInspect := e.ShouldInspect(state, &parsed)
-	if cached, ok := e.verdictCache.Get(flowHash); ok {
-		// Permanent or temporary enforcement verdicts can short-circuit the flow.
-		if cached.Action != verdict.AllowContinue {
-			return accept
-		}
-		// For non-inspected flows we cache ALLOW to avoid re-checking every packet.
-		// Inspectable flows must continue through DPI so later payload-bearing
-		// packets are decoded; otherwise a SYN/ACK can suppress the whole flow.
-		if !shouldInspect {
-			return accept
-		}
-	}
-
-	if !shouldInspect {
-		// Cache an ALLOW verdict for non-inspected flows so we don't
-		// re-evaluate ShouldInspect on every packet.
-		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
-		return accept
-	}
-	events, err := e.dpiMgr.OnPacket(state, &parsed)
-	if err != nil {
-		return accept
-	}
-	e.RecordDPIEvents(state, &parsed, events)
-
-	if v, enforced := e.enforceDPIEvents(state, &parsed, events); enforced {
-		e.verdictCache.Put(flowHash, v)
-	}
-	return accept
+	return e.handleFlowPacket(pkt, state)
 }
 
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
@@ -546,12 +565,19 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
+	var expired []*flow.State
 	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
 			metrics.FlowsActive.Dec()
+			if st != nil {
+				expired = append(expired, st)
+			}
 		}
+	}
+	e.flowMu.Unlock()
+	for _, st := range expired {
+		e.endFlowStream(st, nil)
 	}
 }

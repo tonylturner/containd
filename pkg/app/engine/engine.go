@@ -35,6 +35,8 @@ type healthResponse struct {
 	Component  string `json:"component"`
 	Build      string `json:"build"`
 	CommitHash string `json:"commitHash,omitempty"`
+
+	IEC104Enforcement engine.IEC104Enforcement `json:"iec104Enforcement"`
 }
 
 func initialEngineConfig(ifaces []string, enforceEnabled bool, enforceTable string) engine.Config {
@@ -96,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	// Start capture (no-op if no interfaces).
 	go func() {
-		if err := dpEngine.Start(ctx); err != nil {
+		if err := dpEngine.StartWithRetry(ctx); err != nil {
 			logger.Errorf("capture start failed: %v", err)
 		}
 	}()
@@ -128,7 +130,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	mux := http.NewServeMux()
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/health", healthHandler(dpEngine))
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if dpEngine == nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)

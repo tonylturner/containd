@@ -62,7 +62,7 @@ func (e *Engine) recordInventoryEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		if isICSEvent(ev.Proto, ev.Kind) {
+		if learnableICSEvent(ev) {
 			e.inventory.RecordEvent(srcIP, dstIP, ev)
 		}
 	}
@@ -73,7 +73,7 @@ func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		if isICSEvent(ev.Proto, ev.Kind) {
+		if learnableICSEvent(ev) {
 			e.learner.RecordEvent(srcIP, dstIP, ev)
 		}
 	}
@@ -98,14 +98,14 @@ func anomalyAlertFromEvent(ev dpi.Event, a anomaly.Anomaly) dpi.Event {
 		FlowID: ev.FlowID,
 		Proto:  "ids",
 		Kind:   "anomaly",
-		Attributes: map[string]any{
+		Attributes: withDerivedIdentity(ev, map[string]any{
 			"anomaly_type": a.Type,
 			"protocol":     a.Protocol,
 			"severity":     a.Severity,
 			"message":      a.Message,
 			"source_ip":    a.SourceIP,
 			"dest_ip":      a.DestIP,
-		},
+		}),
 		Timestamp: a.Timestamp,
 	}
 }
@@ -126,12 +126,12 @@ func signatureAlertFromMatch(ev dpi.Event, m signatures.Match) dpi.Event {
 		FlowID: ev.FlowID,
 		Proto:  "ids",
 		Kind:   "signature_match",
-		Attributes: map[string]any{
+		Attributes: withDerivedIdentity(ev, map[string]any{
 			"signature_id": m.Signature.ID,
 			"name":         m.Signature.Name,
 			"severity":     m.Signature.Severity,
 			"description":  m.Signature.Description,
-		},
+		}),
 		Timestamp: m.Timestamp,
 	}
 }
@@ -377,18 +377,23 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 // should never silently start blocking traffic just because containd is
 // installed.
 func (e *Engine) effectiveMode(matched *rules.Entry) string {
-	if matched != nil && strings.TrimSpace(matched.ICS.Mode) != "" {
-		return strings.ToLower(strings.TrimSpace(matched.ICS.Mode))
+	ruleMode, globalMode := "", ""
+	if matched != nil {
+		ruleMode = matched.ICS.Mode
 	}
-	if e != nil && strings.TrimSpace(e.dpiMode) != "" {
-		return strings.ToLower(strings.TrimSpace(e.dpiMode))
+	if e != nil {
+		globalMode = e.dpiMode
 	}
-	return "learn"
+	return rules.EffectiveMode(ruleMode, globalMode)
 }
 
 // ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
 func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	if e.updater == nil {
+	return applyVerdict(ctx, e.updater, v, flow)
+}
+
+func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdict, flow rules.EvalContext) error {
+	if updater == nil {
 		return nil
 	}
 	switch v.Action {
@@ -397,9 +402,9 @@ func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules
 		if ip == nil {
 			ip = flow.DstIP
 		}
-		return e.updater.BlockHostTemp(ctx, ip, v.TTL)
+		return updater.BlockHostTemp(ctx, ip, v.TTL)
 	case verdict.BlockFlowTemp:
-		return e.updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
+		return updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
 	default:
 		return nil
 	}

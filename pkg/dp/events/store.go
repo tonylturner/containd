@@ -48,6 +48,9 @@ type FlowSummary struct {
 	EventCount  uint64    `json:"eventCount"`
 	AvDetected  bool      `json:"avDetected,omitempty"`
 	AvBlocked   bool      `json:"avBlocked,omitempty"`
+	// SessionID is set for an IEC104 session incarnation: its events from
+	// both wire directions form one group (contracts K6).
+	SessionID string `json:"session_id,omitempty"`
 }
 
 const (
@@ -64,8 +67,9 @@ type Store struct {
 	idBase   uint64
 	nextID   atomic.Uint64
 
-	mu     sync.Mutex
-	events []Event
+	mu      sync.Mutex
+	events  []Event
+	aborted abortedSet // aborted IEC104 incarnations hidden from Flows
 
 	// Spill-to-disk support.
 	spillPath string
@@ -347,7 +351,10 @@ func (s *Store) TimeRange() (oldest, newest time.Time) {
 	return
 }
 
-// Flows derives flow summaries from the stored events.
+// Flows derives flow summaries from the stored events. IEC104 events that
+// carry a session_id group by incarnation across both directions; aborted
+// incarnations are left out before limit applies. Other events group by
+// FlowID as before.
 func (s *Store) Flows(limit int) []FlowSummary {
 	if s == nil {
 		return nil
@@ -358,8 +365,13 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		return nil
 	}
 	byFlow := map[string]*FlowSummary{}
+	var order []string
 	for _, ev := range s.events {
-		f, ok := byFlow[ev.FlowID]
+		key, sessionID := flowGroup(ev)
+		if sessionID != "" && s.aborted.has(sessionID) {
+			continue
+		}
+		f, ok := byFlow[key]
 		if !ok {
 			f = &FlowSummary{
 				FlowID:      ev.FlowID,
@@ -371,8 +383,17 @@ func (s *Store) Flows(limit int) []FlowSummary {
 				DstPort:     ev.DstPort,
 				Transport:   ev.Transport,
 				Application: ev.Proto,
+				SessionID:   sessionID,
 			}
-			byFlow[ev.FlowID] = f
+			if sessionID != "" {
+				f.FlowID = sessionID
+			}
+			byFlow[key] = f
+			order = append(order, key)
+		}
+		if sessionID != "" && isClientSide(ev) {
+			// Orient the group on the session tuple: client → server.
+			f.SrcIP, f.DstIP, f.SrcPort, f.DstPort = ev.SrcIP, ev.DstIP, ev.SrcPort, ev.DstPort
 		}
 		if ev.Timestamp.Before(f.FirstSeen) {
 			f.FirstSeen = ev.Timestamp
@@ -391,13 +412,25 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			f.AvBlocked = true
 		}
 	}
+	s.aborted.prune(s.events)
 	out := make([]FlowSummary, 0, len(byFlow))
-	for _, f := range byFlow {
-		out = append(out, *f)
+	for _, k := range order {
+		out = append(out, *byFlow[k])
 	}
 	// no sorting needed for v1; caller can sort.
 	if limit <= 0 || limit > len(out) {
 		return out
 	}
 	return out[:limit]
+}
+
+// MarkAborted hides the flow group of an aborted IEC104 incarnation. Its
+// events stay in List (spec E4).
+func (s *Store) MarkAborted(sessionID string) {
+	if s == nil || sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.aborted.add(sessionID, s.events)
 }

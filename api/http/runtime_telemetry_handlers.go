@@ -46,7 +46,9 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 			out = append(out, s.ListTelemetryEvents(limit)...)
 		}
 
-		if engineErr != nil && len(out) > 0 {
+		// An unreachable engine is reported in the stream, never as an
+		// empty 200 that reads like "no events".
+		if engineErr != nil {
 			out = append(out, dpevents.Event{
 				Proto:     "system",
 				Kind:      "system.engine.telemetry_error",

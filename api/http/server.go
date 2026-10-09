@@ -195,7 +195,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api := r.Group("/api/v1")
 	api.Use(limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit))
 	// Health is always unauthenticated for liveness.
-	api.GET("/health", healthHandler)
+	api.GET("/health", healthHandler(engine))
 	// Prometheus metrics endpoint (unauthenticated for scraping).
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
@@ -384,15 +384,6 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	}
 
 	return r
-}
-
-func healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"component": "mgmt",
-		"build":     config.BuildVersion,
-		"time":      time.Now().UTC().Format(time.RFC3339Nano),
-	})
 }
 
 func getConfigHandler(store config.Store) gin.HandlerFunc {
