@@ -23,6 +23,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
@@ -72,6 +73,7 @@ type Engine struct {
 	sigEngine       *signatures.Engine
 	stats           *stats.Tracker
 	hooks           *inlineHooks
+	iec             *iecTable
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -114,6 +116,10 @@ type Config struct {
 	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
 	// for full rationale.
 	NFQueueGroup uint16
+
+	// ResetInjector sends the IEC104 abort resets. Nil opens the platform
+	// injector when NFQueueGroup is set.
+	ResetInjector session.Injector
 }
 
 // DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
@@ -164,6 +170,7 @@ func New(cfg Config) (*Engine, error) {
 	e.stats = stats.New()
 	e.eventStore = events.NewStore(4096)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.initIEC(cfg, capManager)
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -214,6 +221,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.nflogStop = nil
 	e.flowMu.Unlock()
 	prevRunDone := e.runDone
+	prevIEC := e.iec
 	if prevCancel != nil {
 		prevCancel()
 	}
@@ -253,8 +261,17 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
+	e.iec = fresh.iec
 	e.flowMu.Unlock()
 	e.started.Store(false)
+	// The fresh table enforces the loaded rules at once; sessions of the
+	// old run are unknown to it and are reset once (spec §8.3).
+	if snap := e.ruleSnap.Load(); snap != nil {
+		e.iec.setPolicy(snap)
+	}
+	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
+		_ = prevIEC.injector.Close()
+	}
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -269,6 +286,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.runCancel = runCancel
 	e.runCapture = runCapture
 	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
+		if e.nfqueueGroup != 0 {
+			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
+		}
 		runCancel()
 		e.runCancel = nil
 		e.runCapture = nil
@@ -312,10 +332,14 @@ func (e *Engine) Start(ctx context.Context) error {
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup
-	run.Add(2)
+	run.Add(3)
 	go func() {
 		defer run.Done()
 		e.hooks.blocks.run(runCtx)
+	}()
+	go func() {
+		defer run.Done()
+		e.iec.run(runCtx.Done())
 	}()
 	// Periodically update the active goroutine gauge.
 	go func() {
@@ -340,6 +364,7 @@ func (e *Engine) Start(ctx context.Context) error {
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 }
 
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
@@ -368,6 +393,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	}
 
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
 	e.setRulesetStatus(compiled, nil)
 	return nil
@@ -483,7 +509,14 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	return e.handleFlowPacket(pkt, now)
+	state := e.trackFlow(pkt, now)
+	if state == nil {
+		return acceptDecision
+	}
+	if d, ok := e.handleIECPacket(pkt, state); ok {
+		return d
+	}
+	return e.handleFlowPacket(pkt, state)
 }
 
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {

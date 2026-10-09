@@ -87,6 +87,10 @@ func NewByteStream(maxBytes, maxSegs int) *ByteStream {
 // Next returns the offset of the first byte not yet delivered.
 func (b *ByteStream) Next() int64 { return b.next }
 
+// Floor returns the offset below which history was released: the receiver
+// acknowledged those bytes, so their identity can no longer be shown.
+func (b *ByteStream) Floor() int64 { return b.histBase }
+
 // Buffered returns the bytes held as history and out-of-order data.
 func (b *ByteStream) Buffered() int { return len(b.hist) + b.oooBytes }
 

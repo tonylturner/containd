@@ -20,6 +20,7 @@ const (
 type inlineHooks struct {
 	after   *afterVerdict
 	blocks  *worker
+	iec     *iecTable
 	onError func(error)
 }
 
@@ -37,19 +38,35 @@ func (h *inlineHooks) onVerdict(tok capture.Token, _ capture.Verdict, err error)
 	if job := h.after.take(tok); job != nil && !h.blocks.submit(job) {
 		h.reportWorkerOverflow("block worker queue full")
 	}
-	if err != nil && !errors.Is(err, capture.ErrQueueClosed) && h.onError != nil {
-		h.onError(err)
+	if err != nil && !errors.Is(err, capture.ErrQueueClosed) {
+		h.iec.health.fault(faultVerdict, "verdict: "+err.Error())
+		if h.onError != nil {
+			h.onError(err)
+		}
 	}
+	h.iec.onVerdict(tok, err)
 }
 
-// onSource handles inline source state changes.
+// onSource handles inline source state changes. A source that goes down aborts the enforce sessions; enforcement is
+// healthy again only once the source reports ready (contracts K6).
 func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 	if ev.Err != nil && h.onError != nil {
 		h.onError(ev.Err)
 	}
+	if ev.Ready {
+		h.iec.health.sourceReady()
+		return
+	}
+	reason := "queue down"
+	if ev.Err != nil {
+		reason = "queue down: " + ev.Err.Error()
+	}
+	h.iec.health.fault(faultQueue, reason)
+	h.iec.onSourceDown()
 }
 
 func (h *inlineHooks) reportWorkerOverflow(what string) {
+	h.iec.health.fault(faultWorker, what)
 	if h.onError != nil {
 		h.onError(errors.New("engine: " + what))
 	}

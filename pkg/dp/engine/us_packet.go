@@ -6,7 +6,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -46,11 +45,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // IEC104 sessions. A denied ICS message drops the current packet (spec §4.1
 // #1) and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow.
-func (e *Engine) handleFlowPacket(pkt capture.Packet, now time.Time) capture.Decision {
-	state := e.trackFlow(pkt, now)
-	if state == nil {
-		return acceptDecision
-	}
+func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture.Decision {
 	parsed := dpi.ParsedPacket{
 		Payload:     pkt.Payload,
 		Proto:       pkt.Transport,
