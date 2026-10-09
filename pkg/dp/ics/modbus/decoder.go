@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // Decoder implements dpi.Decoder for Modbus/TCP visibility.
@@ -46,9 +47,9 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	isException := fc >= 128
 
 	attrs := map[string]any{
-		"transaction_id": frame.TransactionID,
-		"unit_id":        frame.UnitID,
-		"function_code":  fc,
+		"transaction_id":            frame.TransactionID,
+		eventfields.KeyUnitID:       frame.UnitID,
+		eventfields.KeyFunctionCode: fc,
 	}
 
 	kind := "request"
@@ -56,15 +57,15 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if isException {
 		kind = "exception"
 		baseFc := fc - 128
-		attrs["function_code"] = baseFc
-		attrs["is_write"] = IsWriteFunctionCode(baseFc)
+		attrs[eventfields.KeyFunctionCode] = baseFc
+		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(baseFc)
 		if len(frame.PDU) >= 1 {
 			ec := frame.PDU[0]
 			attrs["exception_code"] = ec
 			attrs["exception_description"] = exceptionName(ec)
 		}
 	} else {
-		attrs["is_write"] = IsWriteFunctionCode(fc)
+		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(fc)
 
 		switch fc {
 		case 8: // Diagnostics — sub-function is first 2 bytes of PDU.
@@ -74,7 +75,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 				attrs["sub_function_name"] = diagSubFunctionName(sub)
 				// Sub-functions 1 (restart comm) and 4 (force listen only) are writes.
 				if sub == 1 || sub == 4 {
-					attrs["is_write"] = true
+					attrs[eventfields.KeyIsWrite] = true
 				}
 			}
 		case 43: // MEI (Encapsulated Interface Transport).
@@ -105,7 +106,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 	ev := dpi.Event{
 		FlowID:     state.Key.Hash(),
-		Proto:      "modbus",
+		Proto:      eventfields.ProtoModbus,
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),

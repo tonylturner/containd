@@ -13,6 +13,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // Decoder implements dpi.Decoder for DNP3 visibility.
@@ -61,12 +62,12 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 
 	attrs := map[string]any{
-		"function_code":       fc,
-		"function_name":       FunctionCodeName(fc),
-		"is_write":            isWrite,
-		"is_control":          isControl,
-		"source_address":      frame.Source,
-		"destination_address": frame.Destination,
+		eventfields.KeyFunctionCode: fc,
+		"function_name":             FunctionCodeName(fc),
+		eventfields.KeyIsWrite:      isWrite,
+		"is_control":                isControl,
+		"source_address":            frame.Source,
+		"destination_address":       frame.Destination,
 	}
 
 	// Extract IIN flags from response messages.
@@ -92,7 +93,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 			}
 			b.WriteString(strconv.FormatUint(uint64(oh.Group), 10))
 		}
-		attrs["object_groups"] = b.String()
+		attrs[eventfields.KeyObjectGroups] = b.String()
 
 		// Emit first header's qualifier and count for primary inspection.
 		attrs["qualifier"] = objHeaders[0].Qualifier
@@ -110,7 +111,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 	ev := dpi.Event{
 		FlowID:     state.Key.Hash(),
-		Proto:      "dnp3",
+		Proto:      eventfields.ProtoDNP3,
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),

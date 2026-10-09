@@ -9,6 +9,8 @@ package eventfields
 // Proto values.
 const (
 	ProtoIEC104 = "iec104"
+	ProtoModbus = "modbus"
+	ProtoDNP3   = "dnp3"
 )
 
 // Engine event kinds for decisions and their outcomes.
