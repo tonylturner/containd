@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a persistent Modbus connection (read, write, read) and fails on a short pass
   count.
 
+### Security
+
+- Go toolchain 1.25.13 → 1.26.9 (go.mod and both Docker builders). This
+  clears CVE-2026-78667 (net/http Range header DoS) and CVE-2026-97031
+  (crypto/tls ECH DoS), which have no 1.25 fix.
+
 ### Changed (visible in events and logs)
 
 - Modbus and DNP3 produce one event per frame in each direction. 0.1.31
