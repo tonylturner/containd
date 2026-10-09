@@ -5,6 +5,7 @@ package ids
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,14 +19,21 @@ func ExportSuricataRule(rule config.IDSRule) (string, error) {
 	if rule.SourceFormat == "suricata" && rule.RawSource != "" {
 		return rule.RawSource, nil
 	}
+	if err := checkExportableProto(rule); err != nil {
+		return "", err
+	}
 	return buildSuricataRule(rule), nil
 }
 
-// ExportSuricataRules converts multiple IDSRules to Suricata .rules format.
+// ExportSuricataRules converts multiple IDSRules to Suricata .rules format. Rules
+// whose protocol it cannot express are skipped.
 func ExportSuricataRules(rules []config.IDSRule) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, rule := range rules {
 		s, err := ExportSuricataRule(rule)
+		if errors.Is(err, ErrUnexportableProto) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
