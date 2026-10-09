@@ -77,6 +77,7 @@ isCommandPoint(int ca, int ioa)
 }
 
 #define SELECT_TIMEOUT_MS 3000
+#define RECONNECT_DELAY_MS 1000 /* control centre reconnect delay (B1: <= 1 s) */
 
 static volatile bool running = true;
 
@@ -494,7 +495,8 @@ clientAsduHandler(void* parameter, int address, CS101_ASDU asdu)
     (void)address;
     CS101_CauseOfTransmission cot = CS101_ASDU_getCOT(asdu);
     int type = CS101_ASDU_getTypeID(asdu);
-    printf("RCVD type=%d cot=%d negative=%d elements=%d\n",
+    printf("t=%llu RCVD type=%d cot=%d negative=%d elements=%d\n",
+        (unsigned long long)Hal_getTimeInMs(),
         type, cot, CS101_ASDU_isNegative(asdu), CS101_ASDU_getNumberOfElements(asdu));
     fflush(stdout);
     if (type == awaitType &&
@@ -512,6 +514,10 @@ clientAsduHandler(void* parameter, int address, CS101_ASDU asdu)
     return true;
 }
 
+/* Set by the connection handler when the session closes or fails, so the
+ * control centre loop knows to reconnect. */
+static volatile bool clientClosed = false;
+
 static void
 clientConnectionHandler(void* parameter, CS104_Connection connection, CS104_ConnectionEvent event)
 {
@@ -526,7 +532,9 @@ clientConnectionHandler(void* parameter, CS104_Connection connection, CS104_Conn
     case CS104_CONNECTION_STOPDT_CON_RECEIVED: name = "stopdt_con"; break;
     case CS104_CONNECTION_FAILED: name = "failed"; break;
     }
-    printf("CONN %s\n", name);
+    if (event == CS104_CONNECTION_CLOSED || event == CS104_CONNECTION_FAILED)
+        clientClosed = true;
+    printf("t=%llu CONN %s\n", (unsigned long long)Hal_getTimeInMs(), name);
     fflush(stdout);
 }
 
@@ -543,6 +551,7 @@ openConnection(const char* host, int port)
     }
     CS104_Connection_setASDUReceivedHandler(con, clientAsduHandler, NULL);
     CS104_Connection_setConnectionHandler(con, clientConnectionHandler, NULL);
+    CS104_Connection_setConnectTimeout(con, 2000);
     if (!CS104_Connection_connect(con))
     {
         fprintf(stderr, "connect to %s:%d failed\n", host, port);
@@ -557,26 +566,37 @@ openConnection(const char* host, int port)
 static int
 runCc(const char* host, int port)
 {
+    /* A real control centre (milestone B B1): after the session closes or is
+     * reset, wait at most 1 s, reconnect, STARTDT and re-run station GI. Each
+     * session logs "t=<ms> CC connected"; closes log "t=<ms> CONN closed". */
     signal(SIGINT, sigint_handler);
-    CS104_Connection con = openConnection(host, port);
-    if (!con)
-        return 1;
-    printf("CC connected to %s:%d\n", host, port);
-    fflush(stdout);
-    CS104_Connection_sendInterrogationCommand(con, CS101_COT_ACTIVATION, CA_MAIN, IEC60870_QOI_STATION);
-    uint64_t lastGi = Hal_getMonotonicTimeInMs();
     while (running)
     {
-        Thread_sleep(500);
-        uint64_t now = Hal_getMonotonicTimeInMs();
-        if (now >= lastGi + 30000)
+        clientClosed = false;
+        CS104_Connection con = openConnection(host, port);
+        if (!con)
         {
-            lastGi = now;
-            if (CS104_Connection_isConnected(con))
-                CS104_Connection_sendInterrogationCommand(con, CS101_COT_ACTIVATION, CA_MAIN, IEC60870_QOI_STATION);
+            Thread_sleep(RECONNECT_DELAY_MS);
+            continue;
         }
+        printf("t=%llu CC connected to %s:%d\n", (unsigned long long)Hal_getTimeInMs(), host, port);
+        fflush(stdout);
+        CS104_Connection_sendInterrogationCommand(con, CS101_COT_ACTIVATION, CA_MAIN, IEC60870_QOI_STATION);
+        uint64_t lastGi = Hal_getMonotonicTimeInMs();
+        while (running && !clientClosed)
+        {
+            Thread_sleep(100);
+            uint64_t now = Hal_getMonotonicTimeInMs();
+            if (now >= lastGi + 30000)
+            {
+                lastGi = now;
+                CS104_Connection_sendInterrogationCommand(con, CS101_COT_ACTIVATION, CA_MAIN, IEC60870_QOI_STATION);
+            }
+        }
+        CS104_Connection_destroy(con);
+        if (running)
+            Thread_sleep(RECONNECT_DELAY_MS);
     }
-    CS104_Connection_destroy(con);
     return 0;
 }
 
