@@ -5,7 +5,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -75,6 +74,7 @@ type Engine struct {
 	stats           *stats.Tracker
 	hooks           *inlineHooks
 	iec             *iecTable
+	gate            *envelopeGate // outlives Reconfigure, as the kernel ruleset does
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -172,6 +172,8 @@ func New(cfg Config) (*Engine, error) {
 	e.eventStore = events.NewStore(4096)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.initIEC(cfg, capManager)
+	e.gate = &envelopeGate{}
+	e.bindGate()
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
 		if cfg.Enforce.TableName != "" {
@@ -266,6 +268,10 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Unlock()
 	e.epoch.Add(1)
 	e.started.Store(false)
+	// The old queue is closed and the new one is not bound yet: the
+	// envelope drops until the new run binds (contracts K8).
+	e.bindGate()
+	e.gate.own(0)
 	// The fresh table enforces the loaded rules at once; sessions of the
 	// old run are unknown to it and are reset once (spec §8.3).
 	if snap := e.ruleSnap.Load(); snap != nil {
@@ -298,12 +304,17 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	if err := runCapture.Start(runCtx, e.capturePacket); err != nil {
 		if e.nfqueueGroup != 0 {
 			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
+			e.gate.own(0)
 		}
 		runCancel()
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
 		return group, err
+	}
+	if group != 0 {
+		// Start returned nil: the queue is bound and registered.
+		e.gate.own(group)
 	}
 	// Start the nflog consumer if configured. This produces
 	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
@@ -385,17 +396,8 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 
 	if e.compiler != nil {
 		start := time.Now()
-		compiled, applyErr = e.compiler.CompileFirewall(&snap)
+		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
 		if applyErr != nil {
-			e.setRulesetStatus(compiled, applyErr)
-			return applyErr
-		}
-		if e.applier == nil {
-			applyErr = errors.New("no applier configured")
-			e.setRulesetStatus(compiled, applyErr)
-			return applyErr
-		}
-		if applyErr = e.applier.Apply(ctx, compiled); applyErr != nil {
 			e.setRulesetStatus(compiled, applyErr)
 			return applyErr
 		}

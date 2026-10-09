@@ -21,6 +21,8 @@ type inlineHooks struct {
 	after   *afterVerdict
 	blocks  *worker
 	iec     *iecTable
+	gate    *envelopeGate // the engine's envelope gate (bindGate)
+	group   uint16        // this configuration's NFQUEUE group
 	onError func(error)
 }
 
@@ -57,8 +59,12 @@ func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 	}
 	if ev.Ready {
 		h.iec.health.sourceReady()
+		h.gate.own(h.group)
 		return
 	}
+	// Close the envelope first: until this engine rebinds, nft drops
+	// envelope traffic instead of queueing it (contracts K8).
+	h.gate.own(0)
 	reason := "queue down"
 	if ev.Err != nil {
 		reason = "queue down: " + ev.Err.Error()

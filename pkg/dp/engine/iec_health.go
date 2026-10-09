@@ -25,6 +25,7 @@ const (
 	faultWorker   = "worker"
 	faultFraming  = "framing"
 	faultEnvelope = "envelope"
+	faultSteering = "steering"
 )
 
 // transientFaults clear when the inline source reports ready again; the

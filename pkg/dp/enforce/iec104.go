@@ -4,6 +4,7 @@
 package enforce
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strconv"
@@ -23,6 +24,15 @@ const (
 
 // iec104Port is the only IEC104 server port in milestone B.
 const iec104Port = 2404
+
+// IEC104EnvelopeChain is the regular chain every IEC104 envelope steering
+// rule jumps to. It holds one rule: the marked queue verdict while the
+// engine owns its queue, and drop otherwise (contracts K8, "envelope
+// steering fails closed until this engine owns the queue"). Switching
+// replaces that one rule in a single nft transaction, so the ruleset never
+// passes through a state where envelope traffic is neither queued to the
+// engine nor dropped, and no other rule changes.
+const IEC104EnvelopeChain = "iec104_envelope"
 
 // EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
 func EnvelopeMarked(mark uint32) bool {
@@ -52,10 +62,10 @@ func isIEC104Rule(e rules.Entry) bool {
 
 // writeIEC104Steering emits the envelope steering of every IEC104 rule,
 // sorted by rule ID. Each rule's session scope (opener -> server port 2404)
-// is queued in both directions, marked, whatever the rule's action: the
-// engine judges the content. These lines go before the conntrack
-// established accept and every ordinary accept, so neither direction of an
-// envelope session can bypass inspection.
+// jumps to IEC104EnvelopeChain in both directions, whatever the rule's
+// action: the engine judges the content. These lines go before the
+// conntrack established accept and every ordinary accept, so neither
+// direction of an envelope session can bypass inspection.
 func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot) {
 	entries := make([]rules.Entry, 0, len(snap.Firewall))
 	for _, e := range snap.Firewall {
@@ -65,17 +75,47 @@ func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot)
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		for _, line := range compileIEC104Steering(e, snap.ZoneIfaces, c.QueueID) {
+		for _, line := range compileIEC104Steering(e, snap.ZoneIfaces) {
 			lines(line)
 		}
 	}
 }
 
+// iec104EnvelopeVerdict is the one rule of IEC104EnvelopeChain: the marked
+// queue verdict when open, drop when closed.
+func (c *Compiler) iec104EnvelopeVerdict(open bool) string {
+	if !open {
+		return "drop"
+	}
+	return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
+		^EnvelopeMarkMask, EnvelopeMark, c.QueueID)
+}
+
+// writeIEC104EnvelopeChain emits IEC104EnvelopeChain in the state of
+// c.IEC104EnvelopeOpen.
+func (c *Compiler) writeIEC104EnvelopeChain(buf *bytes.Buffer) {
+	buf.WriteString("  chain " + IEC104EnvelopeChain + " {\n")
+	buf.WriteString("    " + c.iec104EnvelopeVerdict(c.IEC104EnvelopeOpen) + ";\n")
+	buf.WriteString("  }\n")
+}
+
+// IEC104EnvelopeSwitch returns the nft script that sets the envelope state
+// of an installed ruleset: one transaction that replaces the single rule of
+// IEC104EnvelopeChain. Apply it only to a ruleset compiled for a snapshot
+// that SteersIEC104.
+func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
+	table := c.TableName
+	if table == "" {
+		table = "containd"
+	}
+	return fmt.Sprintf("flush chain inet %s %s\nadd rule inet %s %s %s\n",
+		table, IEC104EnvelopeChain, table, IEC104EnvelopeChain, c.iec104EnvelopeVerdict(open))
+}
+
 // compileIEC104Steering returns the client-to-server and server-to-client
 // steering lines for one IEC104 rule.
-func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string, queueID int) []string {
-	verdict := fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
-		^EnvelopeMarkMask, EnvelopeMark, queueID)
+func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string) []string {
+	verdict := "jump " + IEC104EnvelopeChain
 	steer := func(inZones, outZones []string, port string, src, dst []string) string {
 		parts := []string{}
 		if c := zoneClause("iifname", inZones, zoneIfaces); c != "" {

@@ -26,6 +26,11 @@ type Compiler struct {
 	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
 	// steering matched traffic through NFQUEUE for selective DPI.
 	QueueID int
+	// IEC104EnvelopeOpen is the state CompileFirewall writes into
+	// IEC104EnvelopeChain: true queues envelope traffic to QueueID, false
+	// (the zero value) drops it. Only the engine that owns the queue sets
+	// it, and only while that queue is bound (contracts K8).
+	IEC104EnvelopeOpen bool
 	// NFLogGroup, when non-zero, causes rules with Log:true to emit a
 	// "log prefix ... group <NFLogGroup>" statement before their verdict.
 	// The userspace nflog consumer subscribes to this group, parses the
@@ -58,6 +63,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
 	c.writeDynamicSets(&buf)
+	// Declared before the forward chain that jumps to it.
+	if c.SteersIEC104(snap) {
+		c.writeIEC104EnvelopeChain(&buf)
+	}
 	if err := c.writeInputChain(&buf, snap); err != nil {
 		return "", err
 	}

@@ -37,14 +37,10 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 	if err := NewNftApplier().Apply(context.Background(), ruleset); err != nil {
 		t.Fatalf("apply: %v\n%s", err, ruleset)
 	}
-	out, err := exec.Command("nft", "list", "chain", "inet", "containd", "forward").CombinedOutput()
-	if err != nil {
-		t.Fatalf("list: %v: %s", err, out)
-	}
-	listed := string(out)
+	listed := nftList(t, "forward")
 	for _, want := range []string{
-		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
-		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 jump iec104_envelope",
+		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 jump iec104_envelope",
 	} {
 		if !strings.Contains(listed, want) {
 			t.Fatalf("kernel ruleset lacks %q:\n%s", want, listed)
@@ -53,4 +49,31 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 	if strings.Index(listed, "tcp sport 2404") > strings.Index(listed, "ct state { established, related } accept") {
 		t.Fatalf("steering must precede the established accept:\n%s", listed)
 	}
+	// Compiled closed, the envelope drops; the switch opens and closes it
+	// in place without touching the forward chain.
+	const queued = "meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100"
+	if env := nftList(t, IEC104EnvelopeChain); !strings.Contains(env, "drop") || strings.Contains(env, "queue") {
+		t.Fatalf("closed envelope chain:\n%s", env)
+	}
+	for _, open := range []bool{true, false, true} {
+		if err := NewNftApplier().Apply(context.Background(), c.IEC104EnvelopeSwitch(open)); err != nil {
+			t.Fatalf("switch open=%v: %v", open, err)
+		}
+		env := nftList(t, IEC104EnvelopeChain)
+		if open != strings.Contains(env, queued) || open == strings.Contains(env, "drop") {
+			t.Fatalf("envelope chain after switch open=%v:\n%s", open, env)
+		}
+		if got := nftList(t, "forward"); got != listed {
+			t.Fatalf("the switch changed the forward chain:\n%s", got)
+		}
+	}
+}
+
+func nftList(t *testing.T, chain string) string {
+	t.Helper()
+	out, err := exec.Command("nft", "list", "chain", "inet", "containd", chain).CombinedOutput()
+	if err != nil {
+		t.Fatalf("list %s: %v: %s", chain, err, out)
+	}
+	return string(out)
 }
