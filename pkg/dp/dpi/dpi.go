@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -22,6 +23,12 @@ type ParsedPacket struct {
 	SrcPort uint16
 	DstPort uint16
 	TCPSeq  uint32 // TCP sequence number (0 for UDP)
+
+	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
+	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)
+	HasOffset   bool      // the caller tracked the handshake and computed Offset
+	Session     string    // required when HasOffset
+	Dir         StreamDir // required when HasOffset
 }
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
@@ -58,6 +65,9 @@ type Manager struct {
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *Reassembler
+
+	mu     sync.Mutex
+	failed map[string]error // session stream key -> error that failed it
 }
 
 func NewManager(decoders ...Decoder) *Manager {
@@ -65,6 +75,7 @@ func NewManager(decoders ...Decoder) *Manager {
 		tcpByPort:   make(map[uint16][]Decoder),
 		udpByPort:   make(map[uint16][]Decoder),
 		reassembler: NewReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
+		failed:      make(map[string]error),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -135,51 +146,11 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 	return append(indexed, m.anyDecoders...)
 }
 
-// OnPacket passes the packet to decoders that support the flow.
-// For TCP flows the payload is fed through the reassembler so that
-// decoders see the full accumulated stream rather than individual
-// segments.
+// OnPacket passes the packet to decoders that support the flow and returns
+// only the events. It is Inspect without the framing metadata.
 func (m *Manager) OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error) {
-	if m == nil || len(m.decoders) == 0 {
-		return nil, nil
-	}
-
-	// For TCP flows, use the reassembler to accumulate payloads.
-	usedReassembly := false
-	flowKey := state.Key.Hash()
-	dpiPkt := pkt
-	if pkt.Proto == "tcp" && len(pkt.Payload) > 0 && m.reassembler != nil {
-		reassembled := m.reassembler.Feed(flowKey, pkt.Payload, time.Now(), pkt.TCPSeq)
-		dpiPkt = &ParsedPacket{
-			Payload: reassembled,
-			Proto:   pkt.Proto,
-			SrcPort: pkt.SrcPort,
-			DstPort: pkt.DstPort,
-		}
-		usedReassembly = true
-	}
-
-	var out []Event
-	for _, d := range m.candidates(state) {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
-		events, err := d.OnPacket(state, dpiPkt)
-		if err != nil {
-			return out, err
-		}
-		out = append(out, events...)
-
-		// If the decoder implements StreamDecoder, trim consumed bytes.
-		if usedReassembly {
-			if sd, ok := d.(StreamDecoder); ok {
-				if consumed := sd.ConsumedBytes(); consumed > 0 {
-					m.reassembler.Trim(flowKey, consumed)
-				}
-			}
-		}
-	}
-	return out, nil
+	res := m.Inspect(state, pkt)
+	return res.Events, res.Err
 }
 
 // OnFlowEnd notifies decoders of flow termination and cleans up reassembly

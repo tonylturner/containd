@@ -20,7 +20,7 @@ func TestStartAFPacketRequiresLinux(t *testing.T) {
 		}
 	}
 
-	err = mgr.startAFPacket(context.Background(), func(Packet) {})
+	err = mgr.startAFPacket(context.Background(), func(Packet) Decision { return Decision{} })
 	if err != nil {
 		t.Fatalf("startAFPacket() returned unexpected error: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNonLinuxCaptureStubs(t *testing.T) {
 	}
 
 	mgr := &Manager{}
-	if err := mgr.startNFQueue(context.Background(), func(Packet) {}); err == nil || !strings.Contains(err.Error(), "only supported on linux") {
+	if err := mgr.startNFQueue(context.Background(), func(Packet) Decision { return Decision{} }); err == nil || !strings.Contains(err.Error(), "only supported on linux") {
 		t.Fatalf("startNFQueue() error = %v, want linux-only error", err)
 	}
 }

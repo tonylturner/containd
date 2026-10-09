@@ -183,36 +183,53 @@ func TestFeedPartialRetransmission(t *testing.T) {
 	}
 }
 
-// mockStreamDecoder implements both Decoder and StreamDecoder. It parses
-// a simple framing: first byte is the message length, followed by that
-// many bytes of payload.  It reports ConsumedBytes accordingly.
+// mockStreamDecoder is a framed decoder for a simple framing: the first
+// byte is the frame's payload length, followed by that many bytes. A length
+// byte of 0xFF cannot be framed.
 type mockStreamDecoder struct {
-	consumed int
-	events   int
+	onPacketCalls int
+	scribble      bool // overwrite v.Bytes after parsing (misbehaving decoder)
 }
 
 func (m *mockStreamDecoder) Supports(_ *flow.State) bool { return true }
 
-func (m *mockStreamDecoder) OnPacket(_ *flow.State, pkt *ParsedPacket) ([]Event, error) {
-	m.consumed = 0
-	buf := pkt.Payload
-	if len(buf) == 0 {
-		return nil, nil
-	}
-	msgLen := int(buf[0])
-	if len(buf) < 1+msgLen {
-		// Incomplete message; wait for more data.
-		return nil, nil
-	}
-	// Complete message found.
-	m.consumed = 1 + msgLen
-	m.events++
-	return []Event{{Kind: "test-frame", Proto: "tcp"}}, nil
+func (m *mockStreamDecoder) OnPacket(_ *flow.State, _ *ParsedPacket) ([]Event, error) {
+	m.onPacketCalls++
+	return nil, nil
 }
 
 func (m *mockStreamDecoder) OnFlowEnd(_ *flow.State) ([]Event, error) { return nil, nil }
 
-func (m *mockStreamDecoder) ConsumedBytes() int { return m.consumed }
+func (m *mockStreamDecoder) Protocol() string { return "mock" }
+
+func (m *mockStreamDecoder) ParseStream(_ *flow.State, v StreamView) (StreamResult, error) {
+	var res StreamResult
+	defer func() {
+		if m.scribble {
+			for i := range v.Bytes {
+				v.Bytes[i] = 0xEE
+			}
+		}
+	}()
+	off := 0
+	for off < len(v.Bytes) {
+		n := int(v.Bytes[off])
+		if n == 0xFF {
+			at := v.Base + int64(off)
+			return res, &FrameError{Offset: at, Reason: "bad length", Event: Event{Proto: "mock", Kind: "malformed", Attributes: map[string]any{"start": at}}}
+		}
+		if off+1+n > len(v.Bytes) {
+			res.NeedMore = true
+			break
+		}
+		start := v.Base + int64(off)
+		end := start + int64(1+n)
+		res.Frames = append(res.Frames, DecodedFrame{Start: start, End: end, Events: []Event{{Proto: "mock", Kind: "test-frame", Attributes: map[string]any{"start": start}}}})
+		off += 1 + n
+	}
+	res.Consumed = off
+	return res, nil
+}
 
 func TestIntegrationReassemblyWithStreamDecoder(t *testing.T) {
 	dec := &mockStreamDecoder{}
@@ -256,6 +273,9 @@ func TestIntegrationReassemblyWithStreamDecoder(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("segment 3: expected 1 event (complete 1-byte frame), got %d", len(events))
 	}
+	if dec.onPacketCalls != 0 {
+		t.Fatalf("framed decoder OnPacket called %d times on TCP", dec.onPacketCalls)
+	}
 }
 
 func TestIntegrationModbusStyleReassembly(t *testing.T) {
@@ -281,6 +301,9 @@ func TestIntegrationModbusStyleReassembly(t *testing.T) {
 	events2, _ := mgr.OnPacket(st, seg2)
 	if len(events2) != 1 {
 		t.Fatalf("modbus seg2: expected 1 event, got %d", len(events2))
+	}
+	if dec.onPacketCalls != 0 {
+		t.Fatalf("framed decoder OnPacket called %d times on TCP", dec.onPacketCalls)
 	}
 }
 

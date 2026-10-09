@@ -13,15 +13,19 @@ import (
 )
 
 type icsPredicateJSON struct {
-	Protocol      string   `json:"protocol,omitempty"`
-	FunctionCode  []int    `json:"functionCode,omitempty"`
-	UnitID        *uint8   `json:"unitId,omitempty"`
-	Addresses     []string `json:"addresses,omitempty"`
-	ObjectClasses []uint16 `json:"objectClasses,omitempty"`
-	ReadOnly      bool     `json:"readOnly,omitempty"`
-	WriteOnly     bool     `json:"writeOnly,omitempty"`
-	Direction     string   `json:"direction,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
+	Protocol      string     `json:"protocol,omitempty"`
+	FunctionCode  []int      `json:"functionCode,omitempty"`
+	UnitID        *uint8     `json:"unitId,omitempty"`
+	Addresses     []string   `json:"addresses,omitempty"`
+	ObjectClasses []uint16   `json:"objectClasses,omitempty"`
+	ReadOnly      bool       `json:"readOnly,omitempty"`
+	WriteOnly     bool       `json:"writeOnly,omitempty"`
+	Direction     string     `json:"direction,omitempty"`
+	Mode          string     `json:"mode,omitempty"`
+	TypeIDs       []int      `json:"typeIds,omitempty"`
+	Classes       []string   `json:"classes,omitempty"`
+	CA            []uint16   `json:"ca,omitempty"`
+	IOA           []IOARange `json:"ioa,omitempty"`
 }
 
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
@@ -34,6 +38,10 @@ func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 		WriteOnly:     p.WriteOnly,
 		Direction:     p.Direction,
 		Mode:          p.Mode,
+		TypeIDs:       p.TypeIDs,
+		Classes:       p.Classes,
+		CA:            p.CA,
+		IOA:           p.IOA,
 	}
 	if len(p.FunctionCode) > 0 {
 		out.FunctionCode = make([]int, 0, len(p.FunctionCode))
@@ -55,6 +63,10 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 		WriteOnly     bool            `json:"writeOnly,omitempty"`
 		Direction     string          `json:"direction,omitempty"`
 		Mode          string          `json:"mode,omitempty"`
+		TypeIDs       []int           `json:"typeIds,omitempty"`
+		Classes       []string        `json:"classes,omitempty"`
+		CA            []uint16        `json:"ca,omitempty"`
+		IOA           []IOARange      `json:"ioa,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -69,6 +81,10 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 		WriteOnly:     raw.WriteOnly,
 		Direction:     raw.Direction,
 		Mode:          raw.Mode,
+		TypeIDs:       raw.TypeIDs,
+		Classes:       raw.Classes,
+		CA:            raw.CA,
+		IOA:           raw.IOA,
 	}
 
 	if len(raw.FunctionCode) == 0 || string(raw.FunctionCode) == "null" {

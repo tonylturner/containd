@@ -13,18 +13,6 @@ const (
 	maxOOOSegments       = 4         // max out-of-order segments per stream
 )
 
-// StreamDecoder is an optional interface that stream-aware decoders can
-// implement.  After a successful parse the reassembler uses ConsumedBytes
-// to trim already-processed data from the buffer instead of discarding the
-// entire stream.
-type StreamDecoder interface {
-	Decoder
-	// ConsumedBytes returns the number of leading bytes that were
-	// successfully parsed in the last OnPacket call.  Return 0 if the
-	// buffer does not yet contain a complete message.
-	ConsumedBytes() int
-}
-
 // oooSegment holds a single out-of-order TCP segment.
 type oooSegment struct {
 	seq     uint32
@@ -35,6 +23,7 @@ type oooSegment struct {
 type StreamBuffer struct {
 	flowKey    string
 	buf        []byte
+	base       int64 // absolute stream offset of buf[0]
 	maxSize    int
 	lastUpdate time.Time
 
@@ -89,6 +78,14 @@ func seqDiff(a, b uint32) int32 {
 // is 0 and no sequence tracking has been established, it is treated as
 // in-order (legacy callers).
 func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq uint32) []byte {
+	buf, _, _ := r.feed(flowKey, payload, now, seq, 0)
+	return buf
+}
+
+// feed is Feed for the framed path. A new stream starts at absolute offset
+// start. It also returns the absolute offset of the returned buffer's first
+// byte and whether out-of-order bytes are buffered beyond a hole.
+func (r *Reassembler) feed(flowKey string, payload []byte, now time.Time, seq uint32, start int64) ([]byte, int64, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -96,6 +93,7 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq ui
 	if !ok {
 		sb = &StreamBuffer{
 			flowKey: flowKey,
+			base:    start,
 			maxSize: r.maxSize,
 			buf:     make([]byte, 0, min(len(payload)*4, r.maxSize)),
 		}
@@ -155,6 +153,7 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq ui
 		excess := len(sb.buf) - sb.maxSize
 		r.BytesBuffered -= excess
 		sb.buf = sb.buf[excess:]
+		sb.base += int64(excess)
 	}
 
 	r.BytesBuffered += len(payload)
@@ -166,7 +165,7 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq ui
 	// Return a copy so callers cannot mutate internal state.
 	out := make([]byte, len(sb.buf))
 	copy(out, sb.buf)
-	return out
+	return out, sb.base, len(sb.ooo) > 0
 }
 
 // flushOOO drains any contiguous OOO segments that now fit at nextSeq.
@@ -235,9 +234,11 @@ func (r *Reassembler) Trim(flowKey string, n int) {
 	}
 	if n >= len(sb.buf) {
 		r.BytesBuffered -= len(sb.buf)
+		sb.base += int64(len(sb.buf))
 		sb.buf = sb.buf[:0]
 	} else {
 		r.BytesBuffered -= n
+		sb.base += int64(n)
 		sb.buf = sb.buf[n:]
 	}
 	if r.BytesBuffered < 0 {

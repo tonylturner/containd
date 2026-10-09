@@ -160,7 +160,7 @@ func (s *nfqueueSource) run(ctx context.Context) error {
 			}
 			return 0
 		}
-		pkt, ok := decodeIPPacket(*a.Payload)
+		pkt, ok := decodeIP(*a.Payload)
 		if !ok {
 			// Not a parseable IP packet -- accept and move on.
 			if a.PacketID != nil {
@@ -168,9 +168,17 @@ func (s *nfqueueSource) run(ctx context.Context) error {
 			}
 			return 0
 		}
+		pkt.Timestamp = time.Now().UTC()
+		pkt.Interface = "nfqueue"
+		if a.Mark != nil {
+			pkt.Mark = *a.Mark
+			pkt.HasMark = true
+		}
 
-		// Deliver to capture handler (DPI/telemetry).
-		s.handler(pkt)
+		// Deliver to capture handler (DPI/telemetry). Packets are not
+		// delivered inline yet (zero Token), so the decision is always
+		// Accept and the queue answers immediately.
+		_ = s.handler(pkt)
 
 		// Default verdict is ACCEPT. The verdict cache in the engine will
 		// override this via nftables set updates for blocked flows.

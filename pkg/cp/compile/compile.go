@@ -83,15 +83,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Action:       dprules.Action(r.Action),
 			Log:          r.Log,
 			Identities:   append([]string(nil), r.Identities...),
-			ICS: dprules.ICSPredicate{
-				Protocol:     r.ICS.Protocol,
-				FunctionCode: append([]uint8(nil), r.ICS.FunctionCode...),
-				UnitID:       r.ICS.UnitID,
-				Addresses:    append([]string(nil), r.ICS.Addresses...),
-				ReadOnly:     r.ICS.ReadOnly,
-				WriteOnly:    r.ICS.WriteOnly,
-				Mode:         r.ICS.Mode,
-			},
+			ICS:          ICSPredicate(r.ICS),
 		}
 		if r.Schedule != nil {
 			entry.Schedule = dprules.SchedulePredicate{

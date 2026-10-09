@@ -809,6 +809,19 @@ type ICSPredicate struct {
 	WriteOnly     bool     `json:"writeOnly,omitempty"`     // write-only class
 	Direction     string   `json:"direction,omitempty"`     // "request", "response", or "" (both)
 	Mode          string   `json:"mode,omitempty"`          // "learn" or "enforce"
+
+	// IEC 60870-5-104 predicates (protocol "iec104").
+	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255; int so JSON is a numeric array, never base64
+	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
+	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
+	IOA     []IOARange `json:"ioa,omitempty"`
+}
+
+// IOARange is a closed IEC104 information object address range,
+// endpoints 0..16777215.
+type IOARange struct {
+	Start uint32 `json:"start"`
+	End   uint32 `json:"end"`
 }
 
 type AVConfig struct {

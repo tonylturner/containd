@@ -67,3 +67,40 @@ func TestICSPredicateUnmarshalJSONAcceptsLegacyBase64AndArrayForms(t *testing.T)
 		}
 	})
 }
+
+func TestICSPredicateIEC104FieldsRoundTrip(t *testing.T) {
+	const in = `{"protocol":"iec104","typeIds":[45,46],"classes":["control"],"direction":"request","ca":[1,65534],"ioa":[{"start":65536,"end":65567},{"start":0,"end":0}],"mode":"enforce"}`
+	var pred ICSPredicate
+	if err := json.Unmarshal([]byte(in), &pred); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	want := ICSPredicate{
+		Protocol:  "iec104",
+		TypeIDs:   []int{45, 46},
+		Classes:   []string{"control"},
+		Direction: "request",
+		CA:        []uint16{1, 65534},
+		IOA:       []IOARange{{Start: 65536, End: 65567}, {Start: 0, End: 0}},
+		Mode:      "enforce",
+	}
+	if !reflect.DeepEqual(pred, want) {
+		t.Fatalf("decoded %+v, want %+v", pred, want)
+	}
+	body, err := json.Marshal(pred)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, frag := range []string{`"typeIds":[45,46]`, `"classes":["control"]`, `"ca":[1,65534]`, `"ioa":[{"start":65536,"end":65567},{"start":0,"end":0}]`} {
+		if !strings.Contains(string(body), frag) {
+			t.Fatalf("marshalled %s lacks %s", body, frag)
+		}
+	}
+	var again ICSPredicate
+	if err := json.Unmarshal(body, &again); err != nil || !reflect.DeepEqual(again, want) {
+		t.Fatalf("round trip = %+v, %v", again, err)
+	}
+	empty, err := json.Marshal(ICSPredicate{Protocol: "modbus"})
+	if err != nil || strings.ContainsAny(string(empty), "[") {
+		t.Fatalf("absent IEC fields must be omitted: %s, %v", empty, err)
+	}
+}

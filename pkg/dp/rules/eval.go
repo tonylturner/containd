@@ -37,6 +37,8 @@ type ICSContext struct {
 	ReadOnly     bool
 	WriteOnly    bool
 	Direction    string // "request" or "response"
+	// IEC104 is set only for IEC 60870-5-104 events.
+	IEC104 *IEC104Context
 }
 
 // compiledAddr holds a pre-parsed ICS address or address range.
@@ -363,7 +365,11 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		len(p.ObjectClasses) == 0 &&
 		p.Direction == "" &&
 		!p.ReadOnly &&
-		!p.WriteOnly
+		!p.WriteOnly &&
+		len(p.TypeIDs) == 0 &&
+		len(p.Classes) == 0 &&
+		len(p.CA) == 0 &&
+		len(p.IOA) == 0
 }
 
 // parseAddr parses a numeric address string supporting both decimal and hex (0x prefix).

@@ -6,93 +6,141 @@ package capture
 import (
 	"encoding/binary"
 	"net"
-	"time"
 )
 
-// decodeIPPacket decodes a raw IP packet (no Ethernet header) into a Packet.
-// This is used by NFQUEUE which delivers IP-layer packets directly.
-func decodeIPPacket(data []byte) (Packet, bool) {
+// Packet.Invalid reasons.
+const (
+	InvalidTruncated = "truncated"  // shorter than its IP header
+	InvalidIPVersion = "ip_version" // neither IPv4 nor IPv6
+	InvalidIPHeader  = "ip_header"  // IPv4 IHL below 20 bytes
+	InvalidFragment  = "fragment"   // IPv4 MF/fragment offset or IPv6 fragment header
+	InvalidIPv6      = "ipv6"       // IPv6 extension header chain (not walked)
+	InvalidProtocol  = "protocol"   // transport is neither TCP nor UDP
+	InvalidTCPHeader = "tcp_header" // TCP header short or bad data offset
+	InvalidUDPHeader = "udp_header" // UDP header short
+)
+
+// DecodeIPPacket decodes a raw IP packet (no link-layer header). It never
+// fails silently: a packet that cannot be decoded has Invalid set, and its
+// tuple fields are best effort. Timestamp and Interface are left to the
+// caller.
+func DecodeIPPacket(data []byte) Packet {
+	pkt, _ := decodeIP(data)
+	return pkt
+}
+
+// decodeIP decodes like DecodeIPPacket and also reports whether capture
+// delivers the packet to its handler. Capture still accepts undecodable
+// packets itself; IPv4 fragments that decode are delivered as before, now
+// marked Invalid=fragment.
+func decodeIP(data []byte) (Packet, bool) {
 	if len(data) < 1 {
-		return Packet{}, false
+		return Packet{Invalid: InvalidTruncated}, false
 	}
-	version := data[0] >> 4
-	switch version {
+	switch data[0] >> 4 {
 	case 4:
 		return decodeIPv4Raw(data)
 	case 6:
 		return decodeIPv6Raw(data)
 	default:
-		return Packet{}, false
+		return Packet{Invalid: InvalidIPVersion}, false
 	}
 }
 
 func decodeIPv4Raw(data []byte) (Packet, bool) {
 	if len(data) < 20 {
-		return Packet{}, false
+		return Packet{Invalid: InvalidTruncated}, false
+	}
+	pkt := Packet{
+		Proto: data[9],
+		SrcIP: net.IPv4(data[12], data[13], data[14], data[15]),
+		DstIP: net.IPv4(data[16], data[17], data[18], data[19]),
 	}
 	ihl := int(data[0]&0x0f) * 4
-	if ihl < 20 || len(data) < ihl {
-		return Packet{}, false
+	if ihl < 20 {
+		pkt.Invalid = InvalidIPHeader
+		return pkt, false
 	}
-	proto := data[9]
-	src := net.IPv4(data[12], data[13], data[14], data[15])
-	dst := net.IPv4(data[16], data[17], data[18], data[19])
-	return decodeL4NFQ(proto, src, dst, data[ihl:])
+	if len(data) < ihl {
+		pkt.Invalid = InvalidTruncated
+		return pkt, false
+	}
+	ok := decodeL4(&pkt, data[ihl:])
+	const moreFragments, offsetMask = 0x2000, 0x1fff
+	if frag := binary.BigEndian.Uint16(data[6:8]); ok && frag&(moreFragments|offsetMask) != 0 {
+		pkt.Invalid = InvalidFragment
+	}
+	return pkt, ok
 }
 
 func decodeIPv6Raw(data []byte) (Packet, bool) {
 	if len(data) < 40 {
-		return Packet{}, false
+		return Packet{Invalid: InvalidTruncated}, false
 	}
-	proto := data[6]
-	src := net.IP(append([]byte(nil), data[8:24]...))
-	dst := net.IP(append([]byte(nil), data[24:40]...))
-	return decodeL4NFQ(proto, src, dst, data[40:])
+	pkt := Packet{
+		Proto: data[6],
+		SrcIP: net.IP(append([]byte(nil), data[8:24]...)),
+		DstIP: net.IP(append([]byte(nil), data[24:40]...)),
+	}
+	switch pkt.Proto {
+	case 44:
+		pkt.Invalid = InvalidFragment
+		return pkt, false
+	case 0, 43, 51, 60, 135, 139, 140, 253, 254:
+		pkt.Invalid = InvalidIPv6
+		return pkt, false
+	}
+	return pkt, decodeL4(&pkt, data[40:])
 }
 
-func decodeL4NFQ(proto uint8, src, dst net.IP, data []byte) (Packet, bool) {
-	switch proto {
-	case 6: // TCP
-		if len(data) < 20 {
-			return Packet{}, false
-		}
-		sport := binary.BigEndian.Uint16(data[0:2])
-		dport := binary.BigEndian.Uint16(data[2:4])
-		off := int(data[12]>>4) * 4
-		if off < 20 || len(data) < off {
-			return Packet{}, false
-		}
-		payload := append([]byte(nil), data[off:]...)
-		return Packet{
-			Timestamp: time.Now().UTC(),
-			Interface: "nfqueue",
-			SrcIP:     src,
-			DstIP:     dst,
-			SrcPort:   sport,
-			DstPort:   dport,
-			Proto:     proto,
-			Transport: "tcp",
-			Payload:   payload,
-		}, true
-	case 17: // UDP
-		if len(data) < 8 {
-			return Packet{}, false
-		}
-		sport := binary.BigEndian.Uint16(data[0:2])
-		dport := binary.BigEndian.Uint16(data[2:4])
-		payload := append([]byte(nil), data[8:]...)
-		return Packet{
-			Timestamp: time.Now().UTC(),
-			Interface: "nfqueue",
-			SrcIP:     src,
-			DstIP:     dst,
-			SrcPort:   sport,
-			DstPort:   dport,
-			Proto:     proto,
-			Transport: "udp",
-			Payload:   payload,
-		}, true
+// decodeL4 fills the transport fields of pkt and reports success; on
+// failure it sets pkt.Invalid.
+func decodeL4(pkt *Packet, data []byte) bool {
+	switch pkt.Proto {
+	case 6:
+		pkt.Transport = "tcp"
+		return decodeTCP(pkt, data)
+	case 17:
+		pkt.Transport = "udp"
+		return decodeUDP(pkt, data)
 	default:
-		return Packet{}, false
+		pkt.Invalid = InvalidProtocol
+		return false
 	}
+}
+
+func decodeTCP(pkt *Packet, data []byte) bool {
+	if len(data) >= 4 {
+		pkt.SrcPort = binary.BigEndian.Uint16(data[0:2])
+		pkt.DstPort = binary.BigEndian.Uint16(data[2:4])
+	}
+	if len(data) < 20 {
+		pkt.Invalid = InvalidTCPHeader
+		return false
+	}
+	off := int(data[12]>>4) * 4
+	if off < 20 || len(data) < off {
+		pkt.Invalid = InvalidTCPHeader
+		return false
+	}
+	pkt.TCP = TCPMeta{
+		Valid:  true,
+		Seq:    binary.BigEndian.Uint32(data[4:8]),
+		Ack:    binary.BigEndian.Uint32(data[8:12]),
+		Flags:  TCPFlags(data[13]),
+		Window: binary.BigEndian.Uint16(data[14:16]),
+	}
+	pkt.Payload = append([]byte(nil), data[off:]...)
+	return true
+}
+
+func decodeUDP(pkt *Packet, data []byte) bool {
+	if len(data) < 8 {
+		pkt.Invalid = InvalidUDPHeader
+		return false
+	}
+	pkt.SrcPort = binary.BigEndian.Uint16(data[0:2])
+	pkt.DstPort = binary.BigEndian.Uint16(data[2:4])
+	pkt.Payload = append([]byte(nil), data[8:]...)
+	return true
 }

@@ -94,4 +94,18 @@ type ICSPredicate struct {
 	WriteOnly     bool     // write-only class
 	Direction     string   // "request", "response", or "" (both)
 	Mode          string   // "learn" or "enforce"
+
+	// IEC 60870-5-104 predicates. The Snapshot is JSON-marshalled to the
+	// engine, so TypeIDs is []int: []uint8 would encode as base64.
+	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255
+	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
+	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
+	IOA     []IOARange `json:"ioa,omitempty"`
+}
+
+// IOARange is a closed IEC104 information object address range,
+// endpoints 0..16777215.
+type IOARange struct {
+	Start uint32 `json:"start"`
+	End   uint32 `json:"end"`
 }

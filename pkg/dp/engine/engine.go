@@ -36,6 +36,7 @@ type captureRunner interface {
 	Start(context.Context, capture.Handler) error
 	Stop()
 	Interfaces() []string
+	Settler() capture.Settler
 }
 
 // Engine coordinates capture and rule enforcement components.
@@ -452,9 +453,13 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 	}
 }
 
-func (e *Engine) handlePacket(pkt capture.Packet) {
+// handlePacket runs flow tracking, DPI and enforcement for one captured
+// packet. Every exit accepts the current packet; enforcement acts through
+// the verdict cache and nft updates.
+func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
+	accept := capture.Decision{Action: capture.Accept}
 	if e == nil {
-		return
+		return accept
 	}
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
@@ -464,7 +469,7 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	}
 	state := e.trackFlow(pkt, now)
 	if state == nil {
-		return
+		return accept
 	}
 
 	parsed := dpi.ParsedPacket{
@@ -479,13 +484,13 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	if cached, ok := e.verdictCache.Get(flowHash); ok {
 		// Permanent or temporary enforcement verdicts can short-circuit the flow.
 		if cached.Action != verdict.AllowContinue {
-			return
+			return accept
 		}
 		// For non-inspected flows we cache ALLOW to avoid re-checking every packet.
 		// Inspectable flows must continue through DPI so later payload-bearing
 		// packets are decoded; otherwise a SYN/ACK can suppress the whole flow.
 		if !shouldInspect {
-			return
+			return accept
 		}
 	}
 
@@ -493,18 +498,18 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 		// Cache an ALLOW verdict for non-inspected flows so we don't
 		// re-evaluate ShouldInspect on every packet.
 		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
-		return
+		return accept
 	}
 	events, err := e.dpiMgr.OnPacket(state, &parsed)
 	if err != nil {
-		return
+		return accept
 	}
 	e.RecordDPIEvents(state, &parsed, events)
 
 	if v, enforced := e.enforceDPIEvents(state, &parsed, events); enforced {
 		e.verdictCache.Put(flowHash, v)
-		return
 	}
+	return accept
 }
 
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {

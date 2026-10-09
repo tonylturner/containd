@@ -43,6 +43,8 @@ func (c *retryCapture) Stop() {
 
 func (c *retryCapture) Interfaces() []string { return nil }
 
+func (c *retryCapture) Settler() capture.Settler { return nil }
+
 func TestStartRetriesAfterCaptureFailure(t *testing.T) {
 	ctx := context.Background()
 	c := &retryCapture{}
@@ -101,6 +103,8 @@ func (c *blockingCapture) Stop() {
 }
 
 func (c *blockingCapture) Interfaces() []string { return nil }
+
+func (c *blockingCapture) Settler() capture.Settler { return nil }
 
 func engineWithCapture(t *testing.T, runner captureRunner) *Engine {
 	t.Helper()
