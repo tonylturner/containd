@@ -47,10 +47,12 @@ func (h *inlineHooks) onVerdict(tok capture.Token, _ capture.Verdict, err error)
 	h.iec.onVerdict(tok, err)
 }
 
-// onSource handles inline source state changes. A source that goes down aborts the enforce sessions; enforcement is
-// healthy again only once the source reports ready (contracts K6).
+// onSource handles inline source state changes. A source that goes down
+// aborts the enforce sessions; enforcement is healthy again only once the
+// source reports ready (contracts K6).
 func (h *inlineHooks) onSource(ev capture.SourceEvent) {
-	if ev.Err != nil && h.onError != nil {
+	// A queue closed by Stop (every Reconfigure) is not an error to log.
+	if ev.Err != nil && !errors.Is(ev.Err, capture.ErrQueueClosed) && h.onError != nil {
 		h.onError(ev.Err)
 	}
 	if ev.Ready {

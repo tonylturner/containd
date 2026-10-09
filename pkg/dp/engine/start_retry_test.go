@@ -115,3 +115,19 @@ func TestStartWithRetryDoesNotRetryAFPacket(t *testing.T) {
 		t.Fatalf("observational start = %v after %d starts", err, c.starts.Load())
 	}
 }
+
+func TestNormalQueueCloseIsNotLoggedAsError(t *testing.T) {
+	var logged []error
+	e, err := New(Config{OnError: func(err error) { logged = append(logged, err) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.hooks.onSource(capture.SourceEvent{Generation: 1, Err: capture.ErrQueueClosed})
+	if len(logged) != 0 {
+		t.Fatalf("a queue closed by Stop was logged: %v", logged)
+	}
+	e.hooks.onSource(capture.SourceEvent{Generation: 2, Err: errBind})
+	if len(logged) != 1 {
+		t.Fatalf("a queue failure was not logged: %v", logged)
+	}
+}
