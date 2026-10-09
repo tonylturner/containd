@@ -319,10 +319,20 @@ func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 // Side-effect: appends a firewall.rule.hit event to the event store when
 // the matched rule has Log:true.
 func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *rules.Entry) {
+	return e.evaluateVerdictMatch(ctx, true)
+}
+
+// evaluateVerdictMatch is EvaluateVerdictMatch with the default action
+// optional: when applyDefault is false, a context that matches no rule
+// gets AllowContinue instead of the snapshot's default.
+func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	snap := e.ruleSnap.Load()
 	ev := rules.NewEvaluator(snap)
 	action, matched := ev.EvaluateMatch(ctx)
+	if matched == nil && !applyDefault {
+		action = rules.ActionAllow
+	}
 	v := verdict.FromRulesAction(action)
 	metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
 	metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()

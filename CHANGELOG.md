@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ephemeral port; under a default DENY policy in enforce mode the reply hit
   the default rule and the flow was blocked. Flows now know which side opened
   the connection, and reply DPI events are evaluated as opener to server on
-  the server port.
+  the server port. The default action applies only to requests from the
+  opener: a message from the server (a response, an exception, a DNP3
+  unsolicited response) is enforced only when a rule matches it, as in
+  NFQUEUE mode.
 - **Port-less TCP/UDP and ICMP rules compile to valid nftables.** A rule with
   protocol `tcp` or `udp` and no port, or protocol `icmp`, emitted a bare
   protocol token that nft rejects, so the apply failed with HTTP 400. They now
@@ -48,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A denied write now produces two rule hits: one for the request and one for
   the echoed reply, which carries the same function code. Reply rule hits show
   the opener-to-server addresses and the server port.
+- An ICS rule's `direction` follows the sender: every message from the server
+  is a `response`. Modbus replies, which 0.1.31 treated as requests, now match
+  `direction: response` rules and no longer match `direction: request` rules.
 - Reply-direction events have a `flowId` that ends in `|1`.
 - ICS rules scoped to a server port now also inspect replies. Before, replies
   were inspected only when IDS was on (the shipped default).

@@ -44,13 +44,19 @@ func (b *blockRecorder) blocked() []string {
 }
 
 func segment(fromServer bool, seq uint32, flags uint8, payload []byte) capture.Packet {
+	return connSegment(fromServer, 41000, 502, seq, flags, payload)
+}
+
+// connSegment builds a segment of the testClient:clientPort ->
+// testServer:serverPort connection, sent by the server when fromServer.
+func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, flags uint8, payload []byte) capture.Packet {
 	pkt := capture.Packet{
 		Timestamp: time.Now().UTC(),
 		Interface: "eth1",
 		SrcIP:     net.ParseIP(testClient),
 		DstIP:     net.ParseIP(testServer),
-		SrcPort:   41000,
-		DstPort:   502,
+		SrcPort:   clientPort,
+		DstPort:   serverPort,
 		Proto:     6,
 		Transport: "tcp",
 		Payload:   payload,
@@ -157,15 +163,17 @@ func TestReplyEvaluatedWithConnectionOrientation(t *testing.T) {
 	if ctx.SrcIP.String() != testClient || ctx.DstIP.String() != testServer || ctx.Port != "502" || ctx.SrcZone != "lan" || ctx.DstZone != "wan" {
 		t.Fatalf("reply context = %+v, want %s -> %s:502 lan->wan", ctx, testClient, testServer)
 	}
-	if ctx.ICS.Direction != "request" {
-		t.Fatalf("ICS direction = %q, want the event's own direction", ctx.ICS.Direction)
+	if ctx.ICS.Direction != "response" {
+		t.Fatalf("ICS direction = %q, want response for a message from the server", ctx.ICS.Direction)
 	}
 }
 
 // TestPersistentModbusUnderDefaultDeny mirrors the smoke policy: default
 // DENY, an allow for FC3 reads and a deny for FC6 writes from the client
 // to the server, enforce mode. Read replies must not be blocked; the write
-// must block the client -> server flow only.
+// must block the client -> server flow only. The echoed write reply
+// matches the deny rule too, so the write yields two rule hits, both
+// blocking the request tuple.
 func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	up := &blockRecorder{}
 	e, err := New(Config{
@@ -205,10 +213,18 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 		t.Fatalf("allowed read or its reply was blocked: %v", got)
 	}
 
-	e.handlePacket(segment(false, 112, ackPsh, modbusADU(11, 6, 1, 0x1234)))
+	write6 := modbusADU(11, 6, 1, 0x1234)
+	e.handlePacket(segment(false, 112, ackPsh, write6))
 	want := testClient + ">" + testServer + "/tcp:502"
 	if got := up.blocked(); len(got) != 1 || got[0] != want {
 		t.Fatalf("blocks after write = %v, want [%s]", got, want)
+	}
+	e.handlePacket(segment(true, 513, ackPsh, write6))
+	if got := up.blocked(); len(got) != 2 || got[0] != want || got[1] != want {
+		t.Fatalf("blocks after the echoed reply = %v, want [%s %s]", got, want, want)
+	}
+	if got := ruleHits(e, "write-deny"); got != 2 {
+		t.Fatalf("write-deny rule hits = %d, want 2", got)
 	}
 
 	// Event wire fields stay as captured: the reply reads server -> client.
@@ -224,8 +240,8 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 			t.Fatalf("rule hit evaluated with the reply orientation: %+v", ev)
 		}
 	}
-	if replies != 1 {
-		t.Fatalf("reply events = %d, want 1", replies)
+	if replies != 2 {
+		t.Fatalf("reply events = %d, want 2", replies)
 	}
 }
 

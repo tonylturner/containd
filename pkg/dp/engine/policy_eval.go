@@ -81,14 +81,18 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 		return verdict.Verdict{}, false
 	}
 	// Policy describes connections from the opener to the server, so a
-	// reply is evaluated with the connection's orientation.
+	// reply is evaluated with the connection's orientation. The default
+	// action governs requests only: a reply is enforced only when a rule
+	// matches it. NFQUEUE mode behaves the same, because replies take the
+	// established conntrack path there and are never queued.
 	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.OpenerIP(), state.Key.ServerIP())
+	applyDefault := !isReply(state)
 	for _, ev := range evs {
 		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
 		if !ok {
 			continue
 		}
-		v, matched := e.EvaluateVerdictMatch(ctx)
+		v, matched := e.evaluateVerdictMatch(ctx, applyDefault)
 		if v.Action == verdict.AllowContinue {
 			continue
 		}
@@ -129,7 +133,7 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 			Address:   attrString(ev.Attributes, "address"),
 			ReadOnly:  !attrBool(ev.Attributes, "is_write"),
 			WriteOnly: attrBool(ev.Attributes, "is_write"),
-			Direction: eventDirection(ev.Kind),
+			Direction: messageDirection(state, ev.Kind),
 		},
 	}
 	if fc, ok := attrUint8(ev.Attributes, "function_code"); ok {
@@ -207,7 +211,20 @@ func isRuleEvaluableICSEvent(proto string) bool {
 	}
 }
 
-func eventDirection(kind string) string {
+// isReply reports whether the packet was sent by the side that accepted
+// the connection.
+func isReply(state *flow.State) bool {
+	return state.Key.Dir == flow.DirReverse
+}
+
+// messageDirection returns the ICS direction rules match on. Everything
+// the server sends is a response, whatever the decoder calls it: a DNP3
+// unsolicited response or a Modbus reply, whose decoder kind is
+// "request". From the opener, the decoder's kind decides.
+func messageDirection(state *flow.State, kind string) string {
+	if isReply(state) {
+		return "response"
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "response", "exception":
 		return "response"
