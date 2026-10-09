@@ -84,6 +84,13 @@ compose() {
 timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { echo "[$(timestamp)] $*"; }
 
+# now_s prints a sub-second monotonic-ish wall time in seconds (float). Python 3
+# is already a harness dependency and gives the same resolution on macOS and
+# Linux, unlike `date +%N` (not on macOS) or EPOCHREALTIME (bash 5 only).
+now_s() { python3 -c 'import time; print(f"{time.time():.3f}")'; }
+elapsed_s() { python3 -c 'import sys,time; print(f"{time.time()-float(sys.argv[1]):.3f}")' "$1"; }
+within_budget() { python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) <= float(sys.argv[2]) else 1)' "$1" "$2"; }
+
 record() {
   local name=$1 status=$2 detail=$3 gate=${4:-false}
   local tmp="$RESULTS_FILE.tmp"
@@ -164,7 +171,7 @@ fatal() {
 
 ensure_tools() {
   local bin
-  for bin in docker jq curl; do
+  for bin in docker jq curl python3; do
     command -v "$bin" >/dev/null 2>&1 || fatal "missing required tool: $bin"
   done
 }
@@ -223,6 +230,9 @@ log "Building the Go malformer client (Apache-2.0, for malformed/split cases)...
 DOCKER_ARCH=$(docker info --format '{{.Architecture}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')
 GOFLAGS=-mod=mod GOOS=linux GOARCH="$DOCKER_ARCH" go build -o "$WORK_DIR/malformer" "$ROOT/test/iec104/malformer" ||
   fatal "could not build the malformer client"
+log "Building the queueholder (NFQUEUE bind-contention tool)..."
+GOFLAGS=-mod=mod GOOS=linux GOARCH="$DOCKER_ARCH" go build -o "$WORK_DIR/queueholder" "$ROOT/test/iec104/queueholder" ||
+  fatal "could not build the queueholder"
 
 log "Bringing up the harness (project $PROJECT)..."
 compose up -d --wait --wait-timeout 120 >"$WORK_DIR/up.log" 2>&1 || { cat "$WORK_DIR/up.log"; fatal "compose up failed"; }
@@ -552,14 +562,14 @@ fi
 # 6. The same client reconnects and completes GI within the B1 budget (new
 #    session + GI complete <= 5 s), with no IEC entry in block_flows.
 rc=0
-GI_START=$(date +%s)
+GI_START=$(now_s)
 run_cmd gi "$ALLOWED_CA" >"$WORK_DIR/regi.out" 2>&1 || rc=$?
-GI_ELAPSED=$(($(date +%s) - GI_START))
-if [[ "$ABORTED" -eq 1 && "$rc" == 0 ]] && grep -q 'type=100 cot=10' "$WORK_DIR/regi.out" && ((GI_ELAPSED <= 5)); then
+GI_ELAPSED=$(elapsed_s "$GI_START")
+if [[ "$ABORTED" -eq 1 && "$rc" == 0 ]] && grep -q 'type=100 cot=10' "$WORK_DIR/regi.out" && within_budget "$GI_ELAPSED" 5.0; then
   gate_pass "the same client reconnects after the abort and completes GI within 5 s" "${GI_ELAPSED}s"
 else
   gate_fail "the same client reconnects after the abort and completes GI within 5 s" \
-    "aborted=$ABORTED; exit $rc; ${GI_ELAPSED}s; GI termination seen: $(grep -c 'type=100 cot=10' "$WORK_DIR/regi.out" || true)"
+    "aborted=$ABORTED; exit $rc; ${GI_ELAPSED}s (budget 5.0 s); GI termination seen: $(grep -c 'type=100 cot=10' "$WORK_DIR/regi.out" || true)"
 fi
 
 BLOCK_FLOWS=$(compose exec -T firewall nft list set inet containd block_flows 2>&1 | tr -d '\r')
@@ -602,8 +612,26 @@ if [[ -n "$gi_after" && "$gi_after" -gt "$gi_before" ]]; then
 else
   fail "an allowed GI on a reused 5-tuple did not reach the RTU" "gi_requests $gi_before -> $gi_after; $REUSE_GI"
 fi
-not_implemented "stale retransmit of an aborted session's bytes after a new handshake cannot bypass" \
-  "needs a raw-socket replay of old-ISN segments from the client network; not built in Phase 1"
+# Stale retransmit: the malformer opens a raw session (port 40405) that sends a
+# forbidden command to IOA 2002, opens a second session from port 40406 (the
+# "new handshake"), then injects a later segment of the first session carrying a
+# forbidden command to IOA 2003. If that stale segment reaches the RTU, its
+# double command handler records ioa=2003 in last_command.
+STALE_IOA=$((FORBIDDEN_IOA + 1))
+received_before=$(rtu_field commands_received)
+STALE_OUT=$(compose exec -T cc /usr/local/bin/malformer -addr "$RTU_IP:$RTU_PORT" \
+  -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN" 2>&1 | tr -d '\r' | tail -n 1)
+sleep 1
+last_cmd=$(rtu_field last_command)
+received_after=$(rtu_field commands_received)
+STALE_DETAIL="malformer: $STALE_OUT; RTU last_command '$last_cmd'; commands_received $received_before -> $received_after"
+if [[ "$STALE_OUT" == *FAILED* ]]; then
+  fail "stale retransmit after a new handshake cannot bypass" "raw replay could not run: $STALE_OUT"
+elif [[ "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
+  gate_pass "stale retransmit after a new handshake cannot bypass" "$STALE_DETAIL"
+else
+  gate_fail "stale retransmit after a new handshake cannot bypass" "the stale segment reached the RTU: $STALE_DETAIL"
+fi
 
 # 9. Malformed/unknown: reset in enforce, alert (event) and pass in learn.
 for scen in bad-length malformed-dcs unsupported-type; do
@@ -656,8 +684,49 @@ reject_check "IEC enforce with the iec104 decoder off is refused before save" \
 reject_check "IEC enforce without NFQUEUE capture (nfqueueGroup 0) is refused before save" \
   "$(echo "$EU_POLICY" | jq 'del(.dataPlane.nfqueueGroup)')"
 apply_config "$EU_POLICY" "EU enforce policy (restore after rejection checks)" || fail "could not restore the EU enforce policy"
-not_implemented "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
-  "needs a way to make the engine's NFQUEUE bind fail at start (a second binder on group 101); not built in Phase 1"
+
+# Queue bind failure at start (E3, §8.3, K6): a second binder holds NFQUEUE 101
+# before the engine binds it, so the engine's bind fails. The config is kept,
+# enforce envelopes fail closed, and health reports unhealthy with a queue-bind
+# reason. Drop the engine's binding first (L4 baseline), take the queue, then
+# re-apply the enforce policy so the engine binds into a held queue.
+if compose cp "$WORK_DIR/queueholder" firewall:/usr/local/bin/queueholder >/dev/null 2>&1; then
+  apply_config "$BASELINE" "L4 baseline (free NFQUEUE 101)" || fail "could not drop the enforce policy before the queue-bind check"
+  sleep 1
+  compose exec -d firewall sh -c "/usr/local/bin/queueholder -queue 101 >/tmp/queueholder.log 2>&1" >/dev/null 2>&1 || true
+  QH_READY=0
+  for _ in $(seq 1 20); do
+    if compose exec -T firewall grep -q 'bound queue 101' /tmp/queueholder.log 2>/dev/null; then QH_READY=1; break; fi
+    sleep 0.5
+  done
+  if [[ "$QH_READY" -eq 1 ]]; then
+    apply_config "$EU_POLICY" "EU enforce policy (into a held queue)" || log "engine apply reported an error with the queue held (expected)"
+    sleep 2
+    QH_HEALTH=$(health_json | jq -c '.iec104Enforcement // "no iec104Enforcement object"')
+    # Fail closed: a normally allowed command must not reach the RTU while the
+    # engine cannot bind its queue.
+    received_before=$(rtu_field commands_received)
+    run_cmd sbo "$ALLOWED_CA" "$ALLOWED_IOA" "$DCS_OPEN" >/dev/null 2>&1 || true
+    received_after=$(rtu_field commands_received)
+    if health_json | jq -e '.iec104Enforcement.active == true and .iec104Enforcement.healthy == false
+        and (.iec104Enforcement.reason | ascii_downcase | test("queue|bind"))' >/dev/null 2>&1 &&
+      [[ "$received_after" == "$received_before" ]]; then
+      gate_pass "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+        "health $QH_HEALTH; commands_received $received_before -> $received_after (fail closed)"
+    else
+      gate_fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+        "health $QH_HEALTH; commands_received $received_before -> $received_after"
+    fi
+  else
+    fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+      "could not bind the holder on NFQUEUE 101: $(compose exec -T firewall cat /tmp/queueholder.log 2>&1 | tr '\n' ' ' | head -c 160)"
+  fi
+  compose exec -T firewall sh -c 'pkill -f "queueholder -queue 101"' >/dev/null 2>&1 || true
+  apply_config "$EU_POLICY" "EU enforce policy (restore after queue-bind check)" || fail "could not restore the EU enforce policy"
+else
+  fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+    "could not install the queueholder in the firewall container"
+fi
 
 # 11. Telemetry stays fresh for > 10 minutes on the long-lived session, which
 #     never drops. Checked every 30 s.

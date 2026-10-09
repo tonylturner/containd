@@ -48,10 +48,20 @@ and then the §12.4 EU policy, runs every §10.2 assertion, writes
 
 Statuses: `PASS`; `FAIL` (baseline or harness defect, independent of IEC
 enforcement); `GATE-FAIL` (needs the integrated L1-L4 engine);
-`NOT-IMPLEMENTED` (a §10.2 assertion the harness cannot drive yet). Exit 0 is
-acceptance (everything passed); 1 is a `FAIL` or a setup error; 3 means the
-baseline passed but gate or unimplemented assertions remain. Passing with
-skips is not acceptance (B6).
+`NOT-IMPLEMENTED` (kept only for the freshness window when it is shortened
+below ten minutes). Exit 0 is acceptance (everything passed); 1 is a `FAIL`
+or a setup error; 3 means the baseline passed but gate assertions remain.
+Passing with skips is not acceptance (B6).
+
+Two assertions use extra tooling. The stale-retransmit case (`malformer
+-scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and
+40406), sends a forbidden command, re-handshakes from the second port, then
+injects a later segment of the first session carrying a forbidden command to
+IOA 2003; it suppresses the container's own RST with an `iptables` OUTPUT
+rule so the raw handshake completes. The queue-bind case builds
+`test/iec104/queueholder`, which binds NFQUEUE 101 before the engine does, so
+the engine's bind fails and (per E3/K6) enforcement must keep the config,
+fail closed and report unhealthy.
 
 ## Endpoint points and state
 
