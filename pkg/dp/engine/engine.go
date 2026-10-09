@@ -468,10 +468,13 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	}
 
 	parsed := dpi.ParsedPacket{
-		Payload: pkt.Payload,
-		Proto:   pkt.Transport,
-		SrcPort: pkt.SrcPort,
-		DstPort: pkt.DstPort,
+		Payload:   pkt.Payload,
+		Proto:     pkt.Transport,
+		SrcPort:   pkt.SrcPort,
+		DstPort:   pkt.DstPort,
+		TCPSeq:    pkt.TCPSeq,
+		HasTCPSeq: pkt.HasTCPSeq,
+		TCPSyn:    pkt.TCPFlags&capture.TCPFlagSYN != 0,
 	}
 
 	flowHash := state.Key.Hash()
@@ -507,24 +510,13 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	}
 }
 
+// trackFlow returns the state of the packet's connection direction. Each
+// direction of a connection has its own state, keyed by its wire tuple,
+// whose Key.Dir records whether its sender opened the connection
+// (DirForward) or accepted it (DirReverse).
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
-	key := flow.Key{
-		SrcIP:   pkt.SrcIP,
-		DstIP:   pkt.DstIP,
-		SrcPort: pkt.SrcPort,
-		DstPort: pkt.DstPort,
-		Proto:   pkt.Proto,
-		Dir:     flow.DirForward,
-	}
-	hash := key.Hash()
 	e.flowMu.Lock()
-	state, ok := e.flows[hash]
-	if !ok {
-		state = flow.NewState(key, now)
-		state.IdleTimeout = 5 * time.Minute
-		e.flows[hash] = state
-		metrics.FlowsActive.Inc()
-	}
+	state := e.connectionStateLocked(pkt, now)
 	state.Touch(uint64(len(pkt.Payload)), now)
 	// Only check if sweep is due under the existing lock; do the actual
 	// sweep outside the critical path if needed.
@@ -538,6 +530,74 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 		e.sweepFlows(now)
 	}
 	return state
+}
+
+// connectionStateLocked finds or creates the direction state for pkt. A
+// SYN marks its sender as the opener and a SYN-ACK as the server; without
+// a handshake, a direction whose opposite was already seen is oriented
+// against it, and otherwise the first-seen direction is the opener. Must
+// be called with e.flowMu held.
+func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.State {
+	key := flow.Key{
+		SrcIP:   pkt.SrcIP,
+		DstIP:   pkt.DstIP,
+		SrcPort: pkt.SrcPort,
+		DstPort: pkt.DstPort,
+		Proto:   pkt.Proto,
+	}
+	hint, hinted := handshakeDirection(pkt)
+	for _, dir := range []flow.Direction{flow.DirForward, flow.DirReverse} {
+		key.Dir = dir
+		state, ok := e.flows[key.Hash()]
+		if !ok {
+			continue
+		}
+		if !hinted || hint == dir {
+			return state
+		}
+		// The handshake contradicts the recorded orientation: the tuple
+		// carries a new connection. Forget both of the old directions.
+		e.dropFlowLocked(key)
+		e.dropFlowLocked(key.Reversed())
+		break
+	}
+
+	key.Dir = flow.DirForward
+	if hinted {
+		key.Dir = hint
+	} else {
+		opposite := key.Reversed()
+		opposite.Dir = flow.DirForward
+		if _, ok := e.flows[opposite.Hash()]; ok {
+			// The other side was seen first and opened the connection.
+			key.Dir = flow.DirReverse
+		}
+	}
+	state := flow.NewState(key, now)
+	state.IdleTimeout = 5 * time.Minute
+	e.flows[key.Hash()] = state
+	metrics.FlowsActive.Inc()
+	return state
+}
+
+// handshakeDirection reports the direction a TCP handshake segment
+// proves: a SYN comes from the opener, a SYN-ACK from the server.
+func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
+	if pkt.Proto != 6 || pkt.TCPFlags&capture.TCPFlagSYN == 0 {
+		return flow.DirForward, false
+	}
+	if pkt.TCPFlags&capture.TCPFlagACK != 0 {
+		return flow.DirReverse, true
+	}
+	return flow.DirForward, true
+}
+
+func (e *Engine) dropFlowLocked(key flow.Key) {
+	hash := key.Hash()
+	if _, ok := e.flows[hash]; ok {
+		delete(e.flows, hash)
+		metrics.FlowsActive.Dec()
+	}
 }
 
 func (e *Engine) sweepFlows(now time.Time) {

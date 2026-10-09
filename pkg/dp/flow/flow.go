@@ -20,12 +20,48 @@ type Key struct {
 	Dir     Direction
 }
 
+// Direction tells which side of a connection sent the packets of a Key:
+// DirForward from the side that opened the connection, DirReverse from
+// the side that accepted it. SrcIP/DstIP are always the wire addresses.
 type Direction uint8
 
 const (
 	DirForward Direction = iota
 	DirReverse
 )
+
+// Reversed returns the key of the opposite direction of the same
+// connection: endpoints swapped, direction flipped.
+func (k Key) Reversed() Key {
+	dir := DirReverse
+	if k.Dir == DirReverse {
+		dir = DirForward
+	}
+	return Key{
+		SrcIP:   k.DstIP,
+		DstIP:   k.SrcIP,
+		SrcPort: k.DstPort,
+		DstPort: k.SrcPort,
+		Proto:   k.Proto,
+		Dir:     dir,
+	}
+}
+
+// OpenerIP returns the address of the side that opened the connection.
+func (k Key) OpenerIP() net.IP {
+	if k.Dir == DirReverse {
+		return k.DstIP
+	}
+	return k.SrcIP
+}
+
+// ServerIP returns the address of the side that accepted the connection.
+func (k Key) ServerIP() net.IP {
+	if k.Dir == DirReverse {
+		return k.SrcIP
+	}
+	return k.DstIP
+}
 
 // Hash provides a simple string hash for map usage.
 // Uses strings.Builder to minimize allocations on the hot path.

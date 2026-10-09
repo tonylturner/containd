@@ -434,11 +434,12 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 	lines := make([]string, 0, len(protos))
 	for _, p := range protos {
 		parts := append([]string(nil), base...)
-		if p.Name != "" {
-			parts = append(parts, p.Name)
+		match, err := protocolMatch(p)
+		if err != nil {
+			return nil, fmt.Errorf("entry %s: %w", e.ID, err)
 		}
-		if p.Port != "" {
-			parts = append(parts, fmt.Sprintf("dport %s", p.Port))
+		if match != "" {
+			parts = append(parts, match)
 		}
 		// CIDR matching (skeleton uses ip saddr/daddr; no v6 yet).
 		if len(e.Sources) > 0 {
@@ -454,6 +455,33 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 		lines = append(lines, strings.Join(parts, " "))
 	}
 	return lines, nil
+}
+
+// protocolMatch returns the nft match for one rule protocol. A transport
+// with a port matches on its destination port; a transport without one,
+// or ICMP, matches on the layer-4 protocol alone (a bare "tcp" token is
+// not a valid nft expression). An empty protocol matches everything.
+func protocolMatch(p rules.Protocol) (string, error) {
+	name := strings.ToLower(strings.TrimSpace(p.Name))
+	switch name {
+	case "":
+		if p.Port != "" {
+			return "", fmt.Errorf("port %q needs a tcp or udp protocol", p.Port)
+		}
+		return "", nil
+	case "tcp", "udp":
+		if p.Port == "" {
+			return "meta l4proto " + name, nil
+		}
+		return fmt.Sprintf("%s dport %s", name, p.Port), nil
+	case "icmp":
+		if p.Port != "" {
+			return "", fmt.Errorf("icmp does not take a port (got %q)", p.Port)
+		}
+		return "meta l4proto icmp", nil
+	default:
+		return "", fmt.Errorf("unsupported protocol %q", p.Name)
+	}
 }
 
 // logPrefix builds the nflog prefix string for a rule. Format:

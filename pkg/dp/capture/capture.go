@@ -27,7 +27,18 @@ type Packet struct {
 	Proto     uint8  // IP protocol number (6 TCP, 17 UDP)
 	Transport string // "tcp" or "udp"
 	Payload   []byte // L4 payload
+	// TCPSeq is the sequence number of the first payload byte. It is
+	// meaningful only when HasTCPSeq is set; zero is a valid sequence.
+	TCPSeq    uint32
+	HasTCPSeq bool
+	TCPFlags  uint8 // TCP header flags byte (FIN 0x01, SYN 0x02, RST 0x04, ACK 0x10)
 }
+
+// TCP header flag bits carried in Packet.TCPFlags.
+const (
+	TCPFlagSYN uint8 = 0x02
+	TCPFlagACK uint8 = 0x10
+)
 
 // Manager manages interface capture workers.
 type Manager struct {

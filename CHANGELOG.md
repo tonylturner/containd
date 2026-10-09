@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-10-09
+
+### Fixed
+
+- **Modbus/TCP and DNP3 DPI inspects every message on a persistent
+  connection.** 0.1.31 passed no TCP sequence numbers to DPI and the Modbus and
+  DNP3 decoders never consumed their bytes, so only the first PDU of a
+  connection was decoded. A write sent after a read on the same connection
+  bypassed `writeOnly` deny rules. Capture now carries the TCP sequence number
+  (NFQUEUE, NFLOG and AF_PACKET), the reassembler orders and de-duplicates
+  segments (each forwarded segment is captured on both interfaces), and the
+  decoders emit one event per complete frame and keep only an incomplete tail.
+- **Allowed ICS replies are no longer blocked.** Flow tracking treated every
+  packet as the forward direction, so a reply was evaluated on the client's
+  ephemeral port; under a default DENY policy in enforce mode the reply hit
+  the default rule and the flow was blocked. Flows now know which side opened
+  the connection, and reply DPI events are evaluated as opener to server on
+  the server port. The default action applies only to requests from the
+  opener: a message from the server (a response, an exception, a DNP3
+  unsolicited response) is enforced only when a rule matches it, as in
+  NFQUEUE mode.
+- **Port-less TCP/UDP and ICMP rules compile to valid nftables.** A rule with
+  protocol `tcp` or `udp` and no port, or protocol `icmp`, emitted a bare
+  protocol token that nft rejects, so the apply failed with HTTP 400. They now
+  compile to `meta l4proto <proto>`. A port on `icmp`, a port with no protocol
+  and an unknown protocol name are rejected when the ruleset compiles.
+- `scripts/smoke-dpi.sh` and `scripts/smoke-forward.sh` counted passes with
+  `((x++))`, which exits 1 under `set -e` in Bash 5. The DPI smoke also covers
+  a persistent Modbus connection (read, write, read) and fails on a short pass
+  count.
+
+### Security
+
+- Go toolchain 1.25.13 → 1.26.9 (go.mod and both Docker builders). This
+  clears CVE-2026-78667 (net/http Range header DoS) and CVE-2026-97031
+  (crypto/tls ECH DoS), which have no 1.25 fix.
+- golang.org/x/net v0.58.0 → v0.60.0 clears CVE-2026-78669 (HTTP/2 SETTINGS
+  flood DoS). The bump also moves x/crypto, x/sys, x/text, x/sync and x/mod
+  to their current releases.
+
+### Changed (visible in events and logs)
+
+- Modbus and DNP3 produce one event per frame in each direction. 0.1.31
+  repeated the first PDU's event and missed later ones.
+- A denied write now produces two rule hits: one for the request and one for
+  the echoed reply, which carries the same function code. Reply rule hits show
+  the opener-to-server addresses and the server port.
+- An ICS rule's `direction` follows the sender: every message from the server
+  is a `response`. Modbus replies, which 0.1.31 treated as requests, now match
+  `direction: response` rules and no longer match `direction: request` rules.
+- Reply-direction events have a `flowId` that ends in `|1`.
+- ICS rules scoped to a server port now also inspect replies. Before, replies
+  were inspected only when IDS was on (the shipped default).
+- Modbus/DNP3 `raw_hex` holds the frame's own bytes, not the whole buffered
+  stream.
+- IT decoders (TLS, HTTP and others) no longer receive the connection's first
+  segment again on every packet. Their per-packet duplicate events stop, and
+  later single-segment messages (for example keep-alive HTTP requests) become
+  visible. Messages that span segments are still not parsed, as in 0.1.31.
+- Captured payloads no longer include Ethernet padding.
+
 ## [0.1.31] - 2026-09-28
 
 ### Fixed

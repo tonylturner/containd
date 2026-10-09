@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -90,10 +89,8 @@ func decodePacket(iface string, data []byte) (Packet, bool) {
 		return Packet{}, false
 	}
 	switch ethType {
-	case 0x0800:
-		return decodeIPv4(iface, data[offset:])
-	case 0x86dd:
-		return decodeIPv6(iface, data[offset:])
+	case 0x0800, 0x86dd:
+		return decodeIP(iface, data[offset:])
 	default:
 		return Packet{}, false
 	}
@@ -113,101 +110,6 @@ func parseEthernet(data []byte) (uint16, int, bool) {
 		offset = 18
 	}
 	return ethType, offset, true
-}
-
-func decodeIPv4(iface string, data []byte) (Packet, bool) {
-	if len(data) < 20 {
-		return Packet{}, false
-	}
-	version := data[0] >> 4
-	if version != 4 {
-		return Packet{}, false
-	}
-	ihl := int(data[0]&0x0f) * 4
-	if ihl < 20 || len(data) < ihl {
-		return Packet{}, false
-	}
-	proto := data[9]
-	src := net.IPv4(data[12], data[13], data[14], data[15])
-	dst := net.IPv4(data[16], data[17], data[18], data[19])
-	return decodeL4(iface, proto, src, dst, data[ihl:])
-}
-
-func decodeIPv6(iface string, data []byte) (Packet, bool) {
-	if len(data) < 40 {
-		return Packet{}, false
-	}
-	version := data[0] >> 4
-	if version != 6 {
-		return Packet{}, false
-	}
-	proto := data[6]
-	src := net.IP(append([]byte(nil), data[8:24]...))
-	dst := net.IP(append([]byte(nil), data[24:40]...))
-	return decodeL4(iface, proto, src, dst, data[40:])
-}
-
-func decodeL4(iface string, proto uint8, src, dst net.IP, data []byte) (Packet, bool) {
-	switch proto {
-	case 6:
-		sport, dport, payload, ok := decodeTCP(data)
-		if !ok {
-			return Packet{}, false
-		}
-		return Packet{
-			Timestamp: time.Now().UTC(),
-			Interface: iface,
-			SrcIP:     src,
-			DstIP:     dst,
-			SrcPort:   sport,
-			DstPort:   dport,
-			Proto:     proto,
-			Transport: "tcp",
-			Payload:   payload,
-		}, true
-	case 17:
-		sport, dport, payload, ok := decodeUDP(data)
-		if !ok {
-			return Packet{}, false
-		}
-		return Packet{
-			Timestamp: time.Now().UTC(),
-			Interface: iface,
-			SrcIP:     src,
-			DstIP:     dst,
-			SrcPort:   sport,
-			DstPort:   dport,
-			Proto:     proto,
-			Transport: "udp",
-			Payload:   payload,
-		}, true
-	default:
-		return Packet{}, false
-	}
-}
-
-func decodeTCP(data []byte) (uint16, uint16, []byte, bool) {
-	if len(data) < 20 {
-		return 0, 0, nil, false
-	}
-	sport := binary.BigEndian.Uint16(data[0:2])
-	dport := binary.BigEndian.Uint16(data[2:4])
-	off := int(data[12]>>4) * 4
-	if off < 20 || len(data) < off {
-		return 0, 0, nil, false
-	}
-	payload := append([]byte(nil), data[off:]...)
-	return sport, dport, payload, true
-}
-
-func decodeUDP(data []byte) (uint16, uint16, []byte, bool) {
-	if len(data) < 8 {
-		return 0, 0, nil, false
-	}
-	sport := binary.BigEndian.Uint16(data[0:2])
-	dport := binary.BigEndian.Uint16(data[2:4])
-	payload := append([]byte(nil), data[8:]...)
-	return sport, dport, payload, true
 }
 
 func htons16(v uint16) uint16 {

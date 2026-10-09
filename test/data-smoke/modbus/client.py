@@ -14,7 +14,7 @@ def recv_exact(conn: socket.socket, count: int) -> bytes:
     return bytes(data)
 
 
-def build_request(mode: str) -> bytes:
+def build_request(mode: str, transaction_id: int = 1) -> bytes:
     unit_id = 1
     if mode == "read":
         pdu = struct.pack(">BHH", 3, 0, 2)
@@ -22,20 +22,48 @@ def build_request(mode: str) -> bytes:
         pdu = struct.pack(">BHH", 6, 1, 0x1234)
     else:
         raise ValueError(f"unsupported mode: {mode}")
-    header = struct.pack(">HHHB", 1, 0, len(pdu) + 1, unit_id)
+    header = struct.pack(">HHHB", transaction_id, 0, len(pdu) + 1, unit_id)
     return header + pdu
 
 
+def transact(conn: socket.socket, mode: str, transaction_id: int) -> str:
+    conn.sendall(build_request(mode, transaction_id))
+    mbap = recv_exact(conn, 7)
+    _, protocol_id, length = struct.unpack(">HHH", mbap[:6])
+    if protocol_id != 0 or length < 2:
+        raise RuntimeError("invalid modbus response header")
+    pdu = recv_exact(conn, length - 1)
+    return check_response(mode, pdu)
+
+
 def run(mode: str, host: str, port: int) -> int:
-    request = build_request(mode)
     with socket.create_connection((host, port), timeout=4.0) as conn:
         conn.settimeout(4.0)
-        conn.sendall(request)
-        mbap = recv_exact(conn, 7)
-        _, protocol_id, length = struct.unpack(">HHH", mbap[:6])
-        if protocol_id != 0 or length < 2:
-            raise RuntimeError("invalid modbus response header")
-        pdu = recv_exact(conn, length - 1)
+        print(transact(conn, mode, 1))
+    return 0
+
+
+def run_persistent(host: str, port: int) -> int:
+    """Send read, write, read on ONE TCP connection.
+
+    Prints the client port, then one line per step. Enforcement may block
+    the connection after the write, so only the first read must succeed.
+    """
+    with socket.create_connection((host, port), timeout=4.0) as conn:
+        conn.settimeout(4.0)
+        print(f"PERSISTENT_PORT {conn.getsockname()[1]}", flush=True)
+        for transaction_id, mode in ((10, "read"), (11, "write"), (12, "read")):
+            try:
+                print(transact(conn, mode, transaction_id), flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"{mode.upper()}_FAILED {exc}", flush=True)
+                if transaction_id == 10:
+                    return 1
+                break
+    return 0
+
+
+def check_response(mode: str, pdu: bytes) -> str:
     function_code = pdu[0]
     if function_code & 0x80:
         raise RuntimeError(f"modbus exception response: fc={function_code} code={pdu[1] if len(pdu) > 1 else 'unknown'}")
@@ -46,21 +74,21 @@ def run(mode: str, host: str, port: int) -> int:
         if byte_count != 4 or len(pdu) != 6:
             raise RuntimeError(f"unexpected read byte count: {byte_count}")
         values = struct.unpack(">HH", pdu[2:6])
-        print(f"READ_OK {values[0]} {values[1]}")
-        return 0
+        return f"READ_OK {values[0]} {values[1]}"
     if function_code != 6 or len(pdu) != 5:
         raise RuntimeError("unexpected modbus write response")
     address, value = struct.unpack(">HH", pdu[1:5])
-    print(f"WRITE_OK {address} {value}")
-    return 0
+    return f"WRITE_OK {address} {value}"
 
 
 def main() -> int:
     if len(sys.argv) != 4:
-        print("usage: client.py <read|write> <host> <port>", file=sys.stderr)
+        print("usage: client.py <read|write|persistent> <host> <port>", file=sys.stderr)
         return 2
     mode, host, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
     try:
+        if mode == "persistent":
+            return run_persistent(host, port)
         return run(mode, host, port)
     except Exception as exc:  # noqa: BLE001
         print(f"{mode.upper()}_FAILED {exc}", file=sys.stderr)

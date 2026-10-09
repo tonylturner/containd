@@ -24,7 +24,10 @@ timestamp() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 log() { echo "[$(timestamp)] $*"; }
-pass() { ((TESTS_PASSED++)); log "PASS: $*"; }
+pass() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  log "PASS: $*"
+}
 
 ensure_tools() {
   for bin in docker jq curl; do
