@@ -19,3 +19,29 @@ run the helper script:
 ```
 
 **Do not commit private keys or database files to the repository.**
+
+## Running the smoke scripts beside another smoke stack
+
+`scripts/smoke-forward.sh` and `scripts/smoke-dpi.sh` default to compose
+project `deploy`, subnets `172.30.0.0/24` (wan) and `172.31.0.0/24` (lan),
+host ports 18080/18081 and the shared `containd/containd:dev` image. Two
+runs on one Docker host collide on all four. For an isolated run, write an
+override that moves them and point the scripts at it:
+
+| Variable | Meaning |
+|---|---|
+| `SMOKE_PROJECT` | compose project name (default `deploy`) |
+| `COMPOSE_FILE` | colon-separated compose files, base first (as in `docker compose`) |
+| `SMOKE_WAN_NET`, `SMOKE_LAN_NET` | first three octets of the moved subnets |
+| `BASE`, `ENGINE` | management and engine URLs for the moved host ports |
+| `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports) |
+
+The override replaces the engine image, networks, addresses, ports and the
+`/data` bind with `!override` (Docker Compose 2.24 or later), for example
+`image: containd/containd:<run-tag>`, `ports: !override ["127.0.0.1::8081",
+"127.0.0.1::18080"]`, one `ipv4_address` per service in the new subnets,
+and `networks.<name>.ipam: !override` with the new subnet. Bring the stack
+up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
+-f <override> up -d`, read the ports with `docker compose ... port engine
+18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then
+`down --volumes` the project you created.

@@ -5,6 +5,13 @@ set -euo pipefail
 # Requirements: docker compose, jq, curl.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
+# Compose project and harness subnets. When another smoke stack owns the
+# default networks, set a unique project, list an override file that moves
+# the subnets in COMPOSE_FILE, and set the matching prefixes here
+# (see test/data-smoke/README.md).
+SMOKE_PROJECT=${SMOKE_PROJECT:-deploy}
+WAN_NET=${SMOKE_WAN_NET:-172.30.0}
+LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 ENGINE=${ENGINE:-http://localhost:18081}
@@ -24,7 +31,21 @@ timestamp() {
 }
 
 log() { echo "[$(timestamp)] $*"; }
-pass() { ((TESTS_PASSED++)); log "PASS: $*"; }
+pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); log "PASS: $*"; }
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
+# override file can follow the base harness file.
+compose() {
+  local files=() args=() file
+  IFS=: read -r -a files <<<"$COMPOSE_FILE"
+  for file in "${files[@]}"; do
+    args+=(-f "$file")
+  done
+  docker compose --project-name "$SMOKE_PROJECT" "${args[@]}" "$@"
+}
 
 ensure_tools() {
   for bin in docker jq curl; do
@@ -82,10 +103,10 @@ apply_snapshot() {
   log "Applying dataplane configuration to engine..."
   tmp_cfg=$(mktemp)
   printf '%s' "$DATAPLANE_CFG" >"$tmp_cfg"
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data-binary @"$tmp_cfg" -o /tmp/smoke-dpi-engine-config.out || true)
+  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data-binary @"$tmp_cfg" -o "$WORK_DIR/smoke-dpi-engine-config.out" || true)
   rm -f "$tmp_cfg"
   if [[ "$code" != "200" ]]; then
-    log "engine config failed (HTTP $code): $(cat /tmp/smoke-dpi-engine-config.out)"
+    log "engine config failed (HTTP $code): $(cat "$WORK_DIR/smoke-dpi-engine-config.out")"
     exit 1
   fi
 
@@ -105,9 +126,9 @@ ensure_tools
 if [[ "$SMOKE_SKIP_UP" != "1" ]]; then
   log "Ensuring smoke harness is up ($COMPOSE_FILE)..."
   if [[ "$SMOKE_BUILD" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    compose up -d --build
   else
-    docker compose -f "$COMPOSE_FILE" up -d
+    compose up -d
   fi
 fi
 
@@ -123,8 +144,8 @@ for _ in $(seq 1 10); do
   fi
   sleep 2
 done
-WAN_DEV=$(discover_iface "$STATE" "172.30.0.2")
-LAN_DEV=$(discover_iface "$STATE" "172.31.0.2")
+WAN_DEV=$(discover_iface "$STATE" "${WAN_NET}.2")
+LAN_DEV=$(discover_iface "$STATE" "${LAN_NET}.2")
 if [[ -z "$WAN_DEV" || -z "$LAN_DEV" ]]; then
   echo "failed to discover wan/lan devices from interface state:" >&2
   echo "$STATE" >&2
@@ -135,7 +156,8 @@ log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 log "Fetching current config..."
 CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
 
-UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" '
+UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
+  --arg client "${LAN_NET}.5/32" --arg server "${WAN_NET}.4/32" '
   .interfaces |= map(
     if .name=="wan" then .device=$wan
     elif .name=="lan1" then .device=$lan | .zone="lan"
@@ -157,8 +179,8 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" '
           description:"Smoke harness allow Modbus reads",
           sourceZones:["lan"],
           destZones:["wan"],
-          sources:["172.31.0.5/32"],
-          destinations:["172.30.0.4/32"],
+          sources:[$client],
+          destinations:[$server],
           protocols:[{"name":"tcp","port":"502"}],
           ics:{
             protocol:"modbus",
@@ -173,8 +195,8 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" '
           description:"Smoke harness deny Modbus writes",
           sourceZones:["lan"],
           destZones:["wan"],
-          sources:["172.31.0.5/32"],
-          destinations:["172.30.0.4/32"],
+          sources:[$client],
+          destinations:[$server],
           protocols:[{"name":"tcp","port":"502"}],
           ics:{
             protocol:"modbus",
@@ -203,8 +225,8 @@ apply_snapshot
 
 START_TS=$(timestamp)
 export START_TS
-export MODBUS_SRC="172.31.0.5"
-export MODBUS_DST="172.30.0.4"
+export MODBUS_SRC="${LAN_NET}.5"
+export MODBUS_DST="${WAN_NET}.4"
 
 modbus_event_filter=$(cat <<'EOF'
 any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
@@ -224,31 +246,31 @@ EOF
 log "Programming OT client and Modbus server routes through engine..."
 {
   set +e
-  docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route flush table main
-  docker compose -f "$COMPOSE_FILE" exec -T modbus_server ip route flush table main
-  docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route add 172.31.0.0/24 dev eth0 scope link src 172.31.0.5
-  docker compose -f "$COMPOSE_FILE" exec -T modbus_server ip route add 172.30.0.0/24 dev eth0 scope link src 172.30.0.4
-  docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route add 172.30.0.0/24 via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T modbus_server ip route add 172.31.0.0/24 via 172.30.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route add default via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T modbus_server ip route add default via 172.30.0.2 dev eth0
+  compose exec -T ot_client ip route flush table main
+  compose exec -T modbus_server ip route flush table main
+  compose exec -T ot_client ip route add "${LAN_NET}.0/24" dev eth0 scope link src "${LAN_NET}.5"
+  compose exec -T modbus_server ip route add "${WAN_NET}.0/24" dev eth0 scope link src "${WAN_NET}.4"
+  compose exec -T ot_client ip route add "${WAN_NET}.0/24" via "${LAN_NET}.2" dev eth0
+  compose exec -T modbus_server ip route add "${LAN_NET}.0/24" via "${WAN_NET}.2" dev eth0
+  compose exec -T ot_client ip route add default via "${LAN_NET}.2" dev eth0
+  compose exec -T modbus_server ip route add default via "${WAN_NET}.2" dev eth0
   set -e
-} >/tmp/route-setup-dpi.log 2>&1 || true
-sed 's/^/  /' /tmp/route-setup-dpi.log
+} >"$WORK_DIR/route-setup-dpi.log" 2>&1 || true
+sed 's/^/  /' "$WORK_DIR/route-setup-dpi.log"
 
-OT_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T ot_client ip route get 172.30.0.4 | tr -d '\r')
-echo "$OT_ROUTE" | grep -q "via 172.31.0.2" || { log "ot_client route not via engine: $OT_ROUTE"; exit 1; }
+OT_ROUTE=$(compose exec -T ot_client ip route get "${WAN_NET}.4" | tr -d '\r')
+echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || { log "ot_client route not via engine: $OT_ROUTE"; exit 1; }
 pass "OT client route uses engine for Modbus traffic"
 
 log "Testing Modbus read allow..."
-docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py read 172.30.0.4 502 >/tmp/modbus-read.out 2>/tmp/modbus-read.err
-READ_STATUS=$?
+READ_STATUS=0
+compose exec -T ot_client python /opt/modbus/client.py read "$MODBUS_DST" 502 >"$WORK_DIR/modbus-read.out" 2>"$WORK_DIR/modbus-read.err" || READ_STATUS=$?
 if [[ $READ_STATUS -ne 0 ]]; then
   log "Modbus read failed (exit $READ_STATUS):"
-  cat /tmp/modbus-read.err
+  cat "$WORK_DIR/modbus-read.err"
   exit 1
 fi
-pass "Modbus read allowed ($(tr -d '\r' </tmp/modbus-read.out))"
+pass "Modbus read allowed ($(tr -d '\r' <"$WORK_DIR/modbus-read.out"))"
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
@@ -258,10 +280,10 @@ fi
 pass "Modbus event recorded in telemetry"
 
 log "Triggering Modbus write enforcement..."
-if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >/tmp/modbus-write-trigger.out 2>/tmp/modbus-write-trigger.err; then
-  log "Initial Modbus write completed before dynamic block took effect ($(tr -d '\r' </tmp/modbus-write-trigger.out))"
+if compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 502 >"$WORK_DIR/modbus-write-trigger.out" 2>"$WORK_DIR/modbus-write-trigger.err"; then
+  log "Initial Modbus write completed before dynamic block took effect ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
 else
-  log "Initial Modbus write blocked immediately ($(tr -d '\r' </tmp/modbus-write-trigger.err))"
+  log "Initial Modbus write blocked immediately ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err"))"
 fi
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
@@ -272,9 +294,9 @@ fi
 pass "Modbus write matched the deny rule"
 
 log "Testing follow-up Modbus write is blocked..."
-if docker compose -f "$COMPOSE_FILE" exec -T ot_client python /opt/modbus/client.py write 172.30.0.4 502 >/tmp/modbus-write-blocked.out 2>/tmp/modbus-write-blocked.err; then
+if compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 502 >"$WORK_DIR/modbus-write-blocked.out" 2>"$WORK_DIR/modbus-write-blocked.err"; then
   log "Unexpected allow: follow-up Modbus write succeeded"
-  cat /tmp/modbus-write-blocked.out
+  cat "$WORK_DIR/modbus-write-blocked.out"
   exit 1
 else
   pass "Follow-up Modbus write blocked after enforcement"
@@ -298,4 +320,5 @@ if [[ $TESTS_PASSED -eq $TESTS_EXPECTED ]]; then
   printf "[%s] %bDPI smoke complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$GREEN" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
 else
   printf "[%s] %bDPI smoke complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$RED" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
+  exit 1
 fi
