@@ -55,8 +55,9 @@ type compiledPort struct {
 // string parsing is done once at load time rather than on every packet.
 type compiledEntry struct {
 	Entry
-	addresses []compiledAddr // pre-parsed ICS addresses
-	ports     []compiledPort // pre-parsed protocol port ranges (one per Protocol)
+	addresses []compiledAddr  // pre-parsed ICS addresses
+	ports     []compiledPort  // pre-parsed protocol port ranges (one per Protocol)
+	iec       *compiledIEC104 // set for ics.protocol iec104 entries only
 }
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
@@ -86,6 +87,9 @@ func (e *Evaluator) compile() {
 // This avoids creating a full Evaluator/Snapshot for dry-run scenarios.
 func CompileEntry(entry Entry) compiledEntry {
 	ce := compiledEntry{Entry: entry}
+	if entry.ICS.Protocol == ProtocolIEC104 {
+		ce.iec = compileIEC104(entry.ICS)
+	}
 
 	// Pre-parse ICS addresses.
 	if len(entry.ICS.Addresses) > 0 {
@@ -231,6 +235,9 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	}
 	if ctx.ICS == nil {
 		return false
+	}
+	if ce.iec != nil {
+		return matchIEC104(ce, ctx)
 	}
 	return matchICSProtocol(ce.ICS, ctx) &&
 		matchICSFunctionCode(ce.ICS, ctx) &&
