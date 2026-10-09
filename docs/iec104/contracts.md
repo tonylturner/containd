@@ -362,3 +362,6 @@ These override the text above where they differ.
   - Each ruleset apply writes the current state; a rule reapply never opens the envelope on an unbound queue.
   - The switch is atomic and touches neither non-envelope rules nor the US Modbus/DNP3 queue steering, which keep 0.1.31 behaviour.
   - The nft mechanism (jump chain, verdict map or set) is L4's choice.
+  - Implemented as the regular chain `iec104_envelope` (6a0bf6ff); each switch is one `flush chain` + `add rule` transaction.
+  - The envelope opens only when the queue the installed ruleset steers to equals the group this engine has bound. After a Reconfigure to a new group, it stays closed until the rules are reapplied.
+  - A failed switch raises the `steering` health fault (enforcement unhealthy). A failed open still drops. After a failed close, the kernel state is unknown and the fault is the only signal. The fault clears on the next successful switch or apply.
