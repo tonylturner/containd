@@ -24,6 +24,9 @@ type Signature struct {
 	Protocol    string      `json:"protocol"` // modbus, dnp3, cip, s7comm, or "" for any
 	Conditions  []Condition `json:"conditions"`
 	References  []string    `json:"references,omitempty"`
+	// Threshold, when set, alerts once per flow when Count matches fall in
+	// one Window instead of on every match.
+	Threshold *Threshold `json:"threshold,omitempty"`
 }
 
 // Condition is a single matching predicate within a signature.
@@ -46,9 +49,10 @@ type Engine struct {
 	signatures []Signature
 	mu         sync.RWMutex
 
-	matchesMu sync.Mutex
-	matches   []Match
-	matchCap  int
+	matchesMu  sync.Mutex
+	matches    []Match
+	matchCap   int
+	thresholds map[thresholdKey]*thresholdState // guarded by matchesMu
 }
 
 // New creates a new signature engine with default capacity for match history.
@@ -126,9 +130,19 @@ func (e *Engine) Match(ev dpi.Event) []Match {
 	sigs := e.signatures
 	e.mu.RUnlock()
 
+	now := ev.Timestamp
+	if now.IsZero() {
+		now = time.Now()
+	}
 	var out []Match
 	for _, sig := range sigs {
 		if !sigMatchesEvent(sig, ev) {
+			continue
+		}
+		e.matchesMu.Lock()
+		alert := e.passThreshold(sig, ev, now)
+		e.matchesMu.Unlock()
+		if !alert {
 			continue
 		}
 		m := Match{

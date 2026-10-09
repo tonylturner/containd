@@ -3,6 +3,14 @@
 
 package signatures
 
+import "time"
+
+// MODBUS-EXCEPTION-STORM rate: exception responses per flow per window.
+const (
+	modbusExceptionStormCount  = 10
+	modbusExceptionStormWindow = time.Minute
+)
+
 // builtinSignatures returns the set of built-in ICS threat signatures.
 func builtinSignatures() []Signature {
 	return []Signature{
@@ -58,12 +66,16 @@ func builtinSignatures() []Signature {
 		{
 			ID:          "MODBUS-EXCEPTION-STORM",
 			Name:        "Modbus Exception Response Storm",
-			Description: "Exception response (function code >= 128) may indicate scanning or brute-force activity.",
+			Description: "Ten or more Modbus exception responses on one flow within a minute may indicate scanning, fuzzing or brute-force activity.",
 			Severity:    "medium",
 			Protocol:    "modbus",
+			// The decoder reports an exception response (FC | 0x80) as kind
+			// "exception" with the base function code and exception_code.
 			Conditions: []Condition{
-				{Field: "function_code", Op: "gte", Value: float64(128)},
+				{Field: "kind", Op: "equals", Value: "exception"},
+				{Field: "exception_code", Op: "gte", Value: float64(0)},
 			},
+			Threshold:  &Threshold{Count: modbusExceptionStormCount, Window: modbusExceptionStormWindow},
 			References: []string{"https://attack.mitre.org/techniques/T0846/"},
 		},
 
