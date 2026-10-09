@@ -47,6 +47,7 @@ type Engine struct {
 	runDone         chan struct{}
 	ruleSnap        atomic.Pointer[rules.Snapshot]
 	started         atomic.Bool
+	epoch           atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler        *enforce.Compiler
 	applier         enforce.Applier
 	updater         enforce.Updater
@@ -263,6 +264,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.hooks = fresh.hooks
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
+	e.epoch.Add(1)
 	e.started.Store(false)
 	// The fresh table enforces the loaded rules at once; sessions of the
 	// old run are unknown to it and are reset once (spec §8.3).
@@ -275,17 +277,25 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 }
 
 func (e *Engine) Start(ctx context.Context) error {
+	_, err := e.start(ctx)
+	return err
+}
+
+// start is Start; it also returns the NFQUEUE group of the configuration
+// it started, read under the lifecycle lock.
+func (e *Engine) start(ctx context.Context) (uint16, error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	group := e.nfqueueGroup
 
 	if e.started.Swap(true) {
-		return nil
+		return group, nil
 	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
 	e.runCapture = runCapture
-	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
+	if err := runCapture.Start(runCtx, e.capturePacket); err != nil {
 		if e.nfqueueGroup != 0 {
 			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
 		}
@@ -293,7 +303,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
-		return err
+		return group, err
 	}
 	// Start the nflog consumer if configured. This produces
 	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
@@ -359,7 +369,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		run.Wait()
 		close(runDone)
 	}()
-	return nil
+	return group, nil
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {

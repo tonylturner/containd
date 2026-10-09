@@ -9,6 +9,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
@@ -23,19 +24,12 @@ const (
 
 var acceptDecision = capture.Decision{Action: capture.Accept}
 
-// envelopeMark is the skb mark value nft sets on packets steered by an
-// IEC104 envelope rule, within the mask containd reserves (contracts K1).
-const (
-	envelopeMarkMask  = 0x0f000000
-	envelopeMarkValue = 0x01000000
-)
-
 // invalidPacketDecision decides a packet whose tuple cannot be trusted.
 // Inside an IEC104 envelope (the nft envelope mark is set) it is dropped
 // (fragments, IPv6 extension headers and truncated packets, spec §8.1);
 // everything else passes as before.
 func invalidPacketDecision(pkt capture.Packet) capture.Decision {
-	if pkt.HasMark && pkt.Mark&envelopeMarkMask == envelopeMarkValue {
+	if envelopeMarked(pkt) {
 		return capture.Decision{Action: capture.Drop, Reason: reasonInvalidMarked + ":" + pkt.Invalid}
 	}
 	return acceptDecision
@@ -157,4 +151,34 @@ func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 
 func isIECPort(pkt capture.Packet) bool {
 	return pkt.Proto == 6 && (pkt.SrcPort == iec104Port || pkt.DstPort == iec104Port)
+}
+
+// envelopeMarked reports a packet nft steered to the queue under an IEC104
+// envelope rule (contracts K1 envelope mark).
+func envelopeMarked(pkt capture.Packet) bool {
+	return pkt.HasMark && enforce.EnvelopeMarked(pkt.Mark)
+}
+
+// capturePacket is the handler given to capture. A panic in packet
+// handling must not crash the process from the capture goroutine: it is
+// recovered, logged and reported as a worker health fault. The packet is
+// dropped when nft marked it as IEC104 envelope traffic (fail closed) and
+// accepted otherwise, as 0.1.31 always did.
+func (e *Engine) capturePacket(pkt capture.Packet) (d capture.Decision) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		err := fmt.Errorf("engine: packet handler panic: %v", r)
+		if e.onError != nil {
+			e.onError(err)
+		}
+		e.iec.health.fault(faultWorker, err.Error())
+		d = acceptDecision
+		if envelopeMarked(pkt) {
+			d = capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}
+		}
+	}()
+	return e.handlePacket(pkt)
 }

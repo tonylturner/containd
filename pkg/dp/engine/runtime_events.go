@@ -377,13 +377,14 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 // should never silently start blocking traffic just because containd is
 // installed.
 func (e *Engine) effectiveMode(matched *rules.Entry) string {
-	if matched != nil && strings.TrimSpace(matched.ICS.Mode) != "" {
-		return strings.ToLower(strings.TrimSpace(matched.ICS.Mode))
+	ruleMode, globalMode := "", ""
+	if matched != nil {
+		ruleMode = matched.ICS.Mode
 	}
-	if e != nil && strings.TrimSpace(e.dpiMode) != "" {
-		return strings.ToLower(strings.TrimSpace(e.dpiMode))
+	if e != nil {
+		globalMode = e.dpiMode
 	}
-	return "learn"
+	return rules.EffectiveMode(ruleMode, globalMode)
 }
 
 // ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.

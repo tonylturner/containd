@@ -76,6 +76,13 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 	}
 	res, ok := t.packet(pkt, state)
 	if !ok {
+		if envelopeMarked(pkt) {
+			// nft steered this packet as IEC104 envelope traffic, but the
+			// engine finds no envelope for it: fail closed rather than let
+			// it through uninspected.
+			t.health.fault(faultEnvelope, "nft steering and the engine envelope disagree")
+			return capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}, true
+		}
 		return capture.Decision{}, false
 	}
 	if len(res.inspect) > 0 {

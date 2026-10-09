@@ -391,7 +391,7 @@ func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *s
 			}
 			dpEngine.Reconfigure(newEngine)
 			go func() {
-				if err := dpEngine.Start(context.Background()); err != nil {
+				if err := dpEngine.StartWithRetry(context.Background()); err != nil {
 					logger.Errorf("capture start failed: %v", err)
 				}
 			}()

@@ -14,11 +14,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// iecSafeRead is iec104.SafeRead (contracts K4), installed with the IEC104
-// decoder registration. Until the decoder is registered no IEC104 stream is
-// framed, so nothing is classified; the default never reports a safe read.
-var iecSafeRead = func(map[string]any) bool { return false }
-
 const iecBroadcastCA = 65535
 
 // iecDecision is the rule decision for one IEC104 event (object, S/U frame
@@ -61,7 +56,7 @@ func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 		d.reason = reasonDefault
 		if entry != nil {
 			d.reason, d.ruleID, d.action, d.log = reasonRule, entry.ID, string(entry.Action), entry.Log
-			d.mode = resolveMode(entry.ICS.Mode, t.globalMode)
+			d.mode = rules.EffectiveMode(entry.ICS.Mode, t.globalMode)
 		}
 		if action == rules.ActionAllow {
 			d.decision = decisionAllow

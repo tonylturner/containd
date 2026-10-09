@@ -17,6 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -148,7 +149,7 @@ func newIECTable(globalMode string) *iecTable {
 	return &iecTable{
 		now:        time.Now,
 		newPolicy:  newRulesPolicy,
-		safeRead:   iecSafeRead,
+		safeRead:   iec104.SafeRead,
 		newID:      nextLiveSessionID,
 		ctDelete:   conntrack.Delete,
 		globalMode: globalMode,
@@ -213,22 +214,11 @@ func hasEnforceIEC(snap *rules.Snapshot, globalMode string) (hasIEC, enforce boo
 			continue
 		}
 		hasIEC = true
-		if resolveMode(entry.ICS.Mode, globalMode) == "enforce" {
+		if rules.EffectiveMode(entry.ICS.Mode, globalMode) == "enforce" {
 			enforce = true
 		}
 	}
 	return hasIEC, enforce
-}
-
-// resolveMode is the mode precedence rule > global > learn (spec §6.3).
-func resolveMode(ruleMode, globalMode string) string {
-	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
-		return m
-	}
-	if m := strings.ToLower(strings.TrimSpace(globalMode)); m != "" {
-		return m
-	}
-	return "learn"
 }
 
 // setPolicy installs the snapshot's IEC104 policy. Live sessions whose
@@ -260,6 +250,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 	}
 	t.mu.Unlock()
 	if t.health != nil {
+		t.health.clear(faultEnvelope)
 		t.health.setActive(active)
 	}
 	t.apply(acts)

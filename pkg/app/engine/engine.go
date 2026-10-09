@@ -98,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	// Start capture (no-op if no interfaces).
 	go func() {
-		if err := dpEngine.Start(ctx); err != nil {
+		if err := dpEngine.StartWithRetry(ctx); err != nil {
 			logger.Errorf("capture start failed: %v", err)
 		}
 	}()

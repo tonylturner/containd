@@ -24,6 +24,7 @@ const (
 	faultInjector = "injector"
 	faultWorker   = "worker"
 	faultFraming  = "framing"
+	faultEnvelope = "envelope"
 )
 
 // transientFaults clear when the inline source reports ready again; the
@@ -89,6 +90,16 @@ func (h *iecHealth) setActive(active bool) {
 func (h *iecHealth) fault(cause, reason string) {
 	h.mu.Lock()
 	h.faults[cause] = reason
+	outcome, text := h.transitionLocked()
+	h.mu.Unlock()
+	h.report(outcome, text)
+}
+
+// clear removes one fault, for example the envelope disagreement when a new
+// policy loads.
+func (h *iecHealth) clear(cause string) {
+	h.mu.Lock()
+	delete(h.faults, cause)
 	outcome, text := h.transitionLocked()
 	h.mu.Unlock()
 	h.report(outcome, text)
