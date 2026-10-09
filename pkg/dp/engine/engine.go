@@ -468,10 +468,13 @@ func (e *Engine) handlePacket(pkt capture.Packet) {
 	}
 
 	parsed := dpi.ParsedPacket{
-		Payload: pkt.Payload,
-		Proto:   pkt.Transport,
-		SrcPort: pkt.SrcPort,
-		DstPort: pkt.DstPort,
+		Payload:   pkt.Payload,
+		Proto:     pkt.Transport,
+		SrcPort:   pkt.SrcPort,
+		DstPort:   pkt.DstPort,
+		TCPSeq:    pkt.TCPSeq,
+		HasTCPSeq: pkt.HasTCPSeq,
+		TCPSyn:    pkt.TCPFlags&capture.TCPFlagSYN != 0,
 	}
 
 	flowHash := state.Key.Hash()

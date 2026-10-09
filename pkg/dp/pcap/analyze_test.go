@@ -43,8 +43,9 @@ func buildPCAP(frames [][]byte) []byte {
 }
 
 // buildModbusEthernetFrame constructs a minimal Ethernet+IPv4+TCP frame
-// containing a valid Modbus/TCP request (function code 3 = Read Holding Registers).
-func buildModbusEthernetFrame() []byte {
+// containing a valid Modbus/TCP request (function code 3 = Read Holding
+// Registers) whose payload starts at TCP sequence number seq.
+func buildModbusEthernetFrame(seq uint32) []byte {
 	// Modbus MBAP + PDU: transaction=1, protocol=0, length=6, unit=1, fc=3, addr=0, qty=10.
 	mbap := make([]byte, 12)
 	binary.BigEndian.PutUint16(mbap[0:], 1)   // transaction ID
@@ -59,6 +60,7 @@ func buildModbusEthernetFrame() []byte {
 	tcp := make([]byte, 20)
 	binary.BigEndian.PutUint16(tcp[0:], 49152) // src port
 	binary.BigEndian.PutUint16(tcp[2:], 502)   // dst port (Modbus)
+	binary.BigEndian.PutUint32(tcp[4:], seq)   // sequence number
 	tcp[12] = 5 << 4                           // data offset = 5 (20 bytes)
 
 	// IPv4 header (20 bytes, minimal).
@@ -129,7 +131,7 @@ func buildIPv6EthernetFrame() []byte {
 }
 
 func TestAnalyzeModbusPacket(t *testing.T) {
-	frame := buildModbusEthernetFrame()
+	frame := buildModbusEthernetFrame(0)
 	pcapData := buildPCAP([][]byte{frame})
 
 	decoder := modbus.NewDecoder()
@@ -213,8 +215,10 @@ func TestAnalyzeEmptyPCAP(t *testing.T) {
 }
 
 func TestAnalyzePacketCounting(t *testing.T) {
-	frame1 := buildModbusEthernetFrame()
-	frame2 := buildModbusEthernetFrame()
+	// Two requests on one connection: the second payload follows the
+	// first in sequence space.
+	frame1 := buildModbusEthernetFrame(0)
+	frame2 := buildModbusEthernetFrame(12)
 
 	pcapData := buildPCAP([][]byte{frame1, frame2})
 
@@ -247,7 +251,7 @@ func TestAnalyzePacketCounting(t *testing.T) {
 }
 
 func TestAnalyzeForPolicy(t *testing.T) {
-	frame := buildModbusEthernetFrame()
+	frame := buildModbusEthernetFrame(0)
 	pcapData := buildPCAP([][]byte{frame})
 
 	result, err := AnalyzeForPolicy(bytes.NewReader(pcapData), modbus.NewDecoder())

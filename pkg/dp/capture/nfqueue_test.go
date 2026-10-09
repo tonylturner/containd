@@ -4,7 +4,9 @@
 package capture
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 )
 
@@ -136,22 +138,83 @@ func TestDecodeIPPacketIPv6UDP(t *testing.T) {
 	}
 }
 
-func TestDecodeL4NFQRejectsInvalidHeaders(t *testing.T) {
-	if _, ok := decodeL4NFQ(6, nil, nil, make([]byte, 10)); ok {
+func TestDecodeL4RejectsInvalidHeaders(t *testing.T) {
+	if _, ok := decodeL4("nfqueue", 6, nil, nil, make([]byte, 10)); ok {
 		t.Fatal("expected short TCP decode failure")
 	}
 
 	shortOffsetTCP := make([]byte, 20)
 	shortOffsetTCP[12] = 0x10 // data offset = 4, invalid
-	if _, ok := decodeL4NFQ(6, nil, nil, shortOffsetTCP); ok {
+	if _, ok := decodeL4("nfqueue", 6, nil, nil, shortOffsetTCP); ok {
 		t.Fatal("expected invalid TCP data offset failure")
 	}
 
-	if _, ok := decodeL4NFQ(17, nil, nil, make([]byte, 4)); ok {
+	if _, ok := decodeL4("nfqueue", 17, nil, nil, make([]byte, 4)); ok {
 		t.Fatal("expected short UDP decode failure")
 	}
 
-	if _, ok := decodeL4NFQ(1, nil, nil, []byte{0x00}); ok {
+	if _, ok := decodeL4("nfqueue", 1, nil, nil, []byte{0x00}); ok {
 		t.Fatal("expected unsupported proto decode failure")
+	}
+}
+
+// tcpIPv4Packet builds an IPv4 TCP packet with the given sequence number,
+// flags and payload, followed by pad trailing bytes that are not part of
+// the IP datagram (link-layer padding).
+func tcpIPv4Packet(seq uint32, flags byte, payload []byte, pad int) []byte {
+	pkt := make([]byte, 40, 40+len(payload)+pad)
+	pkt[0] = 0x45
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(40+len(payload)))
+	pkt[9] = 6
+	copy(pkt[12:16], []byte{10, 0, 0, 1})
+	copy(pkt[16:20], []byte{10, 0, 0, 2})
+	binary.BigEndian.PutUint16(pkt[20:22], 40000)
+	binary.BigEndian.PutUint16(pkt[22:24], 502)
+	binary.BigEndian.PutUint32(pkt[24:28], seq)
+	pkt[32] = 0x50
+	pkt[33] = flags
+	pkt = append(pkt, payload...)
+	return append(pkt, make([]byte, pad)...)
+}
+
+func TestDecodeIPPacketTCPSequence(t *testing.T) {
+	decoded, ok := decodeIPPacket(tcpIPv4Packet(0, 0x18, []byte{0xAA, 0xBB}, 0))
+	if !ok {
+		t.Fatal("expected successful decode")
+	}
+	if !decoded.HasTCPSeq || decoded.TCPSeq != 0 || decoded.TCPFlags != 0x18 {
+		t.Fatalf("seq=%d has=%v flags=%#x, want seq 0 valid flags 0x18", decoded.TCPSeq, decoded.HasTCPSeq, decoded.TCPFlags)
+	}
+
+	// Data on a SYN starts one past the SYN's sequence number.
+	decoded, _ = decodeIPPacket(tcpIPv4Packet(0xFFFFFFFF, TCPFlagSYN, []byte{0x01}, 0))
+	if decoded.TCPSeq != 0 {
+		t.Fatalf("SYN payload seq = %d, want 0 (wrapped ISN+1)", decoded.TCPSeq)
+	}
+
+	udp, _ := decodeIPPacket(func() []byte {
+		pkt := make([]byte, 28)
+		pkt[0] = 0x45
+		pkt[3] = 28
+		pkt[9] = 17
+		return pkt
+	}())
+	if udp.HasTCPSeq {
+		t.Fatal("UDP packet must not carry a TCP sequence number")
+	}
+}
+
+func TestDecodeIPPacketIgnoresLinkPadding(t *testing.T) {
+	// A pure ACK padded to the Ethernet minimum must not yield payload.
+	decoded, ok := decodeIPPacket(tcpIPv4Packet(100, 0x10, nil, 6))
+	if !ok {
+		t.Fatal("expected successful decode")
+	}
+	if len(decoded.Payload) != 0 {
+		t.Fatalf("padding decoded as payload: %x", decoded.Payload)
+	}
+	decoded, _ = decodeIPPacket(tcpIPv4Packet(100, 0x18, []byte{0x01, 0x02}, 4))
+	if !bytes.Equal(decoded.Payload, []byte{0x01, 0x02}) {
+		t.Fatalf("payload = %x, want 0102", decoded.Payload)
 	}
 }

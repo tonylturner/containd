@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -15,13 +16,19 @@ const (
 )
 
 // ParsedPacket is a minimal packet representation for DPI decoders.
-// Capture will populate this in later phases.
 type ParsedPacket struct {
 	Payload []byte
 	Proto   string // "tcp", "udp"
 	SrcPort uint16
 	DstPort uint16
-	TCPSeq  uint32 // TCP sequence number (0 for UDP)
+	// TCPSeq is the sequence number of the first payload byte. It is
+	// meaningful only when HasTCPSeq is set; zero is a valid sequence.
+	TCPSeq    uint32
+	HasTCPSeq bool
+	// TCPSyn marks a SYN segment: the sender starts a new sequence space
+	// at TCPSeq, replacing any stream state an earlier connection on the
+	// same tuple left behind.
+	TCPSyn bool
 }
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
@@ -58,6 +65,13 @@ type Manager struct {
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *Reassembler
+
+	// streamMu makes Feed -> DecodeStream -> Trim atomic per packet. The
+	// engine calls OnPacket from one goroutine per capture interface, and
+	// a forwarded segment is captured on both its ingress and egress
+	// interface; without the lock two goroutines could decode the same
+	// bytes twice or trim bytes the other has not parsed yet.
+	streamMu sync.Mutex
 }
 
 func NewManager(decoders ...Decoder) *Manager {
@@ -135,51 +149,65 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 	return append(indexed, m.anyDecoders...)
 }
 
-// OnPacket passes the packet to decoders that support the flow.
-// For TCP flows the payload is fed through the reassembler so that
-// decoders see the full accumulated stream rather than individual
-// segments.
+// OnPacket passes the packet to decoders that support the flow. TCP
+// payload for StreamDecoders goes through the reassembler, so they see
+// the in-order byte stream of the flow direction and each message is
+// decoded exactly once; all other decoders see the packet as captured.
 func (m *Manager) OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error) {
 	if m == nil || len(m.decoders) == 0 {
 		return nil, nil
 	}
-
-	// For TCP flows, use the reassembler to accumulate payloads.
-	usedReassembly := false
-	flowKey := state.Key.Hash()
-	dpiPkt := pkt
-	if pkt.Proto == "tcp" && len(pkt.Payload) > 0 && m.reassembler != nil {
-		reassembled := m.reassembler.Feed(flowKey, pkt.Payload, time.Now(), pkt.TCPSeq)
-		dpiPkt = &ParsedPacket{
-			Payload: reassembled,
-			Proto:   pkt.Proto,
-			SrcPort: pkt.SrcPort,
-			DstPort: pkt.DstPort,
-		}
-		usedReassembly = true
-	}
-
-	var out []Event
+	var streamDecoders []StreamDecoder
+	var packetDecoders []Decoder
 	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {
 			continue
 		}
-		events, err := d.OnPacket(state, dpiPkt)
+		if sd, ok := d.(StreamDecoder); ok && pkt.Proto == "tcp" && m.reassembler != nil {
+			streamDecoders = append(streamDecoders, sd)
+			continue
+		}
+		packetDecoders = append(packetDecoders, d)
+	}
+
+	out := m.decodeStream(state, pkt, streamDecoders)
+	for _, d := range packetDecoders {
+		events, err := d.OnPacket(state, pkt)
 		if err != nil {
 			return out, err
 		}
 		out = append(out, events...)
-
-		// If the decoder implements StreamDecoder, trim consumed bytes.
-		if usedReassembly {
-			if sd, ok := d.(StreamDecoder); ok {
-				if consumed := sd.ConsumedBytes(); consumed > 0 {
-					m.reassembler.Trim(flowKey, consumed)
-				}
-			}
-		}
 	}
 	return out, nil
+}
+
+// decodeStream feeds the segment into the flow direction's stream, lets
+// every stream decoder frame the buffered bytes, and drops the bytes they
+// consumed. Decoders parse the same buffer, so the largest consumption
+// wins.
+func (m *Manager) decodeStream(state *flow.State, pkt *ParsedPacket, decoders []StreamDecoder) []Event {
+	if len(decoders) == 0 {
+		return nil
+	}
+	flowKey := state.Key.Hash()
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	if pkt.TCPSyn && pkt.HasTCPSeq {
+		m.reassembler.Open(flowKey, pkt.TCPSeq, time.Now())
+	}
+	if len(pkt.Payload) == 0 {
+		return nil
+	}
+	stream := m.reassembler.Feed(flowKey, pkt.Payload, time.Now(), pkt.TCPSeq, pkt.HasTCPSeq)
+	var out []Event
+	consumed := 0
+	for _, d := range decoders {
+		events, n := d.DecodeStream(state, stream)
+		out = append(out, events...)
+		consumed = max(consumed, n)
+	}
+	m.reassembler.Trim(flowKey, consumed)
+	return out
 }
 
 // OnFlowEnd notifies decoders of flow termination and cleans up reassembly

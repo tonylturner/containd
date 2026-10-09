@@ -35,15 +35,53 @@ func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
 	return []uint16{20000}, nil
 }
 
+// OnPacket decodes every complete DNP3 link-layer frame in the payload.
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil || len(pkt.Payload) == 0 {
+	if pkt == nil {
 		return nil, nil
 	}
-	frame, err := ParseFrame(pkt.Payload)
-	if err != nil {
-		return nil, nil
-	}
+	events, _ := d.DecodeStream(state, pkt.Payload)
+	return events, nil
+}
 
+// DecodeStream implements dpi.StreamDecoder: it emits one event per
+// complete link-layer frame at the start of stream and reports the bytes
+// they occupy. A trailing partial frame is left for the next segment. Bad
+// start bytes or a bad header CRC discard the rest of the stream.
+func (d *Decoder) DecodeStream(state *flow.State, stream []byte) ([]dpi.Event, int) {
+	var events []dpi.Event
+	off := 0
+	for off < len(stream) {
+		rest := stream[off:]
+		if len(rest) < 2 {
+			break
+		}
+		if rest[0] != startByte1 || rest[1] != startByte2 {
+			return events, len(stream)
+		}
+		if len(rest) < headerLen {
+			break
+		}
+		frameLen := wireFrameLen(rest[2])
+		if len(rest) < frameLen {
+			if _, err := ParseFrame(rest[:headerLen]); err != nil {
+				return events, len(stream)
+			}
+			break
+		}
+		frame, err := ParseFrame(rest[:frameLen])
+		if err != nil {
+			return events, len(stream)
+		}
+		events = append(events, frameEvent(state, frame, rest[:frameLen]))
+		off += frameLen
+	}
+	return events, off
+}
+
+// frameEvent builds the DPI event for one parsed frame; raw is its wire
+// bytes.
+func frameEvent(state *flow.State, frame *DNP3Frame, raw []byte) dpi.Event {
 	fc := frame.FunctionCode
 	isWrite := IsWriteFunctionCode(fc)
 	isControl := IsControlFunctionCode(fc)
@@ -99,20 +137,18 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 
 	// Include raw hex for operator visibility (cap to avoid huge payloads).
-	raw := pkt.Payload
 	if len(raw) > 512 {
 		raw = raw[:512]
 	}
 	attrs["raw_hex"] = hex.EncodeToString(raw)
 
-	ev := dpi.Event{
+	return dpi.Event{
 		FlowID:     state.Key.Hash(),
 		Proto:      "dnp3",
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

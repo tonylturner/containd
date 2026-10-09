@@ -34,14 +34,58 @@ func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
 	return []uint16{502}, nil
 }
 
+// maxADULen is the largest Modbus/TCP ADU: a 7-byte MBAP header plus a
+// 253-byte PDU.
+const maxADULen = 260
+
+// OnPacket decodes every complete Modbus/TCP frame in the payload.
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil || len(pkt.Payload) == 0 {
+	if pkt == nil {
 		return nil, nil
 	}
-	frame, err := ParseTCPFrame(pkt.Payload)
-	if err != nil {
-		return nil, nil
+	events, _ := d.DecodeStream(state, pkt.Payload)
+	return events, nil
+}
+
+// DecodeStream implements dpi.StreamDecoder: it emits one event per
+// complete MBAP-framed ADU at the start of stream and reports the bytes
+// they occupy. A trailing partial ADU is left for the next segment. A
+// header that cannot start a valid ADU discards the rest of the stream.
+func (d *Decoder) DecodeStream(state *flow.State, stream []byte) ([]dpi.Event, int) {
+	var events []dpi.Event
+	off := 0
+	for off < len(stream) {
+		rest := stream[off:]
+		if len(rest) < 8 {
+			// MBAP header plus function code not yet complete.
+			break
+		}
+		length := int(binary.BigEndian.Uint16(rest[4:6]))
+		frameLen := 6 + length
+		if length < 2 {
+			return events, len(stream)
+		}
+		if len(rest) < frameLen {
+			if frameLen > maxADULen {
+				// No conforming ADU is this long; waiting for it would
+				// stall the stream.
+				return events, len(stream)
+			}
+			break
+		}
+		frame, err := ParseTCPFrame(rest[:frameLen])
+		if err != nil {
+			return events, len(stream)
+		}
+		events = append(events, frameEvent(state, frame, rest[:frameLen]))
+		off += frameLen
 	}
+	return events, off
+}
+
+// frameEvent builds the DPI event for one parsed ADU; raw is its wire
+// bytes.
+func frameEvent(state *flow.State, frame *TCPFrame, raw []byte) dpi.Event {
 	fc := frame.FunctionCode
 	isException := fc >= 128
 
@@ -97,20 +141,18 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 
 	// Include raw hex for operator visibility (cap to avoid huge payloads).
-	raw := pkt.Payload
 	if len(raw) > 512 {
 		raw = raw[:512]
 	}
 	attrs["raw_hex"] = hex.EncodeToString(raw)
 
-	ev := dpi.Event{
+	return dpi.Event{
 		FlowID:     state.Key.Hash(),
 		Proto:      "modbus",
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

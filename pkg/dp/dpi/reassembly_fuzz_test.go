@@ -27,11 +27,11 @@ func FuzzReassemblerFeed(f *testing.F) {
 		r := NewReassembler(int(maxSize), time.Second)
 		now := time.Unix(1, 0).UTC()
 
-		_ = r.Feed("flow1", seg1, now, seq1)
-		_ = r.Feed("flow1", seg2, now.Add(time.Millisecond), seq2)
+		_ = r.Feed("flow1", seg1, now, seq1, true)
+		_ = r.Feed("flow1", seg2, now.Add(time.Millisecond), seq2, true)
 		r.Trim("flow1", int(trim))
 		r.Sweep(now.Add(2 * time.Second))
-		_ = r.Feed("flow1", seg1, now.Add(3*time.Second), seq1)
+		_ = r.Feed("flow1", seg1, now.Add(3*time.Second), seq1, true)
 		r.Complete("flow1")
 
 		if r.ActiveStreams < 0 {

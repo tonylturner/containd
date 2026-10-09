@@ -303,6 +303,22 @@ func (f *DNP3Frame) IIN() (uint8, uint8, bool) {
 	return f.Data[3], f.Data[4], true
 }
 
+// headerLen is the link-layer header: start(2) + length(1) + control(1) +
+// destination(2) + source(2) + header CRC(2).
+const headerLen = 10
+
+// wireFrameLen returns the on-wire size of a frame whose header length
+// field is length: the header, then user data in blocks of up to 16 bytes,
+// each followed by a 2-byte CRC.
+func wireFrameLen(length uint8) int {
+	if length < 5 {
+		return headerLen
+	}
+	userDataLen := int(length) - 5
+	blocks := (userDataLen + 15) / 16
+	return headerLen + userDataLen + 2*blocks
+}
+
 // ParseFrame parses a DNP3 data-link layer frame from raw bytes.
 // It validates start bytes and header CRC. Data block CRCs are skipped for simplicity.
 func ParseFrame(data []byte) (*DNP3Frame, error) {

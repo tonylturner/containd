@@ -16,7 +16,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
-const maxPCAPRecordSize = 16 << 20 // 16 MiB
+const (
+	maxPCAPRecordSize = 16 << 20 // 16 MiB
+	tcpFlagSYN        = 0x02
+)
 
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
@@ -133,10 +136,13 @@ func analysisFlowState(flows map[string]*flow.State, pkt parsedPacketInfo, ts ti
 
 func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt parsedPacketInfo, ts time.Time) ([]dpi.Event, error) {
 	parsed := &dpi.ParsedPacket{
-		Payload: pkt.payload,
-		Proto:   pkt.transport,
-		SrcPort: pkt.srcPort,
-		DstPort: pkt.dstPort,
+		Payload:   pkt.payload,
+		Proto:     pkt.transport,
+		SrcPort:   pkt.srcPort,
+		DstPort:   pkt.dstPort,
+		TCPSeq:    pkt.tcpSeq,
+		HasTCPSeq: pkt.hasTCPSeq,
+		TCPSyn:    pkt.tcpSyn,
 	}
 	events, err := mgr.OnPacket(state, parsed)
 	if err != nil {
@@ -298,6 +304,9 @@ type parsedPacketInfo struct {
 	proto     uint8
 	transport string
 	payload   []byte
+	tcpSeq    uint32 // sequence number of the first payload byte
+	hasTCPSeq bool
+	tcpSyn    bool
 }
 
 // decodeEthernetPacket decodes an Ethernet frame containing an IP packet.
@@ -337,6 +346,11 @@ func decodeIPv4Packet(data []byte) (parsedPacketInfo, bool) {
 	if ihl < 20 || len(data) < ihl {
 		return parsedPacketInfo{}, false
 	}
+	// Bound the packet by the IP total length so Ethernet padding on short
+	// frames never reads as L4 payload.
+	if total := int(binary.BigEndian.Uint16(data[2:4])); total >= ihl && total < len(data) {
+		data = data[:total]
+	}
 	proto := data[9]
 	src := net.IPv4(data[12], data[13], data[14], data[15])
 	dst := net.IPv4(data[16], data[17], data[18], data[19])
@@ -346,6 +360,10 @@ func decodeIPv4Packet(data []byte) (parsedPacketInfo, bool) {
 func decodeIPv6Packet(data []byte) (parsedPacketInfo, bool) {
 	if len(data) < 40 {
 		return parsedPacketInfo{}, false
+	}
+	// Same padding bound as IPv4; a zero payload length is a jumbogram.
+	if payloadLen := int(binary.BigEndian.Uint16(data[4:6])); payloadLen > 0 && 40+payloadLen < len(data) {
+		data = data[:40+payloadLen]
 	}
 	proto := data[6]
 	src := net.IP(append([]byte(nil), data[8:24]...))
@@ -365,12 +383,20 @@ func decodeL4(proto uint8, src, dst net.IP, data []byte) (parsedPacketInfo, bool
 		if off < 20 || len(data) < off {
 			return parsedPacketInfo{}, false
 		}
+		seq := binary.BigEndian.Uint32(data[4:8])
+		syn := data[13]&tcpFlagSYN != 0
+		if syn {
+			// The SYN occupies the first sequence number; any data on a
+			// SYN (TCP Fast Open) starts one past it.
+			seq++
+		}
 		payload := append([]byte(nil), data[off:]...)
 		return parsedPacketInfo{
 			srcIP: src, dstIP: dst,
 			srcPort: sport, dstPort: dport,
 			proto: proto, transport: "tcp",
 			payload: payload,
+			tcpSeq:  seq, hasTCPSeq: true, tcpSyn: syn,
 		}, true
 	case 17: // UDP
 		if len(data) < 8 {

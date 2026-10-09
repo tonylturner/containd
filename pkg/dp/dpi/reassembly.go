@@ -6,6 +6,8 @@ package dpi
 import (
 	"sync"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 const (
@@ -13,16 +15,20 @@ const (
 	maxOOOSegments       = 4         // max out-of-order segments per stream
 )
 
-// StreamDecoder is an optional interface that stream-aware decoders can
-// implement.  After a successful parse the reassembler uses ConsumedBytes
-// to trim already-processed data from the buffer instead of discarding the
-// entire stream.
+// StreamDecoder is implemented by decoders of framed TCP protocols. The
+// Manager feeds them the reassembled, in-order byte stream of one flow
+// direction instead of individual segments.
 type StreamDecoder interface {
 	Decoder
-	// ConsumedBytes returns the number of leading bytes that were
-	// successfully parsed in the last OnPacket call.  Return 0 if the
-	// buffer does not yet contain a complete message.
-	ConsumedBytes() int
+	// DecodeStream returns one event per complete message at the start of
+	// stream and the number of leading bytes those messages occupy. An
+	// incomplete trailing message stays unconsumed until more data
+	// arrives. Bytes that can never be framed are reported as consumed
+	// (up to len(stream)) so the stream is discarded rather than wedged.
+	// Implementations keep no per-call state: one decoder instance serves
+	// every flow, and the consumed count is the only result the Manager
+	// trims by.
+	DecodeStream(state *flow.State, stream []byte) (events []Event, consumed int)
 }
 
 // oooSegment holds a single out-of-order TCP segment.
@@ -42,6 +48,8 @@ type StreamBuffer struct {
 	seqTracking bool   // true once first seq is seen
 	nextSeq     uint32 // expected next sequence number
 	retransmits uint64 // count of retransmitted segments
+	synSeen     bool   // the stream was opened by a SYN
+	synSeq      uint32 // sequence number following that SYN
 
 	// Small bounded buffer of out-of-order segments.
 	ooo []oooSegment
@@ -82,13 +90,15 @@ func seqDiff(a, b uint32) int32 {
 }
 
 // Feed appends payload to the stream buffer identified by flowKey and
-// returns the full accumulated buffer.  If the buffer would exceed
+// returns the full accumulated in-order buffer. If the buffer would exceed
 // maxSize, the oldest bytes are discarded (sliding window).
 //
-// The seq parameter is the TCP sequence number of this segment.  If seq
-// is 0 and no sequence tracking has been established, it is treated as
-// in-order (legacy callers).
-func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq uint32) []byte {
+// seq is the TCP sequence number of payload's first byte and is used only
+// when hasSeq is set; zero is a valid sequence number. Segments with a
+// sequence number are deduplicated (retransmissions, the second capture of
+// a forwarded segment) and reordered. Segments without one are appended in
+// arrival order.
+func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq uint32, hasSeq bool) []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -104,61 +114,26 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq ui
 	}
 
 	sb.lastUpdate = now
+	before := len(sb.buf)
 
-	// Establish sequence tracking on first segment with a non-zero seq,
-	// or if seq is provided on a new stream.
-	if !sb.seqTracking {
-		sb.seqTracking = true
-		sb.nextSeq = seq + uint32(len(payload))
+	switch {
+	case !hasSeq:
 		sb.buf = append(sb.buf, payload...)
-	} else {
-		diff := seqDiff(sb.nextSeq, seq)
-		switch {
-		case diff == 0:
-			// In-order segment.
-			sb.buf = append(sb.buf, payload...)
-			sb.nextSeq = seq + uint32(len(payload))
-			// Try to flush any buffered OOO segments.
-			r.flushOOO(sb)
-		case diff > 0:
-			// Future segment — gap detected. Buffer it if we have room.
-			if len(sb.ooo) < maxOOOSegments {
-				// Insert sorted by seq.
-				seg := oooSegment{seq: seq, payload: make([]byte, len(payload))}
-				copy(seg.payload, payload)
-				sb.ooo = insertOOO(sb.ooo, seg)
-			}
-			// If OOO buffer is full, drop this segment (bounded memory).
-		default:
-			// diff < 0: seq is behind nextSeq — likely retransmission.
-			// Check for partial overlap: if seq + len(payload) > nextSeq,
-			// there is new data at the tail.
-			endSeq := seq + uint32(len(payload))
-			newDiff := seqDiff(sb.nextSeq, endSeq)
-			if newDiff > 0 {
-				// Partial overlap — extract the new portion.
-				overlap := int(seqDiff(seq, sb.nextSeq))
-				if overlap >= 0 && overlap < len(payload) {
-					newData := payload[overlap:]
-					sb.buf = append(sb.buf, newData...)
-					sb.nextSeq = endSeq
-					r.flushOOO(sb)
-				}
-			}
-			// Pure retransmission — skip.
-			sb.retransmits++
-		}
+		sb.nextSeq += uint32(len(payload))
+	case !sb.seqTracking:
+		// The first sequenced segment anchors the stream.
+		sb.seqTracking = true
+		sb.buf = append(sb.buf, payload...)
+		sb.nextSeq = seq + uint32(len(payload))
+	default:
+		r.feedSequenced(sb, payload, seq)
 	}
 
 	// Sliding window: drop oldest bytes when over limit.
 	if len(sb.buf) > sb.maxSize {
-		excess := len(sb.buf) - sb.maxSize
-		r.BytesBuffered -= excess
-		sb.buf = sb.buf[excess:]
+		sb.buf = sb.buf[len(sb.buf)-sb.maxSize:]
 	}
-
-	r.BytesBuffered += len(payload)
-	// Clamp in case of rounding from the trim above.
+	r.BytesBuffered += len(sb.buf) - before
 	if r.BytesBuffered < 0 {
 		r.BytesBuffered = 0
 	}
@@ -167,6 +142,54 @@ func (r *Reassembler) Feed(flowKey string, payload []byte, now time.Time, seq ui
 	out := make([]byte, len(sb.buf))
 	copy(out, sb.buf)
 	return out
+}
+
+// feedSequenced places a segment relative to the expected sequence number.
+// Must be called with r.mu held.
+func (r *Reassembler) feedSequenced(sb *StreamBuffer, payload []byte, seq uint32) {
+	diff := seqDiff(sb.nextSeq, seq)
+	switch {
+	case diff == 0:
+		sb.buf = append(sb.buf, payload...)
+		sb.nextSeq = seq + uint32(len(payload))
+		r.flushOOO(sb)
+	case diff > 0:
+		// Future segment: a gap precedes it.
+		if len(sb.ooo) >= maxOOOSegments {
+			// The gap outlived maxOOOSegments later segments, so the
+			// missing bytes were lost (for example a capture drop).
+			// Resynchronise at the earliest buffered segment instead of
+			// stalling the stream forever; the partial message before
+			// the gap can never complete.
+			r.skipGap(sb)
+			r.feedSequenced(sb, payload, seq)
+			return
+		}
+		seg := oooSegment{seq: seq, payload: make([]byte, len(payload))}
+		copy(seg.payload, payload)
+		sb.ooo = insertOOO(sb.ooo, seg)
+	default:
+		// seq is behind nextSeq: a retransmission. Keep only bytes past
+		// nextSeq, if the segment carries any.
+		endSeq := seq + uint32(len(payload))
+		if seqDiff(sb.nextSeq, endSeq) <= 0 {
+			sb.retransmits++
+			return
+		}
+		overlap := int(seqDiff(seq, sb.nextSeq))
+		sb.buf = append(sb.buf, payload[overlap:]...)
+		sb.nextSeq = endSeq
+		r.flushOOO(sb)
+	}
+}
+
+// skipGap discards the buffered bytes before a lost gap and moves the
+// stream to the earliest out-of-order segment. Must be called with r.mu
+// held.
+func (r *Reassembler) skipGap(sb *StreamBuffer) {
+	sb.buf = sb.buf[:0]
+	sb.nextSeq = sb.ooo[0].seq
+	r.flushOOO(sb)
 }
 
 // flushOOO drains any contiguous OOO segments that now fit at nextSeq.
@@ -242,6 +265,35 @@ func (r *Reassembler) Trim(flowKey string, n int) {
 	}
 	if r.BytesBuffered < 0 {
 		r.BytesBuffered = 0
+	}
+}
+
+// Open starts the stream of a new connection direction at a SYN. seq is
+// the sequence number of the first byte after the SYN. The same SYN seen
+// again (a retransmission, or its capture on a second interface arriving
+// after the data that followed it) leaves the stream as it is; a SYN with
+// a different sequence number replaces whatever an earlier connection on
+// the same tuple left behind.
+func (r *Reassembler) Open(flowKey string, seq uint32, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if sb, ok := r.streams[flowKey]; ok {
+		if sb.synSeen && sb.synSeq == seq {
+			return
+		}
+		r.BytesBuffered = max(r.BytesBuffered-len(sb.buf), 0)
+	} else {
+		r.ActiveStreams++
+	}
+	r.streams[flowKey] = &StreamBuffer{
+		flowKey:     flowKey,
+		maxSize:     r.maxSize,
+		lastUpdate:  now,
+		seqTracking: true,
+		nextSeq:     seq,
+		synSeen:     true,
+		synSeq:      seq,
 	}
 }
 
