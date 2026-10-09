@@ -50,6 +50,7 @@
 #define IOA_BUSBAR_VOLTAGE 1102 /* M_ME_NC_1, monitor */
 #define IOA_BREAKER_CMD 2001   /* C_DC_NA_1 on CA 1, policy-allowed breaker */
 #define IOA_ISOLATOR_CMD 2002  /* C_DC_NA_1 on CA 1, a second device NOT in policy */
+#define IOA_STALE_CMD 2003     /* C_DC_NA_1 on CA 1, target of the stale-retransmit probe */
 #define IOA_AUX_FREQ 1201      /* M_ME_NC_1 on CA 2, monitor */
 /* M_ME_NC_1 test measurements on CA 1 at the 16-bit and 24-bit IOA edges */
 #define IOA_EDGE_16 65535
@@ -60,14 +61,15 @@
  * The RTU accepts the breaker double command (type 46, SBO) at three points so
  * the harness can test every policy dimension against a plant the RTU would
  * actually actuate: (CA 1, IOA 2001) is the policy-allowed breaker, (CA 1, IOA
- * 2002) is a second device the policy forbids (wrong-IOA case), and (CA 2, IOA
- * 2001) is the aux station breaker (wrong-CA case). Every other (CA, IOA) is an
+ * 2002) is a second device the policy forbids (wrong-IOA case), (CA 1, IOA
+ * 2003) is the target of the stale-retransmit probe, and (CA 2, IOA 2001) is
+ * the aux station breaker (wrong-CA case). Every other (CA, IOA) is an
  * unknown address answered negatively with COT 47.
  */
 static bool
 isCommandPoint(int ca, int ioa)
 {
-    if (ca == CA_MAIN && (ioa == IOA_BREAKER_CMD || ioa == IOA_ISOLATOR_CMD))
+    if (ca == CA_MAIN && (ioa == IOA_BREAKER_CMD || ioa == IOA_ISOLATOR_CMD || ioa == IOA_STALE_CMD))
         return true;
     if (ca == CA_AUX && ioa == IOA_BREAKER_CMD)
         return true;
