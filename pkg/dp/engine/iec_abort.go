@@ -216,7 +216,10 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 				t.sendReset(s, target, tr.r)
 			}
 		}
-		if !s.reset.targets[iecDirSrv].valid {
+		t.mu.Lock()
+		established := s.reset.targets[iecDirSrv].valid
+		t.mu.Unlock()
+		if !established {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
