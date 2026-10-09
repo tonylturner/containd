@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Smoke-test live ICS DPI with deterministic Modbus/TCP traffic.
-# Requirements: docker compose, jq, curl.
+# Smoke-test live ICS DPI with deterministic Modbus/TCP and DNP3 traffic
+# (milestone B §10.3 US non-regression). Requirements: docker compose, jq,
+# curl.
+#
+# Both capture modes assert: Modbus FC 3 reads pass, including a read split
+# across two TCP segments and two reads coalesced into one; DNP3 FC 1 reads
+# pass, the outstation's response and unsolicited data reach the master, and
+# DPI decodes the read; a denied Modbus write matches its rule and later
+# writes are blocked; the US 10-minute dynamic block appears in nft
+# block_flows.
 #
 # SMOKE_DPI_CAPTURE=afpacket (default) observes traffic on the interfaces;
 # the first denied write reaches the server and only later writes are
 # blocked. SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
 # (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) and also asserts US
-# first-write prevention (milestone B §4.1 item 1, §10.3): the first Modbus
-# write on a fresh connection, and the first write after a read on a
-# persistent connection, are dropped before the server changes state.
-#
-# EXPECTED-FAIL GATE: those first-write assertions fail on the engine before
-# the milestone B inline verdict (lane L3) and engine (lane L4) work merges,
-# because the engine accepts the current packet and only installs a later
-# block. They must pass after that merge. Do not weaken them to go green.
+# first-actuation prevention (§4.1 item 1, §10.3), from server state: the
+# first Modbus FC 6 write on a fresh connection and after a read on a
+# persistent connection, the first Modbus FC 8, and the first complete DNP3
+# FC 5 and FC 6 never reach the server. Each probe uses its own client
+# address so the dynamic block of an earlier deny cannot stand in for the
+# inline drop.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
 # Compose project and harness subnets. When another smoke stack owns the
@@ -35,11 +41,11 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=7
+TESTS_EXPECTED=13
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=10 ;;
+  nfqueue) TESTS_EXPECTED=20 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -57,7 +63,7 @@ timestamp() {
 log() { echo "[$(timestamp)] $*"; }
 pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); log "PASS: $*"; }
 # check_fail records a failed assertion and lets the run continue, so one
-# run reports every first-write assertion.
+# run reports every assertion.
 check_fail() { FAILURES+=("$*"); log "FAIL: $*"; }
 
 WORK_DIR=$(mktemp -d)
@@ -204,6 +210,71 @@ probe_first_write() {
   fi
 }
 
+# server_fc_requests FC: every request with that function code the Modbus
+# server decoded.
+server_fc_requests() {
+  compose exec -T modbus_server sh -c 'cat /tmp/modbus-requests.jsonl 2>/dev/null || true' |
+    jq -s --argjson fc "$1" '[.[] | select(.function_code == $fc)] | length'
+}
+
+# probe_modbus_diag sends a Modbus FC 8 (denied) from a fresh source and
+# asserts the server never decoded it.
+probe_modbus_diag() {
+  local source=$1 status=0 before after evidence
+  before=$(server_fc_requests 8)
+  compose exec -T ot_client python /opt/modbus/client.py diag "$MODBUS_DST" 502 --source "$source" \
+    >"$WORK_DIR/diag.out" 2>"$WORK_DIR/diag.err" || status=$?
+  after=$(server_fc_requests 8)
+  evidence="client exit $status (want 3); FC 8 requests seen $before -> $after; $(cat "$WORK_DIR/diag.out" "$WORK_DIR/diag.err" | tr -d '\r' | tr '\n' ' ')"
+  if [[ "$status" -eq 3 && "$after" == "$before" ]]; then
+    pass "Inline DROP: first Modbus FC 8 never reached the server ($source; $evidence)"
+  else
+    check_fail "Inline DROP: first Modbus FC 8 reached the server or was not dropped ($source; $evidence)"
+  fi
+}
+
+dnp3_state() {
+  compose exec -T modbus_server cat /tmp/dnp3-state.json
+}
+
+dnp3_fc_requests() {
+  compose exec -T modbus_server sh -c 'cat /tmp/dnp3-requests.jsonl 2>/dev/null || true' |
+    jq -s --argjson fc "$1" '[.[] | select(.function_code == $fc)] | length'
+}
+
+# probe_dnp3_control MODE FC SOURCE WANT: a denied DNP3 control (operate =
+# FC 5, operate-nr = FC 6) as the first complete message from SOURCE must
+# not reach the outstation: no request with that FC logged and no operation
+# applied. WANT is the client exit code when the request is dropped.
+probe_dnp3_control() {
+  local mode=$1 fc=$2 source=$3 want=$4 status=0 ops_before ops_after req_before req_after evidence
+  ops_before=$(dnp3_state | jq -er '.operations')
+  req_before=$(dnp3_fc_requests "$fc")
+  compose exec -T ot_client python /tmp/dnp3.py "$mode" "$MODBUS_DST" --source "$source" \
+    >"$WORK_DIR/dnp3-$mode.out" 2>"$WORK_DIR/dnp3-$mode.err" || status=$?
+  sleep 1
+  ops_after=$(dnp3_state | jq -er '.operations')
+  req_after=$(dnp3_fc_requests "$fc")
+  evidence="client exit $status (want $want); FC $fc requests seen $req_before -> $req_after; operations $ops_before -> $ops_after"
+  if [[ "$status" -eq "$want" && "$req_after" == "$req_before" && "$ops_after" == "$ops_before" ]]; then
+    pass "Inline DROP: first complete DNP3 FC $fc never reached the outstation ($source; $evidence)"
+  else
+    check_fail "Inline DROP: first complete DNP3 FC $fc reached the outstation or was not dropped ($source; $evidence)"
+  fi
+}
+
+# assert_dynamic_block SRC PORT: the US DENY path still installs its
+# 10-minute dynamic block (src . dst . dport) in nft block_flows.
+assert_dynamic_block() {
+  local src=$1 port=$2 set
+  set=$(compose exec -T engine nft list set inet containd block_flows 2>&1 | tr -d '\r')
+  if grep -Fq "$src . $MODBUS_DST . $port timeout 10m" <<<"$set"; then
+    pass "US 10-minute dynamic block present for $src -> $MODBUS_DST:$port"
+  else
+    check_fail "US 10-minute dynamic block missing for $src -> $MODBUS_DST:$port: $(tr '\n' ' ' <<<"$set" | head -c 300)"
+  fi
+}
+
 ensure_tools
 
 if [[ "$SMOKE_SKIP_UP" != "1" ]]; then
@@ -239,10 +310,11 @@ log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 log "Fetching current config..."
 CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
 
-# The nfqueue variant uses two extra client addresses so its first-write
-# probes do not share the US dynamic block (src, dst, dport) of the others.
+# The nfqueue variant uses extra client addresses (.6-.10) so each
+# first-actuation probe has no dynamic block (src, dst, dport) from another.
+PROBE_HOSTS=(6 7 8 9 10)
 if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
-  CLIENT_SOURCES=$(jq -cn --arg net "$LAN_NET" '[$net + ".5/32", $net + ".6/32", $net + ".7/32"]')
+  CLIENT_SOURCES=$(jq -cn --arg net "$LAN_NET" '[$net + ".5/32", $net + ".6/32", $net + ".7/32", $net + ".8/32", $net + ".9/32", $net + ".10/32"]')
 else
   CLIENT_SOURCES=$(jq -cn --arg net "$LAN_NET" '[$net + ".5/32"]')
 fi
@@ -265,9 +337,9 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
   | .dataPlane.dpiEnabled = true
   | .dataPlane.dpiMode = "enforce"
   | .dataPlane.dpiMock = false
-  | .dataPlane.dpiIcsProtocols = ((.dataPlane.dpiIcsProtocols // {}) + {"modbus": true})
+  | .dataPlane.dpiIcsProtocols = ((.dataPlane.dpiIcsProtocols // {}) + {"modbus": true, "dnp3": true})
   | .firewall.rules = (
-      [ .firewall.rules[]? | select(.id != "smoke-modbus-read" and .id != "smoke-modbus-write-deny") ]
+      [ .firewall.rules[]? | select((.id // "") | (startswith("smoke-modbus-") or startswith("smoke-dnp3-")) | not) ]
       + [
         {
           id:"smoke-modbus-read",
@@ -298,6 +370,42 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
             functionCode:[6],
             writeOnly:true
           },
+          action:"DENY",
+          log:true
+        },
+        {
+          id:"smoke-modbus-diag-deny",
+          description:"Smoke harness deny Modbus FC 8 diagnostics",
+          sourceZones:["lan"],
+          destZones:["wan"],
+          sources:$clients,
+          destinations:[$server],
+          protocols:[{"name":"tcp","port":"502"}],
+          ics:{protocol:"modbus", functionCode:[8]},
+          action:"DENY",
+          log:true
+        },
+        {
+          id:"smoke-dnp3-read",
+          description:"Smoke harness allow DNP3 reads",
+          sourceZones:["lan"],
+          destZones:["wan"],
+          sources:$clients,
+          destinations:[$server],
+          protocols:[{"name":"tcp","port":"20000"}],
+          ics:{protocol:"dnp3", functionCode:[1]},
+          action:"ALLOW",
+          log:true
+        },
+        {
+          id:"smoke-dnp3-control-deny",
+          description:"Smoke harness deny DNP3 direct operate",
+          sourceZones:["lan"],
+          destZones:["wan"],
+          sources:$clients,
+          destinations:[$server],
+          protocols:[{"name":"tcp","port":"20000"}],
+          ics:{protocol:"dnp3", functionCode:[5, 6]},
           action:"DENY",
           log:true
         }
@@ -350,8 +458,9 @@ log "Programming OT client and Modbus server routes through engine..."
   compose exec -T ot_client ip route add default via "${LAN_NET}.2" dev eth0
   compose exec -T modbus_server ip route add default via "${WAN_NET}.2" dev eth0
   if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
-    compose exec -T ot_client ip addr add "${LAN_NET}.6/24" dev eth0
-    compose exec -T ot_client ip addr add "${LAN_NET}.7/24" dev eth0
+    for host in "${PROBE_HOSTS[@]}"; do
+      compose exec -T ot_client ip addr add "${LAN_NET}.${host}/24" dev eth0
+    done
   fi
   set -e
 } >"$WORK_DIR/route-setup-dpi.log" 2>&1 || true
@@ -378,10 +487,58 @@ if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
 fi
 pass "Modbus event recorded in telemetry"
 
+log "Testing a Modbus read split across two TCP segments..."
+if compose exec -T ot_client python /opt/modbus/client.py read-split "$MODBUS_DST" 502 >"$WORK_DIR/split.out" 2>"$WORK_DIR/split.err" &&
+  grep -q '^READ_OK' "$WORK_DIR/split.out"; then
+  pass "Split Modbus read passes ($(tr -d '\r' <"$WORK_DIR/split.out"))"
+else
+  check_fail "Split Modbus read failed: $(tr -d '\r' <"$WORK_DIR/split.err")"
+fi
+
+log "Testing two Modbus reads coalesced into one TCP segment..."
+if compose exec -T ot_client python /opt/modbus/client.py read-coalesced "$MODBUS_DST" 502 >"$WORK_DIR/coalesced.out" 2>"$WORK_DIR/coalesced.err" &&
+  [[ "$(grep -c '^READ_OK' "$WORK_DIR/coalesced.out")" == 2 ]]; then
+  pass "Coalesced Modbus reads pass (two responses)"
+else
+  check_fail "Coalesced Modbus reads failed: $(cat "$WORK_DIR/coalesced.out" "$WORK_DIR/coalesced.err" | tr -d '\r' | tr '\n' ' ')"
+fi
+
+log "Starting the DNP3 outstation (port 20000) and testing a DNP3 read..."
+compose cp test/data-smoke/dnp3/dnp3.py modbus_server:/tmp/dnp3.py >/dev/null
+compose cp test/data-smoke/dnp3/dnp3.py ot_client:/tmp/dnp3.py >/dev/null
+if ! compose exec -T modbus_server sh -c 'pgrep -f "dnp3.py server" >/dev/null'; then
+  compose exec -d modbus_server python /tmp/dnp3.py server
+fi
+for _ in $(seq 1 20); do
+  compose exec -T modbus_server test -s /tmp/dnp3-state.json && break
+  sleep 0.5
+done
+DNP3_STATUS=0
+compose exec -T ot_client python /tmp/dnp3.py read "$MODBUS_DST" >"$WORK_DIR/dnp3-read.out" 2>"$WORK_DIR/dnp3-read.err" || DNP3_STATUS=$?
+if grep -q '^READ_OK' "$WORK_DIR/dnp3-read.out"; then
+  pass "DNP3 FC 1 read passes and its FC 129 response reaches the master"
+else
+  check_fail "DNP3 FC 1 read failed (exit $DNP3_STATUS): $(tr -d '\r' <"$WORK_DIR/dnp3-read.err")"
+fi
+if grep -q '^UNSOLICITED_OK' "$WORK_DIR/dnp3-read.out"; then
+  pass "DNP3 unsolicited response (FC 130) reaches the master"
+else
+  check_fail "DNP3 unsolicited response did not reach the master (exit $DNP3_STATUS): $(tr -d '\r' <"$WORK_DIR/dnp3-read.err")"
+fi
+dnp3_read_filter='any(.[]; .proto == "dnp3" and .srcIp == env.MODBUS_SRC and .attributes.function_code == 1 and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))'
+if wait_for_jq "${BASE}/events?limit=200" "$dnp3_read_filter"; then
+  pass "DPI decoded the DNP3 FC 1 read"
+else
+  check_fail "no DNP3 FC 1 event from $MODBUS_SRC in telemetry"
+fi
+
 if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
-  log "Inline first-write prevention (expected-fail gate until lanes L3 and L4 merge)..."
+  log "Inline first-actuation prevention..."
   probe_first_write readwrite "${LAN_NET}.6"
   probe_first_write write "${LAN_NET}.7"
+  probe_modbus_diag "${LAN_NET}.10"
+  probe_dnp3_control operate 5 "${LAN_NET}.8" 3
+  probe_dnp3_control operate-nr 6 "${LAN_NET}.9" 0
 fi
 
 log "Triggering Modbus write enforcement..."
@@ -407,6 +564,11 @@ else
   pass "Follow-up Modbus write blocked after enforcement"
 fi
 
+assert_dynamic_block "$MODBUS_SRC" 502
+if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
+  assert_dynamic_block "${LAN_NET}.8" 20000
+fi
+
 if ! wait_for_jq "${BASE}/stats/protocols" 'any(.[]; .protocol == "modbus" and .packetCount >= 2 and .readCount >= 1 and .writeCount >= 1)'; then
   log "expected modbus protocol stats not found"
   $CURL -H "$AUTH_HEADER" "${BASE}/stats/protocols" | jq '.'
@@ -424,9 +586,6 @@ pass "Inventory discovered Modbus endpoints"
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   log "Failed assertions (${SMOKE_DPI_CAPTURE}):"
   printf '  - %s\n' "${FAILURES[@]}"
-  if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
-    log "The inline first-write assertions are the expected-fail gate until lanes L3 and L4 merge."
-  fi
 fi
 if [[ $TESTS_PASSED -eq $TESTS_EXPECTED ]]; then
   printf "[%s] %bDPI smoke complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$GREEN" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
