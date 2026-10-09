@@ -301,7 +301,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	runCapture := e.capture
 	e.runCancel = runCancel
 	e.runCapture = runCapture
-	if err := runCapture.Start(runCtx, e.capturePacket); err != nil {
+	if err := runCapture.Start(runCtx, e.HandlePacket); err != nil {
 		if e.nfqueueGroup != 0 {
 			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
 			e.gate.own(0)

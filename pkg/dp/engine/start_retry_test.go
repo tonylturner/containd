@@ -131,3 +131,20 @@ func TestNormalQueueCloseIsNotLoggedAsError(t *testing.T) {
 		t.Fatalf("a queue failure was not logged: %v", logged)
 	}
 }
+
+// TestStartWithRetryAfterGivingUpStartsAgain: the retry loop gives up, and
+// a later call (an unchanged config POST) retries the bind and starts.
+func TestStartWithRetryAfterGivingUpStartsAgain(t *testing.T) {
+	fastRetry(t, 3)
+	c := &bindCapture{fails: 3}
+	e := inlineEngine(t, c)
+	if err := e.StartWithRetry(context.Background()); !errors.Is(err, errBind) {
+		t.Fatalf("first StartWithRetry = %v, want give-up", err)
+	}
+	if err := e.StartWithRetry(context.Background()); err != nil || c.starts.Load() != 4 {
+		t.Fatalf("second StartWithRetry = %v after %d starts", err, c.starts.Load())
+	}
+	if err := e.StartWithRetry(context.Background()); err != nil || c.starts.Load() != 4 {
+		t.Fatalf("StartWithRetry on a started engine must be a no-op: %v after %d starts", err, c.starts.Load())
+	}
+}

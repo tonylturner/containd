@@ -32,11 +32,11 @@ func TestCaptureHandlerRecoversPanics(t *testing.T) {
 	e.dpiMgr = dpi.NewManager(panicDecoder{})
 	pkt := capture.Packet{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"), SrcPort: 40000, DstPort: 502,
 		Proto: 6, Transport: "tcp", Payload: []byte{1, 2, 3}, TCP: capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK}}
-	if d := e.capturePacket(pkt); d.Action != capture.Accept {
+	if d := e.HandlePacket(pkt); d.Action != capture.Accept {
 		t.Fatalf("panic on an unmarked packet = %+v, want Accept", d)
 	}
 	pkt.HasMark, pkt.Mark, pkt.SrcPort = true, enforce.EnvelopeMark, 40001
-	if d := e.capturePacket(pkt); d.Action != capture.Drop {
+	if d := e.HandlePacket(pkt); d.Action != capture.Drop {
 		t.Fatalf("panic on an envelope-marked packet = %+v, want Drop", d)
 	}
 	if len(logged) != 2 || !strings.Contains(logged[0], "decoder bug") {

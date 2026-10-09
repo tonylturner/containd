@@ -159,12 +159,13 @@ func envelopeMarked(pkt capture.Packet) bool {
 	return pkt.HasMark && enforce.EnvelopeMarked(pkt.Mark)
 }
 
-// capturePacket is the handler given to capture. A panic in packet
+// HandlePacket is the handler given to capture; offline replays and tests
+// may call it too. A panic in packet
 // handling must not crash the process from the capture goroutine: it is
 // recovered, logged and reported as a worker health fault. The packet is
 // dropped when nft marked it as IEC104 envelope traffic (fail closed) and
 // accepted otherwise, as 0.1.31 always did.
-func (e *Engine) capturePacket(pkt capture.Packet) (d capture.Decision) {
+func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 	defer func() {
 		r := recover()
 		if r == nil {
