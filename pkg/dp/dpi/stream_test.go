@@ -144,10 +144,12 @@ func TestInspectSessionStreamOffsetsAndFailure(t *testing.T) {
 	if got := ranges(res); !reflect.DeepEqual(got, []frameRange{{0, 2}}) {
 		t.Fatalf("c frames %v", got)
 	}
-	// The other direction is an independent stream with its own offsets.
+	// The other direction is an independent stream with its own offsets;
+	// every session stream starts at offset 0, the first byte after the SYN,
+	// so a first segment at 100 waits behind a gap.
 	srv := mgr.Inspect(st, sessionSeg(session, ServerToClient, 100, 0x00))
-	if got := ranges(srv); !reflect.DeepEqual(got, []frameRange{{100, 101}}) {
-		t.Fatalf("s frames %v", got)
+	if got := ranges(srv); len(got) != 0 || !srv.Gap {
+		t.Fatalf("s frames %v gap=%v, want a gap before offset 100", got, srv.Gap)
 	}
 
 	bad := mgr.Inspect(st, sessionSeg(session, ClientToServer, 3, 0xA1, 0xA2, 0xFF))
@@ -161,8 +163,8 @@ func TestInspectSessionStreamOffsetsAndFailure(t *testing.T) {
 		t.Fatalf("failed stream: Framed=%v Err=%v events=%d", after.Framed, after.Err, len(after.Events))
 	}
 	mgr.EndStream(session)
-	reopened := mgr.Inspect(st, sessionSeg(session, ClientToServer, 7, 0x00))
-	if reopened.Err != nil || !reflect.DeepEqual(ranges(reopened), []frameRange{{7, 8}}) {
+	reopened := mgr.Inspect(st, sessionSeg(session, ClientToServer, 0, 0x00))
+	if reopened.Err != nil || !reflect.DeepEqual(ranges(reopened), []frameRange{{0, 1}}) {
 		t.Fatalf("after EndStream Err=%v frames=%v", reopened.Err, ranges(reopened))
 	}
 }
