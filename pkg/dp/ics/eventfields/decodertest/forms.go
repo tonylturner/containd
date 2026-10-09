@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 containd Authors
 
-// Package eventfieldstest holds test helpers for decoders that emit
-// eventfields attributes.
-package eventfieldstest
+// Package decodertest holds test helpers for the ICS decoders: the forms
+// their eventfields attributes take, and the dpi.StreamDecoder invariants.
+package decodertest
 
 import (
 	"bytes"

@@ -10,7 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/eventfieldstest"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
 )
 
 // Readers use the eventfields accessors on these keys (spec §4 "ICS field
@@ -37,7 +37,7 @@ func TestDecodedFieldsReadThroughAccessors(t *testing.T) {
 		if events[0].Proto != eventfields.ProtoDNP3 {
 			t.Fatalf("%s: proto %q", tc.name, events[0].Proto)
 		}
-		for form, attrs := range eventfieldstest.Forms(t, events[0].Attributes) {
+		for form, attrs := range decodertest.Forms(t, events[0].Attributes) {
 			fc, okFC := eventfields.Uint8(attrs, eventfields.KeyFunctionCode)
 			isWrite, okWrite := eventfields.Bool(attrs, eventfields.KeyIsWrite)
 			if !okFC || !okWrite || fc != tc.fc || isWrite != tc.isWrite {

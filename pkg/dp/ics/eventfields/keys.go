@@ -13,6 +13,16 @@ const (
 	ProtoDNP3   = "dnp3"
 )
 
+// Decoder event kinds. IEC104 uses all five; Modbus and DNP3 emit
+// KindMalformed for bytes they cannot frame.
+const (
+	KindRequest     = "request"
+	KindResponse    = "response"
+	KindAPCI        = "apci"
+	KindMalformed   = "malformed"
+	KindUnsupported = "unsupported"
+)
+
 // Engine event kinds for decisions and their outcomes.
 const (
 	KindDecision = "ics.decision"

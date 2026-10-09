@@ -3,7 +3,12 @@
 
 package dnp3
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+)
 
 func FuzzParseFrame(f *testing.F) {
 	f.Add([]byte{})
@@ -29,5 +34,16 @@ func FuzzParseObjectHeaders(f *testing.F) {
 			}
 			pos += h.Size
 		}
+	})
+}
+
+func FuzzParseStream(f *testing.F) {
+	f.Add(concat(readFrame, linkStatus), uint16(0))
+	f.Add(concat(operateFrame, continuation, readFrame[:11]), uint16(3))
+	f.Add([]byte{0x05, 0x64, 0x05, 0xC0, 1, 0, 2, 0, 0xFF, 0xFF}, uint16(1))
+
+	state := dnp3State()
+	f.Fuzz(func(t *testing.T, data []byte, base uint16) {
+		decodertest.CheckStream(t, NewDecoder(), state, dpi.StreamView{Session: "fuzz", Base: int64(base), Bytes: data})
 	})
 }
