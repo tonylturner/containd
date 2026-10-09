@@ -62,8 +62,9 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 
 func TestCompileSnapshotUsesICSPredicate(t *testing.T) {
 	cfg := &config.Config{
-		System: config.SystemConfig{Hostname: "containd"},
-		Zones:  []config.Zone{{Name: "scada"}},
+		System:    config.SystemConfig{Hostname: "containd"},
+		Zones:     []config.Zone{{Name: "scada"}},
+		DataPlane: config.DataPlaneConfig{DPIEnabled: true, NFQueueGroup: 101},
 		Firewall: config.FirewallConfig{
 			DefaultAction: config.ActionDeny,
 			Rules: []config.Rule{{

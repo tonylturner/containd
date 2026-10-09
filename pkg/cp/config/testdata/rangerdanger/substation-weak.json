@@ -1,0 +1,382 @@
+{
+  "schema_version": "0.1.0",
+  "system": {
+    "hostname": "containd",
+    "mgmt": {
+      "listenAddr": ":8080",
+      "enableHTTP": true,
+      "enableHTTPS": true,
+      "httpListenAddr": ":8080",
+      "httpsListenAddr": ":8443",
+      "tlsCertFile": "/data/tls/server.crt",
+      "tlsKeyFile": "/data/tls/server.key"
+    },
+    "ssh": {}
+  },
+  "interfaces": [
+    {
+      "name": "wan",
+      "zone": "wan",
+      "access": {}
+    },
+    {
+      "name": "dmz",
+      "zone": "dmz",
+      "access": {}
+    },
+    {
+      "name": "lan1",
+      "zone": "lan1",
+      "access": {}
+    },
+    {
+      "name": "lan2",
+      "zone": "lan2",
+      "access": {}
+    },
+    {
+      "name": "lan3",
+      "zone": "lan3",
+      "access": {
+        "mgmt": true,
+        "ssh": true
+      }
+    }
+  ],
+  "zones": [
+    {
+      "name": "wan",
+      "description": "Enterprise Zone - Corporate IT environment"
+    },
+    {
+      "name": "dmz",
+      "description": "Vendor / Engineering Zone - Remote support and maintenance"
+    },
+    {
+      "name": "lan1",
+      "description": "OT Operations Zone - HMI, RTAC, supervisory control"
+    },
+    {
+      "name": "lan2",
+      "description": "Field Device Zone - Relay, recloser, regulator, capbank"
+    },
+    {
+      "name": "lan3",
+      "description": "RangerDanger control plane - backend API access (not student-visible)"
+    }
+  ],
+  "routing": {},
+  "dataplane": {
+    "nflogGroup": 100
+  },
+  "pcap": {
+    "filter": {}
+  },
+  "firewall": {
+    "defaultAction": "DENY",
+    "rules": [
+      {
+        "id": "enterprise-to-vendor",
+        "description": "Enterprise to Vendor: SSH, HTTP/S, RDP, VNC",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "dmz"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "22"
+          },
+          {
+            "name": "tcp",
+            "port": "80"
+          },
+          {
+            "name": "tcp",
+            "port": "443"
+          },
+          {
+            "name": "tcp",
+            "port": "3389"
+          },
+          {
+            "name": "tcp",
+            "port": "5900"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "enterprise-to-ot-weak",
+        "description": "WEAK: Enterprise direct access to OT Operations (should be blocked)",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "1881"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "enterprise-to-field-weak",
+        "description": "WEAK: Enterprise direct Modbus/DNP3/HTTP access to Field Devices (should be blocked)",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "vendor-to-ot-weak",
+        "description": "WEAK: Vendor broad access to OT Operations including Modbus/DNP3 (should be narrowed)",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "1881"
+          },
+          {
+            "name": "tcp",
+            "port": "22"
+          },
+          {
+            "name": "tcp",
+            "port": "443"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "vendor-to-field-weak",
+        "description": "WEAK: Vendor direct Modbus/DNP3/HTTP access to Field Devices (should be blocked)",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "ot-to-field-broad",
+        "description": "WEAK: All OT Operations nodes can Modbus/DNP3/HTTP to all Field Devices (should be RTAC only)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "ot-intrazone",
+        "description": "OT Operations internal: HMI\u2194RTAC Modbus, DNP3, HTTP, FUXA",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "1881"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          },
+          {
+            "name": "udp",
+            "port": "123"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "field-intrazone",
+        "description": "Field device internal communication",
+        "sourceZones": [
+          "lan2"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "ntp-ot-to-field",
+        "description": "WEAK: NTP time sync from OT ops to field (no source restriction)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "udp",
+            "port": "123"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      }
+    ],
+    "nat": {
+      "enabled": false
+    }
+  },
+  "ids": {
+    "enabled": false
+  },
+  "services": {
+    "syslog": {
+      "forwarders": [],
+      "format": "rfc5424",
+      "batchSize": 500,
+      "flushEvery": 2
+    },
+    "dns": {
+      "enabled": false
+    },
+    "ntp": {
+      "enabled": false
+    },
+    "proxy": {
+      "forward": {
+        "enabled": false
+      },
+      "reverse": {
+        "enabled": false
+      }
+    },
+    "dhcp": {
+      "enabled": false
+    },
+    "vpn": {
+      "wireguard": {
+        "enabled": false
+      },
+      "openvpn": {
+        "enabled": false
+      }
+    },
+    "av": {
+      "enabled": false,
+      "icap": {},
+      "clamav": {}
+    }
+  }
+}
