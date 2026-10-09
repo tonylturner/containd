@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
@@ -115,6 +116,9 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 		return rules.EvalContext{}, false
 	}
 	service := servicePort(state, pkt)
+	// Read/write class comes only from a present is_write: an event that
+	// does not say it is a write is not thereby read-only.
+	isWrite, hasWrite := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
 	ctx := rules.EvalContext{
 		SrcZone: srcZone,
 		DstZone: dstZone,
@@ -125,19 +129,18 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 		ICS: &rules.ICSContext{
 			Protocol:  strings.ToLower(ev.Proto),
 			Address:   attrString(ev.Attributes, "address"),
-			ReadOnly:  !attrBool(ev.Attributes, "is_write"),
-			WriteOnly: attrBool(ev.Attributes, "is_write"),
+			ReadOnly:  hasWrite && !isWrite,
+			WriteOnly: hasWrite && isWrite,
 			Direction: eventDirection(ev.Kind),
 		},
 	}
-	if fc, ok := attrUint8(ev.Attributes, "function_code"); ok {
+	if fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
 		ctx.ICS.FunctionCode = fc
 	}
-	if unitID, ok := attrUint8(ev.Attributes, "unit_id"); ok {
-		unit := unitID
-		ctx.ICS.UnitID = &unit
+	if unitID, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID); ok {
+		ctx.ICS.UnitID = &unitID
 	}
-	if objectClass, ok := attrUint16(ev.Attributes, "object_class"); ok {
+	if objectClass, ok := eventfields.Uint16(ev.Attributes, "object_class"); ok {
 		ctx.ICS.ObjectClass = objectClass
 	}
 	return ctx, true
@@ -212,72 +215,6 @@ func eventDirection(kind string) string {
 	default:
 		return "request"
 	}
-}
-
-func attrBool(attrs map[string]any, key string) bool {
-	if attrs == nil {
-		return false
-	}
-	switch v := attrs[key].(type) {
-	case bool:
-		return v
-	case string:
-		return strings.EqualFold(v, "true")
-	default:
-		return false
-	}
-}
-
-func attrUint8(attrs map[string]any, key string) (uint8, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint8:
-		return v, true
-	case uint16:
-		if v <= 255 {
-			return uint8(v), true
-		}
-	case int:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 255 {
-			return uint8(v), true
-		}
-	}
-	return 0, false
-}
-
-func attrUint16(attrs map[string]any, key string) (uint16, bool) {
-	if attrs == nil {
-		return 0, false
-	}
-	switch v := attrs[key].(type) {
-	case uint16:
-		return v, true
-	case uint8:
-		return uint16(v), true
-	case int:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case int64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	case float64:
-		if v >= 0 && v <= 65535 {
-			return uint16(v), true
-		}
-	}
-	return 0, false
 }
 
 func attrString(attrs map[string]any, key string) string {
