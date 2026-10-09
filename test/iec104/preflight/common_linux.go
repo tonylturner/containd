@@ -222,7 +222,7 @@ type parallelVerdictResult struct {
 // does not retry failures: a timed-out request may still be executing remotely.
 func runParallelVerdicts(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: preflight parallel-verdict BASE_URL PACKET_ID...")
+		return fmt.Errorf("usage: preflight parallel-verdict BASE_URL PACKET_ID [PACKET_ID ...]")
 	}
 	baseURL := args[0]
 	ids := make([]uint32, len(args)-1)
