@@ -103,6 +103,7 @@ type heldPacket struct {
 	dir   int
 	off   int64
 	end   int64
+	fin   bool // the packet carries a FIN
 	since time.Time
 }
 

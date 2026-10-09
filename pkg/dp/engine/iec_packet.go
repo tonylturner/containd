@@ -378,6 +378,13 @@ func (t *iecTable) finLocked(s *iecSession, dir int, pkt capture.Packet, res *ie
 	if len(pkt.Payload) == 0 {
 		res.decision.Resolved = append(res.decision.Resolved, t.dropHeldLocked(s, dir)...)
 	}
+	t.finForwardedLocked(s, dir, res)
+}
+
+// finForwardedLocked records a forwarded FIN of direction dir and closes
+// the session once both directions finished.
+func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
+	d := s.dirs[dir]
 	d.fin, d.finFwd = true, true
 	if s.dirs[1-dir].fin {
 		res.decision.Resolved = append(res.decision.Resolved, t.dropHeldLocked(s, -1)...)
@@ -411,7 +418,8 @@ func (t *iecTable) closeLocked(s *iecSession, now time.Time) {
 
 func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
 	off := s.dirs[dir].seq.Offset(pkt.TCP.Seq)
-	return &heldPacket{tok: pkt.Token, dir: dir, off: off, end: off + int64(len(pkt.Payload)), since: now}
+	return &heldPacket{tok: pkt.Token, dir: dir, off: off, end: off + int64(len(pkt.Payload)),
+		fin: pkt.TCP.Flags&capture.TCPFlagFIN != 0, since: now}
 }
 
 // dataLocked judges a payload: its bytes are checked against what was
@@ -518,18 +526,25 @@ func (t *iecTable) stopParseLocked(s *iecSession) {
 func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur *heldPacket, res iecResult, now time.Time) iecResult {
 	d := s.dirs[dir]
 	kept := s.held[:0]
+	finReleased := false
 	for _, h := range s.held {
 		if h.dir == dir && h.end <= d.framedEnd {
 			delete(t.held, h.tok)
 			t.heldTotal--
 			s.heldBytes -= int(h.end - h.off)
 			d.forwarded = max(d.forwarded, h.end)
+			finReleased = finReleased || (h.fin && h.end == d.bytes.Next())
 			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictAccept})
 			continue
 		}
 		kept = append(kept, h)
 	}
 	s.held = kept
+	if finReleased {
+		// A released packet ended the stream with its FIN: the FIN was
+		// forwarded, so it counts in the RST sequence (spec §8.2 step 2).
+		t.finForwardedLocked(s, dir, &res)
+	}
 	if cur.end <= d.framedEnd || !pkt.Token.Inline() {
 		d.forwarded = max(d.forwarded, cur.end)
 		res.decision.Action, res.decision.Reason = capture.Accept, reasonIECAccept
