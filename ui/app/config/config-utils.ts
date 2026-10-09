@@ -1,4 +1,5 @@
 import type { ConfigBundle } from "../../lib/api";
+import { effectiveICSDecoders } from "../firewall/firewall-utils";
 import type { BlockKey } from "./config-block-explorer";
 
 export type Tab = "overview" | "running" | "candidate" | "diff";
@@ -181,19 +182,21 @@ export function buildDiffBlocks(
     { key: "ids", label: "IDS", running: (r as any).ids, candidate: (c as any).ids },
     { key: "services", label: "Services", running: (r as any).services, candidate: (c as any).services },
     { key: "dataPlane", label: "Data plane", running: (r as any).dataplane, candidate: (c as any).dataplane },
+    // The DPI block shows effective decoder state (an unset decoder is on);
+    // the Data plane block above keeps the stored map.
     {
       key: "dpi",
       label: "DPI",
       running: {
         dpiMode: (r as any).dataplane?.dpiMode,
-        dpiIcsProtocols: (r as any).dataplane?.dpiIcsProtocols,
+        dpiIcsProtocols: effectiveICSDecoders((r as any).dataplane?.dpiIcsProtocols),
         dpiProtocols: (r as any).dataplane?.dpiProtocols,
         dpiEnabled: (r as any).dataplane?.dpiEnabled,
         dpiExclusions: (r as any).dataplane?.dpiExclusions,
       },
       candidate: {
         dpiMode: (c as any).dataplane?.dpiMode,
-        dpiIcsProtocols: (c as any).dataplane?.dpiIcsProtocols,
+        dpiIcsProtocols: effectiveICSDecoders((c as any).dataplane?.dpiIcsProtocols),
         dpiProtocols: (c as any).dataplane?.dpiProtocols,
         dpiEnabled: (c as any).dataplane?.dpiEnabled,
         dpiExclusions: (c as any).dataplane?.dpiExclusions,
@@ -345,7 +348,7 @@ export function getBlockValue(
       return {
         dpiMode: cfg.dataplane?.dpiMode,
         dpiEnabled: cfg.dataplane?.dpiEnabled,
-        dpiIcsProtocols: cfg.dataplane?.dpiIcsProtocols,
+        dpiIcsProtocols: effectiveICSDecoders(cfg.dataplane?.dpiIcsProtocols),
         dpiProtocols: cfg.dataplane?.dpiProtocols,
         dpiExclusions: cfg.dataplane?.dpiExclusions,
       };

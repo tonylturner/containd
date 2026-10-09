@@ -123,6 +123,20 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     notes:
       "OPC UA uses a binary protocol over TCP. The decoder identifies message types (HEL, ACK, OPN, CLO, MSG) and extracts service IDs from MSG chunks. Security is negotiated at the secure channel level.",
   },
+  iec104: {
+    label: "IEC 60870-5-104",
+    port: "2404",
+    fcLabel: "Type IDs and classes",
+    fcPlaceholder: "46, 100",
+    fcHelp:
+      "Decoded Type IDs: 3, 13, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
+    addrLabel: "CA and IOA",
+    addrPlaceholder: "",
+    addrHelp:
+      "Common address (CA) identifies the station, 0-65534; 65535 is broadcast and never matches an allow rule. Information object addresses (IOA) are closed ranges, 0-16777215.",
+    notes:
+      "Rules match the session tuple (client to port 2404) in both directions. Inside an enforce envelope, a denied, malformed or unsupported APDU drops the packet and resets the session; unmatched traffic is denied.",
+  },
 };
 
 export const ICS_PROTOCOL_KEYS = Object.keys(ICS_PROTOCOLS);
@@ -232,7 +246,21 @@ export const ICS_DPI_PROTOCOLS: {
   { key: "mms", label: "IEC 61850 MMS", port: "102", desc: "MMS service requests, named variables" },
   { key: "bacnet", label: "BACnet/IP", port: "47808", desc: "Service types, object types, property IDs" },
   { key: "opcua", label: "OPC UA", port: "4840", desc: "Service types, node IDs, browse/read/write" },
+  { key: "iec104", label: "IEC 60870-5-104", port: "2404", desc: "APCI frames, Type IDs, common addresses, IOAs" },
 ];
+
+/**
+ * Effective decoder state per ICS protocol. The engine enables a decoder
+ * that is not configured; only an explicit `false` disables it
+ * (pkg/dp/engine/decoders.go). Unknown keys are kept as configured.
+ */
+export function effectiveICSDecoders(
+  configured: Record<string, boolean> | undefined,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = { ...(configured ?? {}) };
+  for (const p of ICS_DPI_PROTOCOLS) out[p.key] = configured?.[p.key] !== false;
+  return out;
+}
 
 export const ICS_PROTOCOL_OPTIONS: Record<
   string,
@@ -290,5 +318,11 @@ export const ICS_PROTOCOL_OPTIONS: Record<
     fcHelp: "Read, Write, Browse, Call, CreateSubscription",
     addrLabel: "Node IDs",
     addrHelp: "Namespace and identifier patterns",
+  },
+  iec104: {
+    fcLabel: "Type IDs and classes",
+    fcHelp: "3/13/31 monitor, 45-51/58-64 control, 100 interrogation, 102 read",
+    addrLabel: "CA and IOA",
+    addrHelp: "Common address 0-65534, IOA ranges 0-16777215",
   },
 };

@@ -4,20 +4,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { api, type TelemetryEvent } from "../../lib/api";
+import { api, iec104SessionID, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { StatusBadge } from "../../components/StatusBadge";
+import { describeICSEvidence } from "./iec104-evidence";
 
-type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy";
+type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy" | "iec104";
 
 const FILTER_OPTIONS: Array<{ value: EventFilter; label: string }> = [
   { value: "all", label: "All activity" },
   { value: "service", label: "Service health" },
   { value: "proxy", label: "Proxy activity" },
   { value: "dpi", label: "DPI / ICS" },
+  { value: "iec104", label: "IEC 104" },
   { value: "firewall", label: "Firewall decisions" },
 ];
 
 function eventHeadline(ev: TelemetryEvent): string {
+  const evidence = describeICSEvidence(ev);
+  if (evidence) return evidence.headline;
   if (ev.kind === "service.av.detected") return "Antivirus detection";
   if (ev.kind === "service.av.block_flow") return "Antivirus blocked flow";
   if (ev.kind.startsWith("service.envoy.")) return "Envoy proxy event";
@@ -42,6 +47,7 @@ function EventsInner() {
   const [filter, setFilter] = useState<EventFilter>("all");
   const [kindPrefix, setKindPrefix] = useState<string>("");
   const [onlyDetections, setOnlyDetections] = useState(false);
+  const [sessionFilter, setSessionFilter] = useState("");
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(true);
@@ -71,8 +77,10 @@ function EventsInner() {
           }
           if (filter === "firewall") return ev.proto === "firewall";
           if (filter === "dpi") return ev.proto !== "firewall" && !ev.kind.startsWith("service.");
+          if (filter === "iec104") return ev.proto === "iec104";
           return true;
         })
+        .filter((ev) => !sessionFilter || iec104SessionID(ev) === sessionFilter)
         .filter((ev) => {
           if (!kindPrefix.trim()) return true;
           return ev.kind.startsWith(kindPrefix.trim());
@@ -81,7 +89,7 @@ function EventsInner() {
           if (!onlyDetections) return true;
           return ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow";
         }),
-    [events, filter, kindPrefix, onlyDetections],
+    [events, filter, kindPrefix, onlyDetections, sessionFilter],
   );
   const detectionCount = useMemo(
     () => events.filter((ev) => ev.kind === "service.av.detected" || ev.kind === "service.av.block_flow").length,
@@ -104,7 +112,7 @@ function EventsInner() {
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [filter, kindPrefix, onlyDetections]);
+  }, [filter, kindPrefix, onlyDetections, sessionFilter]);
 
   const visibleEvents = useMemo(
     () => filteredEvents.slice(0, visibleCount),
@@ -134,9 +142,11 @@ function EventsInner() {
   useEffect(() => {
     const type = searchParams.get("filter");
     const avOnly = searchParams.get("av") === "1";
-    if (type === "service" || type === "dpi" || type === "firewall" || type === "proxy") {
+    if (type === "service" || type === "dpi" || type === "firewall" || type === "proxy" || type === "iec104") {
       setFilter(type);
     }
+    const session = searchParams.get("session");
+    if (session) setSessionFilter(session);
     const kindPref = searchParams.get("kind");
     if (kindPref) {
       setKindPrefix(kindPref);
@@ -267,12 +277,22 @@ function EventsInner() {
           />
           Show AV detections only
         </label>
-        {(filter !== "all" || kindPrefix.trim() || onlyDetections) && (
+        {sessionFilter && (
+          <button
+            onClick={() => setSessionFilter("")}
+            title="Clear session filter"
+            className="transition-ui rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 font-mono text-xs text-[var(--text)]"
+          >
+            Session {sessionFilter} ×
+          </button>
+        )}
+        {(filter !== "all" || kindPrefix.trim() || onlyDetections || sessionFilter) && (
           <button
             onClick={() => {
               setFilter("all");
               setKindPrefix("");
               setOnlyDetections(false);
+              setSessionFilter("");
             }}
             className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
           >
@@ -314,7 +334,9 @@ function EventsInner() {
           </div>
         )}
         {!loading && visibleEvents
-          .map((ev) => (
+          .map((ev) => {
+          const evidence = describeICSEvidence(ev);
+          return (
           <div
             key={ev.id}
             className="table-row-hover rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4"
@@ -334,13 +356,38 @@ function EventsInner() {
               {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
             </div>
+            {evidence && (
+              <div className="mt-2 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge variant={evidence.variant} dot>{evidence.badge}</StatusBadge>
+                  <span className="text-xs text-[var(--text)]">{evidence.message}</span>
+                  {evidence.sessionId && evidence.sessionId !== sessionFilter && (
+                    <button
+                      onClick={() => setSessionFilter(evidence.sessionId)}
+                      className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] hover:bg-amber-500/[0.06]"
+                    >
+                      Show session
+                    </button>
+                  )}
+                </div>
+                <div className="grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
+                  {evidence.rows.map((row) => (
+                    <div key={row.label} className="flex gap-2">
+                      <span className="shrink-0 text-[var(--text-dim)]">{row.label}</span>
+                      <span className="break-all font-mono text-[11px] text-[var(--text)]">{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {ev.attributes && (
               <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-[var(--text)]">
                 {JSON.stringify(ev.attributes, null, 2)}
               </pre>
             )}
           </div>
-        ))}
+          );
+        })}
         {/* Infinite scroll sentinel */}
         {hasMore && (
           <div ref={sentinelRef} className="flex items-center justify-center py-4">

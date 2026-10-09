@@ -1,4 +1,10 @@
-import type { FirewallRule, ICSPredicate, Protocol } from "./api";
+import type {
+  FirewallRule,
+  ICSPredicate,
+  IEC104Class,
+  IOARange,
+  Protocol,
+} from "./api";
 
 function asList(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -27,6 +33,36 @@ function toNumberList(value: unknown): number[] {
       return Number.NaN;
     })
     .filter((item) => Number.isFinite(item));
+}
+
+function toIntegerList(value: unknown): number[] {
+  return toNumberList(value).filter((item) => Number.isInteger(item));
+}
+
+const IEC104_CLASSES: ReadonlySet<string> = new Set<IEC104Class>([
+  "monitor",
+  "control",
+  "system",
+  "unknown",
+]);
+
+function toIEC104Classes(value: unknown): IEC104Class[] {
+  return toStringList(value).filter((item): item is IEC104Class =>
+    IEC104_CLASSES.has(item),
+  );
+}
+
+function toIOARanges(value: unknown): IOARange[] {
+  return asList(value).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const { start, end } = item as Record<string, unknown>;
+    return typeof start === "number" &&
+      typeof end === "number" &&
+      Number.isInteger(start) &&
+      Number.isInteger(end)
+      ? [{ start, end }]
+      : [];
+  });
 }
 
 function normalizeProtocol(value: unknown): Protocol | null {
@@ -71,6 +107,10 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
       record.mode === "enforce" || record.mode === "learn"
         ? record.mode
         : undefined,
+    typeIds: toIntegerList(record.typeIds),
+    classes: toIEC104Classes(record.classes),
+    ca: toIntegerList(record.ca),
+    ioa: toIOARanges(record.ioa),
   };
 
   if (typeof record.unitId === "number" && Number.isFinite(record.unitId)) {
@@ -88,6 +128,10 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if ((normalized.functionCode?.length ?? 0) === 0) delete normalized.functionCode;
   if ((normalized.addresses?.length ?? 0) === 0) delete normalized.addresses;
   if ((normalized.objectClasses?.length ?? 0) === 0) delete normalized.objectClasses;
+  if ((normalized.typeIds?.length ?? 0) === 0) delete normalized.typeIds;
+  if ((normalized.classes?.length ?? 0) === 0) delete normalized.classes;
+  if ((normalized.ca?.length ?? 0) === 0) delete normalized.ca;
+  if ((normalized.ioa?.length ?? 0) === 0) delete normalized.ioa;
   if (!normalized.direction) delete normalized.direction;
   if (!normalized.mode) delete normalized.mode;
   if (normalized.unitId == null) delete normalized.unitId;
