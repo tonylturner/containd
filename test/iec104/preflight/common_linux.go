@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -40,6 +41,7 @@ type packet struct {
 	Held       bool      `json:"held"`
 	Verdict    string    `json:"verdict,omitempty"`
 	VerdictErr string    `json:"verdict_error,omitempty"`
+	VerdictMS  float64   `json:"setverdict_ms,omitempty"`
 	HeldAt     time.Time `json:"held_at,omitempty"`
 	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 	HoldMS     float64   `json:"hold_ms,omitempty"`
@@ -208,4 +210,61 @@ func runControlCLI(args []string) error {
 		_, err = fmt.Fprintln(os.Stdout)
 	}
 	return err
+}
+
+type parallelVerdictResult struct {
+	ID             uint32  `json:"id"`
+	HTTPDurationMS float64 `json:"http_duration_ms"`
+	Error          string  `json:"error,omitempty"`
+}
+
+// runParallelVerdicts submits one POST per packet concurrently. It deliberately
+// does not retry failures: a timed-out request may still be executing remotely.
+func runParallelVerdicts(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: preflight parallel-verdict BASE_URL PACKET_ID...")
+	}
+	baseURL := args[0]
+	ids := make([]uint32, len(args)-1)
+	for i, rawID := range args[1:] {
+		id, err := strconv.ParseUint(rawID, 10, 32)
+		if err != nil || id == 0 {
+			return fmt.Errorf("packet id %q must be a positive uint32", rawID)
+		}
+		ids[i] = uint32(id)
+	}
+
+	results := make([]parallelVerdictResult, len(ids))
+	var workers sync.WaitGroup
+	for i, id := range ids {
+		workers.Add(1)
+		go func(i int, id uint32) {
+			defer workers.Done()
+			started := time.Now()
+			body := map[string]any{"id": id, "action": "accept"}
+			_, _, err := requestJSON(http.MethodPost, baseURL+"/verdict", body)
+			results[i] = parallelVerdictResult{
+				ID:             id,
+				HTTPDurationMS: float64(time.Since(started)) / float64(time.Millisecond),
+			}
+			if err != nil {
+				results[i].Error = err.Error()
+			}
+		}(i, id)
+	}
+	workers.Wait()
+
+	if err := json.NewEncoder(os.Stdout).Encode(results); err != nil {
+		return fmt.Errorf("write parallel verdict results: %w", err)
+	}
+	failed := 0
+	for _, result := range results {
+		if result.Error != "" {
+			failed++
+		}
+	}
+	if failed != 0 {
+		return fmt.Errorf("%d of %d parallel verdict submissions failed (see JSON output)", failed, len(results))
+	}
+	return nil
 }

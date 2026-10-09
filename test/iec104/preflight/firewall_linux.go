@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -31,6 +32,8 @@ type firewallState struct {
 	callbacks       uint64
 	verdictsNoError uint64
 	verdictErrors   []string
+	setVerdictTimes []int64
+	handlerTimes    []int64
 	maxPacket       int
 	stopErr         string
 }
@@ -127,11 +130,15 @@ func (s *firewallState) onPacket(attr nfqueue.Attribute) int {
 		}
 		delay := time.Duration(currentRule.DelayMS) * time.Millisecond
 		time.AfterFunc(delay, func() {
-			_ = s.submitVerdict(p.ID, currentRule.Action)
+			if err := s.submitVerdict(p.ID, currentRule.Action); err != nil {
+				return
+			}
 		})
 		return 0
 	}
-	_ = s.submitVerdict(p.ID, "accept")
+	if err := s.submitVerdict(p.ID, "accept"); err != nil {
+		return 0
+	}
 	return 0
 }
 
@@ -176,8 +183,11 @@ func (s *firewallState) submitVerdict(id uint32, action string) error {
 	} else if action != "accept" {
 		return fmt.Errorf("unsupported verdict action %q", action)
 	}
+	started := time.Now()
 	err := queue.SetVerdict(id, verdict)
+	elapsed := time.Since(started)
 	s.mu.Lock()
+	s.setVerdictTimes = append(s.setVerdictTimes, int64(elapsed))
 	if err == nil {
 		s.verdictsNoError++
 	} else {
@@ -187,6 +197,7 @@ func (s *firewallState) submitVerdict(id uint32, action string) error {
 		if s.events[i].ID == id {
 			s.events[i].Verdict = action
 			s.events[i].ResolvedAt = time.Now()
+			s.events[i].VerdictMS = float64(elapsed) / float64(time.Millisecond)
 			if held {
 				s.events[i].HoldMS = s.events[i].ResolvedAt.Sub(entry.HeldAt).Seconds() * 1000
 			}
@@ -249,6 +260,12 @@ func (s *firewallState) handleHeld(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *firewallState) handleVerdict(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	defer func() {
+		s.mu.Lock()
+		s.handlerTimes = append(s.handlerTimes, int64(time.Since(started)))
+		s.mu.Unlock()
+	}()
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("POST required"))
 		return
@@ -302,9 +319,24 @@ func (s *firewallState) handleStats(w http.ResponseWriter, r *http.Request) {
 		"max_observed_packet":     s.maxPacket,
 		"max_packet_len_config":   65535,
 		"stop_error":              s.stopErr,
+		"setverdict_latency":      summarizeLatencies(s.setVerdictTimes),
+		"verdict_handler_latency": summarizeLatencies(s.handlerTimes),
 	}
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func summarizeLatencies(samples []int64) map[string]any {
+	ordered := append([]int64(nil), samples...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	summary := map[string]any{"count": len(ordered), "max_ms": 0.0, "p99_ms": 0.0}
+	if len(ordered) == 0 {
+		return summary
+	}
+	p99Index := int(math.Ceil(float64(len(ordered))*0.99)) - 1
+	summary["max_ms"] = float64(ordered[len(ordered)-1]) / float64(time.Millisecond)
+	summary["p99_ms"] = float64(ordered[p99Index]) / float64(time.Millisecond)
+	return summary
 }
 
 func (s *firewallState) handleSequences(w http.ResponseWriter, r *http.Request) {

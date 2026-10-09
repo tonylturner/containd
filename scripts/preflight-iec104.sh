@@ -11,13 +11,18 @@ IMAGE_NAME="containd-iec104-preflight:${PROJECT}"
 export RESULTS_DIR IMAGE_NAME
 
 mkdir -p "$RESULTS_DIR"
-rm -f "$RESULTS_DIR/startup-failure.log"
+rm -f "$RESULTS_DIR/startup-failure.log" "$RESULTS_DIR/firewall-stats.json" \
+  "$RESULTS_DIR/firewall-stats-stall-failure.json"
 printf '{"schema_version":1,"status":"RUNNING","project":"%s","image":"%s","scenarios":[],"pcaps":[],"evidence":{},"errors":[]}\n' \
   "$PROJECT" "$IMAGE_NAME" >"$RESULTS_FILE"
 
 STACK_ATTEMPTED=0
 CURRENT_CAPTURE=""
 CASE_FAILURES=0
+CASE_VERDICT_ERRORS=0
+CURRENT_SCENARIO=""
+SCENARIO_VERDICT_FAILED=0
+SCENARIO_VERDICT_FAILURES='[]'
 REQUIRED_CASES=(
   "1 deferred ACCEPT"
   "2 deferred DROP"
@@ -27,6 +32,7 @@ REQUIRED_CASES=(
   "6 TCP payload larger than 2048 bytes"
   "7 two-sided RST and reconnect"
   "8 RFC 5961 challenge-ACK observation"
+  "concurrent verdict stall probe"
   "queue stability after 32 deferred verdicts"
   "9 unbound queue fails closed"
 )
@@ -44,6 +50,28 @@ add_error() {
 
 record_case() {
   local name=$1 status=$2 assertion=$3 metrics=${4:-'{}'}
+  local stats error_count new_errors
+  if [[ "$SCENARIO_VERDICT_FAILED" -eq 1 ]]; then
+    status=FAIL
+    assertion+="; at least one verdict submission failed or timed out (not retried)"
+    metrics=$(jq -cn --argjson metrics "$metrics" \
+      --argjson failures "$SCENARIO_VERDICT_FAILURES" \
+      '$metrics + {verdict_submission_failures:$failures}')
+  fi
+  if stats=$(fw GET /stats); then
+    error_count=$(jq -r '.verdict_errors | length' <<<"$stats")
+    if [[ "$error_count" -gt "$CASE_VERDICT_ERRORS" ]]; then
+      new_errors=$(jq -c --argjson from "$CASE_VERDICT_ERRORS" '.verdict_errors[$from:]' <<<"$stats")
+      status=FAIL
+      assertion+="; SetVerdict reported $(jq -r 'length' <<<"$new_errors") error(s)"
+      metrics=$(jq -cn --argjson metrics "$metrics" --argjson errors "$new_errors" \
+        '$metrics + {setverdict_errors:$errors}')
+    fi
+    CASE_VERDICT_ERRORS=$error_count
+  else
+    status=FAIL
+    assertion+="; could not retrieve NFQUEUE stats to check verdict errors"
+  fi
   local tmp="$RESULTS_FILE.tmp"
   jq --arg name "$name" --arg status "$status" --arg assertion "$assertion" \
     --argjson metrics "$metrics" \
@@ -54,6 +82,11 @@ record_case() {
   if [[ "$status" == "FAIL" ]]; then
     CASE_FAILURES=$((CASE_FAILURES + 1))
   fi
+  if [[ "$CURRENT_SCENARIO" == "$name" ]]; then
+    CURRENT_SCENARIO=""
+    SCENARIO_VERDICT_FAILED=0
+    SCENARIO_VERDICT_FAILURES='[]'
+  fi
 }
 
 record_evidence() {
@@ -62,6 +95,97 @@ record_evidence() {
   jq --arg key "$key" --argjson value "$value" \
     '.evidence[$key]=$value' "$RESULTS_FILE" >"$tmp"
   mv "$tmp" "$RESULTS_FILE"
+}
+
+begin_scenario() {
+  CURRENT_SCENARIO=$1
+  SCENARIO_VERDICT_FAILED=0
+  SCENARIO_VERDICT_FAILURES='[]'
+}
+
+record_latency_evidence() {
+  local stats=$1 latencies
+  latencies=$(jq -cn \
+    --argjson setverdict "$(jq -c .setverdict_latency <<<"$stats")" \
+    --argjson handler "$(jq -c .verdict_handler_latency <<<"$stats")" \
+    '{
+      setverdict:{
+        count:$setverdict.count,
+        verdict_latency_max_ms:$setverdict.max_ms,
+        verdict_latency_p99_ms:$setverdict.p99_ms
+      },
+      http_verdict_handler:{
+        count:$handler.count,
+        verdict_latency_max_ms:$handler.max_ms,
+        verdict_latency_p99_ms:$handler.p99_ms
+      }
+    }')
+  record_evidence verdict_latency "$latencies"
+}
+
+observe_failed_verdict() {
+  local id=$1 prefix=$2 events='{"events":[]}' completed=false event stats metrics
+  for _ in $(seq 1 150); do
+    if ! events=$(fw GET /events); then
+      break
+    fi
+    if jq -e --argjson id "$id" \
+      'any(.events[]; .id == $id and ((.verdict // "") != "" or (.verdict_error // "") != ""))' \
+      <<<"$events" >/dev/null; then
+      completed=true
+      break
+    fi
+    sleep 0.1
+  done
+  event=$(jq -c --argjson id "$id" '[.events[] | select(.id == $id)] | first // null' <<<"$events")
+  if ! stats=$(fw GET /stats); then
+    stats='{}'
+  else
+    record_latency_evidence "$stats"
+    record_evidence setverdict_semantics "$(jq -cn \
+      --arg source 'go-nfqueue v2.0.3 SetVerdict sends without a kernel ACK; nil means submitted without a local Send error, not confirmed disposition.' \
+      --argjson stats "$stats" \
+      '{observed_source_semantics:$source,observed_run_stats:$stats}')"
+  fi
+  metrics=$(jq -cn --argjson id "$id" --arg prefix "$prefix" \
+    --argjson completed "$completed" --argjson event "$event" --argjson stats "$stats" \
+    '{packet_id:$id,prefix:$prefix,observer_wait_limit_ms:15000,handler_completed_after_client_timeout:$completed,packet_event:$event,setverdict_latency:$stats.setverdict_latency,verdict_handler_latency:$stats.verdict_handler_latency,verdict_errors:$stats.verdict_errors,request_retried:false}')
+  printf '%s\n' "$metrics"
+}
+
+note_failed_verdict() {
+  local id=$1 prefix=$2 observation
+  observation=$(observe_failed_verdict "$id" "$prefix")
+  SCENARIO_VERDICT_FAILED=1
+  SCENARIO_VERDICT_FAILURES=$(jq -cn \
+    --argjson existing "$SCENARIO_VERDICT_FAILURES" \
+    --argjson failure "$observation" '$existing + [$failure]')
+  record_evidence failed_verdict_observation "$observation"
+  if jq -e '.handler_completed_after_client_timeout == true' \
+    <<<"$observation" >/dev/null; then
+    printf 'POST /verdict failed or timed out for packet %s; handler was observed to finish; not retried\\n' \
+      "$id" >&2
+    return 0
+  fi
+  printf 'POST /verdict failed for packet %s and handler remained unresolved; not retried\\n' \
+    "$id" >&2
+  return 1
+}
+
+wait_verdict_events() {
+  local ids_json=$1 events
+  for _ in $(seq 1 150); do
+    if ! events=$(fw GET /events); then
+      return 1
+    fi
+    if jq -e --argjson ids "$ids_json" \
+      '. as $snapshot | all($ids[]; . as $id | any($snapshot.events[]; .id == $id and ((.verdict // "") != "" or (.verdict_error // "") != "")))' \
+      <<<"$events" >/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
 }
 
 call() {
@@ -165,24 +289,44 @@ held_id() {
 
 release_held() {
   local prefix=$1 id body
-  id=$(held_id "$prefix")
+  if ! id=$(held_id "$prefix"); then
+    record_case "$CURRENT_SCENARIO" FAIL "Could not identify held packet for prefix $prefix"
+    fatal "Could not identify held packet for explicit verdict submission"
+  fi
   body=$(jq -cn --argjson id "$id" '{id:$id,action:"accept"}')
-  fw POST /verdict "$body" >/dev/null
+  if fw POST /verdict "$body" >/dev/null; then
+    return 0
+  else
+    if ! note_failed_verdict "$id" "$prefix"; then
+      fatal "Held-packet verdict submission did not complete after its client failure"
+    fi
+    return 0
+  fi
 }
 
 release_all_held() {
   local prefix=$1 held ids id body
   for _ in $(seq 1 30); do
-    held=$(fw GET /held)
-    ids=$(jq -r --arg prefix "$prefix" \
-      '.held[] | select(.prefix | startswith($prefix)) | .id' <<<"$held")
+    if ! held=$(fw GET /held); then
+      return 1
+    fi
+    if ! ids=$(jq -r --arg prefix "$prefix" \
+      '.held[] | select(.prefix | startswith($prefix)) | .id' <<<"$held"); then
+      return 1
+    fi
     if [[ -z "$ids" ]]; then
       return 0
     fi
     while IFS= read -r id; do
       [[ -n "$id" ]] || continue
       body=$(jq -cn --argjson id "$id" '{id:$id,action:"accept"}')
-      fw POST /verdict "$body" >/dev/null
+      if fw POST /verdict "$body" >/dev/null; then
+        :
+      else
+        if ! note_failed_verdict "$id" "$prefix"; then
+          return 1
+        fi
+      fi
     done <<<"$ids"
     sleep 0.05
   done
@@ -300,6 +444,11 @@ trap finish EXIT
 fatal() {
   local message=$1
   printf 'FATAL: %s\n' "$message" >&2
+  if [[ -n "$CURRENT_SCENARIO" ]] &&
+    ! jq -e --arg name "$CURRENT_SCENARIO" 'any(.scenarios[]; .name == $name)' \
+      "$RESULTS_FILE" >/dev/null 2>&1; then
+    record_case "$CURRENT_SCENARIO" FAIL "$message" '{"fatal":true}'
+  fi
   add_error "$message"
   exit 1
 }
@@ -359,6 +508,7 @@ printf '\nRunning checkpoint-1 scenarios on Docker Desktop (project %s)\n\n' "$P
 
 # 1. Deferred ACCEPT: the handler returns with the packet held; a timer submits
 # ACCEPT about 300 ms later and the server application must get exactly the data.
+begin_scenario "1 deferred ACCEPT"
 start_capture deferred-accept || fatal "Could not start endpoint pcaps for deferred ACCEPT"
 new_connection || fatal "Could not create the deferred-ACCEPT TCP connection"
 set_rule 'A1:' c2s accept 300
@@ -383,6 +533,7 @@ stop_capture_or_fail
 
 # Extra load assertion: demonstrate the same queue works after 32 independently
 # deferred verdicts rather than only a single packet.
+begin_scenario "queue stability after 32 deferred verdicts"
 start_capture deferred-verdict-stress || fatal "Could not start pcaps for queue stability scenario"
 new_connection || fatal "Could not create the deferred-verdict stress connection"
 set_rule 'ST:' c2s accept 50
@@ -407,6 +558,7 @@ stop_capture_or_fail
 
 # 2. Deferred DROP must leave the server application buffer empty, even after a
 # retransmission interval; close the client while the matching drop stays armed.
+begin_scenario "2 deferred DROP"
 start_capture deferred-drop || fatal "Could not start endpoint pcaps for deferred DROP"
 new_connection || fatal "Could not create the deferred-DROP TCP connection"
 set_rule 'DROP:' c2s drop 100
@@ -431,8 +583,221 @@ else
 fi
 stop_capture_or_fail
 
+# Concurrent verdict stall probe: queue 50 separately emitted data packets over five TCP flows, then submit
+# exactly one concurrent HTTP verdict request per currently held packet. The
+# packet event records each SetVerdict call's own elapsed time (not HTTP time).
+begin_scenario "concurrent verdict stall probe"
+start_capture verdict-stall || fatal "Could not start endpoint pcaps for concurrent verdict probe"
+set_rule 'Q50:' c2s manual 0
+declare -a STALL_FLOW_IDS=()
+declare -a STALL_FLOW_DATA=()
+declare -a STALL_SEND_PIDS=()
+for flow in 0 1 2 3 4; do
+  new_connection || fatal "Could not open concurrent-verdict flow $flow"
+  STALL_FLOW_IDS+=("$CLIENT_ID")
+  payload=""
+  for sequence in $(seq -w 0 9); do
+    payload+="Q50:${flow}:${sequence};"
+  done
+  STALL_FLOW_DATA+=("$payload")
+  SEND_BODY=$(jq -cn --arg data "$payload" \
+    '{data:$data,chunk_size:8,gap_ms:10}')
+  endpoint client POST "/send?id=$CLIENT_ID" "$SEND_BODY" \
+    >"$RESULTS_DIR/stall-send-$flow.json" 2>"$RESULTS_DIR/stall-send-$flow.stderr" &
+  STALL_SEND_PIDS+=("$!")
+done
+STALL_SEND_FAILURES=0
+for flow in 0 1 2 3 4; do
+  if wait "${STALL_SEND_PIDS[$flow]}"; then
+    :
+  else
+    rc=$?
+    STALL_SEND_FAILURES=$((STALL_SEND_FAILURES + 1))
+    printf 'Flow %s send failed with exit %s (not retried)\n' "$flow" "$rc" \
+      >>"$RESULTS_DIR/stall-send-failures.txt"
+  fi
+done
+if [[ "$STALL_SEND_FAILURES" -ne 0 ]]; then
+  fatal "$STALL_SEND_FAILURES concurrent probe flow write(s) failed"
+fi
+wait_held 'Q50:' 50 || fatal "Fewer than 50 packets entered the concurrent-verdict hold"
+STALL_HELD=$(fw GET /held)
+STALL_ID_LINES=$(jq -r '[.held[] | select(.prefix | startswith("Q50:")) | .id] | .[]' \
+  <<<"$STALL_HELD")
+STALL_PACKET_COUNT=$(jq -r '[.held[] | select(.prefix | startswith("Q50:"))] | length' \
+  <<<"$STALL_HELD")
+STALL_INITIAL_PACKET_COUNT=$STALL_PACKET_COUNT
+STALL_IDS=()
+while IFS= read -r id; do
+  [[ -n "$id" ]] && STALL_IDS+=("$id")
+done <<<"$STALL_ID_LINES"
+if [[ "$STALL_PACKET_COUNT" -lt 50 || "${#STALL_IDS[@]}" -ne "$STALL_PACKET_COUNT" ]]; then
+  fatal "Concurrent probe held-packet snapshot was inconsistent (count=$STALL_PACKET_COUNT)"
+fi
+
+STALL_SUBMIT_OK=1
+if compose exec -T firewall /usr/local/bin/preflight parallel-verdict \
+  http://127.0.0.1:8081 "${STALL_IDS[@]}" \
+  >"$RESULTS_DIR/stall-parallel-verdicts.json" 2>"$RESULTS_DIR/stall-parallel-verdicts.stderr"; then
+  :
+else
+  rc=$?
+  STALL_SUBMIT_OK=0
+  printf 'Parallel verdict helper exited %s; no request was retried\n' "$rc" \
+    >>"$RESULTS_DIR/stall-parallel-verdicts.stderr"
+fi
+
+if [[ "$STALL_SUBMIT_OK" -eq 0 ]]; then
+  STALL_SUBMIT_FAILED=1
+  STALL_HTTP_RESULTS=$(jq -c 'if type == "array" then . else [] end' \
+    "$RESULTS_DIR/stall-parallel-verdicts.json" 2>/dev/null || printf '[]')
+  STALL_HTTP_ERRORS=$(jq -c '[.[] | select(.error != null and .error != "") | {id,error}]' \
+    <<<"$STALL_HTTP_RESULTS")
+  STALL_BATCH_IDS=$(jq -c '[.[].id]' <<<"$STALL_HTTP_RESULTS")
+  if [[ $(jq -r 'length' <<<"$STALL_BATCH_IDS") -ne "$STALL_PACKET_COUNT" ]] ||
+    ! wait_verdict_events "$STALL_BATCH_IDS"; then
+    STALL_FAILURE_STATS=$(fw GET /stats || printf '{}')
+    record_latency_evidence "$STALL_FAILURE_STATS"
+    record_evidence failed_verdict_observation "$(jq -cn \
+      --argjson ids "$STALL_BATCH_IDS" --argjson errors "$STALL_HTTP_ERRORS" \
+      --argjson stats "$STALL_FAILURE_STATS" \
+      '{packet_ids:$ids,http_errors:$errors,latencies:{setverdict:$stats.setverdict_latency,verdict_handler:$stats.verdict_handler_latency},requests_retried:false,all_handlers_completed:false}')"
+    fatal "At least one failed concurrent verdict handler did not return within the observation window"
+  fi
+  STALL_FAILURE_STATS=$(fw GET /stats)
+  STALL_FAILURE_EVENTS=$(fw GET /events | jq -c --arg prefix 'Q50:' \
+    '[.events[] | select(.matched and (.prefix | startswith($prefix)))]')
+  record_latency_evidence "$STALL_FAILURE_STATS"
+  record_evidence failed_verdict_observation "$(jq -cn \
+    --argjson errors "$STALL_HTTP_ERRORS" --argjson stats "$STALL_FAILURE_STATS" \
+    --argjson events "$STALL_FAILURE_EVENTS" \
+    '{http_errors:$errors,packet_events:$events,latencies:{setverdict:$stats.setverdict_latency,verdict_handler:$stats.verdict_handler_latency},requests_retried:false,all_handlers_completed:true}')"
+else
+  STALL_HTTP_RESULTS=$(cat "$RESULTS_DIR/stall-parallel-verdicts.json")
+  STALL_HTTP_ERRORS='[]'
+  STALL_SUBMIT_FAILED=0
+fi
+STALL_SUBMITTED_IDS=("${STALL_IDS[@]}")
+STALL_LATE_BATCHES=0
+STALL_QUIET_POLLS=0
+while [[ "$STALL_QUIET_POLLS" -lt 3 ]]; do
+  STALL_HELD=$(fw GET /held)
+  STALL_LATE_LINES=$(jq -r '[.held[] | select(.prefix | startswith("Q50:")) | .id] | .[]' \
+    <<<"$STALL_HELD")
+  if [[ -z "$STALL_LATE_LINES" ]]; then
+    STALL_QUIET_POLLS=$((STALL_QUIET_POLLS + 1))
+    sleep 0.05
+    continue
+  fi
+
+  STALL_LATE_IDS=()
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && STALL_LATE_IDS+=("$id")
+  done <<<"$STALL_LATE_LINES"
+  for late_id in "${STALL_LATE_IDS[@]}"; do
+    for submitted_id in "${STALL_SUBMITTED_IDS[@]}"; do
+      if [[ "$late_id" == "$submitted_id" ]]; then
+        fatal "Concurrent probe attempted to retry packet $late_id"
+      fi
+    done
+  done
+  STALL_LATE_BATCHES=$((STALL_LATE_BATCHES + 1))
+  if [[ "$STALL_LATE_BATCHES" -gt 5 ]]; then
+    fatal "Concurrent probe continued accumulating held retransmissions after five release batches"
+  fi
+  LATE_RESULTS_FILE="$RESULTS_DIR/stall-parallel-verdicts-late-$STALL_LATE_BATCHES.json"
+  if compose exec -T firewall /usr/local/bin/preflight parallel-verdict \
+    http://127.0.0.1:8081 "${STALL_LATE_IDS[@]}" \
+    >"$LATE_RESULTS_FILE" 2>"$LATE_RESULTS_FILE.stderr"; then
+    LATE_RESULTS=$(cat "$LATE_RESULTS_FILE")
+    STALL_HTTP_RESULTS=$(jq -cn --argjson first "$STALL_HTTP_RESULTS" \
+      --argjson late "$LATE_RESULTS" '$first + $late')
+    STALL_SUBMITTED_IDS+=("${STALL_LATE_IDS[@]}")
+    STALL_PACKET_COUNT=$((STALL_PACKET_COUNT + ${#STALL_LATE_IDS[@]}))
+    STALL_QUIET_POLLS=0
+  else
+    LATE_RESULTS=$(jq -c 'if type == "array" then . else [] end' \
+      "$LATE_RESULTS_FILE" 2>/dev/null || printf '[]')
+    LATE_BATCH_ERRORS=$(jq -c '[.[] | select(.error != null and .error != "") | {id,error}]' \
+      <<<"$LATE_RESULTS")
+    LATE_BATCH_IDS=$(jq -c '[.[].id]' <<<"$LATE_RESULTS")
+    STALL_HTTP_RESULTS=$(jq -cn --argjson first "$STALL_HTTP_RESULTS" \
+      --argjson late "$LATE_RESULTS" '$first + $late')
+    STALL_HTTP_ERRORS=$(jq -cn --argjson first "$STALL_HTTP_ERRORS" \
+      --argjson late "$LATE_BATCH_ERRORS" '$first + $late')
+    STALL_SUBMITTED_IDS+=("${STALL_LATE_IDS[@]}")
+    STALL_PACKET_COUNT=$((STALL_PACKET_COUNT + ${#STALL_LATE_IDS[@]}))
+    STALL_SUBMIT_FAILED=1
+    if [[ $(jq -r 'length' <<<"$LATE_BATCH_IDS") -ne "${#STALL_LATE_IDS[@]}" ]] ||
+      ! wait_verdict_events "$LATE_BATCH_IDS"; then
+      STALL_FAILURE_STATS=$(fw GET /stats || printf '{}')
+      record_latency_evidence "$STALL_FAILURE_STATS"
+      record_evidence failed_verdict_observation "$(jq -cn \
+        --argjson ids "$LATE_BATCH_IDS" --argjson errors "$LATE_BATCH_ERRORS" \
+        --argjson stats "$STALL_FAILURE_STATS" \
+        '{packet_ids:$ids,http_errors:$errors,latencies:{setverdict:$stats.setverdict_latency,verdict_handler:$stats.verdict_handler_latency},requests_retried:false,all_handlers_completed:false}')"
+      fatal "A failed late-retransmission verdict handler did not return within the observation window"
+    fi
+    STALL_FAILURE_STATS=$(fw GET /stats)
+    STALL_FAILURE_EVENTS=$(fw GET /events | jq -c --arg prefix 'Q50:' \
+      '[.events[] | select(.matched and (.prefix | startswith($prefix)))]')
+    record_latency_evidence "$STALL_FAILURE_STATS"
+    record_evidence failed_verdict_observation "$(jq -cn \
+      --argjson errors "$STALL_HTTP_ERRORS" --argjson stats "$STALL_FAILURE_STATS" \
+      --argjson events "$STALL_FAILURE_EVENTS" \
+      '{http_errors:$errors,packet_events:$events,latencies:{setverdict:$stats.setverdict_latency,verdict_handler:$stats.verdict_handler_latency},requests_retried:false,all_handlers_completed:true}')"
+    STALL_QUIET_POLLS=0
+  fi
+done
+
+for flow in 0 1 2 3 4; do
+  wait_received server "${STALL_FLOW_IDS[$flow]}" "${STALL_FLOW_DATA[$flow]}" \
+    || fatal "Concurrent probe data for flow $flow was not delivered intact"
+done
+STALL_EVENTS=$(fw GET /events)
+STALL_SETVERDICT_MS=$(jq -c --arg prefix 'Q50:' \
+  '[.events[] | select(.matched and (.prefix | startswith($prefix)) and .verdict == "accept") | .setverdict_ms]' \
+  <<<"$STALL_EVENTS")
+STALL_RETURN_COUNT=$(jq -r 'length' <<<"$STALL_SETVERDICT_MS")
+STALL_LATENCY_MAX_MS=$(jq -r 'max // 0' <<<"$STALL_SETVERDICT_MS")
+STALL_LATENCY_P99_MS=$(jq -r 'if length == 0 then 0 else (sort | .[((length * 0.99 | ceil) - 1)]) end' \
+  <<<"$STALL_SETVERDICT_MS")
+STALL_HELD_LEFT=$(fw GET /held | jq -r '[.held[] | select(.prefix | startswith("Q50:"))] | length')
+STALL_HTTP_COUNT=$(jq -r 'length' <<<"$STALL_HTTP_RESULTS")
+STALL_HTTP_MAX_MS=$(jq -r '[.[].http_duration_ms] | max // 0' <<<"$STALL_HTTP_RESULTS")
+STALL_HTTP_P99_MS=$(jq -r 'if length == 0 then 0 else ([.[].http_duration_ms] | sort | .[((length * 0.99 | ceil) - 1)]) end' \
+  <<<"$STALL_HTTP_RESULTS")
+STALL_METRICS=$(jq -cn --argjson expected 50 --argjson initial "$STALL_INITIAL_PACKET_COUNT" \
+  --argjson held "$STALL_PACKET_COUNT" --argjson late_batches "$STALL_LATE_BATCHES" \
+  --argjson posts "$STALL_HTTP_COUNT" --argjson returns "$STALL_RETURN_COUNT" \
+  --argjson max_ms "$STALL_LATENCY_MAX_MS" --argjson p99_ms "$STALL_LATENCY_P99_MS" \
+  --argjson http_max_ms "$STALL_HTTP_MAX_MS" --argjson http_p99_ms "$STALL_HTTP_P99_MS" \
+  --argjson held_left "$STALL_HELD_LEFT" --argjson setverdict_ms "$STALL_SETVERDICT_MS" \
+  --argjson http_errors "$STALL_HTTP_ERRORS" \
+  '{expected_packets:$expected,initial_held_packets:$initial,total_held_packets:$held,late_retransmission_release_batches:$late_batches,parallel_verdict_posts:$posts,setverdict_returns:$returns,setverdict_latency_max_ms:$max_ms,setverdict_latency_p99_ms:$p99_ms,verdict_http_client_latency_max_ms:$http_max_ms,verdict_http_client_latency_p99_ms:$http_p99_ms,http_errors:$http_errors,unresolved_held_packets:$held_left,per_packet_setverdict_ms:$setverdict_ms,requests_retried:false}')
+if [[ "$STALL_SUBMIT_FAILED" -eq 0 && "$STALL_PACKET_COUNT" -ge 50 &&
+  "$STALL_HTTP_COUNT" -eq "$STALL_PACKET_COUNT" &&
+  "$STALL_RETURN_COUNT" -eq "$STALL_PACKET_COUNT" && "$STALL_HELD_LEFT" -eq 0 ]] &&
+  awk -v n="$STALL_LATENCY_MAX_MS" 'BEGIN { exit !(n <= 250) }'; then
+  record_case "concurrent verdict stall probe" PASS \
+    "released $STALL_PACKET_COUNT held packets concurrently; every SetVerdict returned in ${STALL_LATENCY_MAX_MS}ms (limit 250ms)" \
+    "$STALL_METRICS"
+else
+  if [[ "$STALL_SUBMIT_FAILED" -eq 1 ]]; then
+    STALL_FAILURE_ASSERTION="One or more POST /verdict calls failed or timed out; each request was observed but never retried"
+  else
+    STALL_FAILURE_ASSERTION="concurrent release count, delivery, or 250ms SetVerdict latency assertion failed"
+  fi
+  record_case "concurrent verdict stall probe" FAIL \
+    "$STALL_FAILURE_ASSERTION" \
+    "$STALL_METRICS"
+fi
+stop_capture_or_fail
+
+
 # 3. Hold three packets on one flow and one on another; release the 2nd packet
 # first, then the independent flow, then fill the gap on the first flow.
+begin_scenario "3 multiple held packets"
 start_capture multiple-held || fatal "Could not start endpoint pcaps for multiple-held scenario"
 set_rule 'M:' c2s manual 0
 new_connection || fatal "Could not open first multiple-held flow"
@@ -463,7 +828,9 @@ release_held 'M:flow1-1;'
 release_held 'M:flow1-3;'
 FLOW1_EXPECTED='M:flow1-1;M:flow1-2;M:flow1-3;'
 wait_received server "$FLOW1" "$FLOW1_EXPECTED" || fatal "First-flow stream was not reassembled intact after chosen-order verdicts"
-release_all_held 'M:' || fatal "Could not settle all delayed retransmissions from the multiple-held flows"
+if ! release_all_held 'M:'; then
+  fatal "Could not settle all delayed retransmissions from the multiple-held flows"
+fi
 MULTI_LEFT=$(fw GET /held | jq -r '[.held[] | select(.prefix | startswith("M:"))] | length')
 MULTI_METRICS=$(jq -cn --argjson held "$MULTI_HELD_COUNT" --argjson distinct "$HELD_DISTINCT" \
   --arg before "$FLOW1_BEFORE" --arg flow1 "$FLOW1_EXPECTED" --arg flow2 'M:flow2-1;' \
@@ -478,6 +845,7 @@ stop_capture_or_fail
 
 # 4. The NFQUEUE callback returns without a verdict: a different flow can pass
 # while the first packet remains held.
+begin_scenario "4 callback returns without head-of-line stall"
 start_capture callback-return || fatal "Could not start endpoint pcaps for callback-return scenario"
 set_rule 'H:' c2s manual 0
 new_connection || fatal "Could not open held callback-return flow"
@@ -495,7 +863,9 @@ wait_received server "$FREE_FLOW" 'FREE:independent-flow' \
 HELD_COUNT_AFTER=$(fw GET /held | jq -r '.held | length')
 release_held 'H:'
 wait_received server "$HELD_FLOW" 'H:callback-returned' || fatal "Held callback-return packet did not arrive after verdict"
-release_all_held 'H:' || fatal "Could not settle all held callback-return retransmissions"
+if ! release_all_held 'H:'; then
+  fatal "Could not settle all held callback-return retransmissions"
+fi
 HELD_LEFT=$(fw GET /held | jq -r '[.held[] | select(.prefix | startswith("H:"))] | length')
 CALLBACK_METRICS=$(jq -cn --argjson held_before "$HELD_COUNT_BEFORE" --argjson held_after "$HELD_COUNT_AFTER" \
   --arg free 'FREE:independent-flow' \
@@ -510,6 +880,7 @@ stop_capture_or_fail
 
 # 5. Exercise deferred accept and drop from server to client as well as the
 # client-to-server direction used above.
+begin_scenario "5 verdict in both directions"
 start_capture reverse-direction || fatal "Could not start endpoint pcaps for reverse-direction scenario"
 new_connection || fatal "Could not open reverse-direction TCP flow"
 REVERSE_ID=$CLIENT_ID
@@ -542,6 +913,7 @@ stop_capture_or_fail
 
 # 6. TCP stream payload exceeds the snaplen used in production. The harness
 # configures a 65535-byte NFQUEUE copy and verifies the reconstructed stream.
+begin_scenario "6 TCP payload larger than 2048 bytes"
 start_capture large-payload || fatal "Could not start endpoint pcaps for large-payload scenario"
 new_connection || fatal "Could not open large-payload TCP flow"
 LARGE_ID=$CLIENT_ID
@@ -569,6 +941,7 @@ stop_capture_or_fail
 
 # 7. Drop unforwarded client bytes and use raw IPv4 RSTs with endpoint-correct
 # sequence numbers. Both application sockets must report reset, then reconnect.
+begin_scenario "7 two-sided RST and reconnect"
 start_capture rst-reconnect || fatal "Could not start endpoint pcaps for RST scenario"
 new_connection || fatal "Could not open RST test flow"
 RST_ID=$CLIENT_ID
@@ -627,6 +1000,7 @@ stop_capture_or_fail
 # 8. RFC 5961 evidence probe: the first in-window but inexact RST is not a hard
 # gate; if a challenge ACK is observed, retry with its ACK number and inspect
 # the client socket result.
+begin_scenario "8 RFC 5961 challenge-ACK observation"
 start_capture challenge-ack || fatal "Could not start endpoint pcaps for challenge-ACK probe"
 new_connection || fatal "Could not open challenge-ACK test flow"
 CHALLENGE_ID=$CLIENT_ID
@@ -682,6 +1056,7 @@ stop_capture_or_fail
 
 # 9. Stop only this harness's queue socket, leave nft routing active, and verify
 # a packet hitting queue 101 with no listener does not reach the application.
+begin_scenario "9 unbound queue fails closed"
 start_capture unbound-queue || fatal "Could not start endpoint pcaps for unbound-queue scenario"
 new_connection || fatal "Could not open fail-closed test connection before stopping the queue"
 UNBOUND_ID=$CLIENT_ID
@@ -712,6 +1087,7 @@ stop_capture_or_fail
 fw GET /stats >"$RESULTS_DIR/firewall-stats.json" || fatal "Could not retrieve final queue stats"
 jq -e '.verdict_errors | length == 0' "$RESULTS_DIR/firewall-stats.json" >/dev/null || \
   record_evidence verdict_errors "$(jq -c .verdict_errors "$RESULTS_DIR/firewall-stats.json")"
+record_latency_evidence "$(cat "$RESULTS_DIR/firewall-stats.json")"
 record_evidence setverdict_semantics "$(jq -cn --arg source 'go-nfqueue v2.0.3 SetVerdict sends a netlink request without requesting a kernel ACK; nil means submitted without a local Send error, not confirmed disposition.' \
   --argjson stats "$(cat "$RESULTS_DIR/firewall-stats.json")" \
   '{observed_source_semantics:$source,observed_run_stats:$stats}')"
