@@ -46,11 +46,7 @@ import { authAPI } from "./api-auth";
 import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
-import {
-  fetchWithSession,
-} from "./api-core";
-import {
-} from "./api-request";
+import { fetchWithSession } from "./api-core";
 
 export type DPIExclusion = {
   value: string;

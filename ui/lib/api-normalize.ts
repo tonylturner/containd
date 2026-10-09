@@ -63,8 +63,6 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
     objectClasses: toNumberList(record.objectClasses).map((item) =>
       Math.max(0, Math.trunc(item)),
     ),
-    readOnly: record.readOnly === true,
-    writeOnly: record.writeOnly === true,
     direction:
       record.direction === "request" || record.direction === "response"
         ? record.direction
@@ -82,6 +80,11 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
     if (Number.isFinite(parsed)) normalized.unitId = Math.trunc(parsed);
   }
 
+  // Booleans keep their wire presence: the server omits false values, and an
+  // invented `writeOnly: false` is a forbidden key for some protocols.
+  if (typeof record.readOnly === "boolean") normalized.readOnly = record.readOnly;
+  if (typeof record.writeOnly === "boolean") normalized.writeOnly = record.writeOnly;
+
   if ((normalized.functionCode?.length ?? 0) === 0) delete normalized.functionCode;
   if ((normalized.addresses?.length ?? 0) === 0) delete normalized.addresses;
   if ((normalized.objectClasses?.length ?? 0) === 0) delete normalized.objectClasses;
@@ -90,7 +93,8 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if (normalized.unitId == null) delete normalized.unitId;
   if (!normalized.protocol) delete normalized.protocol;
 
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
+  // `ics: {}` is a valid L3/L4-only predicate; keep it an object.
+  return normalized;
 }
 
 export function normalizeFirewallRule(value: unknown): FirewallRule {

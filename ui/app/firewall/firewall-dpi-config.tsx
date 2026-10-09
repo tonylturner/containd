@@ -435,10 +435,10 @@ function DPIProtocolModal({
         </div>
 
         <div className="mt-4 text-[10px] text-[var(--text-dim)]">
-          ICS protocol decoders (Modbus, DNP3, CIP, S7comm, IEC 61850 MMS,
-          BACnet, OPC UA) are always active and cannot be disabled. TLS
-          inspection covers handshake metadata only (SNI, JA3, cipher suites) —
-          full TLS interception is planned for a future release.
+          ICS protocol decoders are enabled or disabled separately under ICS
+          Protocol Decoders. TLS inspection covers handshake metadata only
+          (SNI, JA3, cipher suites) — full TLS interception is planned for a
+          future release.
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
