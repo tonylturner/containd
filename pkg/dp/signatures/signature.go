@@ -5,7 +5,9 @@ package signatures
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +30,7 @@ type Signature struct {
 // All conditions in a signature must match (AND logic).
 type Condition struct {
 	Field string `json:"field"` // event attribute path: "function_code", "is_write", etc.
-	Op    string `json:"op"`    // equals, in, gt, lt, contains, regex
+	Op    string `json:"op"`    // equals, in, gt, lt, gte, lte, contains, has_token, regex
 	Value any    `json:"value"`
 }
 
@@ -189,6 +191,8 @@ func evalCondition(cond Condition, fieldVal any) bool {
 		return compareNumeric(fieldVal, cond.Value) <= 0
 	case "contains":
 		return containsStr(fieldVal, cond.Value)
+	case "has_token":
+		return hasToken(fieldVal, cond.Value)
 	case "regex":
 		return matchesRegex(fieldVal, cond.Value)
 	default:
@@ -260,6 +264,53 @@ func containsStr(fieldVal, condVal any) bool {
 	fs := fmt.Sprintf("%v", fieldVal)
 	cs := fmt.Sprintf("%v", condVal)
 	return strings.Contains(fs, cs)
+}
+
+// hasToken reports whether condVal is exactly one of the tokens of fieldVal:
+// a comma-separated string (the DNP3 object_groups form) or a list of
+// strings. Tokens compare whole, so "7" does not match "70" or "170".
+func hasToken(fieldVal, condVal any) bool {
+	want, ok := tokenString(condVal)
+	if !ok {
+		return false
+	}
+	var tokens []string
+	switch v := fieldVal.(type) {
+	case string:
+		tokens = strings.Split(v, ",")
+	case []string:
+		tokens = v
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return false
+			}
+			tokens = append(tokens, s)
+		}
+	default:
+		return false
+	}
+	for _, tok := range tokens {
+		if strings.TrimSpace(tok) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenString renders a condition value as a token: strings as given,
+// integral numbers in decimal.
+func tokenString(v any) (string, bool) {
+	if s, ok := v.(string); ok {
+		t := strings.TrimSpace(s)
+		return t, t != ""
+	}
+	f, ok := toFloat64(v)
+	if !ok || f != math.Trunc(f) || math.IsInf(f, 0) {
+		return "", false
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64), true
 }
 
 // sigRegexCache caches compiled regex patterns to avoid per-packet compilation.

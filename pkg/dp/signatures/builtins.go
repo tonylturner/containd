@@ -119,7 +119,7 @@ func builtinSignatures() []Signature {
 			Severity:    "high",
 			Protocol:    "dnp3",
 			Conditions: []Condition{
-				{Field: "object_group", Op: "equals", Value: float64(70)},
+				{Field: "object_groups", Op: "has_token", Value: "70"},
 			},
 			References: []string{"https://attack.mitre.org/techniques/T0859/"},
 		},
