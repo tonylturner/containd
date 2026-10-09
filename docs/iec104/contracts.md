@@ -354,3 +354,4 @@ These override the text above where they differ.
   - The integer accessors reject `float32`.
   - `DirClient`/`DirServer` are the `APDUID` direction bytes.
 - The DP `rules.ICSPredicate` keeps its existing untagged fields; only the four new fields carry JSON tags. Engine decoding is case-insensitive, so this is acceptable. Do not retag existing fields: that would change the snapshot wire format.
+- **K4 non-finite short floats (Tony, 2026-10-09).** A short float (R32) whose bits are NaN or ±Inf is not `malformed`. The object keeps its normal kind and attributes. `value` is omitted, because JSON cannot carry the number, and `value_invalid` (bool) is `true`. `value_invalid` is absent on every other object. This covers monitor types (13, 36) and set-point commands (50, 63) alike. Policy never matches on `value`, so a command's decision is unchanged.
