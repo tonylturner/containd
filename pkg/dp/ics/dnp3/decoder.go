@@ -5,6 +5,7 @@ package dnp3
 
 import (
 	"encoding/hex"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -81,7 +82,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if IsResponse(fc) {
 		objOffset = 5 // +2 IIN bytes
 	}
-	objHeaders := ParseObjectHeaders(frame.Data, objOffset)
+	objHeaders := ParseObjectHeaders(frame.Data, objOffset, fc)
 	if len(objHeaders) > 0 {
 		// Emit comma-separated object groups.
 		var b strings.Builder
@@ -95,7 +96,9 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 		// Emit first header's qualifier and count for primary inspection.
 		attrs["qualifier"] = objHeaders[0].Qualifier
-		attrs["object_count"] = objHeaders[0].Count
+		if count := objHeaders[0].Count; count <= math.MaxUint16 {
+			attrs["object_count"] = uint16(count)
+		}
 	}
 
 	// Include raw hex for operator visibility (cap to avoid huge payloads).

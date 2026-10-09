@@ -43,6 +43,10 @@ const (
 	FuncOperate             = 0x04
 	FuncDirectOperate       = 0x05
 	FuncDirectOperateNoAck  = 0x06
+	FuncImmediateFreeze     = 0x07
+	FuncImmediateFreezeNR   = 0x08
+	FuncFreezeClear         = 0x09
+	FuncFreezeClearNR       = 0x0A
 	FuncColdRestart         = 0x0D
 	FuncWarmRestart         = 0x0E
 	FuncStopApplication     = 0x12
@@ -204,93 +208,6 @@ func FormatIINFlags(iin1, iin2 uint8) string {
 		}
 	}
 	return b.String()
-}
-
-// ObjectHeader represents a parsed DNP3 object group header.
-type ObjectHeader struct {
-	Group     uint8
-	Variation uint8
-	Qualifier uint8
-	Count     uint16 // object count (interpretation depends on qualifier)
-	Size      int    // total bytes consumed by this header
-}
-
-// ParseObjectHeaders parses all object group headers from the application data.
-// offset is the byte position in Data where object headers begin.
-func ParseObjectHeaders(data []byte, offset int) []ObjectHeader {
-	if offset >= len(data) {
-		return nil
-	}
-	// Pre-size to avoid repeated growth; 4 is typical max.
-	headers := make([]ObjectHeader, 0, 4)
-	pos := offset
-	for pos+3 <= len(data) {
-		oh := ObjectHeader{
-			Group:     data[pos],
-			Variation: data[pos+1],
-			Qualifier: data[pos+2],
-		}
-		pos += 3
-		consumed := 3
-
-		// Parse count/range based on qualifier code.
-		// Qualifier low nibble determines index/range prefix size.
-		switch oh.Qualifier {
-		case 0x00, 0x01, 0x02:
-			// 1-byte start + 1-byte stop range
-			if pos+2 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos+1]-data[pos]) + 1
-			pos += 2
-			consumed += 2
-		case 0x03, 0x04, 0x05:
-			// 2-byte start + 2-byte stop range
-			if pos+4 > len(data) {
-				return headers
-			}
-			start := binary.LittleEndian.Uint16(data[pos : pos+2])
-			stop := binary.LittleEndian.Uint16(data[pos+2 : pos+4])
-			oh.Count = stop - start + 1
-			pos += 4
-			consumed += 4
-		case 0x06:
-			// All objects, no range field
-			oh.Count = 0
-		case 0x07, 0x08:
-			// 1-byte count
-			if pos+1 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos])
-			pos += 1
-			consumed += 1
-		case 0x09:
-			// 2-byte count
-			if pos+2 > len(data) {
-				return headers
-			}
-			oh.Count = binary.LittleEndian.Uint16(data[pos : pos+2])
-			pos += 2
-			consumed += 2
-		case 0x0B:
-			// 1-byte count of variable-size objects
-			if pos+1 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos])
-			pos += 1
-			consumed += 1
-		default:
-			// Unknown qualifier — stop parsing to avoid misinterpreting data.
-			oh.Size = consumed
-			headers = append(headers, oh)
-			return headers
-		}
-		oh.Size = consumed
-		headers = append(headers, oh)
-	}
-	return headers
 }
 
 // IIN extracts Internal Indication bytes from response data.
