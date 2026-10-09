@@ -77,7 +77,7 @@ func TestModbusExceptionStormFiresOncePerWindow(t *testing.T) {
 			t.Fatalf("more exceptions in the same window fired %d alerts, want 0", got)
 		}
 		// A new window can fire again.
-		if got := stormAlerts(e, burst(ev, modbusExceptionStormCount, t0.Add(2*modbusExceptionStormWindow))); got != 1 {
+		if got := stormAlerts(e, burst(ev, modbusExceptionStormCount, t0.Add(2*modbusExceptionStormWindowSeconds*time.Second))); got != 1 {
 			t.Fatalf("next window fired %d alerts, want 1", got)
 		}
 	}
@@ -103,7 +103,7 @@ func TestModbusExceptionStormIgnoresNormalResponsesAndOtherFlows(t *testing.T) {
 	var spread []dpi.Event
 	for i := 0; i < 3*modbusExceptionStormCount; i++ {
 		ev := slow
-		ev.Timestamp = t0.Add(time.Duration(i) * (modbusExceptionStormWindow / 5))
+		ev.Timestamp = t0.Add(time.Duration(i) * (modbusExceptionStormWindowSeconds * time.Second / 5))
 		spread = append(spread, ev)
 	}
 	if got := stormAlerts(e, spread); got != 0 {
@@ -114,7 +114,7 @@ func TestModbusExceptionStormIgnoresNormalResponsesAndOtherFlows(t *testing.T) {
 func TestThresholdCountersAreBounded(t *testing.T) {
 	e := New()
 	e.Add(Signature{ID: "T", Protocol: "x", Conditions: []Condition{{Field: "kind", Op: "equals", Value: "k"}},
-		Threshold: &Threshold{Count: 2, Window: time.Hour}})
+		Threshold: &Threshold{Count: 2, WindowSeconds: 3600}})
 	t0 := time.Now()
 	for i := 0; i < maxThresholdKeys+10; i++ {
 		e.Match(dpi.Event{Proto: "x", Kind: "k", FlowID: string(rune(i)), Timestamp: t0})

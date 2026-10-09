@@ -140,12 +140,8 @@ func addSignatureHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if sig.ID == "" {
-			apiError(c, http.StatusBadRequest, "signature ID is required")
-			return
-		}
-		if len(sig.Conditions) == 0 {
-			apiError(c, http.StatusBadRequest, "at least one condition is required")
+		if err := sig.Validate(); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := sc.AddSignature(c.Request.Context(), sig); err != nil {

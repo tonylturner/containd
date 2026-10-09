@@ -4,6 +4,7 @@
 package signatures
 
 import (
+	"errors"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -13,11 +14,30 @@ import (
 const maxThresholdKeys = 4096
 
 // Threshold turns a signature into a rate signature: it alerts once when
-// Count matching events of one flow fall inside one Window, and not again
-// until that window has passed.
+// Count matching events of one flow fall inside one window of
+// WindowSeconds, and not again until that window has passed. Durations are
+// whole seconds in JSON, as in the rest of the config and API
+// (ttlSeconds, intervalSeconds, rotateSeconds).
 type Threshold struct {
-	Count  int           `json:"count"`
-	Window time.Duration `json:"window"`
+	Count         int `json:"count"`
+	WindowSeconds int `json:"windowSeconds"`
+}
+
+// Window returns the threshold window.
+func (t Threshold) Window() time.Duration {
+	return time.Duration(t.WindowSeconds) * time.Second
+}
+
+// validate rejects a threshold that could never count: a silently ignored
+// threshold would alert on every match instead.
+func (t Threshold) validate() error {
+	if t.Count < 2 {
+		return errors.New("threshold count must be at least 2")
+	}
+	if t.WindowSeconds < 1 {
+		return errors.New("threshold windowSeconds must be at least 1")
+	}
+	return nil
 }
 
 type thresholdKey struct{ sigID, flowID string }
@@ -34,19 +54,20 @@ type thresholdState struct {
 // Callers hold e.matchesMu.
 func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool {
 	t := sig.Threshold
-	if t == nil || t.Count <= 1 || t.Window <= 0 {
+	if t == nil || t.validate() != nil {
 		return true
 	}
+	window := t.Window()
 	if e.thresholds == nil {
 		e.thresholds = make(map[thresholdKey]*thresholdState)
 	}
 	key := thresholdKey{sigID: sig.ID, flowID: ev.FlowID}
 	st := e.thresholds[key]
-	if st == nil || now.Sub(st.start) > t.Window {
+	if st == nil || now.Sub(st.start) > window {
 		if st == nil && len(e.thresholds) >= maxThresholdKeys {
 			e.evictThresholds(now)
 		}
-		st = &thresholdState{start: now, window: t.Window}
+		st = &thresholdState{start: now, window: window}
 		e.thresholds[key] = st
 	}
 	st.count++
