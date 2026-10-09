@@ -172,8 +172,12 @@ is a separate product decision.
    overlap now emit `malformed` events (W2).
 6. False Modbus broadcast-write alerts disappear: today every decoded
    write reads as unit 0 (`detector.go:243`).
-7. Every complete frame in a segment is parsed, so event counts change
-   for coalesced traffic.
+7. Every message on a TCP connection is inspected. Today only the first
+   PDU per direction is decoded, and every later packet re-reports it,
+   because the engine passes no TCP sequence number
+   (`contracts.md` §K8). Event counts, alerts and writeOnly denies
+   change for any client that keeps its connection open, and for
+   coalesced traffic.
 8. DNP3 events gain `direction` from the link-layer DIR bit, so the
    restart check stops flagging every master restart as "non-master".
 9. Configs that set `schema_version` 0.1.7 do not load on releases

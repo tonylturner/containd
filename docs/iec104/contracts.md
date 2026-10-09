@@ -1,6 +1,6 @@
 # Milestone B — frozen contracts
 
-- Base: `iec104` @ 79668745 (main 8ebc4229 + preflight harness + netlink v1.11.2 / go-nfqueue v2.1.0).
+- Base: `iec104` @ 79668745 (main 8ebc4229 + preflight harness + netlink v1.11.2 / go-nfqueue v2.1.0). Implemented by c98e4540; §K8 records the amendments that implementation forced.
 - Binding spec: `docs/iec104/milestone-b.md` (corrected; §0 lists decisions E1–E5 and corrections W1–W8). This file is committed as `docs/iec104/contracts.md`.
 - Reviewed by two independent critiques (2026-10-09); every blocker is resolved below.
 - Lanes consume these contracts and never edit them. A lane that needs a change reports it to the orchestrator.
@@ -20,7 +20,7 @@
 ```go
 // Token identifies one inline-delivered packet. Comparable; map key. Zero = not inline.
 type Token struct{ gen uint64; id uint32 }
-func NewToken(gen uint64, id uint32) Token // tests and fakes; gen 0 is invalid
+func NewToken(gen uint64, id uint32) Token // tests and fakes; panics on gen 0 (reserved for the zero Token)
 func (t Token) Inline() bool
 func (t Token) Generation() uint64
 func (t Token) String() string // logs only; never in event JSON
@@ -99,7 +99,8 @@ TCP     TCPMeta
 Token   Token
 Mark    uint32 // NFQUEUE skb mark when HasMark; opaque to capture
 HasMark bool
-Invalid string // "" = decoded. Else a reason: "truncated", "fragment", "tcp_header", "ipv6", ...
+Invalid string // "" = decoded. Else an exported reason constant: truncated, ip_version, ip_header,
+               // fragment, ipv6 (extension headers only; plain IPv6 TCP/UDP is valid), protocol, tcp_header, udp_header
                // Tuple fields are best effort. Payload is always an owned copy.
 ```
 
@@ -333,3 +334,23 @@ type Fake struct{ /* records Resets; configurable error */ } // implements Injec
 
 - L4 picks each target's tuple and its forwarded sequence, consumes challenge ACKs, bounds the retries (≤ 3 within 1 s), and deletes conntrack afterwards (`pkg/dp/conntrack`). The reset worker starts after the abort's trigger token has its OnVerdict completion.
 - The contract commit adds the interface, `Fake`, and the non-linux `ErrUnsupportedPlatform`. The linux constructor returns `ErrUnsupportedPlatform` until L3 implements it. The checkpoint-1 builder (`test/iec104/preflight/firewall_linux.go`, `sendRawRST`) is the reference.
+
+## K8 Amendments after the contract commit (c98e4540)
+
+These override the text above where they differ.
+
+- **K5 `icsPredicateEmpty`** counts the four new fields only, not `Mode`. Counting `Mode` would make template L4 rules that carry `ics.mode` stop matching in the HTTP preview (`api/http/firewall_rule_handlers.go:204-211`, `pkg/cp/templates/templates.go:87-88`).
+- **K5 `compile.ICSPredicate`** does not copy `Direction` and `ObjectClasses` yet. L2 adds that copy in its own commit; it is US-visible change #2 (spec §4.1). L2 also switches the HTTP preview to `compile.ICSPredicate`.
+- **K2 errors.** Only framed errors (`*FrameError`, `*StreamError`) discard or fail a stream. A legacy decoder's `OnPacket` error passes through in `Err` unchanged and discards nothing, as today. A `StreamDecoder` must return only `*FrameError`; L3 makes the manager wrap any other error as a `FrameError` at `v.Base` with a synthesized malformed event.
+- **K2 dispatch.** The first supporting `StreamDecoder` (registration order) frames a direction; other StreamDecoders are skipped on TCP. Inspect on a failed session stream returns `Framed=true`, the same `Err`, and no events. A `HasOffset` packet without `Session` or `Dir` is not framed (`Framed=false`; the IEC caller fails closed).
+- **K2 sequence numbers — correction of "as today".** Today the engine and PCAP pass no sequence number (`pkg/dp/engine/engine.go:470-475`, `pkg/dp/pcap/analyze.go:134-141`). The reassembler then treats every later segment as a retransmission, so on a persistent TCP connection only the first PDU per direction is ever decoded, and every later packet re-reports it (verified 2026-10-09 against main 8ebc4229: read FC3 then write FC6 on one connection → three FC3 events, no FC6). L4 fills `TCPSeq`/`TCPSeqValid` from `capture.Packet.TCP` on both paths. L3 makes reassembly with `TCPSeqValid=false` append in arrival order.
+- **K1.**
+  - L3 adds `ErrInvalidVerdict` for a `Settle` entry whose Verdict is neither Accept nor Drop.
+  - Observational sources (AF_PACKET, NFLOG) ignore the Decision.
+  - L3 owns "NFQUEUE Start returns nil only after the queue is bound" (today `startNFQueue` returns before `nfqueue.Open`, `pkg/dp/capture/nfqueue_linux.go:58-70`).
+  - L4 owns migrating `pkg/dp/pcap/analyze.go:320-380` to `capture.DecodeIPPacket`.
+- **K3.**
+  - `Float64` accepts finite `float32`, `float64` and `json.Number`, plus Go integers up to 2^53 in magnitude.
+  - The integer accessors reject `float32`.
+  - `DirClient`/`DirServer` are the `APDUID` direction bytes.
+- The DP `rules.ICSPredicate` keeps its existing untagged fields; only the four new fields carry JSON tags. Engine decoding is case-insensitive, so this is acceptable. Do not retag existing fields: that would change the snapshot wire format.
