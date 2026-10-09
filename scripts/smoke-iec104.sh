@@ -84,6 +84,13 @@ compose() {
 timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { echo "[$(timestamp)] $*"; }
 
+# now_s prints a sub-second monotonic-ish wall time in seconds (float). Python 3
+# is already a harness dependency and gives the same resolution on macOS and
+# Linux, unlike `date +%N` (not on macOS) or EPOCHREALTIME (bash 5 only).
+now_s() { python3 -c 'import time; print(f"{time.time():.3f}")'; }
+elapsed_s() { python3 -c 'import sys,time; print(f"{time.time()-float(sys.argv[1]):.3f}")' "$1"; }
+within_budget() { python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) <= float(sys.argv[2]) else 1)' "$1" "$2"; }
+
 record() {
   local name=$1 status=$2 detail=$3 gate=${4:-false}
   local tmp="$RESULTS_FILE.tmp"
@@ -164,7 +171,7 @@ fatal() {
 
 ensure_tools() {
   local bin
-  for bin in docker jq curl; do
+  for bin in docker jq curl python3; do
     command -v "$bin" >/dev/null 2>&1 || fatal "missing required tool: $bin"
   done
 }
@@ -216,13 +223,18 @@ run_cmd() {
 ensure_tools
 ensure_images
 mkdir -p "$RESULTS_DIR"
-rm -f "$RESULTS_DIR"/*.log
+# Remove only what this script writes; a caller may keep its own console log
+# in the same directory.
+rm -f "$RESULTS_DIR/compose.log" "$RESULTS_DIR/cc.log"
 printf '{"schema_version":1,"project":"%s","assertions":[],"summary":{}}\n' "$PROJECT" >"$RESULTS_FILE"
 
 log "Building the Go malformer client (Apache-2.0, for malformed/split cases)..."
 DOCKER_ARCH=$(docker info --format '{{.Architecture}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')
 GOFLAGS=-mod=mod GOOS=linux GOARCH="$DOCKER_ARCH" go build -o "$WORK_DIR/malformer" "$ROOT/test/iec104/malformer" ||
   fatal "could not build the malformer client"
+log "Building the queueholder (NFQUEUE bind-contention tool)..."
+GOFLAGS=-mod=mod GOOS=linux GOARCH="$DOCKER_ARCH" go build -o "$WORK_DIR/queueholder" "$ROOT/test/iec104/queueholder" ||
+  fatal "could not build the queueholder"
 
 log "Bringing up the harness (project $PROJECT)..."
 compose up -d --wait --wait-timeout 120 >"$WORK_DIR/up.log" 2>&1 || { cat "$WORK_DIR/up.log"; fatal "compose up failed"; }
@@ -552,14 +564,14 @@ fi
 # 6. The same client reconnects and completes GI within the B1 budget (new
 #    session + GI complete <= 5 s), with no IEC entry in block_flows.
 rc=0
-GI_START=$(date +%s)
+GI_START=$(now_s)
 run_cmd gi "$ALLOWED_CA" >"$WORK_DIR/regi.out" 2>&1 || rc=$?
-GI_ELAPSED=$(($(date +%s) - GI_START))
-if [[ "$ABORTED" -eq 1 && "$rc" == 0 ]] && grep -q 'type=100 cot=10' "$WORK_DIR/regi.out" && ((GI_ELAPSED <= 5)); then
+GI_ELAPSED=$(elapsed_s "$GI_START")
+if [[ "$ABORTED" -eq 1 && "$rc" == 0 ]] && grep -q 'type=100 cot=10' "$WORK_DIR/regi.out" && within_budget "$GI_ELAPSED" 5.0; then
   gate_pass "the same client reconnects after the abort and completes GI within 5 s" "${GI_ELAPSED}s"
 else
   gate_fail "the same client reconnects after the abort and completes GI within 5 s" \
-    "aborted=$ABORTED; exit $rc; ${GI_ELAPSED}s; GI termination seen: $(grep -c 'type=100 cot=10' "$WORK_DIR/regi.out" || true)"
+    "aborted=$ABORTED; exit $rc; ${GI_ELAPSED}s (budget 5.0 s); GI termination seen: $(grep -c 'type=100 cot=10' "$WORK_DIR/regi.out" || true)"
 fi
 
 BLOCK_FLOWS=$(compose exec -T firewall nft list set inet containd block_flows 2>&1 | tr -d '\r')
@@ -602,8 +614,26 @@ if [[ -n "$gi_after" && "$gi_after" -gt "$gi_before" ]]; then
 else
   fail "an allowed GI on a reused 5-tuple did not reach the RTU" "gi_requests $gi_before -> $gi_after; $REUSE_GI"
 fi
-not_implemented "stale retransmit of an aborted session's bytes after a new handshake cannot bypass" \
-  "needs a raw-socket replay of old-ISN segments from the client network; not built in Phase 1"
+# Stale retransmit: the malformer opens a raw session (port 40405) that sends a
+# forbidden command to IOA 2002, opens a second session from port 40406 (the
+# "new handshake"), then injects a later segment of the first session carrying a
+# forbidden command to IOA 2003. If that stale segment reaches the RTU, its
+# double command handler records ioa=2003 in last_command.
+STALE_IOA=$((FORBIDDEN_IOA + 1))
+received_before=$(rtu_field commands_received)
+STALE_OUT=$(compose exec -T cc /usr/local/bin/malformer -addr "$RTU_IP:$RTU_PORT" \
+  -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN" 2>&1 | tr -d '\r' | tail -n 1)
+sleep 1
+last_cmd=$(rtu_field last_command)
+received_after=$(rtu_field commands_received)
+STALE_DETAIL="malformer: $STALE_OUT; RTU last_command '$last_cmd'; commands_received $received_before -> $received_after"
+if [[ "$STALE_OUT" == *FAILED* ]]; then
+  fail "stale retransmit after a new handshake cannot bypass" "raw replay could not run: $STALE_OUT"
+elif [[ "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
+  gate_pass "stale retransmit after a new handshake cannot bypass" "$STALE_DETAIL"
+else
+  gate_fail "stale retransmit after a new handshake cannot bypass" "the stale segment reached the RTU: $STALE_DETAIL"
+fi
 
 # 9. Malformed/unknown: reset in enforce, alert (event) and pass in learn.
 for scen in bad-length malformed-dcs unsupported-type; do
@@ -656,17 +686,103 @@ reject_check "IEC enforce with the iec104 decoder off is refused before save" \
 reject_check "IEC enforce without NFQUEUE capture (nfqueueGroup 0) is refused before save" \
   "$(echo "$EU_POLICY" | jq 'del(.dataPlane.nfqueueGroup)')"
 apply_config "$EU_POLICY" "EU enforce policy (restore after rejection checks)" || fail "could not restore the EU enforce policy"
-not_implemented "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
-  "needs a way to make the engine's NFQUEUE bind fail at start (a second binder on group 101); not built in Phase 1"
 
-# 11. Telemetry stays fresh for > 10 minutes on the long-lived session, which
-#     never drops. Checked every 30 s.
+# Queue bind failure at start (E3, §8.3, K6): a second binder holds NFQUEUE 101
+# before the engine binds it, so the engine's bind fails. The config is kept,
+# enforce envelopes fail closed, and health reports unhealthy with a queue-bind
+# reason. Drop the engine's binding first (L4 baseline), take the queue, then
+# re-apply the enforce policy so the engine binds into a held queue.
+if compose cp "$WORK_DIR/queueholder" firewall:/usr/local/bin/queueholder >/dev/null 2>&1; then
+  apply_config "$BASELINE" "L4 baseline (free NFQUEUE 101)" || fail "could not drop the enforce policy before the queue-bind check"
+  sleep 1
+  compose exec -d firewall sh -c "/usr/local/bin/queueholder -queue 101 >/tmp/queueholder.log 2>&1" >/dev/null 2>&1 || true
+  QH_READY=0
+  for _ in $(seq 1 20); do
+    if compose exec -T firewall grep -q 'bound queue 101' /tmp/queueholder.log 2>/dev/null; then QH_READY=1; break; fi
+    sleep 0.5
+  done
+  if [[ "$QH_READY" -eq 1 ]]; then
+    apply_config "$EU_POLICY" "EU enforce policy (into a held queue)" || log "engine apply reported an error with the queue held (expected)"
+    sleep 2
+    QH_HEALTH=$(health_json | jq -c '.iec104Enforcement // "no iec104Enforcement object"')
+    # Fail closed: a normally allowed command must not reach the RTU while the
+    # engine cannot bind its queue.
+    received_before=$(rtu_field commands_received)
+    run_cmd sbo "$ALLOWED_CA" "$ALLOWED_IOA" "$DCS_OPEN" >/dev/null 2>&1 || true
+    received_after=$(rtu_field commands_received)
+    if health_json | jq -e '.iec104Enforcement.active == true and .iec104Enforcement.healthy == false
+        and (.iec104Enforcement.reason | ascii_downcase | test("queue|bind"))' >/dev/null 2>&1 &&
+      [[ "$received_after" == "$received_before" ]]; then
+      gate_pass "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+        "health $QH_HEALTH; commands_received $received_before -> $received_after (fail closed)"
+    else
+      gate_fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+        "health $QH_HEALTH; commands_received $received_before -> $received_after"
+    fi
+  else
+    fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+      "could not bind the holder on NFQUEUE 101: $(compose exec -T firewall cat /tmp/queueholder.log 2>&1 | tr '\n' ' ' | head -c 160)"
+  fi
+  compose exec -T firewall sh -c 'pkill -f "queueholder -queue 101"' >/dev/null 2>&1 || true
+  apply_config "$EU_POLICY" "EU enforce policy (restore after queue-bind check)" || fail "could not restore the EU enforce policy"
+else
+  fail "queue bind failure at start keeps the config, fails closed and reports unhealthy" \
+    "could not install the queueholder in the firewall container"
+fi
+
+# 11. The long-lived control centre behaves like a real one (B1): every policy
+#     apply above (learn switch, restores, queue-bind check) changes the IEC
+#     envelope or restarts the queue, so the engine resets its IEC sessions
+#     (§6.4, §8.3) and the control centre reconnects within 1 s and re-runs
+#     GI. Each recovery (close -> GI termination) must fit the B1 budget.
+#     Then telemetry must stay fresh for > 10 minutes on a session that does
+#     not drop at all: no policy changes happen during that window.
+# wait_cc_settled: wait (up to 20 s) until the control centre is connected and
+# its close/connect counts have not changed for 3 s, so a reset caused by the
+# last policy apply cannot land inside the freshness window.
+wait_cc_settled() {
+  local prev="" cur stable=0
+  for _ in $(seq 1 40); do
+    cur="$(cc_count 'CONN closed' cc.log)/$(cc_count 'CC connected' cc.log)"
+    if [[ "$cur" == "$prev" && "${cur#*/}" -gt "${cur%/*}" ]]; then
+      stable=$((stable + 1))
+      ((stable >= 6)) && return 0
+    else
+      stable=0
+    fi
+    prev=$cur
+    sleep 0.5
+  done
+  return 1
+}
+
+# Settle first, so every reset caused by the policy applies above is in the
+# log before the recovery check reads it.
+wait_cc_settled || log "control centre not settled after 20 s; the checks below will show it"
+compose exec -T cc cat /tmp/cc.log >"$RESULTS_DIR/cc.log" 2>/dev/null || true
+# One line per reset: the gap in ms from "CONN closed" to the next GI
+# termination (type 100, COT 10), or -1 if no GI followed.
+GAPS=$(awk '
+  / CONN closed/ { if (open) print -1; open = 1; t0 = substr($1, 3) + 0; next }
+  / RCVD type=100 cot=10 / { if (open) { print substr($1, 3) - t0; open = 0 } }
+  END { if (open) print -1 }
+' "$RESULTS_DIR/cc.log")
+RESETS=$(grep -c . <<<"$GAPS" || true)
+BAD=$(awk '$1 < 0 || $1 > 5000' <<<"$GAPS" | grep -c . || true)
+RECOVERY="resets=$RESETS; close->GI ms: $(tr '\n' ' ' <<<"$GAPS")"
+if [[ "$BAD" == 0 ]]; then
+  pass "the long-lived control centre recovers from every IEC session reset within 5 s (new session + GI)" "$RECOVERY"
+else
+  fail "the long-lived control centre did not recover from an IEC session reset within 5 s" "$RECOVERY"
+fi
+
 if ((FRESHNESS_SECONDS < 600)); then
   not_implemented "spontaneous telemetry stays fresh for more than 10 minutes" \
     "IEC104_FRESHNESS_SECONDS=$FRESHNESS_SECONDS is shorter than the spec's 10 minutes; rerun with the default"
 else
   log "Watching control-centre telemetry freshness for ${FRESHNESS_SECONDS}s..."
   stale=""
+  closed_start=$(cc_count 'CONN closed' cc.log)
   last=$(cc_count 'cot=3 ' cc.log)
   elapsed=0
   while ((elapsed < FRESHNESS_SECONDS)); do
@@ -678,11 +794,13 @@ else
     fi
     last=$now
   done
-  closed=$(cc_count 'CONN closed' cc.log)
-  if [[ -z "$stale" && "$closed" == 0 ]]; then
-    pass "spontaneous telemetry stays fresh for ${FRESHNESS_SECONDS}s on the long-lived session" "$last updates"
+  closed_end=$(cc_count 'CONN closed' cc.log)
+  compose exec -T cc cat /tmp/cc.log >"$RESULTS_DIR/cc.log" 2>/dev/null || true
+  if [[ -z "$stale" && "$closed_end" == "$closed_start" ]]; then
+    pass "spontaneous telemetry stays fresh for ${FRESHNESS_SECONDS}s on the long-lived session" \
+      "$last updates; no session drop in the window (closes before it: $closed_start)"
   else
-    fail "telemetry went stale or the session dropped" "${stale}closed events=$closed"
+    fail "telemetry went stale or the session dropped" "${stale}closes during the window: $closed_start -> $closed_end"
   fi
 fi
 

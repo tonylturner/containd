@@ -27,6 +27,12 @@
 //	malformed-dcs      a type 46 command with the illegal DCS value 3
 //	unsupported-type   an I-frame with Type ID 104 (not used in IEC 104),
 //	                   sent without STARTDT
+//	stale-retransmit   (Linux only) a raw-socket TCP session that sends a
+//	                   forbidden command, then, after a second handshake from
+//	                   another port, injects a later segment of the first
+//	                   session (its old ISN and next sequence) carrying a fresh
+//	                   forbidden command. Reports whether that stale segment
+//	                   reached the RTU. -ioa is the forbidden point.
 package main
 
 import (
@@ -97,6 +103,70 @@ func interrogation(ca uint16) []byte {
 	asdu = append(asdu, ioa3(0)...)
 	return append(asdu, 20) // QOI = station
 }
+
+// checksum16 is the one's-complement Internet checksum of b.
+func checksum16(b []byte) uint16 {
+	var sum uint32
+	for i := 0; i+1 < len(b); i += 2 {
+		sum += uint32(b[i])<<8 | uint32(b[i+1])
+	}
+	if len(b)%2 == 1 {
+		sum += uint32(b[len(b)-1]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	return ^uint16(sum)
+}
+
+// buildIPv4TCP assembles one IPv4 TCP segment with both checksums filled in.
+// IP options are not used; flags is the TCP flag octet (see TCP* below).
+func buildIPv4TCP(srcIP, dstIP [4]byte, srcPort, dstPort uint16, seq, ack uint32, flags byte, window uint16, payload []byte) []byte {
+	const ipHdr, tcpHdr = 20, 20
+	total := ipHdr + tcpHdr + len(payload)
+
+	ip := make([]byte, ipHdr)
+	ip[0] = 0x45 // version 4, IHL 5
+	binary.BigEndian.PutUint16(ip[2:], uint16(total))
+	ip[8] = 64 // TTL
+	ip[9] = 6  // TCP
+	copy(ip[12:16], srcIP[:])
+	copy(ip[16:20], dstIP[:])
+	binary.BigEndian.PutUint16(ip[10:], checksum16(ip))
+
+	tcp := make([]byte, tcpHdr+len(payload))
+	binary.BigEndian.PutUint16(tcp[0:], srcPort)
+	binary.BigEndian.PutUint16(tcp[2:], dstPort)
+	binary.BigEndian.PutUint32(tcp[4:], seq)
+	binary.BigEndian.PutUint32(tcp[8:], ack)
+	tcp[12] = tcpHdr / 4 << 4 // data offset, no options
+	tcp[13] = flags
+	binary.BigEndian.PutUint16(tcp[14:], window)
+	copy(tcp[tcpHdr:], payload)
+
+	pseudo := make([]byte, 12+len(tcp))
+	copy(pseudo[0:4], srcIP[:])
+	copy(pseudo[4:8], dstIP[:])
+	pseudo[9] = 6
+	binary.BigEndian.PutUint16(pseudo[10:], uint16(len(tcp)))
+	copy(pseudo[12:], tcp)
+	binary.BigEndian.PutUint16(tcp[16:], checksum16(pseudo))
+
+	return append(ip, tcp...)
+}
+
+// seqGreater reports a > b in 32-bit TCP sequence space (modular comparison).
+func seqGreater(a, b uint32) bool {
+	return int32(a-b) > 0
+}
+
+// TCP flag octet bits.
+const (
+	tcpFIN = 0x01
+	tcpSYN = 0x02
+	tcpPSH = 0x08
+	tcpACK = 0x10
+)
 
 type result struct {
 	name   string
@@ -214,6 +284,9 @@ func writeSplit(conn net.Conn, data []byte, chunk int, gap time.Duration) (int, 
 
 func run(o options) result {
 	scenario, ca, ioa, dcs, chunk := o.scenario, o.ca, o.ioa, o.dcs, o.chunk
+	if scenario == "stale-retransmit" {
+		return staleRetransmit(o)
+	}
 	r := result{name: scenario}
 	conn, err := dial(o.addr, o.lport)
 	if err != nil {

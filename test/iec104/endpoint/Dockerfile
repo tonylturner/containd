@@ -36,7 +36,7 @@ RUN mkdir -p /out && cc -std=gnu11 -O2 -Wall -Wextra -Werror -I/opt/lib60870/inc
        /opt/lib60870/lib/liblib60870.a -lpthread
 
 FROM alpine:3.21@${ALPINE_DIGEST}
-RUN apk add --no-cache iproute2
+RUN apk add --no-cache iproute2 iptables
 COPY --from=build /out/iec104ep /usr/local/bin/iec104ep
 COPY LICENSE /usr/share/licenses/iec104/LICENSE
 COPY --from=build /src/lib60870.tar.gz /usr/share/src/lib60870.tar.gz

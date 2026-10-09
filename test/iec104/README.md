@@ -48,10 +48,20 @@ and then the §12.4 EU policy, runs every §10.2 assertion, writes
 
 Statuses: `PASS`; `FAIL` (baseline or harness defect, independent of IEC
 enforcement); `GATE-FAIL` (needs the integrated L1-L4 engine);
-`NOT-IMPLEMENTED` (a §10.2 assertion the harness cannot drive yet). Exit 0 is
-acceptance (everything passed); 1 is a `FAIL` or a setup error; 3 means the
-baseline passed but gate or unimplemented assertions remain. Passing with
-skips is not acceptance (B6).
+`NOT-IMPLEMENTED` (kept only for the freshness window when it is shortened
+below ten minutes). Exit 0 is acceptance (everything passed); 1 is a `FAIL`
+or a setup error; 3 means the baseline passed but gate assertions remain.
+Passing with skips is not acceptance (B6).
+
+Two assertions use extra tooling. The stale-retransmit case (`malformer
+-scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and
+40406), sends a forbidden command, re-handshakes from the second port, then
+injects a later segment of the first session carrying a forbidden command to
+IOA 2003; it suppresses the container's own RST with an `iptables` OUTPUT
+rule so the raw handshake completes. The queue-bind case builds
+`test/iec104/queueholder`, which binds NFQUEUE 101 before the engine does, so
+the engine's bind fails and (per E3/K6) enforcement must keep the config,
+fail closed and report unhealthy.
 
 ## Endpoint points and state
 
@@ -78,6 +88,18 @@ session while the client is still holding its socket.
 The cyclic task sends feeder current as spontaneous data (COT 3) every 2 s
 and busbar voltage as cyclic data (COT 1) every 10 s; `PERIODIC_MS=0`
 disables both. The control-centre client honours `IEC104_T3`.
+
+The long-lived control centre (`iec104ep cc`) behaves like a real one (B1):
+when its session closes or is reset it waits 1 s, reconnects, sends STARTDT
+and re-runs station GI. Every policy apply resets the enforce IEC sessions
+(§6.4 envelope change, §8.3 queue restart), so the harness checks that each
+recovery (close to GI termination) fits the 5 s budget, waits for the session
+to settle after the last apply, and only then watches freshness: more than
+10 minutes with an update in every 30 s window and no session drop. Its log
+lines carry `t=<epoch ms>`; the script copies it to `cc.log` in the results
+directory, next to `compose.log` and `results.json`. The script deletes only
+those two log files at start, so a caller's own console log in the same
+directory survives.
 
 ## Phase 1 result (2026-10-09, before L1-L4 merge)
 
