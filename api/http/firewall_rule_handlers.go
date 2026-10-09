@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -201,15 +202,7 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			Destinations: req.Destinations,
 			Action:       rules.Action(req.Action),
 			Identities:   req.Identities,
-			ICS: rules.ICSPredicate{
-				Protocol:     req.ICS.Protocol,
-				FunctionCode: req.ICS.FunctionCode,
-				UnitID:       req.ICS.UnitID,
-				Addresses:    req.ICS.Addresses,
-				ReadOnly:     req.ICS.ReadOnly,
-				WriteOnly:    req.ICS.WriteOnly,
-				Mode:         req.ICS.Mode,
-			},
+			ICS:          compile.ICSPredicate(req.ICS),
 		}
 		if req.Schedule != nil {
 			entry.Schedule = rules.SchedulePredicate{

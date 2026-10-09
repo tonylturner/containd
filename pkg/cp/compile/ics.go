@@ -8,22 +8,21 @@ import (
 	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// ICSPredicate is the one CP→DP mapping of an ICS predicate.
-//
-// Direction and ObjectClasses are not copied yet: the data-plane evaluator
-// already matches them, so copying them changes US enforcement (spec §4.1
-// item 2) and belongs in its own commit.
+// ICSPredicate is the one CP→DP mapping of an ICS predicate. It copies
+// every field into memory the data-plane predicate owns.
 func ICSPredicate(p config.ICSPredicate) dprules.ICSPredicate {
 	out := dprules.ICSPredicate{
-		Protocol:     p.Protocol,
-		FunctionCode: append([]uint8(nil), p.FunctionCode...),
-		Addresses:    append([]string(nil), p.Addresses...),
-		ReadOnly:     p.ReadOnly,
-		WriteOnly:    p.WriteOnly,
-		Mode:         p.Mode,
-		TypeIDs:      append([]int(nil), p.TypeIDs...),
-		Classes:      append([]string(nil), p.Classes...),
-		CA:           append([]uint16(nil), p.CA...),
+		Protocol:      p.Protocol,
+		FunctionCode:  append([]uint8(nil), p.FunctionCode...),
+		Addresses:     append([]string(nil), p.Addresses...),
+		ObjectClasses: append([]uint16(nil), p.ObjectClasses...),
+		ReadOnly:      p.ReadOnly,
+		WriteOnly:     p.WriteOnly,
+		Direction:     p.Direction,
+		Mode:          p.Mode,
+		TypeIDs:       append([]int(nil), p.TypeIDs...),
+		Classes:       append([]string(nil), p.Classes...),
+		CA:            append([]uint16(nil), p.CA...),
 	}
 	if p.UnitID != nil {
 		unitID := *p.UnitID
