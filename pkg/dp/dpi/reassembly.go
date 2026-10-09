@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -35,6 +36,16 @@ type StreamDecoder interface {
 type oooSegment struct {
 	seq     uint32
 	payload []byte
+}
+
+// end returns the sequence number following the segment's last byte.
+func (s oooSegment) end() uint32 {
+	return s.seq + uint32(len(s.payload))
+}
+
+// covers reports whether every byte of o lies within s.
+func (s oooSegment) covers(o oooSegment) bool {
+	return seqDiff(s.seq, o.seq) >= 0 && seqDiff(o.end(), s.end()) >= 0
 }
 
 // StreamBuffer holds the accumulated TCP payload for a single flow.
@@ -155,19 +166,22 @@ func (r *Reassembler) feedSequenced(sb *StreamBuffer, payload []byte, seq uint32
 		r.flushOOO(sb)
 	case diff > 0:
 		// Future segment: a gap precedes it.
-		if len(sb.ooo) >= maxOOOSegments {
+		seg := oooSegment{seq: seq, payload: payload}
+		if slices.ContainsFunc(sb.ooo, func(q oooSegment) bool { return q.covers(seg) }) {
+			// Every byte is already queued.
+			sb.retransmits++
+			return
+		}
+		seg.payload = slices.Clone(payload)
+		sb.ooo = insertOOO(sb.ooo, seg)
+		if len(sb.ooo) > maxOOOSegments {
 			// The gap outlived maxOOOSegments later segments, so the
 			// missing bytes were lost (for example a capture drop).
 			// Resynchronise at the earliest buffered segment instead of
 			// stalling the stream forever; the partial message before
 			// the gap can never complete.
 			r.skipGap(sb)
-			r.feedSequenced(sb, payload, seq)
-			return
 		}
-		seg := oooSegment{seq: seq, payload: make([]byte, len(payload))}
-		copy(seg.payload, payload)
-		sb.ooo = insertOOO(sb.ooo, seg)
 	default:
 		// seq is behind nextSeq: a retransmission. Keep only bytes past
 		// nextSeq, if the segment carries any.
@@ -192,47 +206,35 @@ func (r *Reassembler) skipGap(sb *StreamBuffer) {
 	r.flushOOO(sb)
 }
 
-// flushOOO drains any contiguous OOO segments that now fit at nextSeq.
-// Must be called with r.mu held.
+// flushOOO drains the queued segments that now start at or behind
+// nextSeq. A segment overlapping bytes already appended contributes only
+// its unseen tail (the first copy of a byte wins); one fully behind
+// nextSeq is dropped. Must be called with r.mu held.
 func (r *Reassembler) flushOOO(sb *StreamBuffer) {
-	for i := 0; i < len(sb.ooo); {
-		seg := sb.ooo[i]
-		diff := seqDiff(sb.nextSeq, seg.seq)
-		if diff == 0 {
-			// This segment is now in-order.
-			sb.buf = append(sb.buf, seg.payload...)
-			sb.nextSeq = seg.seq + uint32(len(seg.payload))
-			// Remove from OOO buffer.
-			sb.ooo = append(sb.ooo[:i], sb.ooo[i+1:]...)
-			// Restart scan — a later segment may now be contiguous.
-			i = 0
-			continue
+	// The queue is sorted by sequence number, so only its head can reach
+	// nextSeq.
+	for len(sb.ooo) > 0 && seqDiff(sb.nextSeq, sb.ooo[0].seq) <= 0 {
+		seg := sb.ooo[0]
+		sb.ooo = slices.Delete(sb.ooo, 0, 1)
+		if end := seg.end(); seqDiff(sb.nextSeq, end) > 0 {
+			sb.buf = append(sb.buf, seg.payload[seqDiff(seg.seq, sb.nextSeq):]...)
+			sb.nextSeq = end
 		}
-		if diff < 0 {
-			// This segment is now behind nextSeq (already covered).
-			sb.ooo = append(sb.ooo[:i], sb.ooo[i+1:]...)
-			continue
-		}
-		i++
 	}
 }
 
-// insertOOO inserts a segment into the OOO slice sorted by sequence number.
+// insertOOO inserts seg into the OOO slice sorted by sequence number and
+// removes the queued segments seg covers, so a longer copy replaces a
+// shorter one. The caller has checked that no queued segment covers seg.
+// Partially overlapping segments are both kept; flushOOO appends each
+// one's unseen bytes.
 func insertOOO(ooo []oooSegment, seg oooSegment) []oooSegment {
-	for i, s := range ooo {
-		if seqDiff(seg.seq, s.seq) > 0 {
-			// Insert before s.
-			ooo = append(ooo, oooSegment{})
-			copy(ooo[i+1:], ooo[i:])
-			ooo[i] = seg
-			return ooo
-		}
-		if s.seq == seg.seq {
-			// Duplicate — skip.
-			return ooo
-		}
+	ooo = slices.DeleteFunc(ooo, seg.covers)
+	i := slices.IndexFunc(ooo, func(q oooSegment) bool { return seqDiff(seg.seq, q.seq) > 0 })
+	if i < 0 {
+		return append(ooo, seg)
 	}
-	return append(ooo, seg)
+	return slices.Insert(ooo, i, seg)
 }
 
 // Retransmissions returns the retransmission count for the given flow.

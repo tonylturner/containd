@@ -112,6 +112,22 @@ func TestStreamSequenceZeroAndWrap(t *testing.T) {
 	assertFrames(t, evs, f1, f2)
 }
 
+func TestStreamOverlappingOutOfOrderWrite(t *testing.T) {
+	mgr, st := newStreamFixture()
+	read, write := adu(1, 3, 0, 2), adu(2, 6, 1, 0x1234)
+	wire := append(append([]byte(nil), read...), write...)
+
+	// The write (bytes 12..24) arrives as 16..24 ahead of 4..20, which
+	// overlaps it; only the queued segment carries the write's last bytes.
+	evs := feed(t, mgr, st, seg(100, wire[:4]), seg(116, wire[16:]))
+	assertFrames(t, evs)
+	evs = feed(t, mgr, st, seg(104, wire[4:20]))
+	assertFrames(t, evs, read, write)
+	if a := evs[1].Attributes; a["is_write"] != true || a["function_code"] != uint8(6) {
+		t.Fatalf("write event = %+v, want is_write=true function_code=6", a)
+	}
+}
+
 func TestStreamInvalidHeaderDiscardsBuffer(t *testing.T) {
 	mgr, st := newStreamFixture()
 	bad := []byte{0, 1, 0, 0, 0, 1, 1, 3} // length 1: no function code

@@ -5,6 +5,8 @@ package dpi
 
 import (
 	"bytes"
+	"math/rand/v2"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -224,6 +226,175 @@ func TestFeedPartialRetransmission(t *testing.T) {
 	want := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	if !bytes.Equal(buf, want) {
 		t.Fatalf("partial retransmit: got %x, want %x", buf, want)
+	}
+}
+
+// seqBytes returns n bytes whose values follow their offset, so a lost,
+// duplicated or misplaced byte shows up in a comparison.
+func seqBytes(n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = byte(i*7 + i/256)
+	}
+	return out
+}
+
+func TestFeedQueuedSegmentTailPastNextSeq(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+	data := seqBytes(40) // seq 100..140
+
+	r.Open("flow1", 100, now)
+	r.Feed("flow1", data[20:40], now, 120, true)
+	// 100..130 overlaps the queued 120..140; its tail 130..140 must still
+	// be appended.
+	buf := r.Feed("flow1", data[0:30], now, 100, true)
+	if !bytes.Equal(buf, data) {
+		t.Fatalf("got %x, want %x", buf, data)
+	}
+}
+
+func TestFeedOOOSameSeqKeepsLongerCopy(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+	data := seqBytes(40)
+
+	r.Open("flow1", 100, now)
+	r.Feed("flow1", data[20:25], now, 120, true)
+	r.Feed("flow1", data[20:40], now, 120, true)
+	// A shorter copy arriving after the longer one adds nothing.
+	r.Feed("flow1", data[20:30], now, 120, true)
+	buf := r.Feed("flow1", data[0:20], now, 100, true)
+	if !bytes.Equal(buf, data) {
+		t.Fatalf("got %x, want %x", buf, data)
+	}
+}
+
+func TestFeedOOOPartialAndContainedOverlaps(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+	data := seqBytes(60)
+
+	r.Open("flow1", 100, now)
+	r.Feed("flow1", data[20:40], now, 120, true) // queued
+	r.Feed("flow1", data[30:50], now, 130, true) // overlaps its tail
+	r.Feed("flow1", data[15:25], now, 115, true) // overlaps its head
+	r.Feed("flow1", data[32:38], now, 132, true) // contained in a queued one
+	r.Feed("flow1", data[50:60], now, 150, true) // adjacent
+	buf := r.Feed("flow1", data[0:15], now, 100, true)
+	if !bytes.Equal(buf, data) {
+		t.Fatalf("got %x, want %x", buf, data)
+	}
+}
+
+func TestFeedOOOCoveringSegmentReplacesQueued(t *testing.T) {
+	r := NewReassembler(0, time.Minute)
+	now := time.Now()
+	data := seqBytes(40)
+
+	r.Open("flow1", 100, now)
+	for i := 0; i < maxOOOSegments; i++ {
+		off := 10 + 2*i
+		r.Feed("flow1", data[off:off+1], now, uint32(100+off), true)
+	}
+	// One segment covering every queued one frees their slots, so the
+	// next out-of-order segment must not be taken for a lost gap.
+	r.Feed("flow1", data[10:20], now, 110, true)
+	r.Feed("flow1", data[30:40], now, 130, true)
+	r.Feed("flow1", data[20:30], now, 120, true)
+	buf := r.Feed("flow1", data[0:10], now, 100, true)
+	if !bytes.Equal(buf, data) {
+		t.Fatalf("got %x, want %x", buf, data)
+	}
+}
+
+type testSeg struct{ start, end int }
+
+// overlappingCover returns segments covering [0, n) with overlaps,
+// duplicates and segments contained in others.
+func overlappingCover(rng *rand.Rand, n int) []testSeg {
+	var segs []testSeg
+	for pos := 0; pos < n; {
+		start := max(0, pos-rng.IntN(16))
+		end := min(n, pos+1+rng.IntN(32))
+		segs = append(segs, testSeg{start, end})
+		pos = end
+	}
+	for range rng.IntN(len(segs) + 1) {
+		s := segs[rng.IntN(len(segs))]
+		if rng.IntN(2) == 0 {
+			segs = append(segs, s) // duplicate
+			continue
+		}
+		start := s.start + rng.IntN(s.end-s.start)
+		segs = append(segs, testSeg{start, start + 1 + rng.IntN(s.end-start)})
+	}
+	return segs
+}
+
+// arrivalOrder shuffles segs while keeping at most maxOOOSegments of them
+// waiting behind a gap, so the reassembler never has cause to skip one.
+// The earliest remaining segment always reaches the contiguous prefix, so
+// some segment is always eligible.
+func arrivalOrder(rng *rand.Rand, segs []testSeg) []testSeg {
+	remaining := slices.Clone(segs)
+	var order, waiting []testSeg
+	next := 0
+	for len(remaining) > 0 {
+		var eligible []int
+		for i, s := range remaining {
+			if s.start <= next || len(waiting) < maxOOOSegments {
+				eligible = append(eligible, i)
+			}
+		}
+		i := eligible[rng.IntN(len(eligible))]
+		s := remaining[i]
+		remaining = slices.Delete(remaining, i, i+1)
+		order = append(order, s)
+		if s.start > next {
+			waiting = append(waiting, s)
+			continue
+		}
+		next = max(next, s.end)
+		for absorbed := true; absorbed; {
+			absorbed = false
+			for j, w := range waiting {
+				if w.start <= next {
+					next = max(next, w.end)
+					waiting = slices.Delete(waiting, j, j+1)
+					absorbed = true
+					break
+				}
+			}
+		}
+	}
+	return order
+}
+
+func TestFeedShuffledOverlappingSegmentsLoseNoByte(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for trial := range 2000 {
+		n := 1 + rng.IntN(300)
+		data := seqBytes(n)
+		base := rng.Uint32()
+		if trial%4 == 0 {
+			base = 0xFFFFFFFF - uint32(rng.IntN(n+16)) // wrap inside the stream
+		}
+		order := arrivalOrder(rng, overlappingCover(rng, n))
+
+		r := NewReassembler(0, time.Minute)
+		now := time.Now()
+		r.Open("flow1", base, now)
+		var buf []byte
+		for _, s := range order {
+			buf = r.Feed("flow1", data[s.start:s.end], now, base+uint32(s.start), true)
+			if !bytes.HasPrefix(data, buf) {
+				t.Fatalf("trial %d: stream %x diverges from %x (order %v)", trial, buf, data, order)
+			}
+		}
+		if !bytes.Equal(buf, data) {
+			t.Fatalf("trial %d: got %x, want %x (base %#x, order %v)", trial, buf, data, base, order)
+		}
 	}
 }
 
