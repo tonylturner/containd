@@ -45,3 +45,20 @@ up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
 -f <override> up -d`, read the ports with `docker compose ... port engine
 18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then
 `down --volumes` the project you created.
+
+## Modbus fixtures and the NFQUEUE variant
+
+`modbus/server.py` appends every decoded request to
+`/tmp/modbus-requests.jsonl` and rewrites its register image to
+`/tmp/modbus-state.json` (`{"writes": N, "registers": [...]}`) inside the
+`modbus_server` container. `modbus/client.py` supports `read`, `write` and
+`readwrite` (a read, then a write on the same connection), with
+`--source IP` and `--value N`; exit 3 means the connection was established
+but the write got no response.
+
+`SMOKE_DPI_CAPTURE=nfqueue bash scripts/smoke-dpi.sh` runs the inline
+variant (`nfqueueGroup` 101). It adds client addresses `.6` and `.7` on the
+`ot_client` container and asserts, from the server's state files, that the
+first write on a fresh connection and the first write after a read on a
+persistent connection never reach the server. Those assertions are an
+expected-fail gate until milestone B lanes L3 and L4 merge.

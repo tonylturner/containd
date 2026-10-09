@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
+"""Deterministic Modbus/TCP client for the smoke harness.
+
+usage: client.py <read|write|readwrite> <host> <port> [--source IP] [--value N]
+
+readwrite sends a read and then a write on one TCP connection. Exit codes:
+0 success; 1 failure (connect, read, or any other error); 2 usage error;
+3 the connection was established (and, for readwrite, the read succeeded)
+but the write got no valid response.
+"""
 import socket
 import struct
 import sys
+
+TIMEOUT_SECONDS = 4.0
+WRITE_ADDRESS = 1
+DEFAULT_WRITE_VALUE = 0x1234
+
+
+class WriteStageError(Exception):
+    pass
 
 
 def recv_exact(conn: socket.socket, count: int) -> bytes:
@@ -14,28 +31,25 @@ def recv_exact(conn: socket.socket, count: int) -> bytes:
     return bytes(data)
 
 
-def build_request(mode: str) -> bytes:
+def build_request(mode: str, transaction_id: int, value: int) -> bytes:
     unit_id = 1
     if mode == "read":
         pdu = struct.pack(">BHH", 3, 0, 2)
     elif mode == "write":
-        pdu = struct.pack(">BHH", 6, 1, 0x1234)
+        pdu = struct.pack(">BHH", 6, WRITE_ADDRESS, value)
     else:
         raise ValueError(f"unsupported mode: {mode}")
-    header = struct.pack(">HHHB", 1, 0, len(pdu) + 1, unit_id)
+    header = struct.pack(">HHHB", transaction_id, 0, len(pdu) + 1, unit_id)
     return header + pdu
 
 
-def run(mode: str, host: str, port: int) -> int:
-    request = build_request(mode)
-    with socket.create_connection((host, port), timeout=4.0) as conn:
-        conn.settimeout(4.0)
-        conn.sendall(request)
-        mbap = recv_exact(conn, 7)
-        _, protocol_id, length = struct.unpack(">HHH", mbap[:6])
-        if protocol_id != 0 or length < 2:
-            raise RuntimeError("invalid modbus response header")
-        pdu = recv_exact(conn, length - 1)
+def exchange(conn: socket.socket, mode: str, transaction_id: int, value: int) -> str:
+    conn.sendall(build_request(mode, transaction_id, value))
+    mbap = recv_exact(conn, 7)
+    response_id, protocol_id, length = struct.unpack(">HHH", mbap[:6])
+    if protocol_id != 0 or length < 2 or response_id != transaction_id:
+        raise RuntimeError("invalid modbus response header")
+    pdu = recv_exact(conn, length - 1)
     function_code = pdu[0]
     if function_code & 0x80:
         raise RuntimeError(f"modbus exception response: fc={function_code} code={pdu[1] if len(pdu) > 1 else 'unknown'}")
@@ -46,22 +60,61 @@ def run(mode: str, host: str, port: int) -> int:
         if byte_count != 4 or len(pdu) != 6:
             raise RuntimeError(f"unexpected read byte count: {byte_count}")
         values = struct.unpack(">HH", pdu[2:6])
-        print(f"READ_OK {values[0]} {values[1]}")
-        return 0
+        return f"READ_OK {values[0]} {values[1]}"
     if function_code != 6 or len(pdu) != 5:
         raise RuntimeError("unexpected modbus write response")
-    address, value = struct.unpack(">HH", pdu[1:5])
-    print(f"WRITE_OK {address} {value}")
+    address, written = struct.unpack(">HH", pdu[1:5])
+    return f"WRITE_OK {address} {written}"
+
+
+def run(mode: str, host: str, port: int, source: str, value: int) -> int:
+    source_address = (source, 0) if source else None
+    with socket.create_connection((host, port), timeout=TIMEOUT_SECONDS, source_address=source_address) as conn:
+        conn.settimeout(TIMEOUT_SECONDS)
+        if mode == "read":
+            print(exchange(conn, "read", 1, value), flush=True)
+            return 0
+        transaction_id = 1
+        if mode == "readwrite":
+            print(exchange(conn, "read", transaction_id, value), flush=True)
+            transaction_id = 2
+        try:
+            print(exchange(conn, "write", transaction_id, value), flush=True)
+        except Exception as exc:  # noqa: BLE001
+            raise WriteStageError(str(exc)) from exc
     return 0
 
 
+def parse_args(argv: list[str]) -> tuple[str, str, int, str, int]:
+    if len(argv) < 4 or argv[1] not in ("read", "write", "readwrite"):
+        raise ValueError("usage: client.py <read|write|readwrite> <host> <port> [--source IP] [--value N]")
+    mode, host, port = argv[1], argv[2], int(argv[3])
+    source, value = "", DEFAULT_WRITE_VALUE
+    rest = argv[4:]
+    while rest:
+        if len(rest) < 2 or rest[0] not in ("--source", "--value"):
+            raise ValueError(f"unexpected arguments: {' '.join(rest)}")
+        if rest[0] == "--source":
+            source = rest[1]
+        else:
+            value = int(rest[1], 0)
+            if not 0 <= value <= 0xFFFF:
+                raise ValueError("--value must be 0..65535")
+        rest = rest[2:]
+    return mode, host, port, source, value
+
+
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: client.py <read|write> <host> <port>", file=sys.stderr)
-        return 2
-    mode, host, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
     try:
-        return run(mode, host, port)
+        mode, host, port, source, value = parse_args(sys.argv)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    try:
+        return run(mode, host, port, source, value)
+    except WriteStageError as exc:
+        print(f"{mode.upper()}_FAILED stage=write {exc}", file=sys.stderr)
+        return 3
     except Exception as exc:  # noqa: BLE001
         print(f"{mode.upper()}_FAILED {exc}", file=sys.stderr)
         return 1
