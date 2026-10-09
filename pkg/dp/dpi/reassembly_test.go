@@ -11,175 +11,262 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-func TestFeedAccumulatesData(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
+var testNow = time.Unix(1000, 0).UTC()
 
-	buf1 := r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
-	if !bytes.Equal(buf1, []byte{0x01, 0x02}) {
-		t.Fatalf("first feed: got %x, want 0102", buf1)
-	}
+func feedSeq(r *reassembler, key string, seq uint32, strict bool, data ...byte) feedResult {
+	return r.feed(key, position{kind: posSeq, seq: seq}, data, testNow, strict, false)
+}
 
-	buf2 := r.Feed("flow1", []byte{0x03, 0x04}, now, 102)
-	if !bytes.Equal(buf2, []byte{0x01, 0x02, 0x03, 0x04}) {
-		t.Fatalf("second feed: got %x, want 01020304", buf2)
-	}
+func feedOff(r *reassembler, key string, off int64, strict bool, data ...byte) feedResult {
+	return r.feed(key, position{kind: posOffset, off: off}, data, testNow, strict, true)
+}
 
-	if r.ActiveStreams != 1 {
-		t.Fatalf("active streams: got %d, want 1", r.ActiveStreams)
+func wantBuf(t *testing.T, got feedResult, base int64, data ...byte) {
+	t.Helper()
+	if got.err != nil || got.failed != nil {
+		t.Fatalf("err=%v failed=%v", got.err, got.failed)
 	}
-	if r.BytesBuffered != 4 {
-		t.Fatalf("bytes buffered: got %d, want 4", r.BytesBuffered)
+	if got.base != base || !bytes.Equal(got.buf, data) {
+		t.Fatalf("buf %x at %d, want %x at %d", got.buf, got.base, data, base)
 	}
 }
 
-func TestFeedSlidingWindow(t *testing.T) {
-	// maxSize = 4 bytes
-	r := NewReassembler(4, time.Minute)
-	now := time.Now()
-
-	r.Feed("flow1", []byte{0x01, 0x02, 0x03}, now, 100)
-	buf := r.Feed("flow1", []byte{0x04, 0x05, 0x06}, now, 103)
-
-	// 6 bytes total, max 4 -> oldest 2 bytes discarded
-	want := []byte{0x03, 0x04, 0x05, 0x06}
-	if !bytes.Equal(buf, want) {
-		t.Fatalf("sliding window: got %x, want %x", buf, want)
+func wantStreamErr(t *testing.T, got feedResult, kind StreamErrKind, off int64) {
+	t.Helper()
+	if got.err == nil || got.err.Kind != kind || got.err.Offset != off {
+		t.Fatalf("err = %+v, want %v at %d", got.err, kind, off)
 	}
 }
 
-func TestCompleteRemovesStream(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
-
-	r.Feed("flow1", []byte{0x01}, now, 100)
-	r.Feed("flow2", []byte{0x02}, now, 200)
-
-	if r.ActiveStreams != 2 {
-		t.Fatalf("before complete: active=%d, want 2", r.ActiveStreams)
-	}
-
-	r.Complete("flow1")
-	if r.ActiveStreams != 1 {
-		t.Fatalf("after complete: active=%d, want 1", r.ActiveStreams)
-	}
-
-	// Feed to flow1 again should start fresh.
-	buf := r.Feed("flow1", []byte{0xAA}, now, 300)
-	if !bytes.Equal(buf, []byte{0xAA}) {
-		t.Fatalf("after complete+feed: got %x, want aa", buf)
-	}
-}
-
-func TestSweepRemovesIdleStreams(t *testing.T) {
-	r := NewReassembler(0, 5*time.Second)
-	t0 := time.Now()
-
-	r.Feed("flow1", []byte{0x01}, t0, 100)
-	r.Feed("flow2", []byte{0x02}, t0.Add(4*time.Second), 200)
-
-	// At t0+6s, flow1 is 6s idle (>5s), flow2 is 2s idle (<5s).
-	r.Sweep(t0.Add(6 * time.Second))
-
-	if r.ActiveStreams != 1 {
-		t.Fatalf("after sweep: active=%d, want 1", r.ActiveStreams)
-	}
-
-	// Verify flow2 still works.
-	buf := r.Feed("flow2", []byte{0x03}, t0.Add(6*time.Second), 201)
-	if !bytes.Equal(buf, []byte{0x02, 0x03}) {
-		t.Fatalf("flow2 after sweep: got %x, want 0203", buf)
-	}
-}
-
-func TestTrimConsumedBytes(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
-
-	r.Feed("flow1", []byte{0x01, 0x02, 0x03, 0x04, 0x05}, now, 100)
-	r.Trim("flow1", 3)
-
-	buf := r.Feed("flow1", []byte{0x06}, now, 105)
-	want := []byte{0x04, 0x05, 0x06}
-	if !bytes.Equal(buf, want) {
-		t.Fatalf("after trim+feed: got %x, want %x", buf, want)
-	}
-}
-
-func TestFeedOutOfOrder(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
-
-	// Send segment 1 (seq=100, 2 bytes).
-	r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
-
-	// Send segment 3 (seq=105, 2 bytes) — skipping segment 2.
-	buf := r.Feed("flow1", []byte{0x05, 0x06}, now, 105)
-	// Should only have segment 1 data; segment 3 is buffered OOO.
-	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
-		t.Fatalf("after OOO: got %x, want 0102", buf)
-	}
-
-	// Send segment 2 (seq=102, 3 bytes) — fills the gap.
-	buf = r.Feed("flow1", []byte{0x03, 0x04, 0x77}, now, 102)
-	// Now all three segments should be flushed in order.
-	want := []byte{0x01, 0x02, 0x03, 0x04, 0x77, 0x05, 0x06}
-	if !bytes.Equal(buf, want) {
-		t.Fatalf("after gap fill: got %x, want %x", buf, want)
-	}
-}
-
-func TestFeedRetransmission(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
-
-	// Send segment 1.
-	r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
-	// Retransmit segment 1.
-	buf := r.Feed("flow1", []byte{0x01, 0x02}, now, 100)
-	// Should still have only 2 bytes.
-	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
-		t.Fatalf("after retransmit: got %x, want 0102", buf)
-	}
-
-	retrans := r.Retransmissions("flow1")
-	if retrans != 1 {
-		t.Fatalf("retransmissions: got %d, want 1", retrans)
-	}
-}
-
-func TestFeedOOOBufferBounded(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
-
-	// First in-order segment.
-	r.Feed("flow1", []byte{0x01}, now, 100)
-
-	// Send 5 OOO segments (only 4 should be buffered).
-	for i := uint32(0); i < 5; i++ {
-		r.Feed("flow1", []byte{byte(0x10 + i)}, now, 200+i*10)
-	}
-
+// storedTotal recomputes the bytes held by every stream.
+func storedTotal(r *reassembler) int {
 	r.mu.Lock()
-	oooLen := len(r.streams["flow1"].ooo)
-	r.mu.Unlock()
-	if oooLen != 4 {
-		t.Fatalf("OOO buffer: got %d segments, want 4 (bounded)", oooLen)
+	defer r.mu.Unlock()
+	n := 0
+	for _, s := range r.streams {
+		n += s.stored()
+	}
+	return n
+}
+
+func TestReassemblerAccumulatesBySequence(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		r := newReassembler(0, time.Minute)
+		wantBuf(t, feedSeq(r, "f", 100, strict, 1, 2), 0, 1, 2)
+		wantBuf(t, feedSeq(r, "f", 102, strict, 3, 4), 0, 1, 2, 3, 4)
+		if streams, held := r.stats(); streams != 1 || held != 4 {
+			t.Fatalf("stats = %d streams, %d bytes", streams, held)
+		}
 	}
 }
 
-func TestFeedPartialRetransmission(t *testing.T) {
-	r := NewReassembler(0, time.Minute)
-	now := time.Now()
+// Sequence number 0 is a real value, and sequence space wraps.
+func TestReassemblerSequenceZeroAndWrap(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	wantBuf(t, feedSeq(r, "zero", 0, true, 1, 2), 0, 1, 2)
+	wantBuf(t, feedSeq(r, "zero", 2, true, 3), 0, 1, 2, 3)
 
-	// Send 3 bytes at seq 100.
-	r.Feed("flow1", []byte{0x01, 0x02, 0x03}, now, 100)
+	wantBuf(t, feedSeq(r, "wrap", 0xfffffffe, true, 1, 2, 3), 0, 1, 2, 3)
+	wantBuf(t, feedSeq(r, "wrap", 1, true, 4), 0, 1, 2, 3, 4)
+	wantBuf(t, feedSeq(r, "wrap", 0xffffffff, true, 2, 3, 4, 5), 0, 1, 2, 3, 4, 5)
+}
 
-	// Send overlapping segment: seq 101, 4 bytes — 2 bytes overlap, 2 new.
-	buf := r.Feed("flow1", []byte{0x02, 0x03, 0x04, 0x05}, now, 101)
-	want := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
-	if !bytes.Equal(buf, want) {
-		t.Fatalf("partial retransmit: got %x, want %x", buf, want)
+// Without sequence metadata, bytes are appended in arrival order.
+func TestReassemblerAppendMode(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	app := position{kind: posAppend}
+	r.feed("f", app, []byte{1, 2}, testNow, true, false)
+	got := r.feed("f", app, []byte{1, 2}, testNow, true, false)
+	wantBuf(t, got, 0, 1, 2, 1, 2)
+	r.trim("f", 0, 4)
+	wantBuf(t, r.feed("f", app, []byte{9}, testNow, true, false), 4, 9)
+}
+
+func TestReassemblerLenientSlidingWindow(t *testing.T) {
+	r := newReassembler(4, time.Minute)
+	feedSeq(r, "f", 100, false, 1, 2, 3)
+	// Streams without a framed decoder keep the sliding window.
+	wantBuf(t, feedSeq(r, "f", 103, false, 4, 5, 6), 2, 3, 4, 5, 6)
+	if _, held := r.stats(); held != 4 {
+		t.Fatalf("bytes buffered = %d, want 4", held)
+	}
+}
+
+func TestReassemblerStrictOverflowIsAnError(t *testing.T) {
+	r := newReassembler(4, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2, 3)
+	wantStreamErr(t, feedSeq(r, "f", 103, true, 4, 5), StreamOverflow, 3)
+	// An out-of-order segment beyond the window is an overflow too.
+	r2 := newReassembler(4, time.Minute)
+	feedSeq(r2, "f", 100, true, 1)
+	wantStreamErr(t, feedSeq(r2, "f", 104, true, 5), StreamOverflow, 4)
+}
+
+func TestReassemblerOutOfOrderFillsGap(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2)
+	got := feedSeq(r, "f", 105, true, 5, 6)
+	wantBuf(t, feedResult{buf: got.buf, base: got.base}, 0, 1, 2)
+	if !got.gap {
+		t.Fatal("gap not reported")
+	}
+	got = feedSeq(r, "f", 102, true, 3, 4, 0x77)
+	wantBuf(t, got, 0, 1, 2, 3, 4, 0x77, 5, 6)
+	if got.gap {
+		t.Fatal("gap still reported after fill")
+	}
+}
+
+// Session streams start at offset 0: a first segment beyond it is a gap.
+func TestReassemblerSessionStreamStartsAtZero(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	got := feedOff(r, "s", 3, true, 4, 5)
+	if !got.gap || len(got.buf) != 0 || got.base != 0 {
+		t.Fatalf("first segment at 3: gap=%v buf=%x base=%d", got.gap, got.buf, got.base)
+	}
+	wantBuf(t, feedOff(r, "s", 0, true, 1, 2, 3), 0, 1, 2, 3, 4, 5)
+}
+
+func TestReassemblerRetransmissionsAreNotCounted(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2)
+	wantBuf(t, feedSeq(r, "f", 100, true, 1, 2), 0, 1, 2)
+	if got := r.retransmissions("f"); got != 1 {
+		t.Fatalf("retransmissions = %d, want 1", got)
+	}
+	if _, held := r.stats(); held != 2 || storedTotal(r) != 2 {
+		t.Fatalf("bytes buffered = %d (stored %d), want 2", held, storedTotal(r))
+	}
+}
+
+func TestReassemblerPartialRetransmission(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2, 3)
+	wantBuf(t, feedSeq(r, "f", 101, true, 2, 3, 4, 5), 0, 1, 2, 3, 4, 5)
+}
+
+// Bytes below the consumed watermark are duplicates, whatever their
+// content: the caller owns identity of consumed bytes.
+func TestReassemblerConsumedBytesAreDuplicates(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2, 3)
+	r.trim("f", 0, 2)
+	wantBuf(t, feedSeq(r, "f", 100, true, 9, 9, 3, 4), 2, 3, 4)
+}
+
+func TestReassemblerOverlapConflict(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2, 3)
+	wantStreamErr(t, feedSeq(r, "f", 101, true, 2, 9, 4), StreamOverlapConflict, 2)
+
+	lenient := newReassembler(0, time.Minute)
+	feedSeq(lenient, "f", 100, false, 1, 2, 3)
+	wantBuf(t, feedSeq(lenient, "f", 101, false, 2, 9, 4), 0, 1, 2, 3, 4)
+}
+
+func TestReassemblerOverlapConflictBeyondHole(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1)
+	feedSeq(r, "f", 105, true, 5, 6, 7)
+	wantStreamErr(t, feedSeq(r, "f", 106, true, 6, 8), StreamOverlapConflict, 7)
+	// The in-order segment that reaches a held one is compared too.
+	r2 := newReassembler(0, time.Minute)
+	feedSeq(r2, "f", 100, true, 1)
+	feedSeq(r2, "f", 103, true, 3, 4)
+	wantStreamErr(t, feedSeq(r2, "f", 101, true, 1, 2, 9), StreamOverlapConflict, 3)
+}
+
+func TestReassemblerOutOfOrderSegmentsMerge(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 0)
+	for i := uint32(0); i < 3*maxOOOSegments; i++ {
+		// Touching segments merge into one hole's worth of data.
+		if got := feedSeq(r, "f", 110+i, true, byte(i)); got.err != nil {
+			t.Fatalf("segment %d: %v", i, got.err)
+		}
+	}
+	r.mu.Lock()
+	n := len(r.streams["f"].ooo)
+	r.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("out-of-order segments = %d, want 1 merged", n)
+	}
+}
+
+func TestReassemblerOutOfOrderLimit(t *testing.T) {
+	for _, strict := range []bool{true, false} {
+		r := newReassembler(0, time.Minute)
+		feedSeq(r, "f", 100, strict, 1)
+		for i := uint32(0); i < maxOOOSegments; i++ {
+			if got := feedSeq(r, "f", 110+2*i, strict, 1); got.err != nil {
+				t.Fatalf("strict=%v segment %d: %v", strict, i, got.err)
+			}
+		}
+		got := feedSeq(r, "f", 200, strict, 1)
+		if strict {
+			wantStreamErr(t, got, StreamOutOfOrderLimit, 100)
+			continue
+		}
+		if got.err != nil {
+			t.Fatalf("lenient: %v", got.err)
+		}
+		r.mu.Lock()
+		n := len(r.streams["f"].ooo)
+		r.mu.Unlock()
+		if n != maxOOOSegments {
+			t.Fatalf("lenient kept %d segments, want %d", n, maxOOOSegments)
+		}
+	}
+}
+
+func TestReassemblerTrimChecksWatermark(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedSeq(r, "f", 100, true, 1, 2, 3, 4)
+	r.trim("f", 0, 3)
+	r.trim("f", 0, 1) // stale view: ignored
+	wantBuf(t, feedSeq(r, "f", 104, true, 5), 3, 4, 5)
+	if _, held := r.stats(); held != 2 {
+		t.Fatalf("bytes buffered = %d, want 2", held)
+	}
+}
+
+func TestReassemblerFailAndComplete(t *testing.T) {
+	r := newReassembler(0, time.Minute)
+	feedOff(r, "s", 0, true, 1, 2)
+	failure := &StreamError{Kind: StreamOverflow}
+	r.fail("s", failure)
+	if got := feedOff(r, "s", 2, true, 3); got.failed != failure {
+		t.Fatalf("feed after fail = %+v, want the failure", got)
+	}
+	if r.failure("s") != failure {
+		t.Fatal("failure not recorded")
+	}
+	r.complete("s")
+	if r.failure("s") != nil {
+		t.Fatal("complete must clear the failure")
+	}
+	if streams, held := r.stats(); streams != 0 || held != 0 {
+		t.Fatalf("stats after complete = %d, %d", streams, held)
+	}
+}
+
+func TestReassemblerSweepKeepsSessionStreams(t *testing.T) {
+	r := newReassembler(0, 5*time.Second)
+	t0 := testNow
+	r.feed("legacy", position{kind: posSeq, seq: 1}, []byte{1}, t0, false, false)
+	r.feed("fresh", position{kind: posSeq, seq: 1}, []byte{1}, t0.Add(4*time.Second), false, false)
+	r.feed("session", position{kind: posOffset}, []byte{1}, t0, true, true)
+	r.sweep(t0.Add(6 * time.Second))
+	r.mu.Lock()
+	_, legacy := r.streams["legacy"]
+	_, fresh := r.streams["fresh"]
+	_, session := r.streams["session"]
+	r.mu.Unlock()
+	if legacy || !fresh || !session {
+		t.Fatalf("after sweep legacy=%v fresh=%v session=%v", legacy, fresh, session)
+	}
+	if streams, held := r.stats(); streams != 2 || held != 2 {
+		t.Fatalf("stats = %d, %d", streams, held)
 	}
 }
 
@@ -322,7 +409,7 @@ func TestNonTCPBypassesReassembly(t *testing.T) {
 		t.Fatalf("udp: expected 1 call, got %d", dec.calls)
 	}
 	// Reassembler should have no streams.
-	if mgr.reassembler.ActiveStreams != 0 {
-		t.Fatalf("reassembler should have 0 streams for UDP, got %d", mgr.reassembler.ActiveStreams)
+	if streams, _ := mgr.reassembler.stats(); streams != 0 {
+		t.Fatalf("reassembler should have 0 streams for UDP, got %d", streams)
 	}
 }

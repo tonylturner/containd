@@ -8,128 +8,206 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Inspect passes the packet to the decoders that support the flow. For TCP
-// flows the payload is fed through the reassembler so that decoders see the
-// accumulated stream rather than individual segments. The first supporting
-// StreamDecoder frames the stream through ParseStream and trims it; other
-// decoders get OnPacket with the whole buffer, as before.
+// Inspect passes the packet to the decoders that support the flow. TCP
+// payload is fed through the reassembler so that decoders see the stream,
+// not single segments. The first supporting StreamDecoder (registration
+// order) frames the stream through ParseStream and alone trims it; other
+// decoders get OnPacket with the buffered bytes, as before.
 //
-// Streams are keyed by the directional flow hash, or by Session and Dir when
-// HasOffset is set. A HasOffset packet without Session or Dir is not framed.
+// Streams are keyed by the directional flow hash, or by Session and Dir
+// when HasOffset is set. A HasOffset packet without Session or Dir is not
+// framed. A framed stream's buffer bounds, out-of-order bound and
+// conflicting overlaps are *StreamError; the manager adds their malformed
+// event. Any framed error discards the direction's buffer: a legacy stream
+// starts fresh with the next packet, a session stream stays failed until
+// EndStream. Inspect is not safe for concurrent calls on the same stream.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
 		return res
 	}
-
-	stream := pkt.Proto == "tcp" && m.reassembler != nil
-	key, session, start, seq := streamKey(state, pkt)
-	if pkt.HasOffset && (pkt.Session == "" || pkt.Dir == DirUnknown) {
-		stream = false
+	candidates := m.candidates(state)
+	tcp := pkt.Proto == "tcp"
+	stream := tcp && m.reassembler != nil &&
+		!(pkt.HasOffset && (pkt.Session == "" || pkt.Dir == DirUnknown))
+	var framer StreamDecoder
+	if stream {
+		framer = firstFramer(candidates, state)
 	}
-
-	failErr := m.failedErr(pkt, key)
-	dpiPkt := pkt
-	var buf []byte
-	var base int64
-	fed := false
-	if stream && len(pkt.Payload) > 0 && failErr == nil {
-		buf, base, res.Gap = m.reassembler.feed(key, pkt.Payload, time.Now(), seq, start)
-		dpiPkt = &ParsedPacket{
-			Payload: buf,
-			Proto:   pkt.Proto,
-			SrcPort: pkt.SrcPort,
-			DstPort: pkt.DstPort,
+	if framer != nil {
+		res.Framed = true
+		res.Proto = framer.Protocol()
+	}
+	key, session, pos := streamKey(state, pkt)
+	if stream && pkt.HasOffset {
+		if err := m.reassembler.failure(key); err != nil {
+			res.Err = err // already reported with its event; not re-emitted
+			return res
 		}
-		fed = true
 	}
 
-	for _, d := range m.candidates(state) {
+	dpiPkt := pkt
+	var errEvent *Event
+	if stream && len(pkt.Payload) > 0 {
+		now := time.Now()
+		m.reassembler.sweep(now)
+		fed := m.reassembler.feed(key, pos, pkt.Payload, now, framer != nil, pkt.HasOffset)
+		res.Gap = fed.gap
+		dpiPkt = &ParsedPacket{Payload: fed.buf, Proto: pkt.Proto, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
+		switch {
+		case fed.err != nil:
+			fed.err.Proto = res.Proto
+			ev := malformedEvent(state, pkt, res.Proto, fed.err)
+			errEvent, res.Err = &ev, fed.err
+		case framer != nil && len(fed.buf) > 0:
+			view := StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Bytes: fed.buf}
+			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
+		}
+		if res.Err != nil {
+			m.discard(key, pkt.HasOffset, res.Err)
+		}
+	}
+
+	for _, d := range candidates {
 		if d == nil || !d.Supports(state) {
 			continue
 		}
-		if sd, ok := d.(StreamDecoder); ok && stream {
-			if res.Framed {
-				continue // one framed decoder per stream direction
-			}
-			res.Framed = true
-			res.Proto = sd.Protocol()
-			if failErr != nil {
-				res.Err = failErr // already reported with its event; not re-emitted
-				continue
-			}
-			if fed && len(buf) > 0 {
-				m.parseFramed(state, sd, &res, key, StreamView{Session: session, Dir: pkt.Dir, Base: base, Bytes: buf}, pkt.HasOffset)
-			}
-			continue
+		if _, ok := d.(StreamDecoder); ok && tcp {
+			continue // on TCP a StreamDecoder only ever frames through ParseStream
 		}
 		events, err := d.OnPacket(state, dpiPkt)
-		if err != nil {
-			res.Events = append(res.Events, events...)
-			res.Err = err
-			return res
-		}
 		res.Events = append(res.Events, events...)
+		if err != nil {
+			if res.Err == nil {
+				res.Err = err // a legacy decoder error passes through unchanged
+			}
+			break
+		}
+	}
+	if errEvent != nil {
+		res.Events = append(res.Events, *errEvent)
 	}
 	return res
 }
 
-// parseFramed runs one ParseStream call, trims the consumed prefix and, on
-// error, discards the stream (legacy) or fails it until EndStream (session).
-func (m *Manager) parseFramed(state *flow.State, sd StreamDecoder, res *InspectResult, key string, v StreamView, session bool) {
+// firstFramer returns the first registered StreamDecoder supporting the
+// flow, or nil.
+func firstFramer(candidates []Decoder, state *flow.State) StreamDecoder {
+	for _, d := range candidates {
+		if sd, ok := d.(StreamDecoder); ok && sd.Supports(state) {
+			return sd
+		}
+	}
+	return nil
+}
+
+// parseFramed runs one ParseStream call, records its frames and trims the
+// consumed prefix. It returns the malformed event of a framing error, which
+// it also stores in res.Err. A decoder that breaks the framing contract, or
+// returns an error that is not a *FrameError, yields a FrameError at the
+// view's base and none of its frames.
+func (m *Manager) parseFramed(state *flow.State, pkt *ParsedPacket, sd StreamDecoder, res *InspectResult, key string, v StreamView) *Event {
 	sr, err := sd.ParseStream(state, v)
+	var fe *FrameError
+	switch {
+	case err == nil || errors.As(err, &fe):
+		if reason := frameContractViolation(v, sr, fe == nil); reason != "" {
+			fe, sr = &FrameError{Offset: v.Base, Reason: reason}, StreamResult{}
+		}
+	default:
+		fe, sr = &FrameError{Offset: v.Base, Reason: err.Error()}, StreamResult{}
+	}
 	for _, f := range sr.Frames {
 		res.Frames = append(res.Frames, f)
 		res.Events = append(res.Events, f.Events...)
 	}
 	res.NeedMore = sr.NeedMore
-	if sr.Consumed > 0 {
-		m.reassembler.Trim(key, sr.Consumed)
+	if fe == nil {
+		m.reassembler.trim(key, v.Base, sr.Consumed)
+		return nil
 	}
-	if err == nil {
+	if fe.Event.Kind == "" {
+		fe.Event = malformedEvent(state, pkt, res.Proto, fe)
+	}
+	res.Err = fe
+	return &fe.Event
+}
+
+// frameContractViolation checks the StreamResult invariants the manager
+// relies on: frames contiguous from Base inside the view and, when the
+// stream continues (no error), Consumed equal to the complete prefix. On a
+// FrameError the buffer is discarded, so Consumed is not used. It returns
+// "" when the invariants hold.
+func frameContractViolation(v StreamView, sr StreamResult, continues bool) string {
+	next := v.Base
+	for _, f := range sr.Frames {
+		if f.Start != next || f.End <= f.Start {
+			return "decoder returned non-contiguous frames"
+		}
+		next = f.End
+	}
+	if next > v.Base+int64(len(v.Bytes)) {
+		return "decoder returned a frame beyond its view"
+	}
+	if continues && int64(sr.Consumed) != next-v.Base {
+		return "decoder consumed bytes that are not complete frames"
+	}
+	return ""
+}
+
+// discard drops a direction's buffer after a framed error: a session
+// stream stays failed until EndStream, a legacy stream starts fresh.
+func (m *Manager) discard(key string, session bool, err error) {
+	if session {
+		m.reassembler.fail(key, err)
 		return
 	}
-	var fe *FrameError
-	if errors.As(err, &fe) {
-		res.Events = append(res.Events, fe.Event)
+	m.reassembler.complete(key)
+}
+
+// malformedEvent is the single event the manager reports for a framed
+// error it synthesizes: a StreamError, or a decoder error without one.
+func malformedEvent(state *flow.State, pkt *ParsedPacket, proto string, err error) Event {
+	attrs := map[string]any{eventfields.KeyError: err.Error()}
+	if pkt.HasOffset {
+		attrs[eventfields.KeySessionID] = pkt.Session
 	}
-	res.Err = err
-	m.reassembler.Complete(key)
-	if session {
-		m.mu.Lock()
-		m.failed[key] = err
-		m.mu.Unlock()
+	return Event{
+		FlowID:     state.Key.Hash(),
+		Proto:      proto,
+		Kind:       "malformed",
+		Attributes: attrs,
+		Timestamp:  time.Now().UTC(),
 	}
 }
 
 // EndStream drops both directions of a session stream (FIN/RST/abort/expiry
 // or generation change) and clears its failed state.
 func (m *Manager) EndStream(session string) {
-	if m == nil {
+	if m == nil || m.reassembler == nil {
 		return
 	}
 	for _, dir := range []StreamDir{ClientToServer, ServerToClient} {
-		key := sessionStreamKey(session, dir)
-		if m.reassembler != nil {
-			m.reassembler.Complete(key)
-		}
-		m.mu.Lock()
-		delete(m.failed, key)
-		m.mu.Unlock()
+		m.reassembler.complete(sessionStreamKey(session, dir))
 	}
 }
 
-// streamKey returns the reassembly key, the StreamView session, the
-// absolute offset a new stream starts at, and the sequence number to feed.
-// Legacy streams count offsets from the first byte seen.
-func streamKey(state *flow.State, pkt *ParsedPacket) (key, session string, start int64, seq uint32) {
+// streamKey returns the reassembly key, the StreamView session and the
+// segment position. Session streams use the caller's absolute offset; legacy
+// streams count from the first byte seen, by sequence number when it is
+// valid and in arrival order otherwise.
+func streamKey(state *flow.State, pkt *ParsedPacket) (key, session string, pos position) {
 	if pkt.HasOffset {
-		return sessionStreamKey(pkt.Session, pkt.Dir), pkt.Session, pkt.Offset, uint32(pkt.Offset)
+		return sessionStreamKey(pkt.Session, pkt.Dir), pkt.Session, position{kind: posOffset, off: pkt.Offset}
 	}
 	hash := state.Key.Hash()
-	return hash, hash, 0, pkt.TCPSeq
+	if pkt.TCPSeqValid {
+		return hash, hash, position{kind: posSeq, seq: pkt.TCPSeq}
+	}
+	return hash, hash, position{kind: posAppend}
 }
 
 func sessionStreamKey(session string, dir StreamDir) string {
@@ -141,13 +219,4 @@ func sessionStreamKey(session string, dir StreamDir) string {
 	default:
 		return "session/" + session + "/?"
 	}
-}
-
-func (m *Manager) failedErr(pkt *ParsedPacket, key string) error {
-	if !pkt.HasOffset {
-		return nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.failed[key]
 }

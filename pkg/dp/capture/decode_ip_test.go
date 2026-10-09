@@ -5,10 +5,12 @@ package capture
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
-// ipv4TCP builds an IPv4 packet with a 20-byte TCP header and payload.
+// ipv4TCP builds an IPv4 packet with a 20-byte TCP header and payload; the
+// IP total length covers exactly the returned bytes.
 func ipv4TCP(payload []byte) []byte {
 	pkt := make([]byte, 40, 40+len(payload))
 	pkt[0] = 0x45
@@ -22,7 +24,9 @@ func ipv4TCP(payload []byte) []byte {
 	pkt[32] = 0x50                          // data offset 5
 	pkt[33] = byte(TCPFlagPSH | TCPFlagACK) // flags
 	pkt[34], pkt[35] = 0x72, 0x10           // window 29200
-	return append(pkt, payload...)
+	pkt = append(pkt, payload...)
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(len(pkt)))
+	return pkt
 }
 
 func TestDecodeIPPacketIPv4TCPMeta(t *testing.T) {
@@ -53,6 +57,7 @@ func TestDecodeIPPacketIPv4TCPMeta(t *testing.T) {
 func TestDecodeIPPacketIPv6UDP(t *testing.T) {
 	pkt := make([]byte, 52)
 	pkt[0] = 0x60
+	pkt[5] = 12 // payload length
 	pkt[6] = 17
 	pkt[23] = 1
 	pkt[39] = 2
@@ -83,8 +88,16 @@ func TestDecodeIPDeliveryUnchanged(t *testing.T) {
 	ipv6 := func(next byte) []byte {
 		pkt := make([]byte, 60)
 		pkt[0] = 0x60
+		pkt[5] = 20 // payload length
 		pkt[6] = next
 		return pkt
+	}
+	ipv6TCP := append(ipv6(6), 1, 2, 3, 4)
+	ipv6TCP[5] = 24    // payload length: TCP header + 4 bytes
+	ipv6TCP[52] = 0x50 // data offset 5
+	withTotal := func(total uint16, raw []byte) []byte {
+		binary.BigEndian.PutUint16(raw[2:4], total)
+		return raw
 	}
 	shortTCP := ipv4TCP(nil)[:30]
 	badOffset := ipv4TCP(nil)
@@ -121,6 +134,11 @@ func TestDecodeIPDeliveryUnchanged(t *testing.T) {
 		{"ipv4 fragment offset", withFrag(0x0010, ipv4TCP([]byte{1})), InvalidFragment, true},
 		{"ipv4 dont fragment", withFrag(0x4000, ipv4TCP([]byte{1})), "", true},
 		{"ipv4 fragment with short tcp", withFrag(0x2000, ipv4TCP(nil)[:30]), InvalidTCPHeader, false},
+		{"ipv4 capture shorter than total length", ipv4TCP([]byte{1, 2, 3})[:41], InvalidTruncated, true},
+		{"ipv4 total length below header", withTotal(19, ipv4TCP([]byte{1})), InvalidIPHeader, true},
+		{"ipv4 total length cuts tcp header", withTotal(30, ipv4TCP([]byte{1})), InvalidTCPHeader, false},
+		{"ipv4 fragment wins over truncation", withFrag(0x2000, ipv4TCP([]byte{1, 2}))[:41], InvalidFragment, true},
+		{"ipv6 capture shorter than payload length", ipv6TCP[:62], InvalidTruncated, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,5 +165,32 @@ func TestDecodeIPInvalidTCPKeepsBestEffortTuple(t *testing.T) {
 	}
 	if got.Payload != nil {
 		t.Fatalf("payload = %x, want nil", got.Payload)
+	}
+}
+
+// Link-layer padding beyond the IP length is not payload: a pure ACK padded
+// to the Ethernet minimum must decode with an empty payload.
+func TestDecodeIPPacketIgnoresPaddingBeyondIPLength(t *testing.T) {
+	raw := append(ipv4TCP(nil), 0, 0, 0, 0, 0, 0)
+	got := DecodeIPPacket(raw)
+	if got.Invalid != "" || len(got.Payload) != 0 {
+		t.Fatalf("Invalid=%q payload=%x, want decoded with no payload", got.Invalid, got.Payload)
+	}
+	v6 := make([]byte, 40+20+4)
+	v6[0] = 0x60
+	v6[5] = 20
+	v6[6] = 6
+	v6[52] = 0x50
+	if got := DecodeIPPacket(v6); got.Invalid != "" || len(got.Payload) != 0 {
+		t.Fatalf("IPv6 Invalid=%q payload=%x, want decoded with no payload", got.Invalid, got.Payload)
+	}
+}
+
+// A truncated copy keeps its best-effort payload so observational sources
+// still see it, but it is never reported as decoded.
+func TestDecodeIPPacketTruncatedKeepsBestEffortPayload(t *testing.T) {
+	got := DecodeIPPacket(ipv4TCP([]byte{1, 2, 3})[:42])
+	if got.Invalid != InvalidTruncated || !got.TCP.Valid || !bytes.Equal(got.Payload, []byte{1, 2}) {
+		t.Fatalf("Invalid=%q TCP=%+v payload=%x", got.Invalid, got.TCP, got.Payload)
 	}
 }

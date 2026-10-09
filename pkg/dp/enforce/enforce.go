@@ -169,9 +169,12 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// entirely, so the userspace DPI decoder never sees a payload to
 	// parse. With QueueID=0 this is a no-op (compileEntry emits plain
 	// accept/drop for everything, ct established below stays optimal).
+	// IEC104 rules come first and steer both directions of their session
+	// scope, marked; they replace the rule's own line.
 	if c.QueueID > 0 {
+		c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap)
 		for _, e := range entries {
-			if !isDPIEligible(e) {
+			if !isDPIEligible(e) || isIEC104Rule(e) {
 				continue
 			}
 			lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
@@ -379,23 +382,11 @@ func defaultPolicy(a rules.Action) string {
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	base := []string{}
-
-	if len(e.SourceZones) > 0 {
-		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
-		if len(ifs) > 0 {
-			base = append(base, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
-		} else {
-			// No interfaces for these zones -> rule never matches.
-			base = append(base, "iifname { }")
-		}
+	if c := zoneClause("iifname", e.SourceZones, zoneIfaces); c != "" {
+		base = append(base, c)
 	}
-	if len(e.DestZones) > 0 {
-		ifs := collectZoneIfaces(e.DestZones, zoneIfaces)
-		if len(ifs) > 0 {
-			base = append(base, fmt.Sprintf("oifname { %s }", strings.Join(ifs, ", ")))
-		} else {
-			base = append(base, "oifname { }")
-		}
+	if c := zoneClause("oifname", e.DestZones, zoneIfaces); c != "" {
+		base = append(base, c)
 	}
 
 	// Pick the verdict once — same for every emitted protocol-variant line.
@@ -537,6 +528,20 @@ func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]str
 	}
 	parts = append(parts, proto, fmt.Sprintf("dport %d", r.Port), "accept")
 	return strings.Join(parts, " "), nil
+}
+
+// zoneClause matches keyword (iifname or oifname) against the interfaces of
+// zones; "" when zones is empty. Zones without interfaces give an empty set,
+// so the rule never matches.
+func zoneClause(keyword string, zones []string, zoneIfaces map[string][]string) string {
+	if len(zones) == 0 {
+		return ""
+	}
+	ifs := collectZoneIfaces(zones, zoneIfaces)
+	if len(ifs) == 0 {
+		return keyword + " { }"
+	}
+	return fmt.Sprintf("%s { %s }", keyword, strings.Join(ifs, ", "))
 }
 
 func collectZoneIfaces(zones []string, zoneIfaces map[string][]string) []string {
