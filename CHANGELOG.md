@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Go toolchain 1.25.13 → 1.26.9 (go.mod and both Docker builders). This
   clears CVE-2026-78667 (net/http Range header DoS) and CVE-2026-97031
   (crypto/tls ECH DoS), which have no 1.25 fix.
+- golang.org/x/net v0.58.0 → v0.60.0 clears CVE-2026-78669 (HTTP/2 SETTINGS
+  flood DoS). The bump also moves x/crypto, x/sys, x/text, x/sync and x/mod
+  to their current releases.
 
 ### Changed (visible in events and logs)
 
