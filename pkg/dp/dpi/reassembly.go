@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	defaultMaxStreamSize = 64 * 1024 // 64 KB of buffered bytes per stream direction
 	// maxOOOSegments bounds the holes a stream may buffer beyond. It is at
 	// least the IEC104 holdback bound of 32 held packets per session, so
 	// the reassembler never fails before the engine's own bound.
@@ -98,7 +97,7 @@ type reassembler struct {
 // evicts streams that are not session streams.
 func newReassembler(maxStreamSize int, idleTimeout time.Duration) *reassembler {
 	if maxStreamSize <= 0 {
-		maxStreamSize = defaultMaxStreamSize
+		maxStreamSize = defaultReassemblyMax
 	}
 	return &reassembler{
 		streams:     make(map[string]*stream),
