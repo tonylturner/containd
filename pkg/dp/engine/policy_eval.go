@@ -80,7 +80,9 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	if snap == nil {
 		return verdict.Verdict{}, false
 	}
-	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
+	// Policy describes connections from the opener to the server, so a
+	// reply is evaluated with the connection's orientation.
+	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.OpenerIP(), state.Key.ServerIP())
 	for _, ev := range evs {
 		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
 		if !ok {
@@ -118,8 +120,8 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 	ctx := rules.EvalContext{
 		SrcZone: srcZone,
 		DstZone: dstZone,
-		SrcIP:   state.Key.SrcIP,
-		DstIP:   state.Key.DstIP,
+		SrcIP:   state.Key.OpenerIP(),
+		DstIP:   state.Key.ServerIP(),
 		Proto:   strings.ToLower(pkt.Proto),
 		Port:    strconv.Itoa(int(service)),
 		ICS: &rules.ICSContext{
@@ -302,6 +304,9 @@ func attrString(attrs map[string]any, key string) string {
 	}
 }
 
+// servicePort returns the server port of the packet's connection: the
+// destination port when the sender opened the connection, the source port
+// on its replies.
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
 	if state != nil && state.Key.Dir == flow.DirReverse {
 		return pkt.SrcPort

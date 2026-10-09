@@ -34,8 +34,11 @@ type Packet struct {
 	TCPFlags  uint8 // TCP header flags byte (FIN 0x01, SYN 0x02, RST 0x04, ACK 0x10)
 }
 
-// TCPFlagSYN is the SYN bit of Packet.TCPFlags.
-const TCPFlagSYN uint8 = 0x02
+// TCP header flag bits carried in Packet.TCPFlags.
+const (
+	TCPFlagSYN uint8 = 0x02
+	TCPFlagACK uint8 = 0x10
+)
 
 // Manager manages interface capture workers.
 type Manager struct {
