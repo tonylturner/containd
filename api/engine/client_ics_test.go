@@ -44,6 +44,8 @@ func TestApplyRulesRoundTripsIEC104Predicate(t *testing.T) {
 	cfg := &config.Config{
 		System: config.SystemConfig{Hostname: "containd"},
 		Zones:  []config.Zone{{Name: "scada"}},
+		// An enforce iec104 rule needs inline DPI (E3 rejects it otherwise).
+		DataPlane: config.DataPlaneConfig{DPIEnabled: true, NFQueueGroup: 101},
 		Firewall: config.FirewallConfig{
 			DefaultAction: config.ActionDeny,
 			Rules:         []config.Rule{rule},
