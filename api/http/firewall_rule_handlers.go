@@ -17,6 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -105,6 +106,9 @@ func mergeJSONObject(dst, patch map[string]interface{}) map[string]interface{} {
 	return dst
 }
 
+// updateFirewallRuleHandler merges a JSON patch into a rule. The "ics"
+// object is not deep-merged as generic JSON: config.PatchICSPredicate
+// strict-decodes it, and a protocol change replaces the predicate.
 func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -113,65 +117,78 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "failed to read request body")
 			return
 		}
-		var patch map[string]interface{}
+		var patch map[string]json.RawMessage
 		if err := json.Unmarshal(body, &patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
+		icsPatch, patchesICS := patch["ics"]
+		delete(patch, "ics")
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		updated := false
+		idx := -1
 		for i, existing := range cfg.Firewall.Rules {
 			if existing.ID == id {
-				currentJSON, err := json.Marshal(existing)
-				if err != nil {
-					internalError(c, err)
-					return
-				}
-				var merged map[string]interface{}
-				if err := json.Unmarshal(currentJSON, &merged); err != nil {
-					internalError(c, err)
-					return
-				}
-				merged = mergeJSONObject(merged, patch)
-				mergedJSON, err := json.Marshal(merged)
-				if err != nil {
-					internalError(c, err)
-					return
-				}
-				var rule config.Rule
-				if err := json.Unmarshal(mergedJSON, &rule); err != nil {
-					apiError(c, http.StatusBadRequest, "invalid rule payload")
-					return
-				}
-				if rule.ID == "" {
-					rule.ID = existing.ID
-				}
-				cfg.Firewall.Rules[i] = rule
-				updated = true
-				c.Set("updated_rule", rule)
+				idx = i
 				break
 			}
 		}
-		if !updated {
+		if idx < 0 {
 			apiError(c, http.StatusNotFound, "rule not found")
 			return
 		}
+		existing := cfg.Firewall.Rules[idx]
+		rule, err := mergeRulePatch(existing, patch)
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+			return
+		}
+		if patchesICS {
+			if rule.ICS, err = config.PatchICSPredicate(existing.ICS, icsPatch); err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+				return
+			}
+		}
+		if rule.ID == "" {
+			rule.ID = existing.ID
+		}
+		cfg.Firewall.Rules[idx] = rule
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if v, ok := c.Get("updated_rule"); ok {
-			if rule, ok := v.(config.Rule); ok {
-				c.JSON(http.StatusOK, rule)
-				return
-			}
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+		c.JSON(http.StatusOK, rule)
 	}
+}
+
+// mergeRulePatch deep-merges the non-ICS keys of a patch into a rule.
+func mergeRulePatch(existing config.Rule, patch map[string]json.RawMessage) (config.Rule, error) {
+	currentJSON, err := json.Marshal(existing)
+	if err != nil {
+		return config.Rule{}, err
+	}
+	var merged map[string]interface{}
+	if err := json.Unmarshal(currentJSON, &merged); err != nil {
+		return config.Rule{}, err
+	}
+	generic := make(map[string]interface{}, len(patch))
+	for key, raw := range patch {
+		var value interface{}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return config.Rule{}, err
+		}
+		generic[key] = value
+	}
+	mergedJSON, err := json.Marshal(mergeJSONObject(merged, generic))
+	if err != nil {
+		return config.Rule{}, err
+	}
+	var rule config.Rule
+	err = json.Unmarshal(mergedJSON, &rule)
+	return rule, err
 }
 
 type previewRuleResponse struct {
@@ -249,6 +266,7 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 		const maxSamples = 50
 		var matchCount int
 		var samples []dpevents.Event
+		iec104 := entry.ICS.Protocol == rules.ProtocolIEC104
 		for _, ev := range evs {
 			ctx := rules.EvalContext{
 				SrcIP: net.ParseIP(ev.SrcIP),
@@ -256,6 +274,9 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 				Proto: ev.Transport,
 				Port:  strconv.Itoa(int(ev.DstPort)),
 				Now:   ev.Timestamp,
+			}
+			if iec104 {
+				ctx = previewIEC104Context(ctx, ev)
 			}
 			if rules.PreviewMatch(entry, ctx) {
 				matchCount++
@@ -277,6 +298,65 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 		})
 	}
 }
+
+// iec104WireKinds are the event kinds the IEC104 decoder emits for wire
+// objects. Decision and outcome events (ics.*) are evidence about them
+// and must not count again.
+var iec104WireKinds = map[string]struct{}{
+	"request": {}, "response": {}, "apci": {}, "malformed": {}, "unsupported": {},
+}
+
+// previewIEC104Context adds the IEC104 object of a decoded IEC104 event to
+// ctx and turns the tuple into the session tuple (source = client,
+// destination = server, port = server port) that IEC104 rules match
+// (spec §6.3, B8). Other events keep ctx unchanged and cannot match an
+// IEC104 rule.
+//
+// SafeRead stays false: deciding it belongs to the decoder's
+// iec104.SafeRead, so readOnly IEC104 rules match nothing in a preview.
+func previewIEC104Context(ctx rules.EvalContext, ev dpevents.Event) rules.EvalContext {
+	if ev.Proto != eventfields.ProtoIEC104 {
+		return ctx
+	}
+	if _, ok := iec104WireKinds[ev.Kind]; !ok {
+		return ctx
+	}
+	attrs := ev.Attributes
+	direction, ok := eventfields.String(attrs, eventfields.KeyDirection)
+	if !ok {
+		direction = "request"
+		if ev.SrcPort == iec104Port && ev.DstPort != iec104Port {
+			direction = "response"
+		}
+	}
+	if direction == "response" {
+		ctx.SrcIP, ctx.DstIP = ctx.DstIP, ctx.SrcIP
+		ctx.Port = strconv.Itoa(int(ev.SrcPort))
+	}
+	obj := &rules.IEC104Context{
+		Malformed:   ev.Kind == "malformed",
+		Unsupported: ev.Kind == "unsupported",
+	}
+	obj.APCIType, _ = eventfields.String(attrs, eventfields.KeyAPCIType)
+	obj.Class, _ = eventfields.String(attrs, eventfields.KeyClass)
+	if v, ok := eventfields.Uint8(attrs, eventfields.KeyTypeID); ok {
+		obj.TypeID = &v
+	}
+	if v, ok := eventfields.Uint16(attrs, eventfields.KeyCA); ok {
+		obj.CA = &v
+		obj.Broadcast = obj.APCIType == "I" && v == iec104BroadcastCA
+	}
+	if v, ok := eventfields.Uint32(attrs, eventfields.KeyIOA); ok {
+		obj.IOA = &v
+	}
+	ctx.ICS = &rules.ICSContext{Protocol: rules.ProtocolIEC104, Direction: direction, IEC104: obj}
+	return ctx
+}
+
+const (
+	iec104Port        = 2404
+	iec104BroadcastCA = 65535
+)
 
 func hasICSPredicate(r config.Rule) bool {
 	return strings.TrimSpace(r.ICS.Protocol) != "" ||
