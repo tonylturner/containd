@@ -15,6 +15,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/stats"
@@ -317,4 +318,31 @@ func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (Simu
 		return SimulationStatus{}, err
 	}
 	return st, nil
+}
+
+// IEC104Enforcement reads the engine's IEC104 enforcement health from its
+// /health endpoint (contracts K6).
+func (c *HTTPClient) IEC104Enforcement(ctx context.Context) (dpengine.IEC104Enforcement, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
+	if err != nil {
+		return dpengine.IEC104Enforcement{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return dpengine.IEC104Enforcement{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return dpengine.IEC104Enforcement{}, engineStatusError(resp, "engine health status")
+	}
+	var out struct {
+		IEC104Enforcement *dpengine.IEC104Enforcement `json:"iec104Enforcement"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return dpengine.IEC104Enforcement{}, err
+	}
+	if out.IEC104Enforcement == nil {
+		return dpengine.IEC104Enforcement{}, fmt.Errorf("engine health has no iec104Enforcement")
+	}
+	return *out.IEC104Enforcement, nil
 }

@@ -283,13 +283,16 @@ func conntrackHandler() http.HandlerFunc {
 	}
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	resp := healthResponse{
-		Status:    "ok",
-		Component: "engine",
-		Build:     config.BuildVersion,
+// healthHandler is engine liveness plus IEC104 enforcement health (K6).
+func healthHandler(dpEngine *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, healthResponse{
+			Status:            "ok",
+			Component:         "engine",
+			Build:             config.BuildVersion,
+			IEC104Enforcement: dpEngine.IEC104Enforcement(),
+		})
 	}
-	writeJSON(w, resp)
 }
 
 func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {

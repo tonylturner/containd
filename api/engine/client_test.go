@@ -452,3 +452,25 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("RulesetStatus = %#v, %v", ruleset, err)
 	}
 }
+
+func TestIEC104EnforcementReadsEngineHealth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"}}`))
+	}))
+	defer srv.Close()
+	st, err := NewHTTPClient(srv.URL).IEC104Enforcement(context.Background())
+	if err != nil || st != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down"}) {
+		t.Fatalf("IEC104Enforcement = %+v, %v", st, err)
+	}
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer old.Close()
+	if _, err := NewHTTPClient(old.URL).IEC104Enforcement(context.Background()); err == nil {
+		t.Fatal("an engine without iec104Enforcement must not read as healthy")
+	}
+}
