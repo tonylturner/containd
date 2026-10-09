@@ -231,8 +231,11 @@ func TestAnalyzePacketCounting(t *testing.T) {
 	if result.ByteCount != expectedBytes {
 		t.Errorf("ByteCount = %d, want %d", result.ByteCount, expectedBytes)
 	}
-	if len(result.Events) != 2 {
-		t.Errorf("len(Events) = %d, want 2", len(result.Events))
+	// The two frames are byte-identical at the same TCP sequence number: the
+	// second is a retransmission, so its message is decoded once (contracts
+	// K2, K8). TestAnalyzeCountsEveryMessage covers two distinct messages.
+	if len(result.Events) != 1 {
+		t.Errorf("len(Events) = %d, want 1", len(result.Events))
 	}
 	if result.Duration != 1*time.Second {
 		t.Errorf("Duration = %v, want 1s", result.Duration)
@@ -326,5 +329,19 @@ func TestAnalyzeRejectsPacketLargerThanMaximum(t *testing.T) {
 
 	if _, err := Analyze(bytes.NewReader(buf.Bytes())); err == nil {
 		t.Fatal("Analyze() error = nil, want non-nil for oversized packet record")
+	}
+}
+
+func TestAnalyzeCountsEveryMessage(t *testing.T) {
+	frame1 := buildModbusEthernetFrame()
+	frame2 := buildModbusEthernetFrame()
+	// The second request follows the first on the connection.
+	binary.BigEndian.PutUint32(frame2[14+20+4:], 12)
+	result, err := Analyze(bytes.NewReader(buildPCAP([][]byte{frame1, frame2})), modbus.NewDecoder())
+	if err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if len(result.Events) != 2 {
+		t.Errorf("len(Events) = %d, want 2", len(result.Events))
 	}
 }
