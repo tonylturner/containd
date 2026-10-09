@@ -113,6 +113,10 @@ type Detector struct {
 	writeRate *rateTracker
 	totalRate *rateTracker
 
+	// IEC104 APDU IDs already counted for rates (bounded).
+	apduSeen  map[string]struct{}
+	apduOrder []string
+
 	// Ring buffer of recent anomalies.
 	ring    []Anomaly
 	ringPos int
@@ -133,6 +137,7 @@ func New(opts ...Option) *Detector {
 		flowProtos:                make(map[string]map[string]bool),
 		writeRate:                 newRateTracker(),
 		totalRate:                 newRateTracker(),
+		apduSeen:                  make(map[string]struct{}),
 		ring:                      make([]Anomaly, ringSize),
 	}
 	for _, o := range opts {
@@ -179,12 +184,20 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		out = append(out, d.checkS7comm(srcIP, dstIP, ev)...)
 	case "cip":
 		out = append(out, d.checkCIP(srcIP, dstIP, ev)...)
+	case "iec104":
+		out = append(out, d.checkIEC104(srcIP, dstIP, ev)...)
 	}
 
 	// 2b. Cross-protocol violations.
 	out = append(out, d.checkCrossProtocol(srcIP, dstIP, ev)...)
 
-	// 3. Rate anomalies.
+	// 3. Rate anomalies, counted once per APDU.
+	if !d.countsForRate(ev) {
+		for _, a := range out {
+			d.recordAnomaly(a)
+		}
+		return out
+	}
 	fk := flowKey(srcIP, dstIP)
 
 	totalCount := d.totalRate.record(fk)
@@ -354,6 +367,8 @@ func (d *Detector) Clear() {
 	d.flowProtos = make(map[string]map[string]bool)
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
+	d.apduSeen = make(map[string]struct{})
+	d.apduOrder = nil
 	d.ring = make([]Anomaly, ringSize)
 	d.ringPos = 0
 	d.ringLen = 0

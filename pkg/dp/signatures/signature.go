@@ -61,7 +61,7 @@ func New() *Engine {
 
 // LoadBuiltins loads the built-in ICS threat signatures.
 func (e *Engine) LoadBuiltins() {
-	for _, sig := range builtinSignatures() {
+	for _, sig := range append(builtinSignatures(), iec104Signatures()...) {
 		e.Add(sig)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -42,7 +43,7 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode}
 	switch {
-	case ev.Kind == iecKindMalformed && iecRoleViolation(ev.Attributes):
+	case ev.Kind == iecKindMalformed && anomaly.IEC104RoleViolation(ev.Attributes):
 		d.reason = reasonRole
 	case ev.Kind == iecKindMalformed:
 		d.reason = reasonMalformed
@@ -100,24 +101,6 @@ func iecBroadcast(a map[string]any) bool {
 	apci, _ := eventfields.String(a, eventfields.KeyAPCIType)
 	ca, ok := eventfields.Uint16(a, eventfields.KeyCA)
 	return apci == "I" && ok && ca == iecBroadcastCA
-}
-
-// iecRoleViolation recognises the B profile role restrictions of spec §7.3
-// from the decoded identity of a malformed event: a monitor-direction type
-// (1..44) from the client, or a control or system command (cause 6 or 8)
-// from the server.
-func iecRoleViolation(a map[string]any) bool {
-	dir, _ := eventfields.String(a, eventfields.KeyDirection)
-	typeID, hasType := eventfields.Uint8(a, eventfields.KeyTypeID)
-	if !hasType {
-		return false
-	}
-	if dir == "request" {
-		return typeID >= 1 && typeID <= 44
-	}
-	class, _ := eventfields.String(a, eventfields.KeyClass)
-	cause, hasCause := eventfields.Uint8(a, eventfields.KeyCause)
-	return dir == "response" && hasCause && (cause == 6 || cause == 8) && (class == "control" || class == "system")
 }
 
 // judgeLocked decides the events of newly framed APDUs. It reports whether
