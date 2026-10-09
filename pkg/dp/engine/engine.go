@@ -489,6 +489,8 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 		return port == 47808
 	case "opcua":
 		return port == 4840
+	case "iec104":
+		return port == iec104Port
 	default:
 		return false
 	}

@@ -71,7 +71,7 @@ func dirName(dir int) string {
 // take the flow path unchanged.
 func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
 	t := e.iec
-	if t == nil || pkt.Proto != 6 || (pkt.SrcPort != iec104Port && pkt.DstPort != iec104Port) {
+	if t == nil || !isIECPort(pkt) {
 		return capture.Decision{}, false
 	}
 	res, ok := t.packet(pkt, state)

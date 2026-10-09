@@ -75,6 +75,12 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
 		return acceptDecision
 	}
+	if isIECPort(pkt) {
+		// IEC104 is parsed only on a session tracked from its SYN
+		// (HasOffset, contracts K2); outside every envelope it passes
+		// unparsed, as before.
+		return acceptDecision
+	}
 	// Events come before the error: a stream error's malformed event is
 	// already among them, and the packet itself passes (spec §4.2).
 	evs, _ := e.dpiMgr.OnPacket(state, &parsed)
@@ -147,4 +153,8 @@ func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	if len(evs) > 0 {
 		e.RecordDPIEvents(state, pkt, evs)
 	}
+}
+
+func isIECPort(pkt capture.Packet) bool {
+	return pkt.Proto == 6 && (pkt.SrcPort == iec104Port || pkt.DstPort == iec104Port)
 }

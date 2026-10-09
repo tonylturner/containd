@@ -60,6 +60,7 @@ var icsDecoderProto = map[string]string{
 	"*iec61850.MMSDecoder": "mms",
 	"*bacnet.Decoder":      "bacnet",
 	"*opcua.Decoder":       "opcua",
+	"*iec104.Decoder":      "iec104",
 }
 
 // FilterDecoders returns decoders filtered by the per-protocol toggle maps.

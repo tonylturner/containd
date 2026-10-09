@@ -7,12 +7,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
@@ -54,6 +56,7 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 	}
 
 	mgr := dpi.NewManager(decoders...)
+	sessions := newOfflineSessions()
 
 	flows := make(map[string]*flow.State)
 	flowEvents := make(map[string]int)
@@ -79,7 +82,7 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 			continue
 		}
 		hash, state := analysisFlowState(flows, pkt, ts)
-		events := analyzePacket(mgr, state, pkt, ts)
+		events := analyzePacket(mgr, sessions, state, pkt, ts)
 		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
 	}
 
@@ -131,7 +134,7 @@ func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time
 // analyzePacket runs one packet through DPI with its TCP sequence number,
 // as the live engine does. Events come before the error: a stream error's
 // malformed event is among them and the analysis continues.
-func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
+func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
 	parsed := &dpi.ParsedPacket{
 		Payload:     pkt.Payload,
 		Proto:       pkt.Transport,
@@ -139,6 +142,9 @@ func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt capture.Packet, ts t
 		DstPort:     pkt.DstPort,
 		TCPSeq:      pkt.TCP.Seq,
 		TCPSeqValid: pkt.TCP.Valid,
+	}
+	if iec, parse := sessions.annotate(mgr, pkt, parsed); iec && !parse {
+		return nil
 	}
 	events, _ := mgr.OnPacket(state, parsed)
 	stampEvents(events, ts)
@@ -224,7 +230,11 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 
 	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
 		eventSummary[ev.Proto]++
-		learner.RecordEvent(srcIP, dstIP, ev)
+		// IEC104 traffic is summarised but never learned into permissive
+		// rules (spec §7.4, W4).
+		if !strings.EqualFold(ev.Proto, eventfields.ProtoIEC104) {
+			learner.RecordEvent(srcIP, dstIP, ev)
+		}
 	}
 
 	result, err := analyzeCore(r, onEvent, decoders...)

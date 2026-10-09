@@ -104,3 +104,66 @@ func TestAnalyzeUsesTCPSequence(t *testing.T) {
 		t.Fatalf("records=%v malformed=%d, want the frame before the error and its malformed event", recs, malformed)
 	}
 }
+
+// iecFramer emits one iec104 event per 4-byte record on port 2404.
+type iecFramer struct{ recordFramer }
+
+func (iecFramer) Supports(s *flow.State) bool {
+	return s != nil && s.Key.Proto == 6 && (s.Key.SrcPort == 2404 || s.Key.DstPort == 2404)
+}
+func (iecFramer) Ports() ([]uint16, []uint16) { return []uint16{2404}, nil }
+func (iecFramer) Protocol() string            { return "iec104" }
+func (iecFramer) ParseStream(_ *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
+	var res dpi.StreamResult
+	for off := 0; off+4 <= len(v.Bytes); off += 4 {
+		start := v.Base + int64(off)
+		res.Frames = append(res.Frames, dpi.DecodedFrame{Start: start, End: start + 4, Events: []dpi.Event{{
+			Proto: "iec104", Kind: "request", Attributes: map[string]any{"type_id": uint8(46), "is_write": true},
+		}}})
+		res.Consumed = off + 4
+	}
+	return res, nil
+}
+
+// iecFrame builds an Ethernet/IPv4/TCP frame between 10.0.0.1:40000 (the
+// client) and 10.0.0.2:2404.
+func iecFrame(fromClient bool, seq, ack uint32, flags byte, payload string) []byte {
+	f := tcpFrame(seq, flags, payload)
+	tcp := f[34:]
+	binary.BigEndian.PutUint32(tcp[8:], ack)
+	if fromClient {
+		binary.BigEndian.PutUint16(tcp[0:], 40000)
+		binary.BigEndian.PutUint16(tcp[2:], 2404)
+	} else {
+		binary.BigEndian.PutUint16(tcp[0:], 2404)
+		binary.BigEndian.PutUint16(tcp[2:], 40000)
+		copy(f[26:30], []byte{10, 0, 0, 2})
+		copy(f[30:34], []byte{10, 0, 0, 1})
+	}
+	return f
+}
+
+func TestAnalyzeTracksIEC104SessionsAndNeverLearnsThem(t *testing.T) {
+	const syn, ack, psh = 0x02, 0x10, 0x08
+	frames := [][]byte{
+		iecFrame(true, 99, 0, syn, ""),
+		iecFrame(false, 499, 100, syn|ack, ""),
+		iecFrame(true, 100, 500, ack|psh, "CMD1"),
+		iecFrame(true, 100, 500, ack|psh, "CMD1"), // retransmission
+		iecFrame(true, 104, 500, ack|psh, "CMD2"),
+	}
+	// A second connection whose SYN was not captured is never parsed.
+	mid := iecFrame(true, 7000, 9000, ack|psh, "LOST")
+	binary.BigEndian.PutUint16(mid[34:], 40001)
+	frames = append(frames, mid)
+	res, err := AnalyzeForPolicy(bytes.NewReader(buildPCAP(frames)), iecFramer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.EventSummary["iec104"] != 2 {
+		t.Fatalf("iec104 events = %d, want 2 (once each, none mid-stream)", res.EventSummary["iec104"])
+	}
+	if len(res.Rules) != 0 || len(res.Profiles) != 0 {
+		t.Fatalf("PCAP-to-policy learned IEC104: rules=%+v profiles=%+v", res.Rules, res.Profiles)
+	}
+}
