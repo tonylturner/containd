@@ -287,7 +287,7 @@ components:
         dpiProtocols:
           type: object
           additionalProperties: { type: boolean }
-          description: IT protocol enable/disable map (e.g., {"dns": true, "tls": true})
+          description: 'IT protocol enable/disable map (e.g., {"dns": true, "tls": true})'
         dpiIcsProtocols:
           type: object
           additionalProperties: { type: boolean }
