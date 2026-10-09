@@ -10,9 +10,9 @@ import (
 
 // Packet.Invalid reasons.
 const (
-	InvalidTruncated = "truncated"  // shorter than its IP header
+	InvalidTruncated = "truncated"  // shorter than its IP header or its IP length field
 	InvalidIPVersion = "ip_version" // neither IPv4 nor IPv6
-	InvalidIPHeader  = "ip_header"  // IPv4 IHL below 20 bytes
+	InvalidIPHeader  = "ip_header"  // IPv4 IHL below 20, or an IP length below the header
 	InvalidFragment  = "fragment"   // IPv4 MF/fragment offset or IPv6 fragment header
 	InvalidIPv6      = "ipv6"       // IPv6 extension header chain (not walked)
 	InvalidProtocol  = "protocol"   // transport is neither TCP nor UDP
@@ -29,10 +29,13 @@ func DecodeIPPacket(data []byte) Packet {
 	return pkt
 }
 
-// decodeIP decodes like DecodeIPPacket and also reports whether capture
-// delivers the packet to its handler. Capture still accepts undecodable
-// packets itself; IPv4 fragments that decode are delivered as before, now
-// marked Invalid=fragment.
+// decodeIP decodes like DecodeIPPacket and also reports whether an
+// observational source (AF_PACKET) delivers the packet to its handler: only
+// packets whose transport header decodes. Those can still carry an Invalid
+// reason (fragment, truncated, ip_header); their payload is best effort.
+// The inline NFQUEUE source delivers every packet, decoded or not.
+//
+// Bytes beyond the IP length field (link-layer padding) are not payload.
 func decodeIP(data []byte) (Packet, bool) {
 	if len(data) < 1 {
 		return Packet{Invalid: InvalidTruncated}, false
@@ -65,12 +68,33 @@ func decodeIPv4Raw(data []byte) (Packet, bool) {
 		pkt.Invalid = InvalidTruncated
 		return pkt, false
 	}
+	data, lengthErr := clampIPLength(data, int(binary.BigEndian.Uint16(data[2:4])), ihl)
 	ok := decodeL4(&pkt, data[ihl:])
-	const moreFragments, offsetMask = 0x2000, 0x1fff
-	if frag := binary.BigEndian.Uint16(data[6:8]); ok && frag&(moreFragments|offsetMask) != 0 {
-		pkt.Invalid = InvalidFragment
+	if !ok {
+		return pkt, false
 	}
-	return pkt, ok
+	const moreFragments, offsetMask = 0x2000, 0x1fff
+	if frag := binary.BigEndian.Uint16(data[6:8]); frag&(moreFragments|offsetMask) != 0 {
+		pkt.Invalid = InvalidFragment
+	} else {
+		pkt.Invalid = lengthErr
+	}
+	return pkt, true
+}
+
+// clampIPLength trims data to the packet length the IP header states and
+// reports a length problem: InvalidTruncated when the capture is shorter
+// than the stated length, InvalidIPHeader when the stated length does not
+// even cover the header. The data is returned unchanged in both cases.
+func clampIPLength(data []byte, total, header int) ([]byte, string) {
+	switch {
+	case total < header:
+		return data, InvalidIPHeader
+	case total > len(data):
+		return data, InvalidTruncated
+	default:
+		return data[:total], ""
+	}
 }
 
 func decodeIPv6Raw(data []byte) (Packet, bool) {
@@ -90,7 +114,12 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 		pkt.Invalid = InvalidIPv6
 		return pkt, false
 	}
-	return pkt, decodeL4(&pkt, data[40:])
+	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
+	if !decodeL4(&pkt, data[40:]) {
+		return pkt, false
+	}
+	pkt.Invalid = lengthErr
+	return pkt, true
 }
 
 // decodeL4 fills the transport fields of pkt and reports success; on

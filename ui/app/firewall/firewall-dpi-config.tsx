@@ -11,6 +11,7 @@ import {
   type DataPlaneConfig,
   type DPIExclusion,
 } from "../../lib/api";
+import { IEC104HealthStatus } from "../ics/iec104-health";
 import {
   ICS_DPI_PROTOCOLS,
   ICS_PROTOCOL_OPTIONS,
@@ -28,6 +29,7 @@ export function DPIConfigSection({
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
   );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showProtoModal, setShowProtoModal] = useState(false);
   const [showExclModal, setShowExclModal] = useState(false);
   const [showICSConfigModal, setShowICSConfigModal] = useState(false);
@@ -45,43 +47,42 @@ export function DPIConfigSection({
     (p) => icsProtos[p.key] !== false,
   ).length;
 
+  // Applies the change optimistically and reverts it when the server
+  // rejects it, for example an IEC 104 enforce policy that needs the decoder.
   async function save(updated: DataPlaneConfig) {
     if (!canEdit) return;
+    const previous = cfg;
+    onChange(updated);
     setSaving(true);
+    setSaveError(null);
     const result = await setDataPlane(updated);
     setSaving(false);
     setSaveState(result.ok ? "saved" : "error");
+    if (!result.ok) {
+      onChange(previous);
+      setSaveError(result.error);
+    }
     setTimeout(() => setSaveState("idle"), 1500);
   }
 
   function toggleDPI() {
-    const updated = { ...cfg, dpiEnabled: !dpiOn };
-    onChange(updated);
-    save(updated);
+    save({ ...cfg, dpiEnabled: !dpiOn });
   }
 
   function setMode(mode: "learn" | "enforce") {
-    const updated = { ...cfg, dpiMode: mode };
-    onChange(updated);
-    save(updated);
+    save({ ...cfg, dpiMode: mode });
   }
 
   function saveProtos(newProtos: Record<string, boolean>) {
-    const updated = { ...cfg, dpiProtocols: newProtos };
-    onChange(updated);
-    save(updated);
+    save({ ...cfg, dpiProtocols: newProtos });
   }
 
   function saveICSProtos(newICSProtos: Record<string, boolean>) {
-    const updated = { ...cfg, dpiIcsProtocols: newICSProtos };
-    onChange(updated);
-    save(updated);
+    save({ ...cfg, dpiIcsProtocols: newICSProtos });
   }
 
   function saveExclusions(newExcl: DPIExclusion[]) {
-    const updated = { ...cfg, dpiExclusions: newExcl };
-    onChange(updated);
-    save(updated);
+    save({ ...cfg, dpiExclusions: newExcl });
   }
 
   return (
@@ -128,6 +129,12 @@ export function DPIConfigSection({
             </StatusBadge>
           </div>
         </div>
+
+        {saveError && (
+          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            Not saved: {saveError}
+          </div>
+        )}
 
         {dpiOn && (
           <div className="mt-4 space-y-3">
@@ -208,6 +215,9 @@ export function DPIConfigSection({
                     </span>
                   );
                 })}
+              </div>
+              <div className="mt-2">
+                <IEC104HealthStatus />
               </div>
             </div>
 
@@ -435,10 +445,10 @@ function DPIProtocolModal({
         </div>
 
         <div className="mt-4 text-[10px] text-[var(--text-dim)]">
-          ICS protocol decoders (Modbus, DNP3, CIP, S7comm, IEC 61850 MMS,
-          BACnet, OPC UA) are always active and cannot be disabled. TLS
-          inspection covers handshake metadata only (SNI, JA3, cipher suites) —
-          full TLS interception is planned for a future release.
+          ICS protocol decoders are enabled or disabled separately under ICS
+          Protocol Decoders. TLS inspection covers handshake metadata only
+          (SNI, JA3, cipher suites) — full TLS interception is planned for a
+          future release.
         </div>
 
         <div className="mt-4 flex justify-end gap-2">

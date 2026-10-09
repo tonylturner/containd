@@ -9,6 +9,18 @@ package eventfields
 // Proto values.
 const (
 	ProtoIEC104 = "iec104"
+	ProtoModbus = "modbus"
+	ProtoDNP3   = "dnp3"
+)
+
+// Decoder event kinds. IEC104 uses all five; Modbus and DNP3 emit
+// KindMalformed for bytes they cannot frame.
+const (
+	KindRequest     = "request"
+	KindResponse    = "response"
+	KindAPCI        = "apci"
+	KindMalformed   = "malformed"
+	KindUnsupported = "unsupported"
 )
 
 // Engine event kinds for decisions and their outcomes.

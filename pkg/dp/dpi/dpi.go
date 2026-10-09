@@ -4,14 +4,13 @@
 package dpi
 
 import (
-	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 const (
-	defaultReassemblyMax     = 64 * 1024        // 64 KB per stream
+	defaultReassemblyMax     = 64 * 1024        // 64 KB buffered per stream direction
 	defaultReassemblyTimeout = 30 * time.Second // idle stream timeout
 )
 
@@ -64,18 +63,14 @@ type Manager struct {
 	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
-	reassembler *Reassembler
-
-	mu     sync.Mutex
-	failed map[string]error // session stream key -> error that failed it
+	reassembler *reassembler
 }
 
 func NewManager(decoders ...Decoder) *Manager {
 	m := &Manager{
 		tcpByPort:   make(map[uint16][]Decoder),
 		udpByPort:   make(map[uint16][]Decoder),
-		reassembler: NewReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
-		failed:      make(map[string]error),
+		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -162,7 +157,7 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {
-		m.reassembler.Complete(state.Key.Hash())
+		m.reassembler.complete(state.Key.Hash())
 	}
 
 	var out []Event

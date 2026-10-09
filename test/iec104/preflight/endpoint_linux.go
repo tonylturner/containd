@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -288,16 +287,4 @@ func (s *endpointService) handleConnections(w http.ResponseWriter, r *http.Reque
 		snapshots = append(snapshots, entry.snapshot())
 	}
 	writeJSON(w, http.StatusOK, snapshots)
-}
-
-func connectionPort(addr string) (uint16, error) {
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(port))
-	if err != nil || n < 1 || n > 65535 {
-		return 0, fmt.Errorf("invalid TCP port in %q", addr)
-	}
-	return uint16(n), nil
 }

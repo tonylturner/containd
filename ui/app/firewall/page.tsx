@@ -34,6 +34,7 @@ import {
   zoneName,
 } from "./firewall-utils";
 import { DPIConfigSection } from "./firewall-dpi-config";
+import { summarizeIEC104 } from "../ics/iec104";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 
 // This page should own firewall page orchestration and top-level state.
@@ -463,7 +464,9 @@ export default function FirewallPage() {
                         {r.ics.mode === "learn" ? "safe learning" : "enforce"}
                       </StatusBadge>
                       <span className="text-xs text-[var(--text)]">
-                        {r.ics.protocol} fc={(r.ics.functionCode ?? []).join(",") || "*"}
+                        {r.ics.protocol === "iec104"
+                          ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
+                          : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
                       </span>
                     </div>
                   ) : "\u2014"}

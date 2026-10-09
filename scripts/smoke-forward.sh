@@ -5,6 +5,13 @@ set -euo pipefail
 # Requirements: docker compose, jq, curl.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
+# Compose project and harness subnets. When another smoke stack owns the
+# default networks, set a unique project, list an override file that moves
+# the subnets in COMPOSE_FILE, and set the matching prefixes here
+# (see test/data-smoke/README.md).
+SMOKE_PROJECT=${SMOKE_PROJECT:-deploy}
+WAN_NET=${SMOKE_WAN_NET:-172.30.0}
+LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
@@ -24,7 +31,21 @@ timestamp() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 log() { echo "[$(timestamp)] $*"; }
-pass() { ((TESTS_PASSED++)); log "PASS: $*"; }
+pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); log "PASS: $*"; }
+
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
+# override file can follow the base harness file.
+compose() {
+  local files=() args=() file
+  IFS=: read -r -a files <<<"$COMPOSE_FILE"
+  for file in "${files[@]}"; do
+    args+=(-f "$file")
+  done
+  docker compose --project-name "$SMOKE_PROJECT" "${args[@]}" "$@"
+}
 
 ensure_tools() {
   for bin in docker jq curl; do
@@ -59,9 +80,9 @@ ensure_tools
 if [[ "$SMOKE_SKIP_UP" != "1" ]]; then
   log "Bringing up smoke harness ($COMPOSE_FILE)..."
   if [[ "$SMOKE_BUILD" == "1" ]]; then
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    compose up -d --build
   else
-    docker compose -f "$COMPOSE_FILE" up -d
+    compose up -d
   fi
 fi
 
@@ -77,8 +98,8 @@ for _ in $(seq 1 10); do
   fi
   sleep 2
 done
-WAN_DEV=$(discover_iface "$STATE" "172.30.0.2")
-LAN_DEV=$(discover_iface "$STATE" "172.31.0.2")
+WAN_DEV=$(discover_iface "$STATE" "${WAN_NET}.2")
+LAN_DEV=$(discover_iface "$STATE" "${LAN_NET}.2")
 if [[ -z "$WAN_DEV" || -z "$LAN_DEV" ]]; then
   echo "failed to discover wan/lan devices from interface state:" >&2
   echo "$STATE" >&2
@@ -90,7 +111,8 @@ log "Fetching current config..."
 CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Applying dataplane + firewall config (enforcement, SNAT, allow lan->wan, DNAT ${DNAT_PORT} -> lan_target)..."
-UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg dnatPort "$DNAT_PORT" '
+UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg dnatPort "$DNAT_PORT" \
+  --arg lanTarget "${LAN_NET}.4" --arg lanClient "${LAN_NET}.3/32" '
   .interfaces |= map(
     if .name=="wan" then .device=$wan
     elif .name=="lan1" then .device=$lan | .zone="lan"
@@ -113,7 +135,7 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
           ingressZone:"wan",
           proto:"tcp",
           listenPort:($dnatPort | tonumber),
-          destIP:"172.31.0.4",
+          destIP:$lanTarget,
           destPort:80,
           allowedSources:[]
         }
@@ -125,7 +147,7 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
           id:"allow-lan-client-wan",
           sourceZones:["lan"],
           destZones:["wan"],
-          sources:["172.31.0.3/32"],
+          sources:[$lanClient],
           protocols:[{name:"tcp", port:"8080"}],
           action:"ALLOW"
         }
@@ -171,83 +193,83 @@ $CURL "${BASE}/health" >/dev/null
 log "Setting test client routes (lan->engine, wan->engine)..."
 {
   set +e
-  docker compose -f "$COMPOSE_FILE" exec -T lan_client ip route flush table main
-  docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route flush table main
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route flush table main
-  docker compose -f "$COMPOSE_FILE" exec -T lan_client ip route add 172.31.0.0/24 dev eth0 scope link src 172.31.0.3
-  docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route add 172.31.0.0/24 dev eth0 scope link src 172.31.0.4
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add 172.30.0.0/24 dev eth0 scope link src 172.30.0.3
-  docker compose -f "$COMPOSE_FILE" exec -T lan_client ip route add 172.30.0.0/24 via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route add 172.30.0.0/24 via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add 172.31.0.0/24 via 172.30.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T lan_client ip route add default via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route add default via 172.31.0.2 dev eth0
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add default via 172.30.0.2 dev eth0
+  compose exec -T lan_client ip route flush table main
+  compose exec -T lan_target ip route flush table main
+  compose exec -T wan_server ip route flush table main
+  compose exec -T lan_client ip route add "${LAN_NET}.0/24" dev eth0 scope link src "${LAN_NET}.3"
+  compose exec -T lan_target ip route add "${LAN_NET}.0/24" dev eth0 scope link src "${LAN_NET}.4"
+  compose exec -T wan_server ip route add "${WAN_NET}.0/24" dev eth0 scope link src "${WAN_NET}.3"
+  compose exec -T lan_client ip route add "${WAN_NET}.0/24" via "${LAN_NET}.2" dev eth0
+  compose exec -T lan_target ip route add "${WAN_NET}.0/24" via "${LAN_NET}.2" dev eth0
+  compose exec -T wan_server ip route add "${LAN_NET}.0/24" via "${WAN_NET}.2" dev eth0
+  compose exec -T lan_client ip route add default via "${LAN_NET}.2" dev eth0
+  compose exec -T lan_target ip route add default via "${LAN_NET}.2" dev eth0
+  compose exec -T wan_server ip route add default via "${WAN_NET}.2" dev eth0
   set -e
-} >/tmp/route-setup.log 2>&1 || true
+} >"$WORK_DIR/route-setup.log" 2>&1 || true
 log "Route programming output:"
-sed 's/^/  /' /tmp/route-setup.log
+sed 's/^/  /' "$WORK_DIR/route-setup.log"
 
 log "Asserting routes prefer engine for cross-subnet traffic..."
-LAN_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T lan_client ip route get 172.30.0.3 | tr -d '\r')
-echo "$LAN_ROUTE" | grep -q "via 172.31.0.2" || { log "lan_client route not via engine: $LAN_ROUTE"; exit 1; }
-WAN_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route get 172.31.0.4 | tr -d '\r')
-echo "$WAN_ROUTE" | grep -q "via 172.30.0.2" || { log "wan_server route not via engine: $WAN_ROUTE"; exit 1; }
-LAN_TGT_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T lan_target ip route get 172.30.0.3 | tr -d '\r')
-echo "$LAN_TGT_ROUTE" | grep -q "via 172.31.0.2" || { log "lan_target route not via engine: $LAN_TGT_ROUTE"; exit 1; }
+LAN_ROUTE=$(compose exec -T lan_client ip route get "${WAN_NET}.3" | tr -d '\r')
+echo "$LAN_ROUTE" | grep -q "via ${LAN_NET}.2" || { log "lan_client route not via engine: $LAN_ROUTE"; exit 1; }
+WAN_ROUTE=$(compose exec -T wan_server ip route get "${LAN_NET}.4" | tr -d '\r')
+echo "$WAN_ROUTE" | grep -q "via ${WAN_NET}.2" || { log "wan_server route not via engine: $WAN_ROUTE"; exit 1; }
+LAN_TGT_ROUTE=$(compose exec -T lan_target ip route get "${WAN_NET}.3" | tr -d '\r')
+echo "$LAN_TGT_ROUTE" | grep -q "via ${LAN_NET}.2" || { log "lan_target route not via engine: $LAN_TGT_ROUTE"; exit 1; }
 
 log "Snapshotting DNAT counter before tests..."
-DNAT_PKTS_BEFORE=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+DNAT_PKTS_BEFORE=$(compose exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
 
 log "Testing LAN -> WAN HTTP (lan_client -> wan_server:8080)..."
-docker compose -f "$COMPOSE_FILE" exec -T lan_client curl -svf http://172.30.0.3:8080 >/tmp/lan_wan.out 2>/tmp/lan_wan.err
-LAN_STATUS=$?
+LAN_STATUS=0
+compose exec -T lan_client curl -svf "http://${WAN_NET}.3:8080" >"$WORK_DIR/lan_wan.out" 2>"$WORK_DIR/lan_wan.err" || LAN_STATUS=$?
 if [[ $LAN_STATUS -ne 0 ]]; then
-  log "LAN->WAN failed (exit $LAN_STATUS):"; cat /tmp/lan_wan.err; exit 1
+  log "LAN->WAN failed (exit $LAN_STATUS):"; cat "$WORK_DIR/lan_wan.err"; exit 1
 fi
-pass "LAN->WAN success (first line: $(head -n1 /tmp/lan_wan.out))"
+pass "LAN->WAN success (first line: $(head -n1 "$WORK_DIR/lan_wan.out"))"
 
 log "Testing LAN -> WAN other port blocked (lan_client -> wan_server:8082)..."
-if docker compose -f "$COMPOSE_FILE" exec -T lan_client curl -m 5 -sf http://172.30.0.3:8082 >/tmp/lan_wan_block.out 2>/tmp/lan_wan_block.err; then
-  log "Unexpected allow: lan_client reached wan_server:8082"; cat /tmp/lan_wan_block.out; exit 1
+if compose exec -T lan_client curl -m 5 -sf "http://${WAN_NET}.3:8082" >"$WORK_DIR/lan_wan_block.out" 2>"$WORK_DIR/lan_wan_block.err"; then
+  log "Unexpected allow: lan_client reached wan_server:8082"; cat "$WORK_DIR/lan_wan_block.out"; exit 1
 else
   pass "LAN->WAN port 8082 correctly blocked by rule ordering/default deny"
 fi
 
 log "Testing LAN TARGET -> WAN should be blocked (lan_target -> wan_server:8080)..."
-if docker compose -f "$COMPOSE_FILE" exec -T lan_target curl -m 5 -sf http://172.30.0.3:8080 >/tmp/lan_target_wan.out 2>/tmp/lan_target_wan.err; then
-  log "Unexpected allow: lan_target reached wan_server:8080"; cat /tmp/lan_target_wan.out; exit 1
+if compose exec -T lan_target curl -m 5 -sf "http://${WAN_NET}.3:8080" >"$WORK_DIR/lan_target_wan.out" 2>"$WORK_DIR/lan_target_wan.err"; then
+  log "Unexpected allow: lan_target reached wan_server:8080"; cat "$WORK_DIR/lan_target_wan.out"; exit 1
 else
   pass "LAN target blocked from WAN as expected"
 fi
 
 log "Testing DNAT WAN:${DNAT_PORT} -> LAN target:80 (from wan_server)..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_dnat.out 2>/tmp/wan_dnat.err
-DNAT_STATUS=$?
+DNAT_STATUS=0
+compose exec -T wan_server sh -c "wget -qO- --timeout=5 http://${WAN_NET}.2:${DNAT_PORT}" >"$WORK_DIR/wan_dnat.out" 2>"$WORK_DIR/wan_dnat.err" || DNAT_STATUS=$?
 if [[ $DNAT_STATUS -ne 0 ]]; then
-  log "WAN DNAT failed (exit $DNAT_STATUS):"; cat /tmp/wan_dnat.err; exit 1
+  log "WAN DNAT failed (exit $DNAT_STATUS):"; cat "$WORK_DIR/wan_dnat.err"; exit 1
 fi
-pass "WAN DNAT success (first line: $(head -n1 /tmp/wan_dnat.out))"
+pass "WAN DNAT success (first line: $(head -n1 "$WORK_DIR/wan_dnat.out"))"
 
-log "Testing WAN direct to LAN (should be blocked: wan_server -> 172.31.0.4:80)..."
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.31.0.4:80" >/tmp/wan_direct.out 2>/tmp/wan_direct.err; then
-  log "Unexpected allow: wan_server reached 172.31.0.4:80"; exit 1
+log "Testing WAN direct to LAN (should be blocked: wan_server -> ${LAN_NET}.4:80)..."
+if compose exec -T wan_server sh -c "wget -qO- --timeout=5 http://${LAN_NET}.4:80" >"$WORK_DIR/wan_direct.out" 2>"$WORK_DIR/wan_direct.err"; then
+  log "Unexpected allow: wan_server reached ${LAN_NET}.4:80"; exit 1
 else
   pass "WAN direct to LAN HTTP correctly blocked"
 fi
 
-log "Testing WAN direct to LAN SSH (should be blocked: wan_server -> 172.31.0.4:22)..."
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "nc -z -w2 172.31.0.4 22" >/tmp/wan_direct_ssh.out 2>/tmp/wan_direct_ssh.err; then
-  log "Unexpected allow: wan_server reached 172.31.0.4:22"; exit 1
+log "Testing WAN direct to LAN SSH (should be blocked: wan_server -> ${LAN_NET}.4:22)..."
+if compose exec -T wan_server sh -c "nc -z -w2 ${LAN_NET}.4 22" >"$WORK_DIR/wan_direct_ssh.out" 2>"$WORK_DIR/wan_direct_ssh.err"; then
+  log "Unexpected allow: wan_server reached ${LAN_NET}.4:22"; exit 1
 else
   pass "WAN SSH to LAN correctly blocked"
 fi
 
 log "Checking nft counters for NAT and forward paths..."
-DNAT_PKTS_AFTER=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
-POST_PKTS=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd postrouting | awk '/masquerade/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
-FWD_LAN_WAN=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 8080/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
-FWD_WAN_DNAT=$(docker compose -f "$COMPOSE_FILE" exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 80/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+DNAT_PKTS_AFTER=$(compose exec -T engine /usr/sbin/nft -ac list chain inet containd prerouting | awk '/dnat ip to/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+POST_PKTS=$(compose exec -T engine /usr/sbin/nft -ac list chain inet containd postrouting | awk '/masquerade/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+FWD_LAN_WAN=$(compose exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 8080/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
+FWD_WAN_DNAT=$(compose exec -T engine /usr/sbin/nft -ac list chain inet containd forward | awk '/dport 80/{for(i=1;i<NF;i++){if($i=="packets"){print $(i+1)}}}' || true)
 if [[ -n "$DNAT_PKTS_BEFORE" && -n "$DNAT_PKTS_AFTER" ]]; then
   if (( DNAT_PKTS_AFTER <= DNAT_PKTS_BEFORE )); then
     log "DNAT counter did not increment (before=$DNAT_PKTS_BEFORE after=$DNAT_PKTS_AFTER)"; exit 1
@@ -257,40 +279,41 @@ log "Counters: prerouting DNAT packets=$DNAT_PKTS_AFTER, postrouting masq packet
 pass "Counters observed and DNAT incremented"
 
 log "Testing no-route scenario (wan_server without path to engine/LAN)..."
-WAN_NET_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T wan_server ip -4 route show 172.30.0.0/24 | tr -d '\r')
-WAN_DEF_ROUTE=$(docker compose -f "$COMPOSE_FILE" exec -T wan_server ip -4 route show default | tr -d '\r')
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del 172.30.0.0/24 || true
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route del default || true
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable 172.30.0.0/24 || true
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add unreachable default || true
-if docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_noroute.out 2>/tmp/wan_noroute.err; then
+WAN_NET_ROUTE=$(compose exec -T wan_server ip -4 route show "${WAN_NET}.0/24" | tr -d '\r')
+WAN_DEF_ROUTE=$(compose exec -T wan_server ip -4 route show default | tr -d '\r')
+compose exec -T wan_server ip route del "${WAN_NET}.0/24" || true
+compose exec -T wan_server ip route del default || true
+compose exec -T wan_server ip route add unreachable "${WAN_NET}.0/24" || true
+compose exec -T wan_server ip route add unreachable default || true
+if compose exec -T wan_server sh -c "wget -qO- --timeout=5 http://${WAN_NET}.2:${DNAT_PORT}" >"$WORK_DIR/wan_noroute.out" 2>"$WORK_DIR/wan_noroute.err"; then
   log "Unexpected success with no route present"; exit 1
 else
   pass "No-route check passed (traffic failed as expected)"
 fi
 
 log "Restoring routes after no-route check..."
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route flush table main || true
-docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route flush unreachable || true
+compose exec -T wan_server ip route flush table main || true
+compose exec -T wan_server ip route flush unreachable || true
 if [[ -n "$WAN_NET_ROUTE" ]]; then
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "ip route add $WAN_NET_ROUTE" || true
+  compose exec -T wan_server sh -c "ip route add $WAN_NET_ROUTE" || true
 else
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add 172.30.0.0/24 dev eth0 scope link src 172.30.0.3 || true
+  compose exec -T wan_server ip route add "${WAN_NET}.0/24" dev eth0 scope link src "${WAN_NET}.3" || true
 fi
 if [[ -n "$WAN_DEF_ROUTE" ]]; then
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "ip route add $WAN_DEF_ROUTE" || true
+  compose exec -T wan_server sh -c "ip route add $WAN_DEF_ROUTE" || true
 else
-  docker compose -f "$COMPOSE_FILE" exec -T wan_server ip route add default via 172.30.0.2 dev eth0 || true
+  compose exec -T wan_server ip route add default via "${WAN_NET}.2" dev eth0 || true
 fi
 
 log "Re-testing DNAT after route restoration..."
-if ! docker compose -f "$COMPOSE_FILE" exec -T wan_server sh -c "wget -qO- --timeout=5 http://172.30.0.2:${DNAT_PORT}" >/tmp/wan_dnat2.out 2>/tmp/wan_dnat2.err; then
-  log "WAN DNAT after restore failed:"; cat /tmp/wan_dnat2.err; exit 1
+if ! compose exec -T wan_server sh -c "wget -qO- --timeout=5 http://${WAN_NET}.2:${DNAT_PORT}" >"$WORK_DIR/wan_dnat2.out" 2>"$WORK_DIR/wan_dnat2.err"; then
+  log "WAN DNAT after restore failed:"; cat "$WORK_DIR/wan_dnat2.err"; exit 1
 fi
-pass "WAN DNAT after restore success (first line: $(head -n1 /tmp/wan_dnat2.out))"
+pass "WAN DNAT after restore success (first line: $(head -n1 "$WORK_DIR/wan_dnat2.out"))"
 
 if [[ $TESTS_PASSED -eq $TESTS_EXPECTED ]]; then
   printf "[%s] %bSmoke test complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$GREEN" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
 else
   printf "[%s] %bSmoke test complete. Tests passed: %s/%s%b\n" "$(timestamp)" "$RED" "$TESTS_PASSED" "$TESTS_EXPECTED" "$RESET"
+  exit 1
 fi

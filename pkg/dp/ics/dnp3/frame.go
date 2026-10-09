@@ -4,16 +4,9 @@
 package dnp3
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
-)
-
-// DNP3 data-link start bytes.
-const (
-	startByte1 = 0x05
-	startByte2 = 0x64
 )
 
 // DNP3Frame represents a parsed DNP3 data-link layer frame.
@@ -43,12 +36,17 @@ const (
 	FuncOperate             = 0x04
 	FuncDirectOperate       = 0x05
 	FuncDirectOperateNoAck  = 0x06
+	FuncImmediateFreeze     = 0x07
+	FuncImmediateFreezeNR   = 0x08
+	FuncFreezeClear         = 0x09
+	FuncFreezeClearNR       = 0x0A
 	FuncColdRestart         = 0x0D
 	FuncWarmRestart         = 0x0E
 	FuncStopApplication     = 0x12
 	FuncSaveConfiguration   = 0x13
-	FuncEnableUnsolicited   = 0x15
-	FuncDisableUnsolicited  = 0x16
+	FuncEnableUnsolicited   = 0x14
+	FuncDisableUnsolicited  = 0x15
+	FuncAssignClass         = 0x16
 	FuncResponse            = 0x81
 	FuncUnsolicitedResponse = 0x82
 )
@@ -57,6 +55,7 @@ var (
 	ErrTooShort     = errors.New("dnp3 frame too short")
 	ErrInvalidStart = errors.New("dnp3 invalid start bytes")
 	ErrBadHeaderCRC = errors.New("dnp3 header CRC mismatch")
+	ErrBadLength    = errors.New("dnp3 link length below 5")
 )
 
 // FunctionCodeName returns a human-readable name for a DNP3 function code.
@@ -88,6 +87,8 @@ func FunctionCodeName(fc uint8) string {
 		return "enable_unsolicited"
 	case FuncDisableUnsolicited:
 		return "disable_unsolicited"
+	case FuncAssignClass:
+		return "assign_class"
 	case FuncResponse:
 		return "response"
 	case FuncUnsolicitedResponse:
@@ -203,93 +204,6 @@ func FormatIINFlags(iin1, iin2 uint8) string {
 	return b.String()
 }
 
-// ObjectHeader represents a parsed DNP3 object group header.
-type ObjectHeader struct {
-	Group     uint8
-	Variation uint8
-	Qualifier uint8
-	Count     uint16 // object count (interpretation depends on qualifier)
-	Size      int    // total bytes consumed by this header
-}
-
-// ParseObjectHeaders parses all object group headers from the application data.
-// offset is the byte position in Data where object headers begin.
-func ParseObjectHeaders(data []byte, offset int) []ObjectHeader {
-	if offset >= len(data) {
-		return nil
-	}
-	// Pre-size to avoid repeated growth; 4 is typical max.
-	headers := make([]ObjectHeader, 0, 4)
-	pos := offset
-	for pos+3 <= len(data) {
-		oh := ObjectHeader{
-			Group:     data[pos],
-			Variation: data[pos+1],
-			Qualifier: data[pos+2],
-		}
-		pos += 3
-		consumed := 3
-
-		// Parse count/range based on qualifier code.
-		// Qualifier low nibble determines index/range prefix size.
-		switch oh.Qualifier {
-		case 0x00, 0x01, 0x02:
-			// 1-byte start + 1-byte stop range
-			if pos+2 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos+1]-data[pos]) + 1
-			pos += 2
-			consumed += 2
-		case 0x03, 0x04, 0x05:
-			// 2-byte start + 2-byte stop range
-			if pos+4 > len(data) {
-				return headers
-			}
-			start := binary.LittleEndian.Uint16(data[pos : pos+2])
-			stop := binary.LittleEndian.Uint16(data[pos+2 : pos+4])
-			oh.Count = stop - start + 1
-			pos += 4
-			consumed += 4
-		case 0x06:
-			// All objects, no range field
-			oh.Count = 0
-		case 0x07, 0x08:
-			// 1-byte count
-			if pos+1 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos])
-			pos += 1
-			consumed += 1
-		case 0x09:
-			// 2-byte count
-			if pos+2 > len(data) {
-				return headers
-			}
-			oh.Count = binary.LittleEndian.Uint16(data[pos : pos+2])
-			pos += 2
-			consumed += 2
-		case 0x0B:
-			// 1-byte count of variable-size objects
-			if pos+1 > len(data) {
-				return headers
-			}
-			oh.Count = uint16(data[pos])
-			pos += 1
-			consumed += 1
-		default:
-			// Unknown qualifier — stop parsing to avoid misinterpreting data.
-			oh.Size = consumed
-			headers = append(headers, oh)
-			return headers
-		}
-		oh.Size = consumed
-		headers = append(headers, oh)
-	}
-	return headers
-}
-
 // IIN extracts Internal Indication bytes from response data.
 // Returns (iin1, iin2, ok).
 func (f *DNP3Frame) IIN() (uint8, uint8, bool) {
@@ -301,80 +215,6 @@ func (f *DNP3Frame) IIN() (uint8, uint8, bool) {
 		return 0, 0, false
 	}
 	return f.Data[3], f.Data[4], true
-}
-
-// ParseFrame parses a DNP3 data-link layer frame from raw bytes.
-// It validates start bytes and header CRC. Data block CRCs are skipped for simplicity.
-func ParseFrame(data []byte) (*DNP3Frame, error) {
-	// Minimum frame: 2 start + 1 length + 1 control + 2 dest + 2 src + 2 CRC = 10 bytes
-	if len(data) < 10 {
-		return nil, ErrTooShort
-	}
-	if data[0] != startByte1 || data[1] != startByte2 {
-		return nil, ErrInvalidStart
-	}
-
-	length := data[2]
-	control := data[3]
-	destination := binary.LittleEndian.Uint16(data[4:6])
-	source := binary.LittleEndian.Uint16(data[6:8])
-
-	// Validate header CRC (bytes 0-7, CRC at 8-9).
-	headerCRC := binary.LittleEndian.Uint16(data[8:10])
-	calcCRC := crc16DNP3(data[0:8])
-	if headerCRC != calcCRC {
-		return nil, ErrBadHeaderCRC
-	}
-
-	frame := &DNP3Frame{
-		Length:      length,
-		Control:     control,
-		Destination: destination,
-		Source:      source,
-	}
-
-	// Extract user data from data blocks (each block is up to 16 data bytes + 2 CRC bytes).
-	// The length field indicates the number of bytes of user data following the header
-	// (control + destination + source = 5 bytes are included in length).
-	if length < 5 {
-		return frame, nil
-	}
-	userDataLen := int(length) - 5
-	remaining := data[10:]
-	var userData []byte
-	bytesNeeded := userDataLen
-	for bytesNeeded > 0 && len(remaining) > 0 {
-		blockSize := bytesNeeded
-		if blockSize > 16 {
-			blockSize = 16
-		}
-		// Need blockSize data bytes + 2 CRC bytes.
-		if len(remaining) < blockSize+2 {
-			// Partial block — take what we can.
-			userData = append(userData, remaining[:min(blockSize, len(remaining))]...)
-			break
-		}
-		userData = append(userData, remaining[:blockSize]...)
-		remaining = remaining[blockSize+2:] // skip CRC
-		bytesNeeded -= blockSize
-	}
-	frame.Data = userData
-
-	// Extract application layer function code from transport + application layer.
-	// Transport header is 1 byte, then application header starts.
-	// Application header: control byte, then function code.
-	// For requests: 1 byte app control + function code at offset 1.
-	// For responses: 1 byte app control + function code at offset 1, then 2 IIN bytes.
-	if len(userData) >= 2 {
-		// userData[0] = transport header (FIN, FIR, sequence)
-		// userData[1] = application control byte
-		// userData[2] = function code (if present)
-		if len(userData) >= 3 {
-			frame.FunctionCode = userData[2]
-		}
-	}
-
-	return frame, nil
 }
 
 // ObjectGroup extracts the first object group number from the application data, if present.

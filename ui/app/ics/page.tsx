@@ -17,6 +17,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
 import { PROTOCOL_KEYS, PROTOCOLS, protoMeta } from "./ics-shared";
+import { summarizeIEC104 } from "./iec104";
+import { IEC104HealthStatus } from "./iec104-health";
 
 /* -- Page ----------------------------------------------------------------- */
 
@@ -112,6 +114,9 @@ export default function ICSPolicyPage() {
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
         )}
+        <div className="mt-3">
+          <IEC104HealthStatus />
+        </div>
         <div className="mt-2">
           <Link href="/firewall/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
             Configure DPI in Firewall Rules &rarr;
@@ -241,10 +246,14 @@ export default function ICSPolicyPage() {
                   </StatusBadge>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
-                  {(r.ics?.functionCode ?? []).join(", ") || "*"}
+                  {r.ics?.protocol === "iec104"
+                    ? summarizeIEC104(r.ics).types
+                    : (r.ics?.functionCode ?? []).join(", ") || "*"}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
-                  {(r.ics?.addresses ?? []).join(", ") || "*"}
+                  {r.ics?.protocol === "iec104"
+                    ? summarizeIEC104(r.ics).addresses
+                    : (r.ics?.addresses ?? []).join(", ") || "*"}
                 </td>
                 <td className="px-4 py-3 text-xs text-[var(--text)]">
                   {r.ics?.readOnly

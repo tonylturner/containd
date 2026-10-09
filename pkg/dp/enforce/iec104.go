@@ -1,0 +1,133 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
+package enforce
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/rules"
+)
+
+// containd reserves the skb-mark bits in EnvelopeMarkMask. EnvelopeMark
+// within them means "steered to the queue by an IEC104 envelope rule"; the
+// other mark bits are preserved.
+const (
+	EnvelopeMarkMask uint32 = 0x0f000000
+	EnvelopeMark     uint32 = 0x01000000
+)
+
+// iec104Port is the only IEC104 server port in milestone B.
+const iec104Port = 2404
+
+// EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
+func EnvelopeMarked(mark uint32) bool {
+	return mark&EnvelopeMarkMask == EnvelopeMark
+}
+
+// SteersIEC104 reports whether CompileFirewall steers IEC104 envelope
+// traffic to the queue for snap: a queue is configured and at least one
+// IEC104 rule's scope covers TCP port 2404.
+func (c *Compiler) SteersIEC104(snap *rules.Snapshot) bool {
+	if c.QueueID <= 0 || snap == nil {
+		return false
+	}
+	for _, e := range snap.Firewall {
+		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
+			return true
+		}
+	}
+	return false
+}
+
+// isIEC104Rule reports whether an entry carries an IEC104 semantic
+// predicate. Its L3/L4 scope is part of the inspection envelope.
+func isIEC104Rule(e rules.Entry) bool {
+	return strings.EqualFold(strings.TrimSpace(e.ICS.Protocol), eventfields.ProtoIEC104)
+}
+
+// writeIEC104Steering emits the envelope steering of every IEC104 rule,
+// sorted by rule ID. Each rule's session scope (opener -> server port 2404)
+// is queued in both directions, marked, whatever the rule's action: the
+// engine judges the content. These lines go before the conntrack
+// established accept and every ordinary accept, so neither direction of an
+// envelope session can bypass inspection.
+func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot) {
+	entries := make([]rules.Entry, 0, len(snap.Firewall))
+	for _, e := range snap.Firewall {
+		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
+			entries = append(entries, e)
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	for _, e := range entries {
+		for _, line := range compileIEC104Steering(e, snap.ZoneIfaces, c.QueueID) {
+			lines(line)
+		}
+	}
+}
+
+// compileIEC104Steering returns the client-to-server and server-to-client
+// steering lines for one IEC104 rule.
+func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string, queueID int) []string {
+	verdict := fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
+		^EnvelopeMarkMask, EnvelopeMark, queueID)
+	steer := func(inZones, outZones []string, port string, src, dst []string) string {
+		parts := []string{}
+		if c := zoneClause("iifname", inZones, zoneIfaces); c != "" {
+			parts = append(parts, c)
+		}
+		if c := zoneClause("oifname", outZones, zoneIfaces); c != "" {
+			parts = append(parts, c)
+		}
+		parts = append(parts, port)
+		if len(src) > 0 {
+			parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(src, ", ")))
+		}
+		if len(dst) > 0 {
+			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(dst, ", ")))
+		}
+		return strings.Join(append(parts, verdict), " ")
+	}
+	port := strconv.Itoa(iec104Port)
+	return []string{
+		steer(e.SourceZones, e.DestZones, "tcp dport "+port, e.Sources, e.Destinations),
+		steer(e.DestZones, e.SourceZones, "tcp sport "+port, e.Destinations, e.Sources),
+	}
+}
+
+// admitsIEC104Port reports whether a rule's protocol list matches TCP
+// destination port 2404, the session tuple the IEC104 envelope is
+// evaluated on. No protocols matches everything.
+func admitsIEC104Port(protos []rules.Protocol) bool {
+	if len(protos) == 0 {
+		return true
+	}
+	for _, p := range protos {
+		if name := strings.ToLower(strings.TrimSpace(p.Name)); name != "" && name != "tcp" {
+			continue
+		}
+		if p.Port == "" {
+			return true
+		}
+		if lo, hi, ok := parsePortRange(p.Port); ok && lo <= iec104Port && iec104Port <= hi {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePortRange parses "N" or "N-M" the way the rule evaluator does.
+func parsePortRange(s string) (lo, hi uint64, ok bool) {
+	if a, b, isRange := strings.Cut(s, "-"); isRange {
+		l, err1 := strconv.ParseUint(a, 10, 16)
+		h, err2 := strconv.ParseUint(b, 10, 16)
+		return l, h, err1 == nil && err2 == nil
+	}
+	v, err := strconv.ParseUint(s, 10, 16)
+	return v, v, err == nil
+}

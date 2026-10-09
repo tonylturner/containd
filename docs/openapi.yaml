@@ -123,6 +123,32 @@ components:
         commit: { type: string }
         hostname: { type: string }
         time: { type: string, format: date-time }
+        iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
+
+    IEC104Enforcement:
+      type: object
+      required: [active, healthy, reason]
+      description: >
+        IEC 60870-5-104 enforcement state of the running engine. The
+        endpoint keeps HTTP 200 liveness whatever this object says.
+        Inactive with no fault is {active: false, healthy: true, reason: ""}.
+        If the management plane cannot reach the engine it reports
+        {active: false, healthy: false, reason: "engine unreachable"}; it
+        never reports healthy without the engine.
+      properties:
+        active:
+          type: boolean
+          description: >
+            At least one IEC104 enforce envelope is loaded in the runtime.
+            This describes the applied policy, not the saved config.
+        healthy:
+          type: boolean
+          description: >
+            False after a queue bind, verdict submission, reset send,
+            reset injector or bounded-worker failure. IEC104 envelope
+            traffic then fails closed until readiness returns.
+        reason: { type: string, description: Machine-readable cause when unhealthy, else empty }
+      example: { active: true, healthy: true, reason: "" }
 
     DashboardResponse:
       type: object
@@ -167,6 +193,11 @@ components:
       type: object
       properties:
         flowId: { type: string }
+        session_id:
+          type: string
+          description: >
+            IEC104 session incarnation that groups this rollup (both wire
+            directions of one connection). Absent for non-IEC flows.
         firstSeen: { type: string, format: date-time }
         lastSeen: { type: string, format: date-time }
         srcIp: { type: string }
@@ -178,6 +209,126 @@ components:
         eventCount: { type: integer, format: uint64 }
         avDetected: { type: boolean }
         avBlocked: { type: boolean }
+
+    FirewallRule:
+      type: object
+      required: [id, action]
+      properties:
+        id: { type: string }
+        description: { type: string }
+        sourceZones: { type: array, items: { type: string } }
+        destZones: { type: array, items: { type: string } }
+        sources: { type: array, items: { type: string }, description: CIDRs }
+        destinations: { type: array, items: { type: string }, description: CIDRs }
+        protocols:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, example: tcp }
+              port: { type: string, example: "2404", description: Single port or range "1000-2000" }
+        identities: { type: array, items: { type: string } }
+        ics: { $ref: "#/components/schemas/ICSPredicate" }
+        action: { type: string, enum: [ALLOW, DENY] }
+        log: { type: boolean }
+
+    ICSPredicate:
+      type: object
+      additionalProperties: false
+      description: |
+        ICS predicate of a firewall rule. Decoding is strict: unknown keys
+        (exact spelling) and duplicate keys are rejected. `{}` is a pure
+        L3/L4 rule. Semantic values need `protocol`. OR within a list, AND
+        across fields; an absent field matches any value.
+
+        IEC 60870-5-104 (`protocol: iec104`):
+        - `typeIds`, `classes`, `ca` and `ioa` are iec104-only. `null`, `[]`
+          and null items are rejected; omit the field to match any value.
+          Numbers must be JSON integers.
+        - `functionCode`, `unitId`, `addresses`, `objectClasses` and
+          `writeOnly` are rejected on iec104 when present at all, so
+          `"writeOnly": false` is an error.
+        - IEC104 rules match the session tuple (client = TCP opener,
+          server port 2404) whatever the wire direction; `direction` selects
+          the half. Inside the IEC104 envelope only iec104 rules are
+          evaluated, in order, and no match is DENY regardless of
+          `firewall.defaultAction`.
+        - An enforce ALLOW rule may name only Type IDs with a decoder
+          descriptor (3, 13, 31, 45-51, 58-64, 70, 100-103, 105, 107) and
+          not the `unknown` class. Broadcast (CA 65535) and malformed
+          objects never match an ALLOW.
+        - IEC104 enforce (effective mode: rule `mode`, else
+          `dataplane.dpiMode`, else learn) is rejected on save, candidate,
+          commit and import unless `dataplane.dpiEnabled` is true,
+          `dataplane.dpiIcsProtocols.iec104` is not false,
+          `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
+          IP/CIDR `dataplane.dpiExclusions` entry overlaps an enforce rule's
+          sources or destinations.
+      properties:
+        protocol:
+          type: string
+          enum: [modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104]
+        functionCode:
+          description: >
+            Function/service codes (not iec104). Accepted forms: integer
+            array, a single integer, numeric strings, an index-keyed
+            object, legacy base64 string, or null.
+          oneOf:
+            - { type: array, items: { type: integer, minimum: 0, maximum: 255 } }
+            - { type: integer, minimum: 0, maximum: 255 }
+            - { type: string }
+            - { type: object, additionalProperties: true }
+          nullable: true
+        unitId: { type: integer, minimum: 0, maximum: 255, description: Modbus unit id }
+        addresses: { type: array, items: { type: string }, description: Register/address values or ranges (not iec104) }
+        objectClasses: { type: array, items: { type: integer }, description: CIP object classes (cip only) }
+        readOnly:
+          type: boolean
+          description: >
+            Match read-only traffic only. On iec104: monitor-class responses,
+            GI (100) and read (102) requests, end of initialization (70),
+            S-frames and U-frames. false is no constraint, never "writes
+            only".
+        writeOnly: { type: boolean, description: Match writes only (not iec104) }
+        direction: { type: string, enum: [request, response] }
+        mode: { type: string, enum: [learn, enforce], description: Overrides dataplane.dpiMode for this rule }
+        typeIds:
+          type: array
+          minItems: 1
+          items: { type: integer, minimum: 1, maximum: 255 }
+          description: IEC104 Type IDs, a numeric array (never base64)
+        classes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [monitor, control, system, unknown] }
+        ca:
+          type: array
+          minItems: 1
+          items: { type: integer, minimum: 0, maximum: 65534 }
+          description: IEC104 common addresses; 65535 (broadcast) is rejected
+        ioa:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/IOARange" }
+          description: IEC104 information object address ranges; duplicates and overlaps are rejected
+      example:
+        protocol: iec104
+        typeIds: [46]
+        classes: [control]
+        direction: request
+        ca: [1]
+        ioa: [{ start: 65536, end: 65567 }]
+        mode: enforce
+
+    IOARange:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      description: Closed range, start <= end; both keys are required, so 0 is never "missing"
+      properties:
+        start: { type: integer, minimum: 0, maximum: 16777215 }
+        end: { type: integer, minimum: 0, maximum: 16777215 }
 
     AuditRecord:
       type: object
@@ -287,12 +438,14 @@ components:
         dpiProtocols:
           type: object
           additionalProperties: { type: boolean }
-          description: IT protocol enable/disable map (e.g., {"dns": true, "tls": true})
+          description: 'IT protocol enable/disable map (e.g., {"dns": true, "tls": true})'
         dpiIcsProtocols:
           type: object
           additionalProperties: { type: boolean }
           description: >
-            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua.
+            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104.
+            An absent key is enabled; only an explicit false disables a decoder.
+            A config with IEC104 enforce rules is rejected if iec104 is false.
           example:
             modbus: true
             dnp3: true
@@ -301,6 +454,7 @@ components:
             mms: true
             bacnet: false
             opcua: false
+            iec104: true
 
   parameters:
     pathId:
@@ -484,13 +638,79 @@ paths:
         "200": { description: Configuration saved }
         "403": { description: Admin role required }
 
+  /config/candidate:
+    get:
+      summary: Get the candidate configuration
+      tags: [Config]
+      responses:
+        "200":
+          description: Candidate configuration
+          content:
+            application/json: { schema: { type: object } }
+        "404": { description: No candidate configuration }
+    post:
+      summary: Save a candidate configuration (admin)
+      description: >
+        Validates and stages the whole config without activating it. ICS
+        predicates decode strictly, and IEC104 enforce that cannot activate
+        is rejected (see ICSPredicate).
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200": { description: Candidate saved }
+        "400":
+          description: Invalid JSON or configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403": { description: Admin role required }
+
   /config/commit:
     post:
       summary: Commit candidate config and apply to data plane
+      description: >
+        Promotes the candidate to running and applies it. Check
+        GET /health iec104Enforcement afterwards: a runtime queue or reset
+        injector failure keeps the config and reports unhealthy.
       tags: [Config]
       responses:
         "200": { description: Commit applied }
+        "400": { description: Candidate configuration is invalid }
         "403": { description: Admin role required }
+
+  /config/import:
+    post:
+      summary: Import a configuration as running (admin)
+      description: >
+        Validates and saves the whole config as the running config. It does
+        not activate it: the data plane keeps its current policy until
+        POST /config/commit. After importing, commit and then check
+        GET /health iec104Enforcement. Validation is the same as for a
+        candidate.
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200":
+          description: Configuration saved, not activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [imported] }
+        "400":
+          description: Invalid JSON or configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403": { description: Admin role required }
+        "413": { description: Body larger than 10 MiB }
 
   /config/rollback:
     post:
@@ -679,23 +899,43 @@ paths:
           description: Array of firewall rules
           content:
             application/json:
-              schema: { type: array, items: { type: object } }
+              schema: { type: array, items: { $ref: "#/components/schemas/FirewallRule" } }
     post:
       summary: Create a firewall rule (admin)
       tags: [Firewall]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FirewallRule" } } } }
       responses:
         "200": { description: Rule created }
+        "400": { description: Invalid rule or resulting configuration }
 
   /firewall/rules/{id}:
     patch:
       summary: Update a firewall rule (admin)
+      description: |
+        Merges the body into the rule. Top-level keys deep-merge as JSON.
+        The `ics` object is handled on its own: it is decoded strictly
+        (unknown or duplicate keys, and null or [] on typeIds, classes, ca
+        and ioa, are errors). If it sets a `protocol` different from the
+        rule's, it replaces the predicate; otherwise its keys overlay the
+        current predicate and the result is decoded strictly again, so keys
+        the protocol does not support are rejected. `"ics": null` clears
+        the predicate.
       tags: [Firewall]
       parameters:
         - $ref: "#/components/parameters/pathId"
       requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
       responses:
-        "200": { description: Rule updated }
+        "200":
+          description: Rule updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallRule" }
+        "400":
+          description: Invalid patch or resulting configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { description: Rule not found }
     delete:
       summary: Delete a firewall rule (admin)
       tags: [Firewall]
@@ -841,6 +1081,12 @@ paths:
   /firewall/rules/preview:
     post:
       summary: Dry-run a proposed rule against recent traffic
+      description: >
+        Matches the rule against recent events. For an iec104 rule, each
+        decoded IEC104 object event (request, response, apci, malformed,
+        unsupported) is matched in the session orientation (client to
+        server port 2404); decision events do not count. readOnly iec104
+        rules do not match in a preview yet.
       tags: [Firewall]
       requestBody:
         required: true

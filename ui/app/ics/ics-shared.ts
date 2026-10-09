@@ -91,6 +91,18 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     addrPlaceholder: "",
     addrHelp: "Optional OPC UA node ID filter.",
   },
+  iec104: {
+    label: "IEC 60870-5-104",
+    port: "2404",
+    fcLabel: "Type IDs / classes",
+    fcPlaceholder: "",
+    fcHelp:
+      "ASDU Type IDs (3=double point, 13=float measurement, 31=double point with time, 45-51/58-64=commands and setpoints, 100=general interrogation, 102=read) and classes (monitor, control, system, unknown).",
+    addrLabel: "CA / IOA",
+    addrPlaceholder: "",
+    addrHelp:
+      "Common address (station, 0-65534) and information object address ranges (0-16777215).",
+  },
 };
 
 export const PROTOCOL_KEYS = Object.keys(PROTOCOLS);

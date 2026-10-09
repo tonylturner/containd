@@ -10,6 +10,12 @@ import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 
+/** Short form of an IEC 104 session ID ("<run>-<seq>"): run prefix and seq. */
+function shortSessionID(id: string): string {
+  const dash = id.lastIndexOf("-");
+  return dash > 0 ? `${id.slice(0, 6)}…${id.slice(dash)}` : `${id.slice(0, 10)}…`;
+}
+
 function FlowsInner() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +36,10 @@ function FlowsInner() {
   );
   const avBlockedCount = useMemo(
     () => flows.filter((f) => f.avBlocked).length,
+    [flows],
+  );
+  const iecSessionCount = useMemo(
+    () => flows.filter((f) => f.session_id).length,
     [flows],
   );
 
@@ -131,6 +141,9 @@ function FlowsInner() {
         <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5">
           AV blocked: {avBlockedCount}
         </div>
+        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5">
+          IEC 104 sessions: {iecSessionCount}
+        </div>
         <a
           href="/events/?av=1"
           className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06] transition-ui"
@@ -168,13 +181,25 @@ function FlowsInner() {
               {!loading && visibleFlows
                 .map((f) => (
                 <tr
-                  key={f.flowId}
+                  key={f.session_id ?? f.flowId}
                   className={`table-row-hover transition-ui border-t border-amber-500/[0.1] ${
                     f.avBlocked ? "bg-[color:var(--error)]/10" : f.avDetected ? "bg-amber/10" : ""
                   }`}
                 >
                   <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
-                    {f.flowId.slice(0, 10)}…
+                    {f.session_id ? (
+                      <span title={f.session_id}>
+                        IEC {shortSessionID(f.session_id)}
+                        <a
+                          href={`/events/?filter=iec104&session=${encodeURIComponent(f.session_id)}`}
+                          className="ml-2 font-sans text-[var(--amber)] hover:text-[var(--amber)]"
+                        >
+                          Evidence
+                        </a>
+                      </span>
+                    ) : (
+                      <>{f.flowId.slice(0, 10)}…</>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-100">
                     {f.application || f.transport || "Unknown"}

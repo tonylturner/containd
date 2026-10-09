@@ -1,8 +1,17 @@
+/** Runtime IEC 104 enforcement health (K6). `active` describes the loaded
+ * runtime envelope, not the saved config. */
+export type IEC104EnforcementHealth = {
+  active: boolean;
+  healthy: boolean;
+  reason: string;
+};
+
 export type HealthResponse = {
   status: string;
   component: string;
   build?: string;
   time?: string;
+  iec104Enforcement?: IEC104EnforcementHealth;
 };
 
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
@@ -38,6 +47,7 @@ export {
   tagPcap,
   uploadPcap,
 } from "./api-dataplane";
+export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
 import { networkAPI } from "./api-network";
@@ -46,11 +56,7 @@ import { authAPI } from "./api-auth";
 import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
-import {
-  fetchWithSession,
-} from "./api-core";
-import {
-} from "./api-request";
+import { fetchWithSession } from "./api-core";
 
 export type DPIExclusion = {
   value: string;
@@ -68,6 +74,8 @@ export type DataPlaneConfig = {
   dpiProtocols?: Record<string, boolean>;
   dpiIcsProtocols?: Record<string, boolean>;
   dpiExclusions?: DPIExclusion[];
+  nflogGroup?: number;
+  nfqueueGroup?: number;
 };
 
 export type PcapForwardTarget = {
@@ -243,6 +251,20 @@ export type ICSPredicate = {
   writeOnly?: boolean;
   direction?: "request" | "response";
   mode?: "enforce" | "learn";
+  // IEC 60870-5-104 fields (protocol "iec104"). A missing field is a
+  // wildcard; an empty list is a validation error, so never send [].
+  typeIds?: number[];
+  classes?: IEC104Class[];
+  ca?: number[];
+  ioa?: IOARange[];
+};
+
+export type IEC104Class = "monitor" | "control" | "system" | "unknown";
+
+/** Closed IEC 104 information object address range, 0..16777215. */
+export type IOARange = {
+  start: number;
+  end: number;
 };
 
 export type FirewallRule = {
@@ -593,7 +615,56 @@ export type FlowSummary = {
   eventCount: number;
   avDetected?: boolean;
   avBlocked?: boolean;
+  /** IEC 104 session incarnation; set when the group is one IEC session. */
+  session_id?: string;
 };
+
+/** Event kinds of IEC 104 enforcement evidence (spec §8.4). */
+export type ICSEvidenceKind = "ics.decision" | "ics.verdict" | "ics.session";
+
+/** `ics.decision` attributes: a rule decision, not a delivery outcome. */
+export type ICSDecisionAttributes = {
+  session_id: string;
+  decision: "allow" | "deny" | "would_drop";
+  ruleId: string;
+  action?: string;
+  mode?: string;
+  reason: "rule" | "default" | "broadcast" | "malformed" | "unsupported" | "role";
+  apdu_id?: string;
+  type_id?: number;
+  ca?: number;
+  ioa?: number;
+  select?: boolean;
+  direction?: "request" | "response";
+};
+
+/** `ics.verdict` attributes: one per aborted session. */
+export type ICSVerdictAttributes = {
+  session_id: string;
+  outcome: "dropped" | "drop_failed";
+  apdu_ids: string[];
+  trigger_apdu_id?: string;
+  error?: string;
+};
+
+/** `ics.session` attributes: one per session or enforcement state change. */
+export type ICSSessionAttributes = {
+  session_id: string;
+  outcome:
+    | "aborted"
+    | "reset_sent"
+    | "reset_failed"
+    | "reconnected"
+    | "enforce_unhealthy"
+    | "enforce_healthy";
+  target?: "client" | "server";
+  error?: string;
+};
+
+export type ICSEvidence =
+  | { kind: "ics.decision"; attrs: ICSDecisionAttributes }
+  | { kind: "ics.verdict"; attrs: ICSVerdictAttributes }
+  | { kind: "ics.session"; attrs: ICSSessionAttributes };
 
 export type ForwardProxyConfig = {
   enabled?: boolean;

@@ -55,8 +55,9 @@ type compiledPort struct {
 // string parsing is done once at load time rather than on every packet.
 type compiledEntry struct {
 	Entry
-	addresses []compiledAddr // pre-parsed ICS addresses
-	ports     []compiledPort // pre-parsed protocol port ranges (one per Protocol)
+	addresses []compiledAddr  // pre-parsed ICS addresses
+	ports     []compiledPort  // pre-parsed protocol port ranges (one per Protocol)
+	iec       *compiledIEC104 // set for ics.protocol iec104 entries only
 }
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
@@ -78,49 +79,7 @@ func (e *Evaluator) compile() {
 	}
 	e.compiled = make([]compiledEntry, len(e.snapshot.Firewall))
 	for i, entry := range e.snapshot.Firewall {
-		ce := compiledEntry{Entry: entry}
-
-		// Pre-parse ICS addresses.
-		if len(entry.ICS.Addresses) > 0 {
-			ce.addresses = make([]compiledAddr, 0, len(entry.ICS.Addresses))
-			for _, spec := range entry.ICS.Addresses {
-				if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
-					low, okLow := parseAddr(parts[0])
-					high, okHigh := parseAddr(parts[1])
-					if okLow && okHigh {
-						ce.addresses = append(ce.addresses, compiledAddr{low: low, high: high})
-						continue
-					}
-				}
-				// Single value.
-				if val, ok := parseAddr(spec); ok {
-					ce.addresses = append(ce.addresses, compiledAddr{low: val, high: val})
-				}
-			}
-		}
-
-		// Pre-parse protocol port ranges.
-		ce.ports = make([]compiledPort, len(entry.Protocols))
-		for j, p := range entry.Protocols {
-			if p.Port == "" {
-				continue
-			}
-			if parts := strings.SplitN(p.Port, "-", 2); len(parts) == 2 {
-				lo, errLo := strconv.ParseUint(parts[0], 10, 16)
-				hi, errHi := strconv.ParseUint(parts[1], 10, 16)
-				if errLo == nil && errHi == nil {
-					ce.ports[j] = compiledPort{low: uint16(lo), high: uint16(hi)}
-					continue
-				}
-			}
-			// Single port.
-			v, err := strconv.ParseUint(p.Port, 10, 16)
-			if err == nil {
-				ce.ports[j] = compiledPort{low: uint16(v), high: uint16(v)}
-			}
-		}
-
-		e.compiled[i] = ce
+		e.compiled[i] = CompileEntry(entry)
 	}
 }
 
@@ -128,6 +87,9 @@ func (e *Evaluator) compile() {
 // This avoids creating a full Evaluator/Snapshot for dry-run scenarios.
 func CompileEntry(entry Entry) compiledEntry {
 	ce := compiledEntry{Entry: entry}
+	if entry.ICS.Protocol == ProtocolIEC104 {
+		ce.iec = compileIEC104(entry.ICS)
+	}
 
 	// Pre-parse ICS addresses.
 	if len(entry.ICS.Addresses) > 0 {
@@ -273,6 +235,9 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	}
 	if ctx.ICS == nil {
 		return false
+	}
+	if ce.iec != nil {
+		return matchIEC104(ce, ctx)
 	}
 	return matchICSProtocol(ce.ICS, ctx) &&
 		matchICSFunctionCode(ce.ICS, ctx) &&

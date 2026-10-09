@@ -7,19 +7,27 @@ import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { Pagination } from "../../components/TableControls";
+import { describeICSEvidence, iec104AttributeRows } from "../events/iec104-evidence";
+import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
+import { IEC104EvidencePanel } from "./iec104-alert-panel";
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
-const severityVariant = (sev: string) => {
-  switch (sev) {
-    case "critical": return "error" as const;
-    case "high": return "warning" as const;
-    case "medium": return "info" as const;
-    default: return "neutral" as const;
-  }
-};
-
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+/** Alerts are IDS alerts plus IEC 104 enforcement evidence other than allows. */
+function alertView(ev: TelemetryEvent): { severity: string; message: string; ruleId: string } | null {
+  if (ev.proto === "ids" && ev.kind === "alert") {
+    return {
+      severity: String(ev.attributes?.["severity"] ?? "low"),
+      message: String(ev.attributes?.["message"] ?? ev.attributes?.["rule_id"] ?? "IDS alert"),
+      ruleId: String(ev.attributes?.["rule_id"] ?? ""),
+    };
+  }
+  const evidence = describeICSEvidence(ev);
+  if (!evidence?.alert) return null;
+  return { severity: evidence.severity, message: evidence.message, ruleId: "" };
+}
 
 export default function AlertsPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
@@ -70,19 +78,18 @@ export default function AlertsPage() {
   }, [live]);
 
   const alerts = useMemo(() => {
-    let list = events.filter((e) => e.proto === "ids" && e.kind === "alert");
+    let list = events.flatMap((ev) => {
+      const view = alertView(ev);
+      return view ? [{ ev, ...view }] : [];
+    });
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter((ev) => {
-        const msg = String(ev.attributes?.["message"] ?? "");
-        const ruleId = String(ev.attributes?.["rule_id"] ?? "");
-        const sev = String(ev.attributes?.["severity"] ?? "");
-        return msg.toLowerCase().includes(q) || ruleId.toLowerCase().includes(q) ||
-          sev.toLowerCase().includes(q) || (ev.srcIp ?? "").includes(q) || (ev.dstIp ?? "").includes(q);
-      });
+      list = list.filter(({ ev, message, ruleId, severity }) =>
+        message.toLowerCase().includes(q) || ruleId.toLowerCase().includes(q) ||
+          severity.toLowerCase().includes(q) || (ev.srcIp ?? "").includes(q) || (ev.dstIp ?? "").includes(q));
     }
     if (sevFilter) {
-      list = list.filter((ev) => String(ev.attributes?.["severity"] ?? "low") === sevFilter);
+      list = list.filter((a) => a.severity === sevFilter);
     }
     return list;
   }, [events, search, sevFilter]);
@@ -96,8 +103,8 @@ export default function AlertsPage() {
   // Severity summary
   const sevCounts = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 };
-    for (const ev of alerts) {
-      const s = String(ev.attributes?.["severity"] ?? "low") as keyof typeof c;
+    for (const a of alerts) {
+      const s = a.severity as keyof typeof c;
       if (s in c) c[s]++;
     }
     return c;
@@ -160,7 +167,7 @@ export default function AlertsPage() {
 
       {alerts.length === 0 ? (
         <EmptyState title="No IDS alerts"
-          description={events.some((e) => e.proto === "ids") ? "No alerts match your filters." : "No alerts yet. Alerts appear when the IDS engine detects suspicious activity."} />
+          description={events.some((e) => alertView(e)) ? "No alerts match your filters." : "No alerts yet. Alerts appear when the IDS engine detects suspicious activity."} />
       ) : (
         <div className="flex gap-4">
           {/* Alert list */}
@@ -177,9 +184,7 @@ export default function AlertsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageData.map((ev) => {
-                    const sev = String(ev.attributes?.["severity"] ?? "low");
-                    const msg = String(ev.attributes?.["message"] ?? ev.attributes?.["rule_id"] ?? "IDS alert");
+                  {pageData.map(({ ev, severity: sev, message: msg }) => {
                     const isActive = selected?.id === ev.id;
                     return (
                       <tr key={ev.id}
@@ -241,6 +246,8 @@ function formatHexDump(hexStr: string): { offset: string; hex: string; ascii: st
 }
 
 function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: () => void }) {
+  const evidence = describeICSEvidence(event);
+  if (evidence) return <IEC104EvidencePanel event={event} evidence={evidence} onClose={onClose} />;
   const attrs = event.attributes ?? {};
   const sev = String(attrs["severity"] ?? "low");
   const msg = String(attrs["message"] ?? "IDS alert");
@@ -262,6 +269,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
   const isS7 = eventProto === "s7comm";
   const isCIP = eventProto === "enip" || eventProto === "cip";
   const isBACnet = eventProto === "bacnet";
+  const isIEC104 = eventProto === "iec104";
 
   return (
     <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden flex flex-col h-[calc(100vh-240px)] sticky top-4">
@@ -504,6 +512,15 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           </DetailSection>
         )}
 
+        {/* ── Protocol Analysis (IEC 104) ── */}
+        {isIEC104 && Object.keys(eventAttrs).length > 0 && (
+          <DetailSection label="IEC 104 Protocol Analysis">
+            {iec104AttributeRows(eventAttrs).map((row) => (
+              <DetailRow key={row.label} label={row.label} value={row.value} mono />
+            ))}
+          </DetailSection>
+        )}
+
         {/* Content matches / pattern highlights */}
         {matchedPatterns.length > 0 && (
           <DetailSection label="Matched Patterns">
@@ -539,7 +556,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
         )}
 
         {/* Generic event attributes (for protocols without dedicated section) */}
-        {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isS7 && !isCIP && !isBACnet && (
+        {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isS7 && !isCIP && !isBACnet && !isIEC104 && (
           <DetailSection label="Event Attributes">
             <div className="rounded-sm border border-amber-500/[0.1] bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
               {Object.entries(eventAttrs).filter(([k]) => k !== "raw_hex").map(([key, val]) => {
@@ -589,27 +606,6 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           </DetailSection>
         )}
       </div>
-    </div>
-  );
-}
-
-function DetailSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="border-b border-amber-500/[0.06] px-4 py-3">
-      <div className="mb-2 flex items-center gap-2 text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)]">
-        {label}
-        <span className="flex-1 h-px bg-amber-500/[0.08]" />
-      </div>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  );
-}
-
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex justify-between gap-3 text-xs">
-      <span className="text-[var(--text-dim)] shrink-0">{label}</span>
-      <span className={`text-right text-[var(--text)] break-all ${mono ? "font-mono text-[11px]" : ""}`}>{value}</span>
     </div>
   );
 }
