@@ -6,6 +6,8 @@ package capture
 import (
 	"errors"
 	"strconv"
+	"sync"
+	"sync/atomic"
 )
 
 // Token identifies one inline-delivered packet: the queue generation that
@@ -95,31 +97,96 @@ type SourceEvent struct {
 }
 
 var (
-	ErrStaleToken   = errors.New("capture: token belongs to a closed queue generation")
-	ErrUnknownToken = errors.New("capture: token is not outstanding")
-	ErrQueueClosed  = errors.New("capture: inline queue is not bound")
-	ErrNotInline    = errors.New("capture: source is not inline")
+	ErrStaleToken     = errors.New("capture: token belongs to a closed queue generation")
+	ErrUnknownToken   = errors.New("capture: token is not outstanding")
+	ErrQueueClosed    = errors.New("capture: inline queue is not bound")
+	ErrNotInline      = errors.New("capture: source is not inline")
+	ErrInvalidVerdict = errors.New("capture: verdict is neither accept nor drop")
 )
+
+// generations numbers inline queue generations for the whole process,
+// across Manager instances and rebinds. 0 is the zero Token.
+var generations atomic.Uint64
+
+func nextGeneration() uint64 { return generations.Add(1) }
+
+func (v Verdict) valid() bool { return v == VerdictAccept || v == VerdictDrop }
+
+// String names the verdict for logs.
+func (v Verdict) String() string {
+	switch v {
+	case VerdictAccept:
+		return "accept"
+	case VerdictDrop:
+		return "drop"
+	default:
+		return "invalid(" + strconv.Itoa(int(v)) + ")"
+	}
+}
 
 // Settler returns the manager's stable verdict handle.
 func (m *Manager) Settler() Settler { return m.settler }
 
-// stubSettler is the contract-commit Settler. No source registers inline
-// tokens yet, so every request is rejected: observational modes with
-// ErrNotInline, NFQUEUE with ErrQueueClosed until the inline queue exists.
-type stubSettler struct {
+// settler is the Manager's Settler. It routes each request to the current
+// queue generation. Observational sources reject everything with
+// ErrNotInline; NFQUEUE rejects with ErrQueueClosed until a generation is
+// bound.
+//
+// A request that names a token whose handler callback is still running is
+// staged: Settle returns nil for it at once, and the verdict (Drop winning
+// over Accept) is submitted when the callback returns. OnVerdict reports
+// that submission.
+type settler struct {
 	inline bool
+
+	mu  sync.Mutex
+	cur *generation
 }
 
-func (s stubSettler) Settle(res ...Resolution) []error {
+func (s *settler) publish(g *generation) {
+	s.mu.Lock()
+	s.cur = g
+	s.mu.Unlock()
+}
+
+func (s *settler) current() *generation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cur
+}
+
+func (s *settler) Settle(res ...Resolution) []error {
 	errs := make([]error, len(res))
+	if len(res) == 0 {
+		return errs
+	}
+	g := s.current()
+	batch := make([]int, 0, len(res))
 	for i, r := range res {
-		switch {
-		case !s.inline || !r.Token.Inline():
-			errs[i] = ErrNotInline
-		default:
-			errs[i] = ErrQueueClosed
+		if errs[i] = routeError(s.inline, g, r); errs[i] == nil {
+			batch = append(batch, i)
 		}
 	}
+	if len(batch) > 0 {
+		g.settle(res, batch, errs)
+	}
 	return errs
+}
+
+// routeError rejects a request that cannot reach generation g.
+func routeError(inline bool, g *generation, r Resolution) error {
+	switch {
+	case !r.Verdict.valid():
+		return ErrInvalidVerdict
+	case !inline || !r.Token.Inline():
+		return ErrNotInline
+	case g == nil:
+		return ErrQueueClosed
+	case r.Token.gen < g.id:
+		return ErrStaleToken
+	case r.Token.gen > g.id:
+		return ErrUnknownToken
+	default:
+		return nil
+	}
 }

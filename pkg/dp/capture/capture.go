@@ -61,7 +61,8 @@ type Manager struct {
 	interfaces []string
 	cfg        Config
 
-	settler stubSettler
+	settler *settler
+	comp    *completer // inline completions; NFQUEUE only, from Start to Stop
 
 	mu      sync.Mutex
 	started bool
@@ -80,14 +81,15 @@ type Config struct {
 	Promisc    bool
 	OnError    func(error)
 	// OnVerdict and OnSource report inline verdict completions and source
-	// state. They run on one capture-owned completion goroutine.
+	// state. They run on one capture-owned completion goroutine, in
+	// submission order; Stop returns after the last one.
 	OnVerdict VerdictFunc
 	OnSource  func(SourceEvent)
 }
 
 func NewManager(cfg Config) (*Manager, error) {
 	cfg = normalizeConfig(cfg)
-	settler := stubSettler{inline: strings.EqualFold(cfg.Mode, "nfqueue")}
+	settler := &settler{inline: strings.EqualFold(cfg.Mode, "nfqueue")}
 	// Allow empty capture config for early phases and mgmt-only runs.
 	// Capture start will be a no-op in this case. NFQUEUE mode does not
 	// need interface names (packets arrive via the kernel queue, not an
@@ -99,8 +101,9 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 // Start begins capture on configured interfaces after validating they exist.
-// A failed Start leaves the manager retryable; no consumer goroutines remain
-// when Start returns an error.
+// In NFQUEUE mode it returns nil only after the queue is bound; a failed
+// first bind is returned, not retried. A failed Start leaves the manager
+// retryable; no consumer goroutines remain when Start returns an error.
 func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	m.mu.Lock()
 	if m.stopped {
@@ -143,33 +146,45 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	case "", "afpacket":
 		err = m.startAFPacket(runCtx, handler)
 	case "nfqueue":
+		m.comp = newCompleter(m.cfg.OnVerdict, m.cfg.OnSource)
 		err = m.startNFQueue(runCtx, handler)
 	}
 	if err != nil {
 		m.started = false
 		m.cancel = nil
+		comp := m.comp
+		m.comp = nil
 		m.mu.Unlock()
 		cancel()
 		m.wg.Wait()
+		if comp != nil {
+			comp.close()
+		}
 		return err
 	}
 	m.mu.Unlock()
 	return nil
 }
 
-// Stop permanently stops the manager, cancels capture, and waits for all
-// consumer goroutines to exit. It is safe to call repeatedly, including
-// before Start or after a failed Start.
+// Stop permanently stops the manager, cancels capture, waits for all
+// consumer goroutines to exit, and then delivers every pending OnVerdict and
+// OnSource completion. It is safe to call repeatedly, including before Start
+// or after a failed Start.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.stopped = true
 	cancel := m.cancel
 	m.cancel = nil
+	comp := m.comp
+	m.comp = nil
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	m.wg.Wait()
+	if comp != nil {
+		comp.close()
+	}
 }
 
 func normalizeConfig(cfg Config) Config {
