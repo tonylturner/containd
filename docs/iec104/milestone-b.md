@@ -40,7 +40,7 @@ candidate never gets a `v*` tag.
 | W5 | CP56Time2a year = 2000 + 7-bit year | The year field is 0..99. 100..127 is malformed. +2000 is a B profile assumption. |
 | W6 | Role and SQ rules are wire errors | The standard allows reverse-direction operation and SQ=1 for more types. B rejects them as **B profile restrictions**. |
 | W7 | readOnly includes "confirmations" of read (102) | A read is answered with monitor data (COT 5). Type 102 comes back only with COT 44-47 (errors). |
-| W8 | Run `smoke-dpi.sh` for US first-actuation | It never sets `nfqueueGroup`, so it cannot test prevention. Both smoke scripts exit on `((x++))` under `set -e` on Linux Bash 5. Fixed on `iec104`. |
+| W8 | Run `smoke-dpi.sh` for US first-actuation | It never sets `nfqueueGroup`, so it cannot test prevention. Both smoke scripts died on `((x++))` under `set -e` on Linux Bash 5 and exited 0 even when a test failed. Fixed on `iec104`: both scripts exit non-zero on a shortfall, and `smoke-dpi.sh` gains an NFQUEUE variant (`SMOKE_DPI_CAPTURE=nfqueue`) that tests first-write prevention. |
 
 **Gap defaults** (from the validation report §3) are folded into §4,
 §6, §8, §11 and §12 below: strict ICS decoding everywhere with
@@ -794,8 +794,12 @@ Apache-2.0 test data and contain no lib60870 code.
   - malformed/unknown: reset in enforce, alert in learn;
   - an unrelated allowed session survives;
   - same-5-tuple reuse and stale retransmits cannot bypass;
-  - decoder off or queue failure at start: enforce refused, health
-    unhealthy.
+  - a static enforce fault (DPI off, iec104 decoder off, capture not
+    NFQUEUE, queue 0, or a DPI exclusion overlapping the envelope) is
+    refused before save on commit, candidate and import;
+  - a runtime queue-bind, verdict or reset failure keeps the saved
+    config, fails closed on IEC envelope traffic, and reports
+    enforcement unhealthy.
 
 ### 10.3 US non-regression (containd side)
 
@@ -925,7 +929,10 @@ EU policies use the same top-level keys as
   (**V:** `C:api/http/interface_autoassign.go:38`). The RTU zone and
   IPs are fixed by RangerDanger in its increment 3; tests must not
   hardcode them.
-- Rules in this order (example; IPs illustrative):
+- Rules in this order (example; IPs illustrative). The point map here
+  (type 46 at CA 1 / IOA 2001) is illustrative and differs from the
+  RangerDanger spike map (command at IOA 3001, measurement at IOA 2001);
+  the decoder and the harness must not hardcode either.
 
 ```json
 [
