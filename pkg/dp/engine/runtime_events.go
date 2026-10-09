@@ -388,7 +388,11 @@ func (e *Engine) effectiveMode(matched *rules.Entry) string {
 
 // ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
 func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	if e.updater == nil {
+	return applyVerdict(ctx, e.updater, v, flow)
+}
+
+func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdict, flow rules.EvalContext) error {
+	if updater == nil {
 		return nil
 	}
 	switch v.Action {
@@ -397,9 +401,9 @@ func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules
 		if ip == nil {
 			ip = flow.DstIP
 		}
-		return e.updater.BlockHostTemp(ctx, ip, v.TTL)
+		return updater.BlockHostTemp(ctx, ip, v.TTL)
 	case verdict.BlockFlowTemp:
-		return e.updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
+		return updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
 	default:
 		return nil
 	}

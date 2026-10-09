@@ -4,7 +4,6 @@
 package engine
 
 import (
-	"context"
 	"net"
 	"strconv"
 	"strings"
@@ -64,22 +63,18 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 	return false
 }
 
-func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, bool) {
-	// The early-return on global mode that used to live here was removed
-	// in favor of per-rule mode resolution: a rule may opt into enforce
-	// even when the global default is learn (the safe production
-	// default). The matched rule's effective mode is consulted below
-	// after evaluation. The firewall.rule.hit log event still fires for
-	// every matched-with-Log rule regardless of mode (logging is safe in
-	// both monitor and enforce modes) — that's how operators get the
-	// visibility they need during the monitor-first observation phase
-	// before flipping rules to enforce.
+// enforceDPIEvents evaluates decoded ICS events against the firewall rules
+// and returns the first enforced denial with its context. It performs no
+// I/O: the caller drops the packet and installs the dynamic block after the
+// verdict. Logging of matched Log rules still happens in
+// EvaluateVerdictMatch for learn and enforce modes alike.
+func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, rules.EvalContext, bool) {
 	if e == nil || state == nil || pkt == nil || len(evs) == 0 {
-		return verdict.Verdict{}, false
+		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
 	snap := e.ruleSnap.Load()
 	if snap == nil {
-		return verdict.Verdict{}, false
+		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
 	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
 	for _, ev := range evs {
@@ -92,9 +87,8 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			continue
 		}
 		if e.effectiveMode(matched) != "enforce" {
-			// Match logged above via EvaluateVerdictMatch — operator sees
-			// "this would have been blocked" — but verdict not applied
-			// because the rule is in learn mode (or no enforce override).
+			// Logged by EvaluateVerdictMatch ("would have been blocked")
+			// but not applied: the rule is in learn mode.
 			continue
 		}
 		if v.Action == verdict.DenyDrop {
@@ -103,16 +97,13 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 				v.TTL = dpiEnforceBlockTTL
 			}
 		}
-		if err := e.ApplyVerdict(context.Background(), v, ctx); err != nil {
-			continue
-		}
-		return v, true
+		return v, ctx, true
 	}
-	return verdict.Verdict{}, false
+	return verdict.Verdict{}, rules.EvalContext{}, false
 }
 
 func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
-	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) {
+	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
 		return rules.EvalContext{}, false
 	}
 	service := servicePort(state, pkt)
@@ -206,6 +197,14 @@ func isRuleEvaluableICSEvent(proto string) bool {
 	default:
 		return false
 	}
+}
+
+// isStreamErrorEvent reports a malformed or unsupported event. Such events
+// are evidence only: on US protocols the packet passes (spec §4.2), so they
+// never reach rule evaluation, where a missing function code would read as
+// FC 0.
+func isStreamErrorEvent(ev dpi.Event) bool {
+	return ev.Kind == "malformed" || ev.Kind == "unsupported"
 }
 
 func eventDirection(kind string) string {

@@ -7,10 +7,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"net"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/learn"
@@ -74,16 +74,13 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 			return nil, fmt.Errorf("pcap record: %w", err)
 		}
 		updateAnalysisPacketStats(result, ts, len(data), &firstTS, &lastTS)
-		pkt, ok := decodeEthernetPacket(data, ts)
+		pkt, ok := decodeEthernetPacket(data)
 		if !ok {
 			continue
 		}
 		hash, state := analysisFlowState(flows, pkt, ts)
-		events, err := analyzePacket(mgr, state, pkt, ts)
-		if err != nil {
-			continue
-		}
-		recordAnalysisEvents(result, flowEvents, hash, pkt.srcIP.String(), pkt.dstIP.String(), events, onEvent)
+		events := analyzePacket(mgr, state, pkt, ts)
+		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
 	}
 
 	finalizeAnalysisFlows(mgr, flows, result, flowEvents, onEvent)
@@ -112,13 +109,13 @@ func updateAnalysisPacketStats(result *AnalysisResult, ts time.Time, size int, f
 	}
 }
 
-func analysisFlowState(flows map[string]*flow.State, pkt parsedPacketInfo, ts time.Time) (string, *flow.State) {
+func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time.Time) (string, *flow.State) {
 	key := flow.Key{
-		SrcIP:   pkt.srcIP,
-		DstIP:   pkt.dstIP,
-		SrcPort: pkt.srcPort,
-		DstPort: pkt.dstPort,
-		Proto:   pkt.proto,
+		SrcIP:   pkt.SrcIP,
+		DstIP:   pkt.DstIP,
+		SrcPort: pkt.SrcPort,
+		DstPort: pkt.DstPort,
+		Proto:   pkt.Proto,
 		Dir:     flow.DirForward,
 	}
 	hash := key.Hash()
@@ -127,27 +124,33 @@ func analysisFlowState(flows map[string]*flow.State, pkt parsedPacketInfo, ts ti
 		state = flow.NewState(key, ts)
 		flows[hash] = state
 	}
-	state.Touch(uint64(len(pkt.payload)), ts)
+	state.Touch(uint64(len(pkt.Payload)), ts)
 	return hash, state
 }
 
-func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt parsedPacketInfo, ts time.Time) ([]dpi.Event, error) {
+// analyzePacket runs one packet through DPI with its TCP sequence number,
+// as the live engine does. Events come before the error: a stream error's
+// malformed event is among them and the analysis continues.
+func analyzePacket(mgr *dpi.Manager, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
 	parsed := &dpi.ParsedPacket{
-		Payload: pkt.payload,
-		Proto:   pkt.transport,
-		SrcPort: pkt.srcPort,
-		DstPort: pkt.dstPort,
+		Payload:     pkt.Payload,
+		Proto:       pkt.Transport,
+		SrcPort:     pkt.SrcPort,
+		DstPort:     pkt.DstPort,
+		TCPSeq:      pkt.TCP.Seq,
+		TCPSeqValid: pkt.TCP.Valid,
 	}
-	events, err := mgr.OnPacket(state, parsed)
-	if err != nil {
-		return nil, err
-	}
+	events, _ := mgr.OnPacket(state, parsed)
+	stampEvents(events, ts)
+	return events
+}
+
+func stampEvents(events []dpi.Event, ts time.Time) {
 	for i := range events {
 		if events[i].Timestamp.IsZero() {
 			events[i].Timestamp = ts
 		}
 	}
-	return events, nil
 }
 
 func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash, srcStr, dstStr string, events []dpi.Event, onEvent eventCallback) {
@@ -163,10 +166,7 @@ func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, has
 
 func finalizeAnalysisFlows(mgr *dpi.Manager, flows map[string]*flow.State, result *AnalysisResult, flowEvents map[string]int, onEvent eventCallback) {
 	for hash, state := range flows {
-		events, err := mgr.OnFlowEnd(state)
-		if err != nil {
-			continue
-		}
+		events, _ := mgr.OnFlowEnd(state)
 		recordAnalysisEvents(result, flowEvents, hash, state.Key.SrcIP.String(), state.Key.DstIP.String(), events, onEvent)
 	}
 }
@@ -289,22 +289,12 @@ func readPCAPRecord(r io.Reader, snaplen uint32) (time.Time, []byte, error) {
 	return ts, data, nil
 }
 
-// parsedPacketInfo holds the result of parsing an Ethernet/IP/TCP|UDP packet.
-type parsedPacketInfo struct {
-	srcIP     net.IP
-	dstIP     net.IP
-	srcPort   uint16
-	dstPort   uint16
-	proto     uint8
-	transport string
-	payload   []byte
-}
-
-// decodeEthernetPacket decodes an Ethernet frame containing an IP packet.
-// It strips the 14-byte Ethernet header and parses the IP + L4 headers.
-func decodeEthernetPacket(data []byte, ts time.Time) (parsedPacketInfo, bool) {
+// decodeEthernetPacket strips the Ethernet (and one 802.1Q) header and
+// decodes the IP packet with capture.DecodeIPPacket, the decoder the live
+// capture path uses. Packets that do not decode cleanly are skipped.
+func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
 	if len(data) < 14 {
-		return parsedPacketInfo{}, false
+		return capture.Packet{}, false
 	}
 	// EtherType is at bytes 12-13.
 	etherType := binary.BigEndian.Uint16(data[12:14])
@@ -313,79 +303,14 @@ func decodeEthernetPacket(data []byte, ts time.Time) (parsedPacketInfo, bool) {
 	// Handle 802.1Q VLAN tagging.
 	if etherType == 0x8100 {
 		if len(ipData) < 4 {
-			return parsedPacketInfo{}, false
+			return capture.Packet{}, false
 		}
 		etherType = binary.BigEndian.Uint16(ipData[2:4])
 		ipData = ipData[4:]
 	}
-
-	switch etherType {
-	case 0x0800: // IPv4
-		return decodeIPv4Packet(ipData)
-	case 0x86DD: // IPv6
-		return decodeIPv6Packet(ipData)
-	default:
-		return parsedPacketInfo{}, false
+	if etherType != 0x0800 && etherType != 0x86DD {
+		return capture.Packet{}, false
 	}
-}
-
-func decodeIPv4Packet(data []byte) (parsedPacketInfo, bool) {
-	if len(data) < 20 {
-		return parsedPacketInfo{}, false
-	}
-	ihl := int(data[0]&0x0f) * 4
-	if ihl < 20 || len(data) < ihl {
-		return parsedPacketInfo{}, false
-	}
-	proto := data[9]
-	src := net.IPv4(data[12], data[13], data[14], data[15])
-	dst := net.IPv4(data[16], data[17], data[18], data[19])
-	return decodeL4(proto, src, dst, data[ihl:])
-}
-
-func decodeIPv6Packet(data []byte) (parsedPacketInfo, bool) {
-	if len(data) < 40 {
-		return parsedPacketInfo{}, false
-	}
-	proto := data[6]
-	src := net.IP(append([]byte(nil), data[8:24]...))
-	dst := net.IP(append([]byte(nil), data[24:40]...))
-	return decodeL4(proto, src, dst, data[40:])
-}
-
-func decodeL4(proto uint8, src, dst net.IP, data []byte) (parsedPacketInfo, bool) {
-	switch proto {
-	case 6: // TCP
-		if len(data) < 20 {
-			return parsedPacketInfo{}, false
-		}
-		sport := binary.BigEndian.Uint16(data[0:2])
-		dport := binary.BigEndian.Uint16(data[2:4])
-		off := int(data[12]>>4) * 4
-		if off < 20 || len(data) < off {
-			return parsedPacketInfo{}, false
-		}
-		payload := append([]byte(nil), data[off:]...)
-		return parsedPacketInfo{
-			srcIP: src, dstIP: dst,
-			srcPort: sport, dstPort: dport,
-			proto: proto, transport: "tcp",
-			payload: payload,
-		}, true
-	case 17: // UDP
-		if len(data) < 8 {
-			return parsedPacketInfo{}, false
-		}
-		sport := binary.BigEndian.Uint16(data[0:2])
-		dport := binary.BigEndian.Uint16(data[2:4])
-		payload := append([]byte(nil), data[8:]...)
-		return parsedPacketInfo{
-			srcIP: src, dstIP: dst,
-			srcPort: sport, dstPort: dport,
-			proto: proto, transport: "udp",
-			payload: payload,
-		}, true
-	default:
-		return parsedPacketInfo{}, false
-	}
+	pkt := capture.DecodeIPPacket(ipData)
+	return pkt, pkt.Invalid == ""
 }

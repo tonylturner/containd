@@ -25,7 +25,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
-	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 const dpiEnforceBlockTTL = 10 * time.Minute
@@ -72,6 +71,7 @@ type Engine struct {
 	learner         *learn.Learner
 	sigEngine       *signatures.Engine
 	stats           *stats.Tracker
+	hooks           *inlineHooks
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -136,6 +136,9 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.Mode = "nfqueue"
 		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
 	}
+	hooks := newInlineHooks(cfg.OnError)
+	cfg.Capture.OnVerdict = hooks.onVerdict
+	cfg.Capture.OnSource = hooks.onSource
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
 		return nil, err
@@ -151,6 +154,7 @@ func New(cfg Config) (*Engine, error) {
 		nfqueueGroup:  cfg.NFQueueGroup,
 		flows:         make(map[string]*flow.State),
 		verdictCache:  NewVerdictCache(30*time.Second, 65536),
+		hooks:         hooks,
 	}
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
@@ -248,6 +252,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
+	e.hooks = fresh.hooks
 	e.flowMu.Unlock()
 	e.started.Store(false)
 }
@@ -304,11 +309,17 @@ func (e *Engine) Start(ctx context.Context) error {
 			e.flowMu.Unlock()
 		}
 	}
-	// Periodically update the active goroutine gauge.
 	runDone := make(chan struct{})
 	e.runDone = runDone
+	var run sync.WaitGroup
+	run.Add(2)
 	go func() {
-		defer close(runDone)
+		defer run.Done()
+		e.hooks.blocks.run(runCtx)
+	}()
+	// Periodically update the active goroutine gauge.
+	go func() {
+		defer run.Done()
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -319,6 +330,10 @@ func (e *Engine) Start(ctx context.Context) error {
 				metrics.GoroutinesActive.Set(float64(runtime.NumGoroutine()))
 			}
 		}
+	}()
+	go func() {
+		run.Wait()
+		close(runDone)
 	}()
 	return nil
 }
@@ -454,62 +469,21 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 }
 
 // handlePacket runs flow tracking, DPI and enforcement for one captured
-// packet. Every exit accepts the current packet; enforcement acts through
-// the verdict cache and nft updates.
+// packet and decides it.
 func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
-	accept := capture.Decision{Action: capture.Accept}
 	if e == nil {
-		return accept
+		return acceptDecision
 	}
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	if pkt.Invalid != "" {
+		return invalidPacketDecision(pkt)
+	}
 	now := pkt.Timestamp
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	state := e.trackFlow(pkt, now)
-	if state == nil {
-		return accept
-	}
-
-	parsed := dpi.ParsedPacket{
-		Payload: pkt.Payload,
-		Proto:   pkt.Transport,
-		SrcPort: pkt.SrcPort,
-		DstPort: pkt.DstPort,
-	}
-
-	flowHash := state.Key.Hash()
-	shouldInspect := e.ShouldInspect(state, &parsed)
-	if cached, ok := e.verdictCache.Get(flowHash); ok {
-		// Permanent or temporary enforcement verdicts can short-circuit the flow.
-		if cached.Action != verdict.AllowContinue {
-			return accept
-		}
-		// For non-inspected flows we cache ALLOW to avoid re-checking every packet.
-		// Inspectable flows must continue through DPI so later payload-bearing
-		// packets are decoded; otherwise a SYN/ACK can suppress the whole flow.
-		if !shouldInspect {
-			return accept
-		}
-	}
-
-	if !shouldInspect {
-		// Cache an ALLOW verdict for non-inspected flows so we don't
-		// re-evaluate ShouldInspect on every packet.
-		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
-		return accept
-	}
-	events, err := e.dpiMgr.OnPacket(state, &parsed)
-	if err != nil {
-		return accept
-	}
-	e.RecordDPIEvents(state, &parsed, events)
-
-	if v, enforced := e.enforceDPIEvents(state, &parsed, events); enforced {
-		e.verdictCache.Put(flowHash, v)
-	}
-	return accept
+	return e.handleFlowPacket(pkt, now)
 }
 
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
@@ -546,12 +520,19 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
+	var expired []*flow.State
 	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
 			metrics.FlowsActive.Dec()
+			if st != nil {
+				expired = append(expired, st)
+			}
 		}
+	}
+	e.flowMu.Unlock()
+	for _, st := range expired {
+		e.endFlowStream(st, nil)
 	}
 }
