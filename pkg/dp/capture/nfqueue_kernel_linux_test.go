@@ -78,6 +78,7 @@ type kernelRecorder struct {
 	order    []string
 	held     chan Token
 	seen     []string
+	badMarks []uint32 // packets without the skb mark the steering rule set
 }
 
 func newKernelRecorder() *kernelRecorder {
@@ -105,6 +106,9 @@ func (r *kernelRecorder) handler(p Packet) Decision {
 	msg := string(p.Payload)
 	r.mu.Lock()
 	r.seen = append(r.seen, msg)
+	if !p.HasMark || p.Mark != 0x01000000 {
+		r.badMarks = append(r.badMarks, p.Mark)
+	}
 	r.mu.Unlock()
 	switch {
 	case strings.HasPrefix(msg, "drop"):
@@ -134,7 +138,7 @@ func TestKernelNFQueueInlineVerdictsAndCloseDropsHeld(t *testing.T) {
 	nft(t, `table inet containd_kernel_test {
   chain out {
     type filter hook output priority 0; policy accept;
-    udp dport `+strconv.Itoa(port)+` queue num `+strconv.Itoa(queue)+`
+    udp dport `+strconv.Itoa(port)+` meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num `+strconv.Itoa(queue)+`
   }
 }`)
 	t.Cleanup(func() { _ = exec.Command("nft", "delete", "table", "inet", "containd_kernel_test").Run() })
@@ -253,6 +257,9 @@ func TestKernelNFQueueInlineVerdictsAndCloseDropsHeld(t *testing.T) {
 	}
 	if last := r.order[len(r.order)-1]; last != "source" {
 		t.Fatalf("down event was not last: %v", r.order)
+	}
+	if len(r.badMarks) != 0 {
+		t.Fatalf("packets without the steering mark: %#x", r.badMarks)
 	}
 	r.mu.Unlock()
 
