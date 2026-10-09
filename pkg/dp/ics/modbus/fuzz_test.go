@@ -3,7 +3,12 @@
 
 package modbus
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+)
 
 func FuzzParseTCPFrame(f *testing.F) {
 	f.Add([]byte{})
@@ -29,5 +34,16 @@ func FuzzParseTCPFrame(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = ParseTCPFrame(data)
+	})
+}
+
+func FuzzParseStream(f *testing.F) {
+	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x02}, uint16(0))
+	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01, 0x83, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x01}, uint16(7))
+	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0xFF, 0xFF, 0x01}, uint16(1))
+
+	state := modbusState()
+	f.Fuzz(func(t *testing.T, data []byte, base uint16) {
+		decodertest.CheckStream(t, NewDecoder(), state, dpi.StreamView{Session: "fuzz", Base: int64(base), Bytes: data})
 	})
 }
