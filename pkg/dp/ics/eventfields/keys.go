@@ -64,6 +64,7 @@ const (
 	KeyQualifier       = "qualifier"
 	KeyQuality         = "quality"
 	KeyValue           = "value"
+	KeyValueInvalid    = "value_invalid"
 	KeySourceTime      = "source_time"
 	KeyTimeValid       = "time_valid"
 	KeyTimeSummer      = "time_summer"

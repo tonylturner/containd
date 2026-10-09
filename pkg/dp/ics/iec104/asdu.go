@@ -175,11 +175,7 @@ func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
 		obj[eventfields.KeyValue] = b[0] & 0x03
 		obj[eventfields.KeyQuality] = b[0] & 0xF0
 	case elemFloatQDS: // R32-IEEE STD 754 + QDS
-		f, err := shortFloat(b[0:4])
-		if err != nil {
-			return err
-		}
-		obj[eventfields.KeyValue] = f
+		shortFloat(b[0:4], obj)
 		obj[eventfields.KeyQuality] = b[4]
 	case elemSCO: // SCS bit 0, bit 1 reserved 0, QU bits 2-6, S/E bit 7
 		if b[0]&0x02 != 0 {
@@ -196,11 +192,7 @@ func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
 		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
 		setpointQualifier(b[2], obj)
 	case elemFloatQOS: // R32 + QOS
-		f, err := shortFloat(b[0:4])
-		if err != nil {
-			return err
-		}
-		obj[eventfields.KeyValue] = f
+		shortFloat(b[0:4], obj)
 		setpointQualifier(b[4], obj)
 	case elemBSI: // BSI, no select bit and no qualifier
 		obj[eventfields.KeyValue] = binary.LittleEndian.Uint32(b[0:4])
@@ -226,14 +218,16 @@ func setpointQualifier(qos uint8, obj map[string]any) {
 	obj[eventfields.KeySelect] = qos&0x80 != 0
 }
 
-// shortFloat decodes R32-IEEE STD 754. NaN and infinities have no JSON
-// representation, so the decoder rejects them.
-func shortFloat(b []byte) (float32, error) {
+// shortFloat records R32-IEEE STD 754 as value. The standard allows NaN and
+// infinities, but JSON cannot carry them: such an object keeps its kind and
+// other attributes, omits value and sets value_invalid (contracts K8).
+func shortFloat(b []byte, obj map[string]any) {
 	f := math.Float32frombits(binary.LittleEndian.Uint32(b))
 	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
-		return 0, errors.New("short float is not finite")
+		obj[eventfields.KeyValueInvalid] = true
+		return
 	}
-	return f, nil
+	obj[eventfields.KeyValue] = f
 }
 
 // decodeCP56 decodes CP56Time2a (IEC 60870-5-101 7.2.6.18): milliseconds

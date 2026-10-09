@@ -148,7 +148,7 @@ func TestDescriptorTable(t *testing.T) {
 			eventfields.KeyTypeID:      tc.asdu[0],
 			eventfields.KeyObjectIndex: uint8(0),
 		})
-		checkAttrs(t, tc.name, evs[0].Attributes, want, append(tc.absent, eventfields.KeyError, eventfields.KeyFunctionCode, "address")...)
+		checkAttrs(t, tc.name, evs[0].Attributes, want, append(tc.absent, eventfields.KeyValueInvalid, eventfields.KeyError, eventfields.KeyFunctionCode, "address")...)
 	}
 }
 
@@ -222,8 +222,6 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"DCO state 0", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x80})...)), eventfields.KindMalformed, "command state 0"},
 		{"DCO state 3", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "command state 3"},
 		{"RCO state 0", cli, iFrame(0, 0, asdu(60, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00}, courseTime)...)), eventfields.KindMalformed, "command state 0"},
-		{"float NaN", srv, iFrame(0, 0, asdu(13, 1, cotSpont, 0, 1, cat(ioa(1), []byte{0x00, 0x00, 0xC0, 0x7F, 0})...)), eventfields.KindMalformed, "not finite"},
-		{"float +Inf", cli, iFrame(0, 0, asdu(50, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00, 0x00, 0x80, 0x7F, 0})...)), eventfields.KindMalformed, "not finite"},
 		{"bad CP56", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, cp56(25, 2, 29, 0, 0, 0))...)), eventfields.KindMalformed, "CP56Time2a day 29"},
 		{"profile: SQ=1 on 31", srv, iFrame(0, 0, asdu(31, vsqSQ|1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), eventfields.KindMalformed, "profile: SQ=1 is not accepted for type 31"},
 		{"profile: SQ=1 on 46", cli, iFrame(0, 0, asdu(46, vsqSQ|1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
