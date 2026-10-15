@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Rules without an ICS predicate omit `ics` from JSON, so applied firewall
   policies read back without spurious empty predicates.
+- Data-plane rebuilds preserve the process event ring and increasing event
+  IDs, including logged denies and events from rebuilt IEC104 sessions.
 
 ## [0.1.31] - 2026-09-28
 

@@ -17,10 +17,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/events"
 )
 
 // dataPlane is what the config handler drives. *engine.Engine implements it.
 type dataPlane interface {
+	Events() *events.Store
 	Reconfigure(fresh *engine.Engine)
 	StartWithRetry(ctx context.Context) error
 }
@@ -47,6 +49,7 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 // and retries the queue bind after an earlier attempt gave up. A changed
 // configuration rebuilds the engine as before.
 func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager) http.HandlerFunc {
+	store := dp.Events()
 	var current appliedConfig
 	var post sync.Mutex // one POST at a time: compare, rebuild and record together
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +73,7 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 			unchanged := current.applied && sameDataPlane(current.dp, next)
 			current.mu.Unlock()
 			if !unchanged {
-				fresh, err := newEngineFor(logger, next)
+				fresh, err := newEngineFor(logger, next, store)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -104,7 +107,7 @@ func sameDataPlane(a, b config.DataPlaneConfig) bool {
 }
 
 // newEngineFor builds an engine for a data-plane configuration.
-func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig) (*engine.Engine, error) {
+func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *events.Store) (*engine.Engine, error) {
 	var excl []engine.DPIExclusion
 	for _, e := range dp.DPIExclusions {
 		excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
@@ -112,6 +115,7 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig) (*engine
 	table := firstNonEmpty(dp.EnforceTable, "containd")
 	return engine.New(engine.Config{
 		Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
+		Events:  store,
 		OnError: func(err error) {
 			logger.Errorf("data plane capture error: %v", err)
 		},

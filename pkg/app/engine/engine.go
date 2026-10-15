@@ -83,6 +83,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	engineCfg := initialEngineConfig(ifaces, enforceEnabled, enforceTable)
+	engineCfg.Events = dpevents.NewStore(4096)
 	engineCfg.OnError = func(err error) {
 		logger.Errorf("data plane capture error: %v", err)
 	}

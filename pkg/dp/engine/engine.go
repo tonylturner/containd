@@ -93,6 +93,9 @@ type EnforceConfig struct {
 
 type Config struct {
 	Capture capture.Config
+	// Events is shared by every configuration of a live engine. Nil allocates
+	// a private 4096-event store for a standalone engine.
+	Events *events.Store
 	// OnError is the fallback for capture errors and also receives non-fatal NFLOG registration errors.
 	OnError         func(error)
 	Enforce         EnforceConfig
@@ -169,7 +172,10 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
-	e.eventStore = events.NewStore(4096)
+	e.eventStore = cfg.Events
+	if e.eventStore == nil {
+		e.eventStore = events.NewStore(4096)
+	}
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.initIEC(cfg, capManager)
 	e.gate = &envelopeGate{}
@@ -206,6 +212,8 @@ func New(cfg Config) (*Engine, error) {
 
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
+// fresh must be constructed with Config.Events set to e.Events(): IEC104
+// callbacks bind to that store at construction, and the store is never swapped.
 //
 // Reconfigure returns only after the previous data-plane run has stopped,
 // including its capture consumers and nflog socket, so the following Start
@@ -247,7 +255,6 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.applier = fresh.applier
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
-	e.eventStore = fresh.eventStore
 	e.inventory = fresh.inventory
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine

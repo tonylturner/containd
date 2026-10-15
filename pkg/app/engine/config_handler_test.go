@@ -186,19 +186,68 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 		}
 	}
 
-	// A changed configuration rebuilds: a fresh event ring, inventory and
-	// session table; the old session's data is no longer parsed.
+	// A changed configuration rebuilds inventory and the session table,
+	// but preserves the process event ring. Old session data is not parsed.
+	store := dp.Events()
+	before := iecSessionIDs(dp.Engine)[session]
 	out = postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
 	if out["unchanged"] != false || dp.reconfigs.Load() != 2 {
 		t.Fatalf("changed POST did not rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	dp.waitStart(t)
-	if len(dp.Events().List(0)) != 0 || len(dp.Inventory().List()) != 0 {
-		t.Fatal("a rebuild must start with fresh telemetry")
+	if dp.Events() != store || len(dp.Events().List(0)) == 0 || len(dp.Inventory().List()) != 0 {
+		t.Fatal("a rebuild must preserve events but reset inventory")
 	}
 	dp.HandlePacket(iecPacket(false, capture.TCPFlagACK|capture.TCPFlagPSH, 5032, 1000, spontaneous(2)))
-	if got := iecSessionIDs(dp.Engine); len(got) != 0 {
-		t.Fatalf("old session still parsed after a rebuild: %v", got)
+	if got := iecSessionIDs(dp.Engine)[session]; got != before {
+		t.Fatalf("old session still parsed after a rebuild: events %d -> %d", before, got)
+	}
+}
+
+func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
+	dp := newCountingDP(t)
+	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	store := dp.Events()
+	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true}}`)
+	dp.waitStart(t)
+	dp.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "iec-learn", Action: rules.ActionAllow,
+		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}}}})
+	marker := store.Append(dpevents.Event{Kind: "firewall.rule.hit", Timestamp: time.Now().UTC(),
+		Attributes: map[string]any{"action": "DENY"}, FlowID: "before-rebuild"})
+	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
+	dp.waitStart(t)
+	if dp.Events() != store {
+		t.Fatal("rebuild replaced the store")
+	}
+	for _, p := range []capture.Packet{
+		iecPacket(true, capture.TCPFlagSYN, 999, 0, nil),
+		iecPacket(false, capture.TCPFlagSYN|capture.TCPFlagACK, 4999, 1000, nil),
+		iecPacket(true, capture.TCPFlagACK, 1000, 5000, nil),
+		iecPacket(false, capture.TCPFlagACK|capture.TCPFlagPSH, 5000, 1000, spontaneous(0)),
+	} {
+		if d := dp.HandlePacket(p); d.Action != capture.Accept {
+			t.Fatalf("packet %+v = %+v", p.TCP, d)
+		}
+	}
+	rec := httptest.NewRecorder()
+	eventsHandler(dp.Engine).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/internal/events", nil))
+	var listed []dpevents.Event
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &listed) != nil {
+		t.Fatalf("events response = %d %s", rec.Code, rec.Body.String())
+	}
+	var foundMarker, foundIEC bool
+	for _, ev := range listed {
+		foundMarker = foundMarker || ev.ID == marker.ID && ev.FlowID == marker.FlowID
+		if ev.Proto == "iec104" && ev.Kind == "response" {
+			foundIEC = true
+			if ev.ID <= marker.ID {
+				t.Fatalf("IEC event ID %d did not advance past %d", ev.ID, marker.ID)
+			}
+		}
+	}
+	if !foundMarker || !foundIEC {
+		t.Fatalf("events after rebuild: marker=%v IEC104=%v: %+v", foundMarker, foundIEC, listed)
 	}
 }
 
