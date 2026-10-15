@@ -10,9 +10,20 @@ import (
 )
 
 func TestICSPredicateIsZeroEveryField(t *testing.T) {
+	assertJSONZero := func(t *testing.T, p ICSPredicate) {
+		t.Helper()
+		body, err := p.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.IsZero() != (string(body) == "{}") {
+			t.Fatalf("IsZero() = %v, MarshalJSON() = %s", p.IsZero(), body)
+		}
+	}
 	if !(ICSPredicate{}).IsZero() {
 		t.Fatal("zero predicate is not zero")
 	}
+	assertJSONZero(t, ICSPredicate{})
 	typ := reflect.TypeFor[ICSPredicate]()
 	for i := range typ.NumField() {
 		t.Run(typ.Field(i).Name, func(t *testing.T) {
@@ -34,13 +45,17 @@ func TestICSPredicateIsZeroEveryField(t *testing.T) {
 			if p.IsZero() {
 				t.Fatal("IsZero ignores this field")
 			}
-			// Non-nil empty slices are not Go zero values either.
+			assertJSONZero(t, p)
+			// MarshalJSON omits empty slices, whether nil or non-nil.
 			if f.Kind() == reflect.Slice {
 				f.Set(reflect.MakeSlice(f.Type(), 0, 0))
-				if p.IsZero() {
-					t.Fatal("non-nil empty slice must not be zero")
+				if !p.IsZero() {
+					t.Fatal("empty slice must be zero")
 				}
+				assertJSONZero(t, p)
 			}
+			f.SetZero()
+			assertJSONZero(t, p)
 		})
 	}
 }
@@ -57,7 +72,10 @@ func TestRuleICSJSON(t *testing.T) {
 		{"unit zero", ICSPredicate{Protocol: "modbus", UnitID: new(uint8)},
 			`{"id":"r","ics":{"protocol":"modbus","unitId":0},"action":"ALLOW"}`},
 		{"non-nil empty slice", ICSPredicate{Addresses: []string{}},
-			`{"id":"r","ics":{},"action":"ALLOW"}`},
+			`{"id":"r","action":"ALLOW"}`},
+		{"all empty slices", ICSPredicate{FunctionCode: []uint8{}, Addresses: []string{},
+			ObjectClasses: []uint16{}, TypeIDs: []int{}, Classes: []string{}, CA: []uint16{}, IOA: []IOARange{}},
+			`{"id":"r","action":"ALLOW"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := json.Marshal(Rule{ID: "r", Action: "ALLOW", ICS: tc.ics})
