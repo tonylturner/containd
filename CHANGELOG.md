@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Rules without an ICS predicate omit `ics` from JSON, so applied firewall
+  policies read back without spurious empty predicates.
+
 ## [0.1.31] - 2026-09-28
 
 ### Fixed

@@ -29,6 +29,15 @@ type icsPredicateJSON struct {
 	IOA           []IOARange `json:"ioa,omitempty"`
 }
 
+// IsZero reports whether every field has its Go zero value. Non-nil slices
+// and a non-nil UnitID (including unit ID 0) keep the predicate in JSON.
+func (p ICSPredicate) IsZero() bool {
+	return p.Protocol == "" && p.FunctionCode == nil && p.UnitID == nil &&
+		p.Addresses == nil && p.ObjectClasses == nil &&
+		!p.ReadOnly && !p.WriteOnly && p.Direction == "" && p.Mode == "" &&
+		p.TypeIDs == nil && p.Classes == nil && p.CA == nil && p.IOA == nil
+}
+
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 	out := icsPredicateJSON{
 		Protocol:      p.Protocol,

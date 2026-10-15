@@ -786,7 +786,7 @@ type Rule struct {
 	Destinations []string        `json:"destinations,omitempty"` // CIDR strings
 	Protocols    []Protocol      `json:"protocols,omitempty"`
 	Identities   []string        `json:"identities,omitempty"`
-	ICS          ICSPredicate    `json:"ics,omitempty"`
+	ICS          ICSPredicate    `json:"ics,omitzero"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`
 	Log          bool            `json:"log,omitempty"` // log matching traffic
