@@ -4,14 +4,7 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 
 import type { Interface, InterfaceState, Zone } from "../../lib/api";
-
-export function runtimeFor(
-  iface: Interface,
-  state: InterfaceState[],
-): InterfaceState | null {
-  const effectiveDev = iface.device || iface.name;
-  return state.find((s) => s.name === effectiveDev) ?? null;
-}
+import { interfaceAddresses, OS_ADDRESS_HINT } from "../../lib/interface-addresses";
 
 export function InterfaceRow({
   iface,
@@ -42,9 +35,7 @@ export function InterfaceRow({
   const [device, setDevice] = useState(iface.device ?? "");
   const [alias, setAlias] = useState(iface.alias ?? "");
   const [zone, setZone] = useState(iface.zone ?? "");
-  const [mode, setMode] = useState(
-    (iface.addressMode ?? "static").toLowerCase(),
-  );
+  const [mode, setMode] = useState(iface.addressMode ?? "");
   const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
   const [gateway, setGateway] = useState(iface.gateway ?? "");
   const [mgmt, setMgmt] = useState(iface.access?.mgmt ?? true);
@@ -54,6 +45,8 @@ export function InterfaceRow({
 
   const detectedCIDR = firstIPv4CIDR(runtime?.addrs);
   const suggestedGateway = suggestGatewayFromCIDR(detectedCIDR);
+  const display = interfaceAddresses(iface, osState);
+  const modeLabel = iface.addressMode || (iface.addresses?.length ? "static" : "external");
 
   const memberCandidates = useMemo(() => {
     const logical = (allIfaces ?? [])
@@ -217,6 +210,7 @@ export function InterfaceRow({
           <span className="text-[var(--text)]">{zoneDisplay}</span>
         )}
       </td>
+      <td className="px-4 py-3">{modeLabel}</td>
       <td className="px-4 py-3">
         {editing ? (
           <div className="space-y-2">
@@ -226,6 +220,7 @@ export function InterfaceRow({
               disabled={!canEdit}
               className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
             >
+              <option value="">{addresses.trim() ? "static (implicit)" : "external"}</option>
               <option value="static">static</option>
               <option value="dhcp">dhcp</option>
             </select>
@@ -233,7 +228,7 @@ export function InterfaceRow({
               value={addresses}
               onChange={(e) => setAddresses(e.target.value)}
               disabled={!canEdit || mode === "dhcp"}
-              placeholder="CIDRs (comma-separated)"
+              placeholder={display.source === "os" ? display.addrs.join(", ") : "CIDRs (comma-separated)"}
               className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
             />
             <input
@@ -295,30 +290,25 @@ export function InterfaceRow({
             </div>
           </div>
         ) : (
-          <span className="text-[var(--text)]">
-            {(iface.addressMode ?? "static").toLowerCase() === "dhcp" ? (
-              runtime && runtime.addrs?.length ? (
-                <span>
-                  dhcp{" "}
-                  <span className="text-[var(--text-muted)]">
-                    ({runtime.addrs.join(", ")})
-                  </span>
-                </span>
-              ) : (
-                <span>dhcp</span>
-              )
-            ) : (iface.addresses ?? []).length > 0 ? (
-              (iface.addresses ?? []).join(", ")
-            ) : (
-              "—"
+          <span
+            className="inline-flex items-center gap-1 text-[var(--text)]"
+            title={(display.source === "config" ? iface.addresses : runtime?.addrs)?.join(", ")}
+          >
+            {display.source === "os" && (
+              <span title={OS_ADDRESS_HINT}>
+                <Image src="/icons/docker.svg" alt="OS/Docker address" width={16} height={16} />
+              </span>
             )}
+            {display.source === "dhcp"
+              ? `dhcp${display.addrs.length ? ` (${display.addrs.join(", ")})` : ""}`
+              : display.addrs.join(", ") || "—"}
           </span>
         )}
       </td>
       <td className="px-4 py-3">
         {(() => {
           const configured =
-            (iface.addressMode ?? "static").toLowerCase() === "dhcp"
+            iface.addressMode?.toLowerCase() === "dhcp"
               ? "dhcp"
               : (iface.addresses ?? []).length > 0
                 ? (iface.addresses ?? []).join(", ")
@@ -431,14 +421,16 @@ export function InterfaceRow({
                       : undefined,
                   device: device.trim() || undefined,
                   zone: zone || undefined,
-                  addressMode: mode,
+                  addressMode: mode === (iface.addressMode ?? "") ? iface.addressMode : mode,
                   addresses:
-                    mode === "dhcp"
-                      ? []
-                      : addresses
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
+                    mode === (iface.addressMode ?? "") && addresses === (iface.addresses ?? []).join(", ")
+                      ? iface.addresses
+                      : mode === "dhcp"
+                        ? []
+                        : addresses
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean),
                   gateway: mode === "dhcp" ? "" : gateway.trim(),
                   access: {
                     mgmt,
@@ -464,7 +456,7 @@ export function InterfaceRow({
                 setDevice(iface.device ?? "");
                 setAlias(iface.alias ?? "");
                 setZone(iface.zone ?? "");
-                setMode((iface.addressMode ?? "static").toLowerCase());
+                setMode(iface.addressMode ?? "");
                 setAddresses((iface.addresses ?? []).join(", "));
                 setGateway(iface.gateway ?? "");
                 setMgmt(iface.access?.mgmt ?? true);

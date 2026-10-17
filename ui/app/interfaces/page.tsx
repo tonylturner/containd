@@ -10,7 +10,8 @@ import { validateCIDRList, validateIP } from "../../lib/validate";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { chipClass, InterfaceRow, runtimeFor } from "./interface-row";
+import { chipClass, InterfaceRow } from "./interface-row";
+import { runtimeFor } from "../../lib/interface-addresses";
 
 export default function InterfacesPage() {
   const [ifaces, setIfaces] = useState<Interface[]>([]);
@@ -426,6 +427,7 @@ export default function InterfacesPage() {
               <th className="px-4 py-3">Device</th>
               <th className="px-4 py-3">Link</th>
               <th className="px-4 py-3">Zone</th>
+              <th className="px-4 py-3">Mode</th>
               <th className="px-4 py-3">Addresses</th>
               <th className="px-4 py-3">Network</th>
               <th className="px-4 py-3">Access</th>
@@ -435,7 +437,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6">
+                <td colSpan={11} className="px-4 py-6">
                   <EmptyState
                     title="No interfaces configured"
                     description="Create an interface above to bind a network port to a zone."

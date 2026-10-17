@@ -13,6 +13,8 @@ import {
 } from "../../lib/api";
 import s from "./physical.module.css";
 import ts from "./topology.module.css";
+import { interfaceAddresses, runtimeFor } from "../../lib/interface-addresses";
+import { TopologyAddress } from "./topology-address";
 
 /* ════════════════════════════════════════════════════════════════════
    TYPES
@@ -593,13 +595,21 @@ export default function PhysicalView() {
               <div className={s.layerSectionFull}>
                 <div className={s.layerSectionLabel}>Bound Interfaces (in-process)</div>
                 <div className={s.ifacePills}>
-                  {data.interfaces.map((ifc) => (
-                    <div key={ifc.name} className={`${s.ifacePill} ${s.ifacePillAmber}`}>
-                      <span className={s.ifacePillName}>{ifc.device || ifc.name}</span>
-                      <span className={s.ifacePillIp}>{ifc.addresses?.[0] || "\u2014"}</span>
-                      <span className={s.ifacePillType} style={{ color: "#22c55e" }}>{ifc.zone || "\u2014"} &middot; up</span>
-                    </div>
-                  ))}
+                  {data.interfaces.map((ifc) => {
+                    const address = interfaceAddresses(ifc, data.ifaceState);
+                    const fullAddrs = address.source === "config"
+                      ? ifc.addresses
+                      : runtimeFor(ifc, data.ifaceState)?.addrs;
+                    return (
+                      <div key={ifc.name} className={`${s.ifacePill} ${s.ifacePillAmber}`}>
+                        <span className={s.ifacePillName}>{ifc.device || ifc.name}</span>
+                        <span className={s.ifacePillIp}>
+                          <TopologyAddress address={address} fullAddrs={fullAddrs} />
+                        </span>
+                        <span className={s.ifacePillType} style={{ color: "#22c55e" }}>{ifc.zone || "\u2014"} &middot; up</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

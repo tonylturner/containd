@@ -257,6 +257,16 @@ func showZones(store config.Store) Command {
 	}
 }
 
+func interfaceMode(iface config.Interface) string {
+	if iface.AddressMode != "" {
+		return iface.AddressMode
+	}
+	if len(iface.Addresses) > 0 {
+		return "static"
+	}
+	return "external"
+}
+
 func showInterfaces(store config.Store) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		cfg, err := store.Load(ctx)
@@ -271,7 +281,7 @@ func showInterfaces(store config.Store) Command {
 		for _, iface := range cfg.Interfaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
-			mode := firstNonEmpty(iface.AddressMode, "static")
+			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
 				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
@@ -342,7 +352,7 @@ func showInterfacesAPI(api *API) Command {
 		for _, iface := range ifaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
-			mode := firstNonEmpty(iface.AddressMode, "static")
+			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
 				if st, ok := stateByName[effectiveDev]; ok && len(st.Addrs) > 0 {

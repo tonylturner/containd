@@ -7,6 +7,7 @@ import {
   STATUS_COLORS,
 } from "./topology-shared";
 import s from "./topology.module.css";
+import { TopologyAddress } from "./topology-address";
 
 export function DetailContent({ data }: { data: TopoNodeData }) {
   const sc = STATUS_COLORS[data.status || "ok"];
@@ -41,7 +42,7 @@ export function DetailContent({ data }: { data: TopoNodeData }) {
         )}
         {data.nodeType === "zone" && (
           <>
-            <DRow k="Subnet" v={data.subnet || ""} cls={s.valCyan} />
+            <DRow k="Subnet" v={<TopologyAddress address={data.address} fullAddrs={data.fullAddrs} />} cls={s.valCyan} />
             <DRow k="Interface" v={data.iface || ""} />
             <DRow k="Hosts" v={String(data.hosts ?? 0)} />
             <DRow
@@ -95,7 +96,7 @@ export function DetailContent({ data }: { data: TopoNodeData }) {
                   </span>
                 </div>
                 <div className={s.ifaceIp}>
-                  {ifc.ip} &middot; {ifc.zone}
+                  <TopologyAddress address={ifc.address} fullAddrs={ifc.fullAddrs} /> &middot; {ifc.zone}
                 </div>
                 <div className={s.ifaceStats}>
                   <span>&darr; {ifc.rx}</span>
@@ -167,7 +168,7 @@ function DRow({
   color,
 }: {
   k: string;
-  v: string;
+  v: React.ReactNode;
   cls?: string;
   color?: string;
 }) {
