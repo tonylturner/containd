@@ -427,6 +427,7 @@ test("interface addresses prefer config, then the bound device, without mutating
   expect(interfaceAddresses({ name: "missing", addressMode: "dhcp" }, interfaceState)).toEqual({
     source: "dhcp", addrs: [],
   });
+  expect(interfaceAddresses({ name: "eth0", addressMode: "dhcp", addresses: ["192.0.2.9/24"] }, interfaceState).source).toBe("dhcp");
   expect(interfaceAddresses({ name: "missing", addresses: ["2001:db8::2/64"] }, [])).toEqual({
     source: "config", addrs: ["2001:db8::2/64"],
   });

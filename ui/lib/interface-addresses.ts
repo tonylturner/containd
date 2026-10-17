@@ -24,14 +24,15 @@ export function interfaceAddresses(
   const runtime = runtimeFor(iface, state);
   const configured = (iface.addresses?.length ?? 0) > 0;
   const dhcp = iface.addressMode?.toLowerCase() === "dhcp";
-  const source = configured
-    ? "config"
-    : dhcp
-      ? "dhcp"
+  // The engine applies dhcp before static addresses, so dhcp wins here too.
+  const source = dhcp
+    ? "dhcp"
+    : configured
+      ? "config"
       : runtime?.addrs?.length
         ? "os"
         : "none";
-  const addrs = (configured ? iface.addresses : runtime?.addrs) ?? [];
+  const addrs = (source === "config" ? iface.addresses : runtime?.addrs) ?? [];
   return {
     source,
     addrs: addrs
