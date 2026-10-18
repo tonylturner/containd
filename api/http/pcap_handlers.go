@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -35,18 +36,37 @@ func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := config.ValidatePCAPConfig(req); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			httpError(c, err)
 			return
 		}
 		cfg.PCAP = req
+		engineCfg := req
+		if engine != nil && req.Enabled {
+			status, err := engine.PcapStatus(c.Request.Context())
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			if status.Running {
+				engineCfg, err = resolvePCAPConfig(c.Request.Context(), engine, *cfg, req)
+				if err != nil {
+					apiError(c, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+		}
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			httpError(c, err)
 			return
 		}
 		if engine != nil {
-			if _, err := engine.SetPcapConfig(c.Request.Context(), cfg.PCAP); err != nil {
+			if _, err := engine.SetPcapConfig(c.Request.Context(), engineCfg); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -63,7 +83,33 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			httpError(c, err)
 			return
 		}
+		var body []byte
+		if c.Request.Body != nil {
+			body, err = io.ReadAll(c.Request.Body)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, "failed to read pcap start body")
+				return
+			}
+		}
+		if strings.TrimSpace(string(body)) != "" {
+			if err := json.Unmarshal(body, &cfg.PCAP); err != nil {
+				apiError(c, http.StatusBadRequest, "invalid pcap start JSON: "+err.Error())
+				return
+			}
+		}
 		cfg.PCAP.Enabled = true
+		if err := config.ValidatePCAPConfig(cfg.PCAP); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		engineCfg := cfg.PCAP
+		if engine != nil {
+			engineCfg, err = resolvePCAPConfig(c.Request.Context(), engine, *cfg, cfg.PCAP)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			httpError(c, err)
 			return
@@ -72,7 +118,7 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"status": "pcap start queued"})
 			return
 		}
-		status, err := engine.StartPcap(c.Request.Context(), cfg.PCAP)
+		status, err := engine.StartPcap(c.Request.Context(), engineCfg)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return

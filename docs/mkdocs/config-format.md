@@ -167,6 +167,11 @@ Canonical JSON configuration for export/import and persistent state.
 Notes:
 - `zones` must be unique.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
+- `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).
+- `pcap.zones` captures every configured interface assigned to each listed zone; interface and zone selections are combined and deduplicated when capture starts.
+- `pcap.filter.port` accepts one port (for example `"2404"`) or an inclusive range (for example `"1000-2000"`). It matches source or destination ports in TCP/UDP packets; it cannot be combined with `proto: "icmp"`.
+- The live capture filter currently parses untagged Ethernet IPv4. Non-initial IPv4 fragments do not expose ports and therefore do not match a port filter.
+- Capture start rejects unknown interfaces or zones, zones with no configured interfaces, and an empty selection. `GET /api/v1/pcap/status` reports the resolved kernel devices.
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
 - `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).

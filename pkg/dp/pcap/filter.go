@@ -16,10 +16,11 @@ func matchFilter(data []byte, filter config.PCAPFilter) bool {
 	proto := strings.ToLower(strings.TrimSpace(filter.Proto))
 	src := strings.TrimSpace(filter.Src)
 	dst := strings.TrimSpace(filter.Dst)
+	port := strings.TrimSpace(filter.Port)
 	if proto == "" || proto == "any" {
 		proto = ""
 	}
-	if src == "" && dst == "" && proto == "" {
+	if src == "" && dst == "" && proto == "" && port == "" {
 		return true
 	}
 	if len(data) < 14 {
@@ -32,8 +33,11 @@ func matchFilter(data []byte, filter config.PCAPFilter) bool {
 	if len(data) < 34 {
 		return false
 	}
+	if data[14]>>4 != 4 {
+		return false
+	}
 	ipHeaderLen := int(data[14]&0x0f) * 4
-	if len(data) < 14+ipHeaderLen {
+	if ipHeaderLen < 20 || len(data) < 14+ipHeaderLen {
 		return false
 	}
 	ipProto := data[23]
@@ -48,7 +52,34 @@ func matchFilter(data []byte, filter config.PCAPFilter) bool {
 	if dst != "" && !matchIP(dst, dstIP) {
 		return false
 	}
+	if port != "" {
+		if ipProto != 6 && ipProto != 17 {
+			return false
+		}
+		minPort, maxPort, err := config.ParsePCAPPortRange(port)
+		if err != nil {
+			return false
+		}
+		fragment := (uint16(data[20]&0x1f) << 8) | uint16(data[21])
+		if fragment&0x1fff != 0 {
+			return false
+		}
+		portOffset := 14 + ipHeaderLen
+		ipTotalLen := int(data[16])<<8 | int(data[17])
+		if ipTotalLen < ipHeaderLen+4 || len(data) < portOffset+4 {
+			return false
+		}
+		srcPort := uint16(data[portOffset])<<8 | uint16(data[portOffset+1])
+		dstPort := uint16(data[portOffset+2])<<8 | uint16(data[portOffset+3])
+		if !portInRange(srcPort, minPort, maxPort) && !portInRange(dstPort, minPort, maxPort) {
+			return false
+		}
+	}
 	return true
+}
+
+func portInRange(port, min, max uint16) bool {
+	return port >= min && port <= max
 }
 
 func matchProto(proto string, ipProto byte) bool {

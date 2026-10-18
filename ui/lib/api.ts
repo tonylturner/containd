@@ -90,11 +90,13 @@ export type PcapFilter = {
   src?: string;
   dst?: string;
   proto?: "any" | "tcp" | "udp" | "icmp";
+  port?: string;
 };
 
 export type PcapConfig = {
   enabled?: boolean;
   interfaces?: string[];
+  zones?: string[];
   snaplen?: number;
   maxSizeMB?: number;
   maxFiles?: number;
