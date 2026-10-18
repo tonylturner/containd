@@ -11,17 +11,23 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
 type healthMockEngine struct {
 	*mockEngine
-	st  dpengine.IEC104Enforcement
-	err error
+	st         dpengine.IEC104Enforcement
+	forwarding netcfg.IPv4ForwardingStatus
+	err        error
 }
 
-func (m *healthMockEngine) IEC104Enforcement(context.Context) (dpengine.IEC104Enforcement, error) {
-	return m.st, m.err
+func (m *healthMockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
+	return engineclient.RuntimeHealth{
+		IEC104Enforcement: m.st,
+		IPv4Forwarding:    m.forwarding,
+	}, m.err
 }
 
 func healthBody(t *testing.T, engine EngineClient) (int, map[string]any) {
@@ -39,17 +45,46 @@ func healthBody(t *testing.T, engine EngineClient) (int, map[string]any) {
 
 func TestHealthReportsIEC104Enforcement(t *testing.T) {
 	cases := []struct {
-		name   string
-		engine EngineClient
-		want   map[string]any
+		name       string
+		engine     EngineClient
+		want       map[string]any
+		forwarding netcfg.IPv4ForwardingStatus
 	}{
-		{"no engine", nil, map[string]any{"active": false, "healthy": false, "reason": "engine unreachable"}},
-		{"engine error", &healthMockEngine{mockEngine: &mockEngine{}, err: errors.New("connection refused")},
-			map[string]any{"active": false, "healthy": false, "reason": "engine unreachable"}},
-		{"engine unhealthy", &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Active: true, Reason: "reset injector unavailable"}},
-			map[string]any{"active": true, "healthy": false, "reason": "reset injector unavailable"}},
-		{"inactive", &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Healthy: true}},
-			map[string]any{"active": false, "healthy": true, "reason": ""}},
+		{
+			name:       "no engine",
+			forwarding: netcfg.IPv4ForwardingUnknown,
+			want:       map[string]any{"active": false, "healthy": false, "reason": "engine unreachable"},
+		},
+		{
+			name:       "engine error",
+			engine:     &healthMockEngine{mockEngine: &mockEngine{}, err: errors.New("connection refused")},
+			forwarding: netcfg.IPv4ForwardingUnknown,
+			want:       map[string]any{"active": false, "healthy": false, "reason": "engine unreachable"},
+		},
+		{
+			name:       "engine unhealthy",
+			engine:     &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Active: true, Reason: "reset injector unavailable"}},
+			forwarding: netcfg.IPv4ForwardingUnknown,
+			want:       map[string]any{"active": true, "healthy": false, "reason": "reset injector unavailable"},
+		},
+		{
+			name:       "inactive",
+			engine:     &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Healthy: true}},
+			forwarding: netcfg.IPv4ForwardingUnknown,
+			want:       map[string]any{"active": false, "healthy": true, "reason": ""},
+		},
+		{
+			name:       "forwarding enabled",
+			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingEnabled},
+			forwarding: netcfg.IPv4ForwardingEnabled,
+			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+		},
+		{
+			name:       "forwarding disabled",
+			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingDisabled},
+			forwarding: netcfg.IPv4ForwardingDisabled,
+			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+		},
 	}
 	for _, c := range cases {
 		code, body := healthBody(t, c.engine)
@@ -61,6 +96,9 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 			if got[k] != v {
 				t.Fatalf("%s: iec104Enforcement = %v, want %v", c.name, got, c.want)
 			}
+		}
+		if body["ipv4Forwarding"] != string(c.forwarding) {
+			t.Fatalf("%s: ipv4Forwarding = %v, want %q", c.name, body["ipv4Forwarding"], c.forwarding)
 		}
 	}
 }

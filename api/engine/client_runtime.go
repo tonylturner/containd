@@ -18,12 +18,19 @@ import (
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
 // SimulationStatus holds the state of the synthetic traffic generator.
 type SimulationStatus struct {
 	Running bool `json:"running"`
+}
+
+// RuntimeHealth is the engine health needed by the management API.
+type RuntimeHealth struct {
+	IEC104Enforcement dpengine.IEC104Enforcement
+	IPv4Forwarding    netcfg.IPv4ForwardingStatus
 }
 
 // ListEvents fetches recent normalized events from the engine.
@@ -320,29 +327,38 @@ func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (Simu
 	return st, nil
 }
 
-// IEC104Enforcement reads the engine's IEC104 enforcement health from its
-// /health endpoint (contracts K6).
-func (c *HTTPClient) IEC104Enforcement(ctx context.Context) (dpengine.IEC104Enforcement, error) {
+// RuntimeHealth reads the engine's network-namespace health from its /health
+// endpoint.
+func (c *HTTPClient) RuntimeHealth(ctx context.Context) (RuntimeHealth, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
 	if err != nil {
-		return dpengine.IEC104Enforcement{}, err
+		return RuntimeHealth{}, err
 	}
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return dpengine.IEC104Enforcement{}, err
+		return RuntimeHealth{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return dpengine.IEC104Enforcement{}, engineStatusError(resp, "engine health status")
+		return RuntimeHealth{}, engineStatusError(resp, "engine health status")
 	}
 	var out struct {
 		IEC104Enforcement *dpengine.IEC104Enforcement `json:"iec104Enforcement"`
+		IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return dpengine.IEC104Enforcement{}, err
+		return RuntimeHealth{}, err
 	}
 	if out.IEC104Enforcement == nil {
-		return dpengine.IEC104Enforcement{}, fmt.Errorf("engine health has no iec104Enforcement")
+		return RuntimeHealth{}, fmt.Errorf("engine health has no iec104Enforcement")
 	}
-	return *out.IEC104Enforcement, nil
+	switch out.IPv4Forwarding {
+	case netcfg.IPv4ForwardingEnabled, netcfg.IPv4ForwardingDisabled:
+	default:
+		out.IPv4Forwarding = netcfg.IPv4ForwardingUnknown
+	}
+	return RuntimeHealth{
+		IEC104Enforcement: *out.IEC104Enforcement,
+		IPv4Forwarding:    out.IPv4Forwarding,
+	}, nil
 }

@@ -314,22 +314,5 @@ func skipAddrDeletion(ipnet *net.IPNet, desired map[string]struct{}, replaceV4 b
 }
 
 func shouldEnableForwarding(ifaces []config.Interface) bool {
-	seen := map[string]struct{}{}
-	for _, iface := range ifaces {
-		if strings.TrimSpace(iface.Zone) == "" {
-			continue
-		}
-		dev := strings.TrimSpace(iface.Device)
-		if dev == "" {
-			dev = strings.TrimSpace(iface.Name)
-		}
-		if dev == "" {
-			continue
-		}
-		seen[dev] = struct{}{}
-		if len(seen) >= 2 {
-			return true
-		}
-	}
-	return false
+	return RequiresIPv4Forwarding(ifaces)
 }

@@ -22,6 +22,25 @@ Authentication and user-management coverage includes:
 
 See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
 
+## Forwarding Health and Commit Warnings
+
+Unauthenticated `GET /api/v1/health` includes `ipv4Forwarding`, which is
+`enabled`, `disabled`, or `unknown`. The value is read from
+`/proc/sys/net/ipv4/ip_forward` by the engine in its network namespace;
+`unknown` means the sysctl could not be read or the management API could not
+reach the engine.
+
+When a commit applies a configuration spanning multiple zone-assigned
+interface devices and forwarding is disabled, the response includes the
+`X-Containd-Warnings` header:
+
+```text
+ipv4 forwarding is disabled (net.ipv4.ip_forward=0); routed traffic will not pass
+```
+
+Warnings are returned as repeated `X-Containd-Warnings` header values when
+there is more than one.
+
 ## Environment Variables
 
 The following environment variables control runtime behavior. They are read at startup and (where noted) on `SIGHUP` reload.

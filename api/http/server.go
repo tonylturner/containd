@@ -578,6 +578,9 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
 			warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
 		}
+		if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
+			warnings = append(warnings, warning)
+		}
 		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
 			warnings = append(warnings, fmt.Sprintf("routing: %v", err))
 		}

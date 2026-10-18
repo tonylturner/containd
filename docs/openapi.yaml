@@ -124,6 +124,14 @@ components:
         hostname: { type: string }
         time: { type: string, format: date-time }
         iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
+        ipv4Forwarding:
+          type: string
+          enum: [enabled, disabled, unknown]
+          description: >
+            IPv4 forwarding state read by the engine from
+            /proc/sys/net/ipv4/ip_forward in its network namespace.
+            `unknown` means the sysctl could not be read or the management
+            API could not reach the engine.
 
     IEC104Enforcement:
       type: object
@@ -468,6 +476,10 @@ paths:
   /health:
     get:
       summary: Health check
+      description: >
+        Always returns HTTP 200 for liveness. `ipv4Forwarding` reports the
+        forwarding sysctl state observed in the engine's network namespace,
+        or `unknown` if that state cannot be read.
       security: []
       tags: [System]
       responses:
@@ -677,7 +689,16 @@ paths:
         injector failure keeps the config and reports unhealthy.
       tags: [Config]
       responses:
-        "200": { description: Commit applied }
+        "200":
+          description: Commit applied
+          headers:
+            X-Containd-Warnings:
+              description: >
+                One header value per warning. When the config spans multiple
+                zone-assigned interface devices and IPv4 forwarding is
+                disabled, includes "ipv4 forwarding is disabled
+                (net.ipv4.ip_forward=0); routed traffic will not pass".
+              schema: { type: string }
         "400": { description: Candidate configuration is invalid }
         "403": { description: Admin role required }
 
