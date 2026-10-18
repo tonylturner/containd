@@ -15,7 +15,7 @@ import (
 // payload is fed through the reassembler so that decoders see the stream,
 // not single segments. The first supporting StreamDecoder (registration
 // order) frames the stream through ParseStream and alone trims it; other
-// decoders get OnPacket with the buffered bytes, as before.
+// packet decoders get OnPacket with only the captured segment.
 //
 // Streams are keyed by the directional flow hash, or by Session and Dir
 // when HasOffset is set. A HasOffset packet without Session or Dir is not
@@ -23,12 +23,14 @@ import (
 // conflicting overlaps are *StreamError; the manager adds their malformed
 // event. Any framed error discards the direction's buffer: a legacy stream
 // starts fresh with the next packet, a session stream stays failed until
-// EndStream. Inspect is not safe for concurrent calls on the same stream.
+// EndStream. Feed, parse and trim are serialized across capture workers.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
 		return res
 	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
 	candidates := m.candidates(state)
 	tcp := pkt.Proto == "tcp"
 	stream := tcp && m.reassembler != nil &&
@@ -42,6 +44,9 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		res.Proto = framer.Protocol()
 	}
 	key, session, pos := streamKey(state, pkt)
+	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
+		m.reassembler.open(key, pkt.TCPSeq, time.Now())
+	}
 	if stream && pkt.HasOffset {
 		if err := m.reassembler.failure(key); err != nil {
 			res.Err = err // already reported with its event; not re-emitted
@@ -49,14 +54,12 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		}
 	}
 
-	dpiPkt := pkt
 	var errEvent *Event
-	if stream && len(pkt.Payload) > 0 {
+	if framer != nil && len(pkt.Payload) > 0 {
 		now := time.Now()
 		m.reassembler.sweep(now)
 		fed := m.reassembler.feed(key, pos, pkt.Payload, now, framer != nil, pkt.HasOffset)
 		res.Gap = fed.gap
-		dpiPkt = &ParsedPacket{Payload: fed.buf, Proto: pkt.Proto, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 		switch {
 		case fed.err != nil:
 			fed.err.Proto = res.Proto
@@ -78,7 +81,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		if _, ok := d.(StreamDecoder); ok && tcp {
 			continue // on TCP a StreamDecoder only ever frames through ParseStream
 		}
-		events, err := d.OnPacket(state, dpiPkt)
+		events, err := d.OnPacket(state, pkt)
 		res.Events = append(res.Events, events...)
 		if err != nil {
 			if res.Err == nil {
@@ -190,6 +193,8 @@ func (m *Manager) EndStream(session string) {
 	if m == nil || m.reassembler == nil {
 		return
 	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
 	for _, dir := range []StreamDir{ClientToServer, ServerToClient} {
 		m.reassembler.complete(sessionStreamKey(session, dir))
 	}

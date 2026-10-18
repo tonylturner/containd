@@ -541,3 +541,50 @@ func TestLogPrefixSanitizationFitsBudgetAfterTruncation(t *testing.T) {
 		t.Fatalf("prefix exceeds 64-byte budget: %d bytes %q", len(got), got)
 	}
 }
+
+// TestCompileEntryProtocolMatches pins the nft match emitted per protocol.
+// A TCP/UDP rule without a port used to compile to a bare "tcp" token,
+// which nft rejects, failing the whole ruleset apply.
+func TestCompileEntryProtocolMatches(t *testing.T) {
+	cases := []struct {
+		name  string
+		proto rules.Protocol
+		want  string
+	}{
+		{"tcp port", rules.Protocol{Name: "tcp", Port: "502"}, "tcp dport 502 ip saddr { 172.30.0.4 } accept"},
+		{"tcp range", rules.Protocol{Name: "tcp", Port: "1-65535"}, "tcp dport 1-65535 ip saddr { 172.30.0.4 } accept"},
+		{"tcp no port", rules.Protocol{Name: "tcp"}, "meta l4proto tcp ip saddr { 172.30.0.4 } accept"},
+		{"udp port", rules.Protocol{Name: "udp", Port: "53"}, "udp dport 53 ip saddr { 172.30.0.4 } accept"},
+		{"udp no port", rules.Protocol{Name: "udp"}, "meta l4proto udp ip saddr { 172.30.0.4 } accept"},
+		{"icmp", rules.Protocol{Name: "icmp"}, "meta l4proto icmp ip saddr { 172.30.0.4 } accept"},
+		{"upper case", rules.Protocol{Name: "TCP"}, "meta l4proto tcp ip saddr { 172.30.0.4 } accept"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Sources: []string{"172.30.0.4"}, Protocols: []rules.Protocol{tc.proto}}
+			lines, err := compileEntry(e, nil, 0, 0)
+			if err != nil {
+				t.Fatalf("compileEntry: %v", err)
+			}
+			if len(lines) != 1 || lines[0] != tc.want {
+				t.Fatalf("lines = %q, want [%q]", lines, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompileEntryRejectsInvalidProtocols(t *testing.T) {
+	for name, p := range map[string]rules.Protocol{
+		"icmp port":   {Name: "icmp", Port: "8"},
+		"port only":   {Port: "502"},
+		"unsupported": {Name: "sctp"},
+		"injection":   {Name: "tcp accept; flush ruleset"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Protocols: []rules.Protocol{p}}
+			if lines, err := compileEntry(e, nil, 0, 0); err == nil {
+				t.Fatalf("expected error, got %q", lines)
+			}
+		})
+	}
+}

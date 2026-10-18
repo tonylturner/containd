@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -22,6 +23,7 @@ type ParsedPacket struct {
 	SrcPort uint16
 	DstPort uint16
 	TCPSeq  uint32 // TCP sequence number (0 for UDP)
+	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
 
 	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
 	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)
@@ -59,6 +61,7 @@ type PortHinter interface {
 
 // Manager dispatches packets to registered decoders.
 type Manager struct {
+	streamMu    sync.Mutex // one feed/parse/trim transaction across capture workers
 	decoders    []Decoder
 	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
@@ -154,6 +157,8 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	if m == nil || len(m.decoders) == 0 {
 		return nil, nil
 	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {

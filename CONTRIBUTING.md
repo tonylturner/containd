@@ -14,7 +14,7 @@ Thank you for your interest in contributing to containd. This document covers th
 
 ### Prerequisites
 
-- Go 1.25.8+ (see `go.mod` for exact version)
+- Go 1.26.9+ (see `go.mod` for exact version)
 - Node.js 20+ and npm
 - Docker and Docker Compose
 - Python 3.12+ (for docs builds only)

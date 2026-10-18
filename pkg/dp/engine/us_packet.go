@@ -47,6 +47,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 		DstPort:     pkt.DstPort,
 		TCPSeq:      pkt.TCP.Seq,
 		TCPSeqValid: pkt.TCP.Valid,
+		TCPSyn:      pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+	}
+	if parsed.TCPSyn {
+		parsed.TCPSeq++
 	}
 	defer e.endStreamsOnClose(state, &parsed, pkt.TCP)
 
@@ -129,9 +133,7 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, tcp
 	if tcp.Flags&capture.TCPFlagRST == 0 {
 		return
 	}
-	rev := state.Key
-	rev.SrcIP, rev.DstIP = state.Key.DstIP, state.Key.SrcIP
-	rev.SrcPort, rev.DstPort = state.Key.DstPort, state.Key.SrcPort
+	rev := state.Key.Reversed()
 	e.flowMu.Lock()
 	revState := e.flows[rev.Hash()]
 	e.flowMu.Unlock()

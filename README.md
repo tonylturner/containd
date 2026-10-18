@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tonylturner/containd/actions/workflows/ci.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/ci.yml)
 [![Release](https://github.com/tonylturner/containd/actions/workflows/release.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/release.yml)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 [![Releases](https://img.shields.io/github/v/release/tonylturner/containd?label=Release&logo=github)](https://github.com/tonylturner/containd/releases)
 [![GHCR](https://img.shields.io/badge/GHCR-containd-blue?logo=github)](https://github.com/tonylturner/containd/pkgs/container/containd)

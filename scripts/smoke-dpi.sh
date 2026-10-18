@@ -41,11 +41,11 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=13
+TESTS_EXPECTED=17
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=20 ;;
+  nfqueue) TESTS_EXPECTED=24 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -582,6 +582,61 @@ if ! wait_for_jq "${BASE}/inventory" "$modbus_inventory_filter"; then
   exit 1
 fi
 pass "Inventory discovered Modbus endpoints"
+
+# Persistent connection: read -> write -> read on ONE TCP connection. The
+# write must be decoded and denied even though it is not the first PDU,
+# and the server's replies must not be mistaken for new flows and blocked.
+log "Clearing dynamic flow blocks before the persistent-connection case..."
+compose exec -T engine nft flush set inet containd block_flows
+sleep 1
+PERSIST_TS=$(timestamp)
+export PERSIST_TS
+
+log "Testing read -> write -> read on one persistent Modbus connection..."
+if ! compose exec -T ot_client python /opt/modbus/client.py persistent "$MODBUS_DST" 502 >"$WORK_DIR"/modbus-persistent.out 2>"$WORK_DIR"/modbus-persistent.err; then
+  log "persistent Modbus client failed:"
+  cat "$WORK_DIR"/modbus-persistent.out "$WORK_DIR"/modbus-persistent.err
+  exit 1
+fi
+sed 's/^/  /' "$WORK_DIR"/modbus-persistent.out
+PERSIST_PORT=$(tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | awk '$1 == "PERSISTENT_PORT" { print $2 }')
+export PERSIST_PORT
+if [[ -z "$PERSIST_PORT" ]] || ! tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 2p | grep -q '^READ_OK'; then
+  log "persistent connection did not complete its first read"
+  exit 1
+fi
+pass "Persistent connection read reply received (client port ${PERSIST_PORT})"
+
+persistent_write_filter=$(cat <<'EOF'
+any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.PERSIST_PORT | tonumber) and .attributes.function_code == 6 and .attributes.is_write == true and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
+EOF
+)
+persistent_deny_filter=$(cat <<'EOF'
+any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
+EOF
+)
+
+if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_write_filter"; then
+  log "write on the persistent connection was not decoded"
+  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '[.[] | select(.proto == "modbus")]'
+  exit 1
+fi
+pass "Persistent-connection write decoded (FC6, is_write=true)"
+
+if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_deny_filter"; then
+  log "write on the persistent connection did not match the deny rule"
+  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
+  exit 1
+fi
+pass "Persistent-connection write matched the deny rule"
+
+BLOCK_FLOWS=$(compose exec -T engine nft list set inet containd block_flows | tr -d '\r')
+if echo "$BLOCK_FLOWS" | grep -q "${MODBUS_DST} . ${MODBUS_SRC}"; then
+  log "server replies were dynamically blocked:"
+  echo "$BLOCK_FLOWS"
+  exit 1
+fi
+pass "Server replies were not dynamically blocked"
 
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   log "Failed assertions (${SMOKE_DPI_CAPTURE}):"

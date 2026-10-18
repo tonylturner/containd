@@ -22,7 +22,7 @@ import sys
 import time
 
 TIMEOUT_SECONDS = 4.0
-MODES = ("read", "write", "readwrite", "read-split", "read-coalesced", "diag")
+MODES = ("persistent", "read", "write", "readwrite", "read-split", "read-coalesced", "diag")
 WRITE_ADDRESS = 1
 DEFAULT_WRITE_VALUE = 0x1234
 
@@ -89,6 +89,17 @@ def run(mode: str, host: str, port: int, source: str, value: int) -> int:
     source_address = (source, 0) if source else None
     with socket.create_connection((host, port), timeout=TIMEOUT_SECONDS, source_address=source_address) as conn:
         conn.settimeout(TIMEOUT_SECONDS)
+        if mode == "persistent":
+            print(f"PERSISTENT_PORT {conn.getsockname()[1]}", flush=True)
+            for transaction_id, stage in ((10, "read"), (11, "write"), (12, "read")):
+                try:
+                    print(exchange(conn, stage, transaction_id, value), flush=True)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"{stage.upper()}_FAILED {exc}", flush=True)
+                    if transaction_id == 10:
+                        return 1
+                    break
+            return 0
         if mode == "read":
             print(exchange(conn, "read", 1, value), flush=True)
             return 0

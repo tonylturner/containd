@@ -46,10 +46,12 @@ type stream struct {
 	// strict streams belong to a framed decoder: buffer bounds, the
 	// out-of-order bound and conflicting overlaps are errors. Other streams
 	// keep the sliding window (oldest bytes dropped) and ignore conflicts.
-	strict bool
-	mode   posKind
-	seq0   uint32 // posSeq: sequence number of offset 0
-	keep   bool   // session stream: lifetime owned by the caller, never idle-swept
+	strict  bool
+	mode    posKind
+	seq0    uint32 // posSeq: sequence number of offset 0
+	synSeen bool
+	synSeq  uint32 // payload sequence following the SYN, for late capture copies
+	keep    bool   // session stream: lifetime owned by the caller, never idle-swept
 
 	base       int64  // absolute offset of buf[0]; the consumed watermark
 	buf        []byte // contiguous bytes from base
@@ -110,6 +112,23 @@ func newReassembler(maxStreamSize int, idleTimeout time.Duration) *reassembler {
 // number space, handling 32-bit wrap-around. Positive means b is ahead of a.
 func seqDiff(a, b uint32) int32 {
 	return int32(b - a)
+}
+
+// open anchors a legacy stream at a handshake. A late second capture of the
+// same SYN must not reset bytes already parsed on the first interface.
+func (r *reassembler) open(key string, seq uint32, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.streams[key]; ok {
+		if s.synSeen && s.synSeq == seq {
+			s.lastUpdate = now
+			return
+		}
+		r.bytesBuffered -= s.stored()
+	} else {
+		r.activeStreams++
+	}
+	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, lastUpdate: now}
 }
 
 // feed adds one segment. A new stream starts at offset 0 in the given

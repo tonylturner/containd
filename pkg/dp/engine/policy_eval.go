@@ -76,13 +76,19 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	if snap == nil {
 		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
-	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.SrcIP, state.Key.DstIP)
+	// Policy describes connections from the opener to the server, so a
+	// reply is evaluated with the connection's orientation. The default
+	// action governs requests only: a reply is enforced only when a rule
+	// matches it. NFQUEUE mode behaves the same, because replies take the
+	// established conntrack path there and are never queued.
+	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.OpenerIP(), state.Key.ServerIP())
+	applyDefault := !isReply(state)
 	for _, ev := range evs {
 		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
 		if !ok {
 			continue
 		}
-		v, matched := e.EvaluateVerdictMatch(ctx)
+		v, matched := e.evaluateVerdictMatch(ctx, applyDefault)
 		if v.Action == verdict.AllowContinue {
 			continue
 		}
@@ -113,8 +119,8 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 	ctx := rules.EvalContext{
 		SrcZone: srcZone,
 		DstZone: dstZone,
-		SrcIP:   state.Key.SrcIP,
-		DstIP:   state.Key.DstIP,
+		SrcIP:   state.Key.OpenerIP(),
+		DstIP:   state.Key.ServerIP(),
 		Proto:   strings.ToLower(pkt.Proto),
 		Port:    strconv.Itoa(int(service)),
 		ICS: &rules.ICSContext{
@@ -122,7 +128,7 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 			Address:   attrString(ev.Attributes, "address"),
 			ReadOnly:  hasWrite && !isWrite,
 			WriteOnly: hasWrite && isWrite,
-			Direction: eventDirection(ev.Kind),
+			Direction: messageDirection(state, ev.Kind),
 		},
 	}
 	if fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
@@ -207,7 +213,14 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 	return ev.Kind == "malformed" || ev.Kind == "unsupported"
 }
 
-func eventDirection(kind string) string {
+// isReply is deliberately limited to the US path; IEC envelopes evaluate
+// both directions through EvaluateIEC104 and deny unmatched replies.
+func isReply(state *flow.State) bool { return state.Key.Dir == flow.DirReverse }
+
+func messageDirection(state *flow.State, kind string) string {
+	if isReply(state) {
+		return "response"
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "response", "exception":
 		return "response"
@@ -238,6 +251,9 @@ func attrString(attrs map[string]any, key string) string {
 	}
 }
 
+// servicePort returns the server port of the packet's connection: the
+// destination port when the sender opened the connection, the source port
+// on its replies.
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
 	if state != nil && state.Key.Dir == flow.DirReverse {
 		return pkt.SrcPort

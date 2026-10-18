@@ -177,8 +177,7 @@ func TestInspectFrameErrorWithoutEventGetsOne(t *testing.T) {
 	wantMalformedLast(t, res, "mock")
 }
 
-// Streams without a framed decoder keep today's lenient buffer: no stream
-// errors, no malformed events.
+// Packet decoders never allocate stream buffers or produce stream errors.
 func TestInspectLegacyStreamHasNoStreamErrors(t *testing.T) {
 	dec := &mockDecoder{support: true}
 	mgr := smallManager(4, dec)
@@ -199,10 +198,13 @@ func TestInspectLegacyDecoderErrorPassesThrough(t *testing.T) {
 	if res.Err != boom || len(res.Events) != 1 {
 		t.Fatalf("Err=%v events=%d, want the legacy error unchanged with its events", res.Err, len(res.Events))
 	}
-	// Nothing was discarded: the next segment extends the same buffer.
-	mgr.Inspect(st, tcpSeg(1, 2))
-	if streams, held := mgr.reassembler.stats(); streams != 1 || held != 2 {
-		t.Fatalf("stats = %d streams, %d bytes; want the buffer kept", streams, held)
+	// The next segment is independent, and its error also passes through.
+	res = mgr.Inspect(st, tcpSeg(1, 2))
+	if res.Err != boom || len(res.Events) != 1 {
+		t.Fatalf("next segment: %+v", res)
+	}
+	if streams, held := mgr.reassembler.stats(); streams != 0 || held != 0 {
+		t.Fatalf("stats = %d streams, %d bytes; packet decoders must not buffer", streams, held)
 	}
 }
 

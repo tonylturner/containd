@@ -142,6 +142,10 @@ func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.Stat
 		DstPort:     pkt.DstPort,
 		TCPSeq:      pkt.TCP.Seq,
 		TCPSeqValid: pkt.TCP.Valid,
+		TCPSyn:      pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+	}
+	if parsed.TCPSyn {
+		parsed.TCPSeq++
 	}
 	if iec, parse := sessions.annotate(mgr, pkt, parsed); iec && !parse {
 		return nil

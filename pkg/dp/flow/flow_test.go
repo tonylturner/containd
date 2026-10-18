@@ -36,3 +36,23 @@ func TestStateExpiration(t *testing.T) {
 		t.Fatalf("expected idle expiration")
 	}
 }
+
+func TestKeyOrientation(t *testing.T) {
+	client, server := net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")
+	fwd := Key{SrcIP: client, DstIP: server, SrcPort: 40000, DstPort: 502, Proto: 6, Dir: DirForward}
+	rev := fwd.Reversed()
+	if !rev.SrcIP.Equal(server) || rev.SrcPort != 502 || !rev.DstIP.Equal(client) || rev.DstPort != 40000 || rev.Dir != DirReverse {
+		t.Fatalf("Reversed() = %+v", rev)
+	}
+	if back := rev.Reversed(); back.Hash() != fwd.Hash() {
+		t.Fatalf("double reversal = %+v, want %+v", back, fwd)
+	}
+	for _, k := range []Key{fwd, rev} {
+		if ip := k.OpenerIP(); !ip.Equal(client) {
+			t.Fatalf("%+v OpenerIP() = %s", k, ip)
+		}
+		if ip := k.ServerIP(); !ip.Equal(server) {
+			t.Fatalf("%+v ServerIP() = %s", k, ip)
+		}
+	}
+}
