@@ -66,14 +66,14 @@ func (w *worker) run(ctx context.Context) error {
 		if n == 0 || pollfds[0].Revents&unix.POLLIN == 0 {
 			continue
 		}
-		rn, _, err := unix.Recvfrom(fd, buf, 0)
+		rn, from, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
 			if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
 				continue
 			}
 			return err
 		}
-		if rn <= 0 {
+		if rn <= 0 || outgoingPacket(from) {
 			continue
 		}
 		pkt, ok := decodePacket(w.iface, buf[:rn])
@@ -83,6 +83,13 @@ func (w *worker) run(ctx context.Context) error {
 		// AF_PACKET is observational: the decision is not applied.
 		_ = w.handler(pkt)
 	}
+}
+
+// outgoingPacket excludes local transmit copies, including forwarded packets
+// after masquerade. Ingress capture sees each wire direction before NAT once.
+func outgoingPacket(from unix.Sockaddr) bool {
+	ll, ok := from.(*unix.SockaddrLinklayer)
+	return ok && ll.Pkttype == unix.PACKET_OUTGOING
 }
 
 // decodePacket strips the Ethernet header and decodes the IP packet with
