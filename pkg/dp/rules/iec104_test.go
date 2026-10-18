@@ -96,7 +96,9 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 		rule      string
 	}{
 		{"GI request", "request", iFrame(100, "system", 1, 0, true), ActionAllow, "cc-rtu-iec104-session"},
+		{"single-point monitor telemetry", "response", iFrame(1, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"monitor telemetry", "response", iFrame(13, "monitor", 1, 4001, true), ActionAllow, "cc-rtu-iec104-session"},
+		{"timed single-point monitor telemetry", "response", iFrame(30, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"S-frame", "request", IEC104Context{APCIType: "S", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
 		{"STOPDT act", "request", IEC104Context{APCIType: "U", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
 		{"allowed breaker command", "request", iFrame(46, "control", 1, 2001, false), ActionAllow, "cc-rtu-breaker-command"},
@@ -158,6 +160,8 @@ func TestEvaluateIEC104Predicates(t *testing.T) {
 		{"ioa above 16 bits", ICSPredicate{IOA: []IOARange{{Start: 65536, End: 65567}}}, iFrame(46, "control", 1, 65567, false), true},
 		{"ioa past range end", ICSPredicate{IOA: []IOARange{{Start: 65536, End: 65567}}}, iFrame(46, "control", 1, 65568, false), false},
 		{"class list is OR", ICSPredicate{Classes: []string{"monitor", "system"}}, iFrame(100, "system", 1, 0, true), true},
+		{"type 1 matches monitor class", ICSPredicate{Classes: []string{"monitor"}, ReadOnly: true}, iFrame(1, "monitor", 1, 1002, true), true},
+		{"type 30 matches monitor class", ICSPredicate{Classes: []string{"monitor"}, ReadOnly: true}, iFrame(30, "monitor", 1, 1002, true), true},
 		{"readOnly needs SafeRead", ICSPredicate{ReadOnly: true}, iFrame(101, "system", 1, 0, false), false},
 		{"readOnly false is no constraint", ICSPredicate{}, iFrame(46, "control", 1, 1, false), true},
 		{"unsupported type by class", ICSPredicate{Classes: []string{"unknown"}}, IEC104Context{APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown", Unsupported: true}, true},

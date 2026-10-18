@@ -46,6 +46,7 @@
 #define CA_MAIN 1
 #define CA_AUX 2
 #define IOA_BREAKER_POS 1001   /* M_DP_NA_1 / M_DP_TB_1, monitor */
+#define IOA_TRIP_STATUS 1002   /* M_SP_NA_1 / M_SP_TB_1, monitor */
 #define IOA_FEEDER_CURRENT 1101 /* M_ME_NC_1, monitor */
 #define IOA_BUSBAR_VOLTAGE 1102 /* M_ME_NC_1, monitor */
 #define IOA_BREAKER_CMD 2001   /* C_DC_NA_1 on CA 1, policy-allowed breaker */
@@ -80,6 +81,7 @@ isCommandPoint(int ca, int ioa)
 #define RECONNECT_DELAY_MS 1000 /* control centre reconnect delay (B1: <= 1 s) */
 
 static volatile bool running = true;
+static bool tripActive = false;
 
 static void
 sigint_handler(int signalId)
@@ -169,15 +171,30 @@ sendBreakerSpontaneous(CS104_Slave slave)
 }
 
 static void
+sendTripSpontaneous(CS104_Slave slave)
+{
+    CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
+    struct sCP56Time2a ts;
+    CP56Time2a_createFromMsTimestamp(&ts, Hal_getTimeInMs());
+    CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_SPONTANEOUS, 0, CA_MAIN, false, false);
+    InformationObject io = (InformationObject)
+        SinglePointWithCP56Time2a_create(NULL, IOA_TRIP_STATUS, tripActive, IEC60870_QUALITY_GOOD, &ts);
+    CS101_ASDU_addInformationObject(asdu, io);
+    InformationObject_destroy(io);
+    CS104_Slave_enqueueASDU(slave, asdu);
+    CS101_ASDU_destroy(asdu);
+}
+
+static void
 handleGeneralInterrogation(CS104_Slave slave)
 {
     Semaphore_wait(rtuLock);
     if (giState == 1 && giConn != NULL)
     {
         CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
-        /* One Type ID per ASDU: CA 1 answers with a type 3 ASDU, then a
-         * type 13 ASDU (SQ=0, five objects incl. the IOA edge points); CA 2
-         * answers with one type 13 ASDU. */
+        /* CA 1 answers with type 3 breaker position, type 1 trip status,
+         * then type 13 measurements (SQ=0, five objects incl. IOA edges).
+         * CA 2 answers with one type 13 ASDU. */
         if (giProgress == 0 && giCa == CA_MAIN)
         {
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_INTERROGATED_BY_STATION,
@@ -197,6 +214,25 @@ handleGeneralInterrogation(CS104_Slave slave)
         }
         else if (giProgress == 1)
         {
+            if (giCa == CA_MAIN)
+            {
+                CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_INTERROGATED_BY_STATION,
+                    giOa, giCa, false, false);
+                InformationObject io = (InformationObject)
+                    SinglePointInformation_create(NULL, IOA_TRIP_STATUS, tripActive, IEC60870_QUALITY_GOOD);
+                CS101_ASDU_addInformationObject(asdu, io);
+                InformationObject_destroy(io);
+                if (IMasterConnection_sendASDUEx(giConn, asdu, true))
+                    giProgress++;
+                CS101_ASDU_destroy(asdu);
+            }
+            else
+            {
+                giProgress++;
+            }
+        }
+        else if (giProgress == 2)
+        {
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_INTERROGATED_BY_STATION,
                 giOa, giCa, false, false);
             if (giCa == CA_MAIN)
@@ -215,7 +251,7 @@ handleGeneralInterrogation(CS104_Slave slave)
                 giProgress++;
             CS101_ASDU_destroy(asdu);
         }
-        else if (giProgress == 2)
+        else if (giProgress == 3)
         {
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_ACTIVATION_TERMINATION,
                 giOa, giCa, false, false);
@@ -459,6 +495,7 @@ runRtu(void)
             lastPeriodic = now;
             tick++;
             CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
+            sendTripSpontaneous(slave);
             /* feeder current drifts by +/-0.1 A so each update is a change */
             float current = nowBreaker == IEC60870_DOUBLE_POINT_ON ? 182.5f + (float)(tick % 3) * 0.1f : 0.0f;
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_SPONTANEOUS, 0, CA_MAIN, false, false);
@@ -495,9 +532,16 @@ clientAsduHandler(void* parameter, int address, CS101_ASDU asdu)
     (void)address;
     CS101_CauseOfTransmission cot = CS101_ASDU_getCOT(asdu);
     int type = CS101_ASDU_getTypeID(asdu);
-    printf("t=%llu RCVD type=%d cot=%d negative=%d elements=%d\n",
+    int ioa = -1;
+    if (CS101_ASDU_getNumberOfElements(asdu) > 0)
+    {
+        InformationObject io = CS101_ASDU_getElement(asdu, 0);
+        if (io)
+            ioa = InformationObject_getObjectAddress(io);
+    }
+    printf("t=%llu RCVD type=%d cot=%d negative=%d elements=%d ioa=%d\n",
         (unsigned long long)Hal_getTimeInMs(),
-        type, cot, CS101_ASDU_isNegative(asdu), CS101_ASDU_getNumberOfElements(asdu));
+        type, cot, CS101_ASDU_isNegative(asdu), CS101_ASDU_getNumberOfElements(asdu), ioa);
     fflush(stdout);
     if (type == awaitType &&
         (cot == CS101_COT_ACTIVATION_CON || cot == CS101_COT_ACTIVATION_TERMINATION))

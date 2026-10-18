@@ -14,8 +14,8 @@
 //   - 101 7.2.1-7.2.5: data unit identifier. Type ID, VSQ (SQ bit 7, number
 //     bits 0-6), COT (cause bits 0-5, P/N bit 6, T bit 7, originator
 //     address), CA (65535 is the global address), IOA (asdu.go).
-//   - 101 7.2.6: information elements, including DIQ, QDS, SCO, DCO, RCO,
-//     QOS, BSI, COI, QOI, QCC, QRP and CP56Time2a (7.2.6.18).
+//   - 101 7.2.6: information elements, including SIQ, DIQ, QDS, SCO, DCO,
+//     RCO, QOS, BSI, COI, QOI, QCC, QRP and CP56Time2a (7.2.6.18).
 //   - 101 7.3: the ASDUs of the descriptor table in types.go.
 //
 // The sub-clause numbers were taken from the editions' structure without
@@ -24,9 +24,9 @@
 //
 // B profile restrictions (the standard allows them; B rejects them as
 // malformed with an error that starts with "profile:"): SQ=1 for any type
-// but 3 and 13; control and system types with SQ=1 or more than one object;
-// timed monitoring (31) with SQ=1; monitor-direction types (1..44) from the
-// client; control or system types from the server with cause 6 or 8.
+// but 1, 3 and 13; control and system types with SQ=1 or more than one object;
+// timed monitoring (30 and 31) with SQ=1; monitor-direction types (1..44)
+// from the client; control or system types from the server with cause 6 or 8.
 //
 // The decoder never resynchronises: bytes that cannot start an APDU end the
 // parse with a *dpi.FrameError, and nothing after them is parsed.

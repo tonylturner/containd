@@ -7,6 +7,7 @@ import { effectiveICSDecoders } from "../app/firewall/firewall-utils";
 import { describeICSEvidence } from "../app/events/iec104-evidence";
 import {
   buildIEC104RuleICS,
+  iec104TypeInfo,
   iec104DraftFrom,
   type IEC104Draft,
 } from "../app/ics/iec104";
@@ -80,6 +81,13 @@ test("allow rules may name only decoded Type IDs unless learning", () => {
   if (!allow.ok) expect(allow.error).toMatch(/104 is not decoded/);
   expect(buildIEC104RuleICS(draft, "enforce", "DENY").ok).toBe(true);
   expect(buildIEC104RuleICS(draft, "learn", "ALLOW").ok).toBe(true);
+});
+
+test("single-point monitor Type IDs are decoded and may be allowed", () => {
+  expect(iec104TypeInfo(1)).toMatchObject({ name: "M_SP_NA_1 single point", cls: "monitor", descriptor: true });
+  expect(iec104TypeInfo(30)).toMatchObject({ name: "M_SP_TB_1 single point, time", cls: "monitor", descriptor: true });
+  const res = buildIEC104RuleICS({ ...empty, typeIds: "1, 30" }, "enforce", "ALLOW");
+  expect(res).toMatchObject({ ok: true, ics: { typeIds: [1, 30] } });
 });
 
 test("an update that would clear a stored IEC field is refused", () => {

@@ -21,10 +21,13 @@ testfr_con	c	apci	680483000000	104 cl.5 U-format TESTFR con
 s_frame	c	apci	680401000a00	104 cl.5 S-format N(R)=5
 gi_act	c	request	680e0000000064010600010000000014	101 7.3.4 C_IC_NA_1 QOI 20, COT 6
 gi_actcon	s	response	680e0000020064010700010000000014	101 7.3.4 C_IC_NA_1 COT 7
+gi_data_m_sp_na_1	s	response	680e00000000010114000100ea030001	101 7.3.1 M_SP_NA_1 SIQ, GI COT 20, trip IOA 1002
+gi_data_m_sp_na_1_sq	s	response,response	680f00000000018214000100ea03000190	101 7.3.1 M_SP_NA_1 SQ=1 SIQ objects, IOAs 1002 and 1003
 gi_data_m_dp_na_1_sq	s	response,response,response	681002000200038314000100e90300010282	101 7.3.1 M_DP_NA_1 SQ=1, DIQ, COT 20
 gi_data_m_me_nc_1	s	response,response	681a040002000d0214000100d107000080664300d20700000080bf10	101 7.3.1 M_ME_NC_1 SQ=0, R32+QDS
 m_me_nc_1_nan	s	response	6812000000000d0103000100e903000000c07f00	101 7.3.1 M_ME_NC_1 R32 quiet NaN: value_invalid, not malformed (K8)
 gi_actterm	s	response	680e0600020064010a00010000000014	101 7.3.4 C_IC_NA_1 COT 10
+spont_m_sp_tb_1	s	response	6815000000001e0103000100ea03000129090f09070b1a	101 7.3.1 M_SP_TB_1 SIQ+CP56Time2a, trip IOA 1002
 spont_m_dp_tb_1	s	response	6815080002001f0103000100b90b000229090f09070b1a	101 7.3.1 M_DP_TB_1 DIQ+CP56Time2a 2026-11-07T09:15:02.345
 c_dc_na_1_select	c	request	680e02000a002e0106000100d1070082	101 7.3.2 C_DC_NA_1 DCO S/E=1 ON
 c_dc_na_1_select_con	s	response	680e0a0004002e0107000100d1070082	101 7.3.2 C_DC_NA_1 COT 7
@@ -55,7 +58,7 @@ malformed_dco_state_0	c	malformed	680e000000002e0106000100d1070080	101 7.2.6 DCO
 profile_server_activates	s	malformed	680e000000002e0106000100d1070001	B profile (spec 7.3): server-originated command
 profile_client_monitor	c	malformed	680e0000000003010300010001000001	B profile (spec 7.3): monitor type from client
 profile_sq_command	c	malformed	680e000000002e810600010001000001	B profile (spec 7.2): command with SQ=1
-unsupported_m_sp_na_1	s	unsupported	680e0000000001010300010001000001	101 7.3.1 M_SP_NA_1 has no B descriptor
+unsupported_type_2	s	unsupported	680e0000000002010300010001000001	101 7.3.1 Type 2 has no B descriptor
 unsupported_c_cd_na_1	c	unsupported	680f000000006a01060001000000000000	101 7.3.4 C_CD_NA_1 is not used in 104
 frame_bad_start	c	frame_error	670407000000	104 cl.5 start octet must be 0x68
 frame_bad_length	c	frame_error	68020700	104 cl.5 length octet 4..253

@@ -25,8 +25,10 @@ func TestSafeRead(t *testing.T) {
 		{"STARTDT act", cli, uFrame(startdtAct), true},
 		{"STOPDT act", cli, uFrame(stopdtAct), true},
 		{"TESTFR act from server", srv, uFrame(testfrAct), true},
+		{"monitor 1 response", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1002), []byte{0x91})...)), true},
 		{"monitor 3 response", srv, iFrame(0, 0, asdu(3, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), true},
 		{"monitor 13 response", srv, iFrame(0, 0, asdu(13, 1, cotInrogen, 0, 1, cat(ioa(1), f32(1), []byte{0})...)), true},
+		{"monitor 30 response", srv, iFrame(0, 0, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1002), []byte{0x91}, courseTime)...)), true},
 		{"monitor 31 response", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), true},
 		{"GI request", cli, iFrame(0, 0, asdu(100, 1, cotAct, 0, 1, gi...)), true},
 		{"GI confirmation", srv, iFrame(0, 0, asdu(100, 1, cotActCon, 0, 1, gi...)), true},
@@ -46,7 +48,7 @@ func TestSafeRead(t *testing.T) {
 		{"broadcast monitor data", srv, iFrame(0, 0, asdu(3, 1, cotSpont, 0, BroadcastCA, cat(ioa(1), []byte{1})...)), false},
 		{"malformed (role)", cli, iFrame(0, 0, asdu(3, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), false},
 		{"malformed S-frame length", srv, []byte{0x68, 6, 0x01, 0x00, 0x02, 0x00, 0, 0}, false},
-		{"unsupported", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), false},
+		{"unsupported", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), false},
 	}
 	for _, tc := range cases {
 		evs := events(parseOne(t, tc.dir, tc.frame))

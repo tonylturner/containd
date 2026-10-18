@@ -97,7 +97,7 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcLabel: "Type IDs / classes",
     fcPlaceholder: "",
     fcHelp:
-      "ASDU Type IDs (3=double point, 13=float measurement, 31=double point with time, 45-51/58-64=commands and setpoints, 100=general interrogation, 102=read) and classes (monitor, control, system, unknown).",
+      "ASDU Type IDs (1=single point, 3=double point, 13=float measurement, 30=single point with time, 31=double point with time, 45-51/58-64=commands and setpoints, 100=general interrogation, 102=read) and classes (monitor, control, system, unknown).",
     addrLabel: "CA / IOA",
     addrPlaceholder: "",
     addrHelp:

@@ -80,6 +80,11 @@ change:
 | `connections_opened`, `connections_closed` | server-side TCP session events |
 | `last_actuated`, `last_command` | the most recent actuation and decoded command |
 
+For TypeID coverage, the smoke RTU also reports a single-point trip status at
+CA 1 / IOA 1002: Type 1 in the GI and Type 30 spontaneously. Its simulated
+trip state is false; the point exercises decoding and monitoring, not
+protection behavior.
+
 A prevention assertion passes only if `commands_received` (or `gi_requests`)
 does not move: the RTU never decoded the forbidden bytes. The reset assertion
 needs both sockets: the client reads `ECONNRESET` and the RTU records a closed
