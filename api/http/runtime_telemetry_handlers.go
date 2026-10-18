@@ -5,7 +5,6 @@ package httpapi
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -59,12 +58,7 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 			})
 		}
 
-		sort.Slice(out, func(i, j int) bool {
-			return out[i].Timestamp.After(out[j].Timestamp)
-		})
-		if limit > 0 && len(out) > limit {
-			out = out[:limit]
-		}
+		out = dpevents.SelectTelemetry(out, limit)
 		c.JSON(http.StatusOK, out)
 	}
 }

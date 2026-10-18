@@ -16,7 +16,7 @@ import (
 func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := parseLimit(r, 500)
-		list := dpEngine.Events().List(limit)
+		list := dpEngine.Events().ListTelemetry(limit)
 		writeJSON(w, list)
 	}
 }

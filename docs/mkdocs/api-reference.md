@@ -22,6 +22,32 @@ Authentication and user-management coverage includes:
 
 See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
 
+## Event Retention and Page Limits
+
+`GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum
+5000), but **not necessarily the globally newest N**. Each runtime store
+keeps a separate count-bounded bank of its latest 1024 real
+`firewall.rule.hit` events whose `attributes.action` is exactly `DENY`.
+Later DENYs evict older bank entries; ordinary telemetry does not. There is
+no age expiry. The bank survives configuration rebuilds, not process restarts,
+and is not a guarantee of a fixed number of hours under DENY floods.
+
+Both the engine's `/internal/events` listing and the management API select
+DENYs first, newest-first if they exceed the limit. Management merges engine
+and service candidates before applying the same rule. Remaining slots contain
+the newest other events. Results are deduplicated by event ID and then sorted
+newest-first by timestamp, with descending ID breaking ties. Original IDs,
+timestamps and network tuples do not change.
+
+An unreachable-engine telemetry-error row always reserves a slot, even at
+`limit=1`. Small pages can therefore consist entirely of DENYs or the error;
+old evidence can displace newer ordinary telemetry. This selection applies
+to all protocols, including Modbus and DNP3, not only IEC104.
+
+`GET /api/v1/events/{id}` can find retained DENYs after the general ring has
+wrapped. `/api/v1/flows` still rolls up only the general event ring; prolonged
+DENY retention does not resurrect old flow groups.
+
 ## Forwarding Health and Commit Warnings
 
 Unauthenticated `GET /api/v1/health` includes `ipv4Forwarding`, which is

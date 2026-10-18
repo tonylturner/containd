@@ -969,10 +969,27 @@ paths:
   /events:
     get:
       summary: List recent ICS/network events
+      description: |
+        Returns an evidence-aware page, not the globally newest events.
+        Each runtime store independently retains its latest 1024 logged
+        firewall.rule.hit events with attributes.action equal to DENY,
+        in addition to its general event ring. Only later DENYs evict this
+        bank; there is no age expiry. It survives configuration rebuilds,
+        but not process restarts.
+
+        Select DENYs newest-first before filling remaining slots with the
+        newest other engine and service events. Deduplicate by event ID,
+        then return the selected page newest-first (timestamp, then ID).
+        An engine telemetry-error event always reserves a slot, including
+        when limit is 1. The limit is a hard maximum, so small pages may
+        contain only DENYs or the telemetry error. Retained DENYs remain
+        available to event detail lookup; flow rollups use only the general
+        ring and do not gain historical groups from the DENY bank.
       tags: [Telemetry]
       parameters:
         - name: limit
           in: query
+          description: Hard maximum page size; retained DENYs take precedence over newer ordinary events.
           schema: { type: integer, default: 500, maximum: 5000 }
       responses:
         "200":

@@ -69,6 +69,7 @@ type Store struct {
 
 	mu      sync.Mutex
 	general eventRing
+	denies  eventRing
 	aborted abortedSet // aborted IEC104 incarnations hidden from Flows
 
 	// Spill-to-disk support.
@@ -87,7 +88,7 @@ func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &Store{capacity: capacity, idBase: idBase, general: eventRing{capacity: capacity}}
+	return &Store{capacity: capacity, idBase: idBase, general: eventRing{capacity: capacity}, denies: eventRing{capacity: denyCapacity}}
 }
 
 // NewStoreWithSpill creates a Store with spill-to-disk enabled.
@@ -231,7 +232,7 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 		if pkt != nil {
 			out.Transport = pkt.Proto
 		}
-		s.appendGeneral(out)
+		s.appendEvent(out)
 	}
 }
 
@@ -246,7 +247,7 @@ func (s *Store) Append(e Event) Event {
 	if e.ID == 0 {
 		e.ID = s.idBase + s.nextID.Add(1)
 	}
-	s.appendGeneral(e)
+	s.appendEvent(e)
 	return e
 }
 
