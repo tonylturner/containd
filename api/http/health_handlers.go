@@ -16,11 +16,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
-// IEC104HealthClient reads the engine's IEC104 enforcement health.
-type IEC104HealthClient interface {
-	IEC104Enforcement(ctx context.Context) (dpengine.IEC104Enforcement, error)
-}
-
 // RuntimeHealthClient reads health values observed in the engine's network
 // namespace.
 type RuntimeHealthClient interface {
@@ -45,12 +40,6 @@ func healthHandler(engine EngineClient) gin.HandlerFunc {
 			if health, err := hc.RuntimeHealth(ctx); err == nil {
 				iec = health.IEC104Enforcement
 				forwarding = health.IPv4Forwarding
-			}
-			cancel()
-		} else if hc, ok := engine.(IEC104HealthClient); ok && hc != nil {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
-			if st, err := hc.IEC104Enforcement(ctx); err == nil {
-				iec = st
 			}
 			cancel()
 		}

@@ -362,12 +362,3 @@ func (c *HTTPClient) RuntimeHealth(ctx context.Context) (RuntimeHealth, error) {
 		IPv4Forwarding:    out.IPv4Forwarding,
 	}, nil
 }
-
-// IEC104Enforcement reads the engine's IEC104 enforcement health (contracts K6).
-func (c *HTTPClient) IEC104Enforcement(ctx context.Context) (dpengine.IEC104Enforcement, error) {
-	health, err := c.RuntimeHealth(ctx)
-	if err != nil {
-		return dpengine.IEC104Enforcement{}, err
-	}
-	return health.IEC104Enforcement, nil
-}

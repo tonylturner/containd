@@ -23,10 +23,6 @@ type healthMockEngine struct {
 	err        error
 }
 
-func (m *healthMockEngine) IEC104Enforcement(context.Context) (dpengine.IEC104Enforcement, error) {
-	return m.st, m.err
-}
-
 func (m *healthMockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
 	return engineclient.RuntimeHealth{
 		IEC104Enforcement: m.st,
