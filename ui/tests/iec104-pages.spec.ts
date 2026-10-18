@@ -219,6 +219,56 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   expect(errors).toEqual([]);
 });
 
+test("client navigation keeps verified page content visible while revalidating the session", async ({ page }) => {
+  let authRequests = 0;
+  let holdAuthAfter = Number.POSITIVE_INFINITY;
+  let releaseHeldAuth: () => void = () => {};
+  let notifyHeldAuth: () => void = () => {};
+  const heldAuth = new Promise<void>((resolve) => {
+    notifyHeldAuth = resolve;
+  });
+  const heldResponse = new Promise<void>((resolve) => {
+    releaseHeldAuth = resolve;
+  });
+
+  await page.route("**/api/v1/**", async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    if (req.method() === "GET" && url.pathname === "/api/v1/auth/me") {
+      authRequests += 1;
+      if (authRequests > holdAuthAfter) {
+        notifyHeldAuth();
+        await heldResponse;
+      }
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body(url.pathname)),
+    });
+  });
+
+  try {
+    await page.goto("/ics");
+    await expect(page.getByText("queue bind failed").first()).toBeVisible();
+    holdAuthAfter = authRequests;
+
+    await page.getByRole("button", { name: "Monitoring" }).click();
+    await page.getByRole("link", { name: "Events" }).click();
+    await page.waitForURL("**/events/");
+    await heldAuth;
+
+    await expect(
+      page
+        .getByRole("main", { name: "Events" })
+        .getByText(/Use Events for raw telemetry and service activity/),
+    ).toBeVisible();
+    await expect(page.getByText("Checking session...")).toHaveCount(0);
+  } finally {
+    releaseHeldAuth();
+  }
+});
+
 test("ICS editor refuses a broadcast CA before saving", async ({ page }) => {
   const writes: Array<{ method: string; path: string; body: unknown }> = [];
   await mockAPI(page, writes);
