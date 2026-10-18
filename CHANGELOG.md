@@ -7,8 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- IEC 104 decodes single-point information: TypeID 1 (M_SP_NA_1) and
+  TypeID 30 (M_SP_TB_1, with CP56Time2a). Both are monitor-class and match
+  read-only IEC 104 rules.
+- `set firewall ics-rule ... iec104` accepts `--type-ids`, `--classes`,
+  `--ca`, `--ioa`, `--direction` and `--mode`. `show firewall ics-rules`
+  shows the IEC fields.
+- PCAP capture selects targets by zone (`zones`) and by logical or kernel
+  interface name (`interfaces`). The engine resolves both, also when a
+  config commit restarts capture. `filter.port` takes a TCP/UDP port or
+  range.
+- `/api/v1/health` reports `ipv4Forwarding` (`enabled`, `disabled` or
+  `unknown`). A commit with forwarding disabled returns a warning, and the
+  engine logs a warning when a blocked sysctl write leaves it at 0.
+
+### Changed (visible in API, events and logs)
+
+- **Unknown firewall rule keys are rejected with HTTP 400.** The error names
+  the key. Before, unknown keys were silently dropped.
+- **Malformed rule selectors fail at save.** An unknown protocol, a port on a
+  protocol without ports, or a malformed port is rejected by validation, not
+  at nftables compile. Protocol names are stored in lower case.
+- **Logged DENY events are retained apart from telemetry.** A separate bank
+  keeps the newest 1024 `firewall.rule.hit` DENY events, so high-volume
+  IEC 104 telemetry does not push them out. Event lists return retained
+  DENYs first within `limit`, so they can displace newer telemetry rows.
+- **A non-empty PCAP start body replaces the saved PCAP configuration** and
+  is saved. Omitted fields take their defaults. A body with no interface
+  and no zone is rejected. An empty body starts the saved configuration.
+- Normal Modbus replies carry kind `response`; exceptions stay `exception`.
+- Merged 0.1.32 (persistent Modbus/DNP3 inspection, reply orientation,
+  port-less rules, Go 1.26.9). IEC 104 keeps failing closed: an unmatched
+  IEC 104 reply inside an enforce envelope is still denied.
+
 ### Fixed
 
+- AF_PACKET capture inspects ingress packets only. With NAT, the
+  post-masquerade copy was decoded a second time and added inert block
+  entries for the engine address.
+- Flows first seen mid-stream are oriented by the known ICS service port, so
+  replies get the correct policy context. Handshake evidence still wins.
 - Rules without an ICS predicate omit `ics` from JSON, so applied firewall
   policies read back without spurious empty predicates.
 - Data-plane rebuilds preserve the process event ring and increasing event
