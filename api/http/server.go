@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -546,7 +547,22 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 	}
 }
 
+// ApplyRunningConfig replays the current stored running config through the same
+// serialized apply path used by commits and runtime configuration handlers.
+func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
+	return applyRunningConfig(ctx, store, engine, services)
+}
+
+var runningConfigApplyMu sync.Mutex
+
 func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
+	// Load only after acquiring the lock: a queued replay must not push a
+	// snapshot read before a newer commit's apply.
+	runningConfigApplyMu.Lock()
+	defer runningConfigApplyMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	cfg, err := store.Load(ctx)
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {

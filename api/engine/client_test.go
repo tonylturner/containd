@@ -459,12 +459,13 @@ func TestRuntimeHealthReadsEngineHealth(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"},"ipv4Forwarding":"disabled"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","bootId":"engine-boot-1","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"},"ipv4Forwarding":"disabled"}`))
 	}))
 	defer srv.Close()
 	client := NewHTTPClient(srv.URL)
 	health, err := client.RuntimeHealth(context.Background())
 	if err != nil ||
+		health.BootID != "engine-boot-1" ||
 		health.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down"}) ||
 		health.IPv4Forwarding != netcfg.IPv4ForwardingDisabled {
 		t.Fatalf("RuntimeHealth = %+v, %v", health, err)
@@ -475,5 +476,16 @@ func TestRuntimeHealthReadsEngineHealth(t *testing.T) {
 	defer old.Close()
 	if _, err := NewHTTPClient(old.URL).RuntimeHealth(context.Background()); err == nil {
 		t.Fatal("an engine without iec104Enforcement must not read as healthy")
+	}
+}
+
+func TestRuntimeHealthWithoutBootID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok","iec104Enforcement":{"active":false,"healthy":true,"reason":""}}`))
+	}))
+	defer srv.Close()
+	health, err := NewHTTPClient(srv.URL).RuntimeHealth(context.Background())
+	if err != nil || health.BootID != "" {
+		t.Fatalf("legacy RuntimeHealth = %+v, %v", health, err)
 	}
 }

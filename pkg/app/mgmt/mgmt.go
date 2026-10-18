@@ -103,6 +103,8 @@ func Run(ctx context.Context, opts Options) error {
 		serviceManager.StartAVWorker(context.Background())
 	}
 	serveStaticUI(router)
+	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
+	defer stopEngineSync()
 
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()

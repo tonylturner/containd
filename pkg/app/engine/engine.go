@@ -5,6 +5,7 @@ package engineapp
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,10 +37,14 @@ type healthResponse struct {
 	Component  string `json:"component"`
 	Build      string `json:"build"`
 	CommitHash string `json:"commitHash,omitempty"`
+	BootID     string `json:"bootId"`
 
 	IEC104Enforcement engine.IEC104Enforcement    `json:"iec104Enforcement"`
 	IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
 }
+
+// engineBootID identifies this process, independent of wall-clock time.
+var engineBootID = rand.Text()
 
 func initialEngineConfig(ifaces []string, enforceEnabled bool, enforceTable string) engine.Config {
 	return engine.Config{

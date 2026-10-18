@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Management replays the stored running config at boot and after an engine
+  restart, detected by a random per-process engine `/health` `bootId`.
+  Replays and commit applies are serialized to avoid stale rule pushes.
 - AF_PACKET capture inspects ingress packets only. With NAT, the
   post-masquerade copy was decoded a second time and added inert block
   entries for the engine address.

@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
+package mgmtapp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"reflect"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	engineapi "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/rules"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+)
+
+type syncHealthFunc func(context.Context) (engineapi.RuntimeHealth, error)
+
+func (f syncHealthFunc) RuntimeHealth(ctx context.Context) (engineapi.RuntimeHealth, error) {
+	return f(ctx)
+}
+
+func TestEngineSyncTransitions(t *testing.T) {
+	tests := []struct {
+		name        string
+		bootIDs     []string // "down" simulates unreachable health.
+		failApply   int
+		wantApplies []int
+	}{
+		{name: "first contact", bootIDs: []string{"a"}, wantApplies: []int{1}},
+		{name: "same boot ID", bootIDs: []string{"a", "a", "a"}, wantApplies: []int{1, 1, 1}},
+		{name: "changed boot ID", bootIDs: []string{"a", "b", "b"}, wantApplies: []int{1, 2, 2}},
+		{name: "apply error retries", bootIDs: []string{"a", "a", "a"}, failApply: 1, wantApplies: []int{1, 2, 2}},
+		{name: "restart apply error retries", bootIDs: []string{"a", "b", "b", "b"}, failApply: 2, wantApplies: []int{1, 2, 3, 3}},
+		{name: "unreachable then up", bootIDs: []string{"down", "down", "a", "a"}, wantApplies: []int{0, 0, 1, 1}},
+		{name: "known boot network flap", bootIDs: []string{"a", "down", "a"}, wantApplies: []int{1, 1, 1}},
+		{name: "unknown once per reachable transition", bootIDs: []string{"", "", "down", "", ""}, wantApplies: []int{1, 1, 1, 2, 2}},
+		{name: "unknown apply error retries", bootIDs: []string{"", "", ""}, failApply: 1, wantApplies: []int{1, 2, 2}},
+		{name: "old to new engine", bootIDs: []string{"", "a", "a"}, wantApplies: []int{1, 2, 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			core, logs := observer.New(zap.WarnLevel)
+			var bootID string
+			calls := 0
+			s := engineSync{
+				health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+					if bootID == "down" {
+						return engineapi.RuntimeHealth{}, errors.New("connection refused")
+					}
+					return engineapi.RuntimeHealth{BootID: bootID}, nil
+				}),
+				apply: func(context.Context) ([]string, error) {
+					calls++
+					if calls == tt.failApply {
+						return nil, errors.New("apply failed")
+					}
+					return []string{"interfaces: permission denied"}, nil
+				},
+				logger: zap.New(core).Sugar(),
+			}
+			for i, id := range tt.bootIDs {
+				bootID = id
+				if got := s.poll(context.Background()); got != (id != "down") {
+					t.Fatalf("poll %d reachable = %v", i, got)
+				}
+				if calls != tt.wantApplies[i] {
+					t.Fatalf("poll %d applies = %d, want %d", i, calls, tt.wantApplies[i])
+				}
+			}
+			if logs.FilterMessage("engine sync: interfaces: permission denied").Len() == 0 {
+				t.Fatal("apply warnings not logged")
+			}
+		})
+	}
+}
+
+func TestEngineSyncBackoffAndCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var calls []time.Time
+		up := false
+		var mu sync.Mutex
+		healthTimes := func() []time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]time.Time(nil), calls...)
+		}
+		s := engineSync{
+			health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				calls = append(calls, time.Now())
+				if !up {
+					return engineapi.RuntimeHealth{}, errors.New("down")
+				}
+				return engineapi.RuntimeHealth{BootID: "a"}, nil
+			}),
+			apply:  func(context.Context) ([]string, error) { return nil, nil },
+			logger: zap.NewNop().Sugar(),
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.run(ctx)
+		}()
+		synctest.Wait()
+		if got := healthTimes(); len(got) != 1 {
+			t.Fatalf("initial health calls = %d", len(got))
+		}
+		for _, delay := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second, 10 * time.Second} {
+			before := len(healthTimes())
+			time.Sleep(delay)
+			synctest.Wait()
+			got := healthTimes()
+			if len(got) != before+1 || got[before].Sub(got[before-1]) != delay {
+				t.Fatalf("health calls did not back off by %v: %v", delay, got)
+			}
+		}
+		mu.Lock()
+		up = true
+		mu.Unlock()
+		time.Sleep(engineSyncMaxBackoff)
+		synctest.Wait()
+		before := len(healthTimes())
+		time.Sleep(engineSyncInterval)
+		synctest.Wait()
+		if len(healthTimes()) != before+1 {
+			t.Fatal("successful health did not reset backoff")
+		}
+		cancel()
+		<-done
+	})
+}
+
+func TestEngineSyncCancellationDuringHealth(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		s := engineSync{
+			health: syncHealthFunc(func(ctx context.Context) (engineapi.RuntimeHealth, error) {
+				<-ctx.Done()
+				return engineapi.RuntimeHealth{}, ctx.Err()
+			}),
+			apply: func(context.Context) ([]string, error) {
+				t.Error("must not apply after canceled health")
+				return nil, nil
+			},
+			logger: zap.NewNop().Sugar(),
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.run(ctx)
+		}()
+		synctest.Wait()
+		cancel()
+		<-done
+	})
+}
+
+func TestStartEngineSyncReplaysStoredRunningConfig(t *testing.T) {
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.DefaultConfig()
+	cfg.Interfaces = nil
+	cfg.Firewall.DefaultAction = config.ActionAllow
+	if err := store.Save(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	paths := make(chan string, 32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.Path
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"bootId":"boot-1","iec104Enforcement":{"healthy":true}}`))
+			return
+		}
+		if r.URL.Path == "/internal/apply_rules" {
+			var snap rules.Snapshot
+			if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
+				t.Error(err)
+			} else if snap.Default != rules.ActionAllow {
+				t.Errorf("replayed rule default=%q, want stored ALLOW", snap.Default)
+			}
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	stop := startEngineSync(context.Background(), zap.NewNop().Sugar(), store, engineapi.NewHTTPClient(srv.URL), nil)
+	defer stop()
+	want := []string{
+		"/health", "/internal/interfaces", "/internal/routing",
+		"/internal/services", "/internal/config", "/internal/pcap/config",
+		"/internal/pcap/stop", "/internal/apply_rules",
+	}
+	var got []string
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for len(got) < len(want) {
+		select {
+		case path := <-paths:
+			got = append(got, path)
+		case <-timer.C:
+			t.Fatalf("timed out waiting for startup replay: %v", got)
+		}
+	}
+	stop()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay push sequence=%v, want %v", got, want)
+	}
+}
+
+func TestStartEngineSyncWithoutEngine(t *testing.T) {
+	stop := startEngineSync(context.Background(), zap.NewNop().Sugar(), nil, nil, nil)
+	stop()
+}

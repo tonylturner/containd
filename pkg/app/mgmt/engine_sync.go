@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 containd Authors
+
+package mgmtapp
+
+import (
+	"context"
+	"time"
+
+	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"go.uber.org/zap"
+)
+
+const (
+	engineSyncInterval      = time.Second
+	engineSyncMaxBackoff    = 10 * time.Second
+	engineSyncHealthTimeout = time.Second
+)
+
+type engineSync struct {
+	health httpapi.RuntimeHealthClient
+	apply  func(context.Context) ([]string, error)
+	logger *zap.SugaredLogger
+
+	applied    bool
+	lastBootID string
+}
+
+// startEngineSync returns a stop-and-join function so Run never closes its
+// stores while a replay is still using them, including on listener errors.
+func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store config.Store, engine httpapi.EngineClient, services httpapi.ServicesApplier) func() {
+	health, ok := engine.(httpapi.RuntimeHealthClient)
+	if !ok {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	syncer := &engineSync{
+		health: health,
+		apply: func(ctx context.Context) ([]string, error) {
+			return httpapi.ApplyRunningConfig(ctx, store, engine, services)
+		},
+		logger: logger,
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		syncer.run(ctx)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (s *engineSync) run(ctx context.Context) {
+	delay := engineSyncInterval
+	for ctx.Err() == nil {
+		reachable := s.poll(ctx)
+		if reachable {
+			delay = engineSyncInterval
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if !reachable {
+			delay = min(2*delay, engineSyncMaxBackoff)
+		}
+	}
+}
+
+// poll reports health reachability, not apply success: apply failures retry at
+// the normal interval, while health failures use the capped backoff.
+func (s *engineSync) poll(ctx context.Context) bool {
+	healthCtx, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
+	health, err := s.health.RuntimeHealth(healthCtx)
+	cancel()
+	if err != nil {
+		// Older engines have no boot ID. Forget a successful unknown apply
+		// only when health becomes unreachable, not on every poll.
+		if s.lastBootID == "" {
+			s.applied = false
+		}
+		s.logger.Debugf("engine sync health unavailable: %v", err)
+		return false
+	}
+	if s.applied && health.BootID == s.lastBootID {
+		return true
+	}
+	warnings, err := s.apply(ctx)
+	for _, warning := range warnings {
+		s.logger.Warnf("engine sync: %s", warning)
+	}
+	if err != nil {
+		s.logger.Warnf("failed to replay running config to engine: %v", err)
+		return true
+	}
+	s.applied = true
+	s.lastBootID = health.BootID
+	s.logger.Infof("replayed running config to engine (bootId=%q)", health.BootID)
+	return true
+}
