@@ -4,6 +4,7 @@ export function normalizeConfig(cfg: PcapConfig): PcapConfig {
   return {
     enabled: cfg.enabled ?? false,
     interfaces: cfg.interfaces ?? [],
+    zones: cfg.zones ?? [],
     snaplen: cfg.snaplen ?? 262144,
     maxSizeMB: cfg.maxSizeMB ?? 64,
     maxFiles: cfg.maxFiles ?? 8,
@@ -16,6 +17,7 @@ export function normalizeConfig(cfg: PcapConfig): PcapConfig {
       src: cfg.filter?.src ?? "",
       dst: cfg.filter?.dst ?? "",
       proto: cfg.filter?.proto ?? "any",
+      port: cfg.filter?.port ?? "",
     },
     forwardTargets: cfg.forwardTargets ?? [],
   };

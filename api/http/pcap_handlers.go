@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -35,6 +36,10 @@ func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := config.ValidatePCAPConfig(req); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			httpError(c, err)
@@ -46,7 +51,7 @@ func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			return
 		}
 		if engine != nil {
-			if _, err := engine.SetPcapConfig(c.Request.Context(), cfg.PCAP); err != nil {
+			if _, err := engine.SetPcapConfig(c.Request.Context(), req); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -63,7 +68,28 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			httpError(c, err)
 			return
 		}
-		cfg.PCAP.Enabled = true
+		var body []byte
+		if c.Request.Body != nil {
+			body, err = io.ReadAll(c.Request.Body)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, "failed to read pcap start body")
+				return
+			}
+		}
+		capture := cfg.PCAP
+		if strings.TrimSpace(string(body)) != "" {
+			capture = config.PCAPConfig{}
+			if err := json.Unmarshal(body, &capture); err != nil {
+				apiError(c, http.StatusBadRequest, "invalid pcap start JSON: "+err.Error())
+				return
+			}
+		}
+		capture.Enabled = true
+		if err := config.ValidatePCAPConfig(capture); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.PCAP = capture
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			httpError(c, err)
 			return

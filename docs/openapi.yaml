@@ -158,6 +158,61 @@ components:
         reason: { type: string, description: Machine-readable cause when unhealthy, else empty }
       example: { active: true, healthy: true, reason: "" }
 
+    PcapFilter:
+      type: object
+      description: >
+        Packet filter. Port matches either the TCP/UDP source or destination
+        port; it is not valid with proto icmp.
+      properties:
+        src: { type: string, description: Source IPv4 address or CIDR }
+        dst: { type: string, description: Destination IPv4 address or CIDR }
+        proto: { type: string, enum: [any, tcp, udp, icmp], default: any }
+        port:
+          type: string
+          pattern: '^[0-9]+(-[0-9]+)?$'
+          example: "2404"
+          description: Single port 1–65535 or inclusive range, e.g. 1000-2000
+
+    PcapConfig:
+      type: object
+      description: >
+        Capture selections are resolved when capture starts against the
+        running interface and zone configuration. Interface and zone
+        selections are unioned and deduplicated.
+      properties:
+        enabled: { type: boolean }
+        interfaces:
+          type: array
+          items: { type: string }
+          description: Logical interface name or existing kernel device name
+        zones:
+          type: array
+          items: { type: string }
+          description: Capture every configured interface assigned to these zones
+        snaplen: { type: integer, minimum: 0 }
+        maxSizeMB: { type: integer, minimum: 0 }
+        maxFiles: { type: integer, minimum: 0 }
+        mode: { type: string, enum: [rolling, once] }
+        promisc: { type: boolean }
+        bufferMB: { type: integer, minimum: 0 }
+        rotateSeconds: { type: integer, minimum: 0 }
+        filePrefix: { type: string }
+        filter: { $ref: "#/components/schemas/PcapFilter" }
+        forwardTargets:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    PcapStatus:
+      type: object
+      properties:
+        running: { type: boolean }
+        interfaces:
+          type: array
+          items: { type: string }
+          description: Resolved kernel device names
+        startedAt: { type: string, format: date-time }
+        lastError: { type: string }
+
     DashboardResponse:
       type: object
       properties:
@@ -1033,6 +1088,77 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/AuditRecord" } }
 
   # ── PCAP Analysis ────────────────────────────────────────────────
+  /pcap/config:
+    get:
+      summary: Get PCAP capture settings
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Capture settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapConfig" }
+    post:
+      summary: Save PCAP capture settings (admin)
+      tags: [PCAP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PcapConfig" }
+      responses:
+        "200":
+          description: Saved settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapConfig" }
+        "400": { description: Invalid capture settings }
+
+  /pcap/start:
+    post:
+      summary: Start PCAP capture (admin)
+      tags: [PCAP]
+      requestBody:
+        required: false
+        description: >
+          An omitted or empty body starts the saved PCAP configuration. A
+          nonempty body replaces the saved configuration for this start;
+          omitted fields use their normal defaults rather than saved values.
+          The complete configuration must select at least one interface or
+          zone; an empty selection is rejected.
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PcapConfig" }
+      responses:
+        "200":
+          description: Capture started with resolved kernel devices
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+        "400": { description: Invalid or unresolved interface, zone, or filter }
+
+  /pcap/stop:
+    post:
+      summary: Stop PCAP capture (admin)
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Capture status after stopping
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+
+  /pcap/status:
+    get:
+      summary: Get PCAP capture status
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Current capture state and resolved devices
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+
   /pcap/analyze:
     post:
       summary: Upload a PCAP file for DPI analysis and policy generation

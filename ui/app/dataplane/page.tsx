@@ -21,6 +21,7 @@ import {
   type PcapForwardTarget,
   type PcapItem,
   type PcapStatus,
+  type Zone,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -40,6 +41,7 @@ export default function PcapPage() {
   const canEdit = isAdmin();
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [ifaceStates, setIfaceStates] = useState<InterfaceState[]>([]);
   const [state, setState] = useState<SaveState>("idle");
   const [notice, setNotice] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export default function PcapPage() {
   const [settings, setSettings] = useState<PcapConfig>({
     enabled: false,
     interfaces: [],
+    zones: [],
     snaplen: 262144,
     maxSizeMB: 64,
     maxFiles: 8,
@@ -68,7 +71,7 @@ export default function PcapPage() {
     bufferMB: 4,
     rotateSeconds: 300,
     filePrefix: "capture",
-    filter: { src: "", dst: "", proto: "any" },
+    filter: { src: "", dst: "", proto: "any", port: "" },
     forwardTargets: [],
   });
 
@@ -104,6 +107,7 @@ export default function PcapPage() {
 
   useEffect(() => {
     api.listInterfaces().then((list) => setIfaces(list ?? []));
+    api.listZones().then((list) => setZones(list ?? []));
     api.listInterfaceState().then((list) => setIfaceStates(list ?? []));
   }, []);
   useEffect(() => {
@@ -134,6 +138,41 @@ export default function PcapPage() {
     return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
   }, [ifaces, ifaceStates]);
 
+  const captureIfaceOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    const osSet = new Set((ifaceStates ?? []).map((s) => s.name));
+    const mappedDevices = new Set<string>();
+    for (const iface of ifaces ?? []) {
+      const device = iface.device?.trim();
+      const kernelDevice = device || iface.name;
+      if (!device && !osSet.has(kernelDevice)) continue;
+      if (kernelDevice) mappedDevices.add(kernelDevice);
+      const label = device && device !== iface.name ? `${iface.name} (${device})` : iface.name;
+      options.set(iface.name, iface.alias ? `${iface.alias} (${label})` : label);
+    }
+    for (const state of ifaceStates) {
+      if (!mappedDevices.has(state.name)) {
+        options.set(state.name, `${state.name} (kernel device)`);
+      }
+    }
+    for (const selected of settings.interfaces ?? []) {
+      if (!options.has(selected)) options.set(selected, `${selected} (saved selection)`);
+    }
+    return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
+  }, [ifaces, ifaceStates, settings.interfaces]);
+
+  const zoneOptions = useMemo(() => {
+    const configured: Zone[] = zones.length
+      ? zones
+      : Array.from(new Set(ifaces.map((iface) => iface.zone).filter(Boolean))).map(
+          (name): Zone => ({ name: name as string }),
+        );
+    return configured.map((zone) => ({
+      value: zone.name,
+      label: zone.alias ? `${zone.alias} (${zone.name})` : zone.name,
+    }));
+  }, [ifaces, zones]);
+
   useEffect(() => {
     setSettings((prev) => {
       const existing = new Map((prev.forwardTargets ?? []).map((t) => [t.interface ?? "", t]));
@@ -159,19 +198,40 @@ export default function PcapPage() {
     if (filter.proto && filter.proto !== "any") clauses.push(filter.proto);
     if (filter.src?.trim()) clauses.push(`src host ${filter.src.trim()}`);
     if (filter.dst?.trim()) clauses.push(`dst host ${filter.dst.trim()}`);
+    if (filter.port?.trim()) clauses.push(`port ${filter.port.trim()}`);
     return clauses.length ? clauses.join(" and ") : "not set";
   }, [settings.filter]);
   const configIssues = useMemo(() => {
     const issues: string[] = [];
-    if ((settings.interfaces ?? []).length === 0) issues.push("Select at least one interface to capture.");
-    if (ifaceOptions.length === 0) {
+    if ((settings.interfaces ?? []).length === 0 && (settings.zones ?? []).length === 0) {
+      issues.push("Select at least one interface or zone to capture.");
+    }
+    if (captureIfaceOptions.length === 0 && zoneOptions.length === 0) {
       issues.push("No firewall interfaces are bound to OS devices. Set device bindings on the Interfaces page.");
+    }
+    for (const selectedZone of settings.zones ?? []) {
+      if (!zoneOptions.some((zone) => zone.value === selectedZone)) {
+        issues.push(`Zone "${selectedZone}" is not configured.`);
+      } else if (!ifaces.some((iface) => iface.zone === selectedZone)) {
+        issues.push(`Zone "${selectedZone}" has no configured interfaces.`);
+      }
     }
     if (ifaceStates.length > 0) {
       const available = new Set(ifaceStates.map((i) => i.name));
-      const missing = (settings.interfaces ?? []).filter((name) => !available.has(name));
+      const deviceByLogical = new Map(
+        ifaces.map((iface) => [iface.name, iface.device?.trim() || iface.name]),
+      );
+      const selectedDevices = new Set(
+        (settings.interfaces ?? []).map((name) => deviceByLogical.get(name) ?? name),
+      );
+      for (const iface of ifaces) {
+        if (iface.zone && (settings.zones ?? []).includes(iface.zone)) {
+          selectedDevices.add(iface.device?.trim() || iface.name);
+        }
+      }
+      const missing = Array.from(selectedDevices).filter((name) => !available.has(name));
       if (missing.length > 0) {
-        issues.push(`Interfaces not found in OS: ${missing.join(", ")}. Bind to a device in Interfaces or select a kernel interface.`);
+        issues.push(`Kernel devices not found: ${missing.join(", ")}. Bind the interfaces or choose an available device.`);
       }
     }
     if (!Number.isFinite(settings.snaplen) || (settings.snaplen ?? 0) <= 0) issues.push("Snaplen must be greater than 0.");
@@ -183,18 +243,37 @@ export default function PcapPage() {
       (t) => t.enabled && (!(t.host ?? "").trim() || !Number.isFinite(t.port) || (t.port ?? 0) <= 0),
     );
     if (badForward.length > 0) issues.push("Forwarding targets need a host and valid port when enabled.");
+    const port = (settings.filter?.port ?? "").trim();
+    if (
+      port &&
+      (!/^\d+(?:-\d+)?$/.test(port) ||
+        port.split("-").some((part) => Number(part) < 1 || Number(part) > 65535) ||
+        (port.includes("-") &&
+          Number(port.split("-")[0]) > Number(port.split("-")[1])))
+    ) {
+      issues.push("Port must be 1–65535 or an inclusive range such as 1000-2000.");
+    }
+    if (port && settings.filter?.proto === "icmp") {
+      issues.push("Port filters apply only to TCP and UDP.");
+    }
     return issues;
-  }, [settings, ifaceStates, ifaceOptions.length]);
+  }, [settings, ifaces, ifaceStates, captureIfaceOptions.length, zoneOptions]);
   const isRunning = status?.running ?? settings.enabled ?? false;
   const canStart = canEdit && configIssues.length === 0 && state === "idle" && !isRunning;
   const captureSummary = useMemo(() => {
-    const ifaceLabel = (settings.interfaces ?? []).length ? (settings.interfaces ?? []).join(", ") : "no interfaces";
+    const selections = [
+      ...(settings.interfaces ?? []),
+      ...(settings.zones ?? []).map((zone) => `zone ${zone}`),
+    ];
+    const ifaceLabel = selections.length
+      ? selections.join(", ")
+      : "no interfaces or zones";
     const rotation =
       settings.mode === "rolling"
         ? `${settings.maxFiles ?? 0} files @ ${settings.maxSizeMB ?? 0}MB`
         : `${settings.maxSizeMB ?? 0}MB max`;
     return `${ifaceLabel} · ${rotation} · snaplen ${settings.snaplen ?? 0}`;
-  }, [settings.interfaces, settings.mode, settings.maxFiles, settings.maxSizeMB, settings.snaplen]);
+  }, [settings.interfaces, settings.zones, settings.mode, settings.maxFiles, settings.maxSizeMB, settings.snaplen]);
   const filteredPcaps = useMemo(() => {
     const q = pcapQuery.trim().toLowerCase();
     if (!q) return pcaps;
@@ -262,10 +341,20 @@ export default function PcapPage() {
     });
   }
 
+  function toggleZone(name: string) {
+    setSettings((prev) => {
+      const set = new Set(prev.zones ?? []);
+      if (set.has(name)) set.delete(name);
+      else set.add(name);
+      return { ...prev, zones: Array.from(set) };
+    });
+  }
+
   function setAllInterfaces(on: boolean) {
     setSettings((prev) => ({
       ...prev,
-      interfaces: on ? ifaceOptions.map((opt) => opt.value) : [],
+      interfaces: on ? captureIfaceOptions.map((opt) => opt.value) : [],
+      zones: [],
     }));
   }
 
@@ -413,8 +502,10 @@ export default function PcapPage() {
         settings={settings}
         setSettings={setSettings}
         configIssues={configIssues}
-        ifaceOptions={ifaceOptions}
+        captureIfaceOptions={captureIfaceOptions}
+        zoneOptions={zoneOptions}
         toggleIface={toggleIface}
+        toggleZone={toggleZone}
         setAllInterfaces={setAllInterfaces}
         bpfPreview={bpfPreview}
         updateForwardTarget={updateForwardTarget}

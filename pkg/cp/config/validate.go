@@ -864,14 +864,25 @@ func validatePCAP(p PCAPConfig) error {
 	return validatePCAPForwardTargets(p.ForwardTargets)
 }
 
+// ValidatePCAPConfig validates PCAP capture settings independently of the
+// remainder of the appliance configuration.
+func ValidatePCAPConfig(p PCAPConfig) error {
+	return validatePCAP(p)
+}
+
 func validatePCAPInterfaces(p PCAPConfig) error {
 	for _, name := range p.Interfaces {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("pcap.interfaces cannot include empty name")
 		}
 	}
-	if p.Enabled && len(p.Interfaces) == 0 {
-		return errors.New("pcap.enabled requires at least one interface")
+	for _, name := range p.Zones {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("pcap.zones cannot include empty name")
+		}
+	}
+	if p.Enabled && len(p.Interfaces) == 0 && len(p.Zones) == 0 {
+		return errors.New("pcap.enabled requires at least one interface or zone")
 	}
 	return nil
 }
@@ -906,6 +917,14 @@ func validatePCAPFilter(filter PCAPFilter) error {
 	proto := strings.ToLower(strings.TrimSpace(filter.Proto))
 	if proto != "" && proto != "any" && proto != "tcp" && proto != "udp" && proto != "icmp" {
 		return fmt.Errorf("pcap.filter.proto invalid %q", filter.Proto)
+	}
+	if strings.TrimSpace(filter.Port) != "" {
+		if proto == "icmp" {
+			return errors.New("pcap.filter.port cannot be used with proto icmp")
+		}
+		if _, _, err := ParsePCAPPortRange(filter.Port); err != nil {
+			return err
+		}
 	}
 	return nil
 }

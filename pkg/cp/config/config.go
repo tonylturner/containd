@@ -512,6 +512,7 @@ type ExportConfig struct {
 type PCAPConfig struct {
 	Enabled        bool                `json:"enabled,omitempty"`
 	Interfaces     []string            `json:"interfaces,omitempty"`
+	Zones          []string            `json:"zones,omitempty"`
 	Snaplen        int                 `json:"snaplen,omitempty"`
 	MaxSizeMB      int                 `json:"maxSizeMB,omitempty"`
 	MaxFiles       int                 `json:"maxFiles,omitempty"`
@@ -528,6 +529,7 @@ type PCAPFilter struct {
 	Src   string `json:"src,omitempty"`
 	Dst   string `json:"dst,omitempty"`
 	Proto string `json:"proto,omitempty"` // "tcp", "udp", "icmp", "any"
+	Port  string `json:"port,omitempty"`  // single port or range; TCP/UDP source or destination
 }
 
 type PCAPForwardTarget struct {
