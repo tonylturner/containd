@@ -15,10 +15,10 @@ set -euo pipefail
 #   FAIL             a baseline (non-gated) assertion failed: a harness,
 #                    routing or monitoring defect that is independent of IEC
 #                    enforcement.
-#   GATE-FAIL        an assertion that needs the integrated milestone B engine
-#                    (lanes L1-L4) failed. Before that merge these fail
-#                    truthfully: nothing decodes IEC104, holds packets or
-#                    resets sessions, so forbidden commands reach the RTU.
+#   GATE-FAIL        an assertion that needs IEC104 enforcement failed. In
+#                    the integrated milestone B engine, these indicate a
+#                    regression: forbidden commands or malformed traffic were
+#                    not prevented as required.
 #   NOT-IMPLEMENTED  a §10.2 hard assertion this harness cannot drive yet.
 # Exit status: 0 every assertion passed (acceptance); 1 a FAIL (or a fatal
 # setup error); 3 the baseline passed but GATE-FAIL or NOT-IMPLEMENTED remain.
@@ -115,8 +115,8 @@ fail() {
   record "$name" FAIL "$detail"
 }
 
-# gate_fail records an assertion that needs the integrated engine (not merged
-# in Phase 1); it is expected to fail now and must pass in Phase 2.
+# gate_fail records an assertion requiring IEC104 enforcement that did not
+# pass. Any occurrence after integration means acceptance has not been met.
 gate_fail() {
   local name=$1 detail=${2:-}
   GATE_FAIL_COUNT=$((GATE_FAIL_COUNT + 1))
@@ -453,7 +453,7 @@ cc_count() {
 
 # assert_not_received NAME COUNTER CMD...: run CMD and assert the RTU counter
 # (commands_received or gi_requests) did not advance and no write was applied.
-# On this branch the firewall forwards everything, so these gate-fail.
+# These must be prevented by the active IEC104 enforcement policy.
 assert_not_received() {
   local name=$1 counter=$2 rc=0 before after writes_before writes_after out detail
   shift 2
