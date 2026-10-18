@@ -459,12 +459,17 @@ func TestIEC104EnforcementReadsEngineHealth(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"}}`))
+		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"},"ipv4Forwarding":"disabled"}`))
 	}))
 	defer srv.Close()
-	st, err := NewHTTPClient(srv.URL).IEC104Enforcement(context.Background())
+	client := NewHTTPClient(srv.URL)
+	st, err := client.IEC104Enforcement(context.Background())
 	if err != nil || st != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down"}) {
 		t.Fatalf("IEC104Enforcement = %+v, %v", st, err)
+	}
+	health, err := client.RuntimeHealth(context.Background())
+	if err != nil || health.IPv4Forwarding != netcfg.IPv4ForwardingDisabled {
+		t.Fatalf("RuntimeHealth = %+v, %v", health, err)
 	}
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))

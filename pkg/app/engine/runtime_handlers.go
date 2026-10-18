@@ -290,6 +290,7 @@ func healthHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			Component:         "engine",
 			Build:             config.BuildVersion,
 			IEC104Enforcement: dpEngine.IEC104Enforcement(),
+			IPv4Forwarding:    netcfg.ReadIPv4ForwardingStatus(),
 		})
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 )
 
@@ -36,7 +37,8 @@ type healthResponse struct {
 	Build      string `json:"build"`
 	CommitHash string `json:"commitHash,omitempty"`
 
-	IEC104Enforcement engine.IEC104Enforcement `json:"iec104Enforcement"`
+	IEC104Enforcement engine.IEC104Enforcement    `json:"iec104Enforcement"`
+	IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
 }
 
 func initialEngineConfig(ifaces []string, enforceEnabled bool, enforceTable string) engine.Config {

@@ -10,13 +10,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
 // IEC104HealthClient reads the engine's IEC104 enforcement health.
 type IEC104HealthClient interface {
 	IEC104Enforcement(ctx context.Context) (dpengine.IEC104Enforcement, error)
+}
+
+// RuntimeHealthClient reads health values observed in the engine's network
+// namespace.
+type RuntimeHealthClient interface {
+	RuntimeHealth(ctx context.Context) (engineclient.RuntimeHealth, error)
 }
 
 // engineHealthTimeout keeps liveness fast when the engine is slow.
@@ -31,12 +39,23 @@ var engineUnreachable = dpengine.IEC104Enforcement{Active: false, Healthy: false
 func healthHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		iec := engineUnreachable
-		if hc, ok := engine.(IEC104HealthClient); ok && hc != nil {
+		forwarding := netcfg.IPv4ForwardingUnknown
+		if hc, ok := engine.(RuntimeHealthClient); ok && hc != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
+			if health, err := hc.RuntimeHealth(ctx); err == nil {
+				iec = health.IEC104Enforcement
+				forwarding = health.IPv4Forwarding
+			}
+			cancel()
+		} else if hc, ok := engine.(IEC104HealthClient); ok && hc != nil {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
 			if st, err := hc.IEC104Enforcement(ctx); err == nil {
 				iec = st
 			}
 			cancel()
+		}
+		if forwarding != netcfg.IPv4ForwardingEnabled && forwarding != netcfg.IPv4ForwardingDisabled {
+			forwarding = netcfg.IPv4ForwardingUnknown
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":            "ok",
@@ -44,6 +63,7 @@ func healthHandler(engine EngineClient) gin.HandlerFunc {
 			"build":             config.BuildVersion,
 			"time":              time.Now().UTC().Format(time.RFC3339Nano),
 			"iec104Enforcement": iec,
+			"ipv4Forwarding":    forwarding,
 		})
 	}
 }
