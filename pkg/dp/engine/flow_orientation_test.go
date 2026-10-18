@@ -147,16 +147,19 @@ func TestTrackFlowOrientsReplies(t *testing.T) {
 
 func TestTrackFlowHandshakeReorients(t *testing.T) {
 	e := newOrientationEngine(t)
-	// Mid-stream capture saw the server first and took it as the opener.
-	if st := e.trackFlow(segment(true, 500, ackPsh, nil), time.Now()); st.Key.Dir != flow.DirForward {
+	// Unknown ports still use first-seen orientation until a handshake.
+	packet := func(server bool, seq uint32, flags capture.TCPFlags) capture.Packet {
+		return connSegment(server, 41000, 9999, seq, flags, nil)
+	}
+	if st := e.trackFlow(packet(true, 500, ackPsh), time.Now()); st.Key.Dir != flow.DirForward {
 		t.Fatalf("first-seen dir = %d, want forward", st.Key.Dir)
 	}
-	e.trackFlow(segment(false, 100, capture.TCPFlagACK, nil), time.Now())
+	e.trackFlow(packet(false, 100, capture.TCPFlagACK), time.Now())
 	// A new connection on the tuple corrects the orientation.
-	if st := e.trackFlow(segment(false, 1000, capture.TCPFlagSYN, nil), time.Now()); st.Key.Dir != flow.DirForward {
+	if st := e.trackFlow(packet(false, 1000, capture.TCPFlagSYN), time.Now()); st.Key.Dir != flow.DirForward {
 		t.Fatalf("SYN sender dir = %d, want forward", st.Key.Dir)
 	}
-	if st := e.trackFlow(segment(true, 5000, ackPsh, nil), time.Now()); st.Key.Dir != flow.DirReverse {
+	if st := e.trackFlow(packet(true, 5000, ackPsh), time.Now()); st.Key.Dir != flow.DirReverse {
 		t.Fatalf("server dir after SYN = %d, want reverse", st.Key.Dir)
 	}
 	if len(e.flows) != 2 {
@@ -295,5 +298,40 @@ func TestModbusResponseDirectionRule(t *testing.T) {
 	replies := modbusEventsOldestFirst(e)
 	if len(replies) != 2 || replies[1].Kind != "response" {
 		t.Fatalf("events=%+v", replies)
+	}
+}
+
+func TestTrackFlowICSServiceReplyFirst(t *testing.T) {
+	for _, tc := range []struct {
+		proto uint8
+		port  uint16
+	}{{6, 502}, {6, 20000}, {6, 44818}, {6, 102}, {6, 4840}, {6, 2404}, {17, 2222}, {17, 47808}} {
+		e := newOrientationEngine(t)
+		reply := connSegment(true, 41000, tc.port, 500, ackPsh, nil)
+		reply.Proto = tc.proto
+		st := e.trackFlow(reply, time.Now())
+		if st.Key.Dir != flow.DirReverse {
+			t.Fatalf("%d/%d first reply dir=%d", tc.proto, tc.port, st.Key.Dir)
+		}
+		request := connSegment(false, 41000, tc.port, 100, ackPsh, nil)
+		request.Proto = tc.proto
+		if st := e.trackFlow(request, time.Now()); st.Key.Dir != flow.DirForward {
+			t.Fatalf("%d/%d request dir=%d", tc.proto, tc.port, st.Key.Dir)
+		}
+	}
+}
+
+func TestTrackFlowHandshakeOverridesServicePort(t *testing.T) {
+	e := newOrientationEngine(t)
+	// An opener bound to a service port is still the client.
+	p := connSegment(true, 41000, 502, 100, capture.TCPFlagSYN, nil)
+	if st := e.trackFlow(p, time.Now()); st.Key.Dir != flow.DirForward {
+		t.Fatal("port overrode SYN")
+	}
+	p.SrcIP, p.DstIP = p.DstIP, p.SrcIP
+	p.SrcPort, p.DstPort = p.DstPort, p.SrcPort
+	p.TCP.Flags = ackPsh
+	if st := e.trackFlow(p, time.Now()); st.Key.Dir != flow.DirReverse {
+		t.Fatal("port overrode existing handshake")
 	}
 }

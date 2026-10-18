@@ -564,8 +564,8 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 
 // connectionStateLocked finds or creates the direction state for pkt. A
 // SYN marks its sender as the opener and a SYN-ACK as the server; without
-// a handshake, a direction whose opposite was already seen is oriented
-// against it, and otherwise the first-seen direction is the opener. Must
+// a handshake, the opposite direction or a known ICS service port orients
+// it. Ambiguous or unknown ports retain first-seen orientation. Must
 // be called with e.flowMu held.
 func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.State {
 	key := flow.Key{
@@ -599,8 +599,14 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 		opposite := key.Reversed()
 		opposite.Dir = flow.DirForward
 		if _, ok := e.flows[opposite.Hash()]; ok {
-			// The other side was seen first and opened the connection.
 			key.Dir = flow.DirReverse
+		} else {
+			opposite.Dir = flow.DirReverse
+			if _, ok := e.flows[opposite.Hash()]; !ok {
+				if dir, known := icsServiceDirection(pkt); known {
+					key.Dir = dir
+				}
+			}
 		}
 	}
 	state := flow.NewState(key, now)
