@@ -562,6 +562,7 @@ func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 // runningConfigApplyMu protects replay and running-store mutations coupled to
 // runtime applies. Hold it before loading a config to modify, through its apply.
 var runningConfigApplyMu sync.Mutex
+var bindDefaultInterfaceDevices = autoBindDefaultInterfaceDevices
 
 func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	// Load only after acquiring the lock: a queued replay must not push a
@@ -584,16 +585,11 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 		return nil, err
 	}
-	// Re-bind logical interface names to physical kernel devices at commit
-	// time. Imports that use logical names (wan/dmz/lan1/lan2) with empty
-	// or stale device fields would otherwise compile to nft rules that
-	// reference the wrong eth and silently black-hole all forwarded
-	// traffic. autoBindDefaultInterfaceDevices is a no-op for configs
-	// that already have correct device fields, so this is safe to call
-	// on every commit.
-	if autoBindDefaultInterfaceDevices(cfg) {
-		_ = store.Save(ctx, cfg)
-	}
+	// Re-bind logical interface names to physical kernel devices before
+	// applying them. Keep this change in memory only: applying a previously
+	// loaded snapshot must never persist it over a newer store mutation.
+	// loadOrInitConfig persists bindings on reads where that behavior is needed.
+	bindDefaultInterfaceDevices(cfg)
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
 			return nil, err
