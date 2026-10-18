@@ -163,11 +163,6 @@ func admitsIEC104Port(protos []rules.Protocol) bool {
 
 // parsePortRange parses "N" or "N-M" the way the rule evaluator does.
 func parsePortRange(s string) (lo, hi uint64, ok bool) {
-	if a, b, isRange := strings.Cut(s, "-"); isRange {
-		l, err1 := strconv.ParseUint(a, 10, 16)
-		h, err2 := strconv.ParseUint(b, 10, 16)
-		return l, h, err1 == nil && err2 == nil
-	}
-	v, err := strconv.ParseUint(s, 10, 16)
-	return v, v, err == nil
+	l, h, err := rules.ParsePortRange(s)
+	return uint64(l), uint64(h), err == nil
 }

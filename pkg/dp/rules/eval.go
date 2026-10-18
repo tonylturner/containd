@@ -115,18 +115,13 @@ func CompileEntry(entry Entry) compiledEntry {
 		if p.Port == "" {
 			continue
 		}
-		if parts := strings.SplitN(p.Port, "-", 2); len(parts) == 2 {
-			lo, errLo := strconv.ParseUint(parts[0], 10, 16)
-			hi, errHi := strconv.ParseUint(parts[1], 10, 16)
-			if errLo == nil && errHi == nil {
-				ce.ports[j] = compiledPort{low: uint16(lo), high: uint16(hi)}
-				continue
-			}
-		}
-		v, err := strconv.ParseUint(p.Port, 10, 16)
+		lo, hi, err := ParsePortRange(p.Port)
 		if err == nil {
-			ce.ports[j] = compiledPort{low: uint16(v), high: uint16(v)}
+			ce.ports[j] = compiledPort{low: lo, high: hi}
+		} else {
+			ce.ports[j] = compiledPort{low: 1, high: 0}
 		}
+
 	}
 
 	return ce
