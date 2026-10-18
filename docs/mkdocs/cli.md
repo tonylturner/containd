@@ -50,6 +50,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `set ip rule add <table> [src <cidr>] [dst <cidr>] [priority <n>]`
   - `set ip rule del <table> [src <cidr>] [dst <cidr>] [priority <n>] | set ip rule del <table> all`
   - `set firewall rule <id> <action> [src_zone] [dst_zone]`
+  - `set firewall ics-rule <id> <action> <protocol> [options...]`
   - `delete firewall rule <id>`
   - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
   - `set outbound quickstart` (enables default route + SNAT + allow rule for LAN/MGMT → WAN)
@@ -98,3 +99,26 @@ Notes:
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
 
+## ICS firewall rules
+
+`set firewall ics-rule <id> <action> <protocol> [options...]` accepts the
+existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
+`--function-code`, `--unit-id`, `--addresses`, `--read-only`, `--write-only`,
+and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
+
+- `--type-ids <ids>` — comma-separated decimal TypeIDs from 1 through 255.
+- `--classes <classes>` — comma-separated `monitor`, `control`, `system`, or `unknown`.
+- `--ca <addresses>` — comma-separated decimal common addresses from 0 through 65534; 65535 is broadcast and is not a rule address.
+- `--ioa <ranges>` — comma-separated decimal addresses or inclusive ranges, for example `0,65536-65567,16777215` (the 24-bit address space).
+- `--read-only` — restrict the rule to read-only IEC traffic.
+- `--direction <request|response>` — select the session half.
+- `--mode <learn|enforce>` — choose the rule's ICS mode.
+
+Example:
+
+```text
+set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 45,46 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+```
+
+`show firewall ics-rules` displays these IEC fields alongside the existing
+ICS predicate fields.

@@ -35,7 +35,11 @@ func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil || r.ID == "" {
+		if err := c.ShouldBindJSON(&r); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
+			return
+		}
+		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
@@ -390,7 +394,11 @@ func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil || r.ID == "" {
+		if err := c.ShouldBindJSON(&r); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
+			return
+		}
+		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
@@ -426,7 +434,7 @@ func updateICSRuleHandler(store config.Store) gin.HandlerFunc {
 		id := c.Param("id")
 		var rule config.Rule
 		if err := c.ShouldBindJSON(&rule); err != nil {
-			apiError(c, http.StatusBadRequest, "invalid rule payload")
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
 			return
 		}
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)

@@ -180,6 +180,7 @@ Notes:
   - `staticRoutes` are installed via netlink (Linux only today; IPv4 only).
   - `policyRules` are installed via netlink as basic policy-based routing (Linux only today; src/dst CIDR selection, `table` selection).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
+- Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
