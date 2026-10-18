@@ -82,6 +82,7 @@ test/data-smoke/*.db
 test/data-smoke/*.db-shm
 test/data-smoke/*.db-wal
 test/data-smoke/logs/
+test/data-smoke/pcaps/
 
 # Internal development files (kept locally, not published)
 agents.md
