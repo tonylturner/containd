@@ -44,7 +44,7 @@ type Engine struct {
 	runCapture      captureRunner
 	runCancel       context.CancelFunc
 	runDone         chan struct{}
-	ruleSnap        atomic.Pointer[rules.Snapshot]
+	ruleSnap        ruleSnapshots
 	started         atomic.Bool
 	epoch           atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler        *enforce.Compiler

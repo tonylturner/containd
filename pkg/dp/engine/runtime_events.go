@@ -301,8 +301,7 @@ func isICSEvent(proto, kind string) bool {
 
 // Evaluate applies the current rule snapshot to a simple context.
 func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
+	ev := e.ruleSnap.Evaluator()
 	return ev.Evaluate(ctx)
 }
 
@@ -327,8 +326,7 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 // gets AllowContinue instead of the snapshot's default.
 func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
+	ev := e.ruleSnap.Evaluator()
 	action, matched := ev.EvaluateMatch(ctx)
 	if matched == nil && !applyDefault {
 		action = rules.ActionAllow
