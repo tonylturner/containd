@@ -7,9 +7,33 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestRuleJSONKeysMatchRuleJSONTags(t *testing.T) {
+	ruleType := reflect.TypeOf(Rule{})
+	tagNames := make([]string, 0, ruleType.NumField())
+	for i := 0; i < ruleType.NumField(); i++ {
+		field := ruleType.Field(i)
+		tag, ok := field.Tag.Lookup("json")
+		if !ok {
+			t.Fatalf("Rule.%s has no JSON tag", field.Name)
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			t.Fatalf("Rule.%s has an empty JSON tag name", field.Name)
+		}
+		tagNames = append(tagNames, name)
+	}
+	if !reflect.DeepEqual(ruleJSONKeys, tagNames) {
+		t.Fatalf("ruleJSONKeys = %v, want Rule JSON tag names %v", ruleJSONKeys, tagNames)
+	}
+}
 
 func TestRuleUnmarshalJSONRejectsUnknownAndDuplicateKeys(t *testing.T) {
 	for _, input := range []string{

@@ -81,7 +81,27 @@ func TestUnknownRuleKeysRejectedByConfigIngestion(t *testing.T) {
 		store := &mockStore{cfg: config.DefaultConfig()}
 		rec := strictRuleRequest(t, NewServer(store, nil), http.MethodPost, "/api/v1/firewall/rules",
 			`{"id":"strict-rule","action":"ALLOW","state":["on"]}`)
-		assertUnknownRule400(t, rec, false, "strict-rule")
+		assertUnknownRule400(t, rec, true, "strict-rule")
+		if store.calls != 0 {
+			t.Fatalf("Save calls = %d, want 0", store.calls)
+		}
+	})
+
+	t.Run("create ICS rule", func(t *testing.T) {
+		store := &mockStore{cfg: config.DefaultConfig()}
+		rec := strictRuleRequest(t, NewServer(store, nil), http.MethodPost, "/api/v1/firewall/ics-rules",
+			`{"id":"strict-rule","action":"ALLOW","ics":{"protocol":"iec104"},"state":["on"]}`)
+		assertUnknownRule400(t, rec, true, "strict-rule")
+		if store.calls != 0 {
+			t.Fatalf("Save calls = %d, want 0", store.calls)
+		}
+	})
+
+	t.Run("replace ICS rule", func(t *testing.T) {
+		store := iecPatchStore(config.ICSPredicate{Protocol: "iec104"})
+		rec := strictRuleRequest(t, NewServer(store, nil), http.MethodPatch, "/api/v1/firewall/ics-rules/r1",
+			`{"id":"r1","action":"ALLOW","ics":{"protocol":"iec104"},"state":["on"]}`)
+		assertUnknownRule400(t, rec, true, "r1")
 		if store.calls != 0 {
 			t.Fatalf("Save calls = %d, want 0", store.calls)
 		}
