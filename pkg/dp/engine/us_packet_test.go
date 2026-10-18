@@ -113,6 +113,35 @@ func TestFlowPathEndsStreamOnFINAndRST(t *testing.T) {
 	}
 }
 
+func TestFlowPathRSTEndsOrientedReverseStream(t *testing.T) {
+	e := recordEngine(t)
+	e.handlePacket(recordPacket(100, capture.TCPFlagPSH, "AB"))
+	reverse := recordPacket(500, capture.TCPFlagPSH, "XY")
+	reverse.SrcIP, reverse.DstIP = reverse.DstIP, reverse.SrcIP
+	reverse.SrcPort, reverse.DstPort = reverse.DstPort, reverse.SrcPort
+	e.handlePacket(reverse)
+	e.handlePacket(recordPacket(102, capture.TCPFlagRST, ""))
+	reverse.TCP.Seq, reverse.Payload = 502, []byte("ZW")
+	e.handlePacket(reverse)
+	e.handlePacket(recordPacket(102, capture.TCPFlagPSH, "CD"))
+	if got := records(e); len(got) != 0 {
+		t.Fatalf("records after reset = %v; both directional tails must be discarded", got)
+	}
+}
+
+func TestFlowPathSYNDataSequenceWrap(t *testing.T) {
+	e := recordEngine(t)
+	syn := recordPacket(0xFFFFFFFF, capture.TCPFlagSYN, "AAAA")
+	syn.TCP.Flags &^= capture.TCPFlagACK
+	e.handlePacket(syn)
+	e.handlePacket(recordPacket(4, capture.TCPFlagPSH, "BBBB"))
+	// The late second-interface SYN capture must not replay its data.
+	e.handlePacket(syn)
+	if got := records(e); len(got) != 2 || got[0] != "AAAA" || got[1] != "BBBB" {
+		t.Fatalf("records = %v, want [AAAA BBBB]", got)
+	}
+}
+
 func TestInvalidPacketDecision(t *testing.T) {
 	e := recordEngine(t)
 	frag := recordPacket(0, 0, "AAAA")

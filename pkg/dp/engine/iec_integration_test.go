@@ -115,3 +115,33 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 		}
 	}
 }
+
+// The US reply exemption must never reach an IEC enforce envelope, even
+// when the ordinary firewall default is ALLOW.
+func TestIECUnmatchedReplyStillDeniedAfterUSReplyMerge(t *testing.T) {
+	h := newIECHarness(t, "enforce")
+	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
+	h.e.iec.dpi = h.e.dpiMgr
+	h.e.iec.newPolicy = newRulesPolicy
+	snap := euSnapshot()
+	snap.Firewall = snap.Firewall[:1]
+	snap.Firewall[0].ICS.Direction = "request"
+	h.e.LoadRules(snap)
+	h.handshake()
+	if _, d := h.send(true, startdtAct); d.Action != capture.Accept {
+		t.Fatalf("matched request = %+v, want Accept", d)
+	}
+	if _, d := h.send(false, startdtCon); d.Action != capture.Drop {
+		t.Fatalf("unmatched reply = %+v, want Drop", d)
+	}
+	found := false
+	for _, ev := range h.eventsOf("ics.decision") {
+		found = found || (ev.Attributes["decision"] == "deny" && ev.Attributes["reason"] == "default")
+	}
+	if !found {
+		t.Fatalf("missing no-match deny evidence: %+v", h.eventsOf("ics.decision"))
+	}
+	if got := h.outcomes(); len(got) != 1 || got[0] != "aborted" {
+		t.Fatalf("outcomes = %v, want [aborted]", got)
+	}
+}

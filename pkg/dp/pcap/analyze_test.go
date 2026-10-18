@@ -215,8 +215,7 @@ func TestAnalyzeEmptyPCAP(t *testing.T) {
 }
 
 func TestAnalyzePacketCounting(t *testing.T) {
-	// Two requests on one connection: the second payload follows the
-	// first in sequence space.
+	// Two captures of the same request, at the same sequence number.
 	frame1 := buildModbusEthernetFrame(0)
 	frame2 := buildModbusEthernetFrame(0)
 
