@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries for the engine address.
 - Flows first seen mid-stream are oriented by the known ICS service port, so
   replies get the correct policy context. Handshake evidence still wins.
+- A policy apply that restarts the NFQUEUE capture resets the open IEC 104
+  sessions again. The engine stopped its reset worker before queue shutdown
+  had queued the resets, so a session could stall until the client's t1
+  timeout.
 - The UI no longer hides a page behind "Checking session..." while it
   re-checks a session it has already verified.
 - Rules without an ICS predicate omit `ics` from JSON, so applied firewall
