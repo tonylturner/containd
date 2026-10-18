@@ -32,6 +32,23 @@ func (w *worker) submit(job func()) bool {
 	}
 }
 
+// flush waits for all jobs queued before its barrier to run. It returns false
+// if the worker's run stopped before reaching the barrier.
+func (w *worker) flush(stopped <-chan struct{}) bool {
+	done := make(chan struct{})
+	select {
+	case w.jobs <- func() { close(done) }:
+	case <-stopped:
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	case <-stopped:
+		return false
+	}
+}
+
 // run executes queued jobs until ctx is done. Jobs still queued at that
 // point belong to the stopped run and are discarded.
 func (w *worker) run(ctx context.Context) {

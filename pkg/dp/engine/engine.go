@@ -233,11 +233,18 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Unlock()
 	prevRunDone := e.runDone
 	prevIEC := e.iec
-	if prevCancel != nil {
-		prevCancel()
-	}
 	if prevCapture != nil {
 		prevCapture.Stop()
+	}
+	// Closing an inline queue invokes OnSourceDown, which schedules IEC
+	// session resets on the old worker. Keep it alive until those callbacks
+	// and their reset jobs have completed; otherwise cancellation can discard
+	// the resets while Reconfigure replaces the session table.
+	if prevIEC != nil && prevIEC.jobs != nil && prevRunDone != nil {
+		prevIEC.jobs.flush(prevRunDone)
+	}
+	if prevCancel != nil {
+		prevCancel()
 	}
 	if prevNflogStop != nil {
 		prevNflogStop()
