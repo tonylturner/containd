@@ -1082,6 +1082,12 @@ paths:
       tags: [PCAP]
       requestBody:
         required: false
+        description: >
+          An omitted or empty body starts the saved PCAP configuration. A
+          nonempty body replaces the saved configuration for this start;
+          omitted fields use their normal defaults rather than saved values.
+          The complete configuration must select at least one interface or
+          zone; an empty selection is rejected.
         content:
           application/json:
             schema: { $ref: "#/components/schemas/PcapConfig" }

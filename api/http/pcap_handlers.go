@@ -76,17 +76,20 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 				return
 			}
 		}
+		capture := cfg.PCAP
 		if strings.TrimSpace(string(body)) != "" {
-			if err := json.Unmarshal(body, &cfg.PCAP); err != nil {
+			capture = config.PCAPConfig{}
+			if err := json.Unmarshal(body, &capture); err != nil {
 				apiError(c, http.StatusBadRequest, "invalid pcap start JSON: "+err.Error())
 				return
 			}
 		}
-		cfg.PCAP.Enabled = true
-		if err := config.ValidatePCAPConfig(cfg.PCAP); err != nil {
+		capture.Enabled = true
+		if err := config.ValidatePCAPConfig(capture); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		cfg.PCAP = capture
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			httpError(c, err)
 			return

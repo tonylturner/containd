@@ -62,7 +62,7 @@ func (c *HTTPClient) SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return out, fmt.Errorf("engine pcap config status %d", resp.StatusCode)
+		return out, engineStatusError(resp, "engine pcap config status")
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return out, err
