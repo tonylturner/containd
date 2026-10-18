@@ -49,9 +49,20 @@ type Store interface {
 
 // SQLiteStore persists configuration in a SQLite database file.
 type SQLiteStore struct {
-	db           *sql.DB
-	mu           sync.Mutex
-	pendingTimer *time.Timer
+	db                 *sql.DB
+	mu                 sync.Mutex
+	pendingTimer       *time.Timer
+	autoRollbackNotify chan<- struct{}
+}
+
+// SetAutoRollbackNotify registers a best-effort notification after a successful
+// timed rollback. Sends never block, even while the store mutex is held.
+// The receiver owns the channel and must not close it; nil unregisters it.
+// Rollbacks before registration are covered by management's boot replay.
+func (s *SQLiteStore) SetAutoRollbackNotify(notify chan<- struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoRollbackNotify = notify
 }
 
 // WipeAll deletes all persisted config state (running/candidate/previous/pending)
@@ -361,6 +372,13 @@ func (s *SQLiteStore) Rollback(ctx context.Context) error {
 
 // Close releases database resources.
 func (s *SQLiteStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingTimer != nil {
+		s.pendingTimer.Stop()
+		s.pendingTimer = nil
+	}
+	s.autoRollbackNotify = nil
 	if s.db != nil {
 		return s.db.Close()
 	}
@@ -418,6 +436,10 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 			return
 		}
 		_ = s.clearPendingLocked(bg)
+		select {
+		case s.autoRollbackNotify <- struct{}{}:
+		default:
+		}
 	})
 }
 

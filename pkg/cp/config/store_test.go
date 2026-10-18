@@ -5,11 +5,127 @@ package config
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestAutoRollbackNotificationNeverBlocks(t *testing.T) {
+	for _, capacity := range []int{0, 1} {
+		t.Run(fmt.Sprint(capacity), func(t *testing.T) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cfg.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			notify := make(chan struct{}, capacity)
+			if capacity > 0 {
+				notify <- struct{}{} // A full channel must not block either.
+			}
+			store.SetAutoRollbackNotify(notify)
+			ctx := context.Background()
+			if err := store.Save(ctx, &Config{System: SystemConfig{Hostname: "previous"}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveCandidate(ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CommitConfirmed(ctx, 10*time.Millisecond); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				cfg, err := store.Load(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.System.Hostname == "previous" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("rollback did not fire")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			done := make(chan error, 1)
+			go func() { done <- store.ConfirmCommit(ctx) }()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("notification blocked timer while holding store mutex")
+			}
+		})
+	}
+}
+
+func TestPendingCommitRearmedAtStoreOpen(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprint("expired=", expired), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "cfg.db")
+			store, err := NewSQLiteStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if err := store.Save(ctx, &Config{System: SystemConfig{Hostname: "previous"}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveCandidate(ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(100 * time.Millisecond)
+			if expired {
+				deadline = time.Now().Add(-time.Second)
+			}
+			blob, err := json.Marshal(pendingCommit{DeadlineUnix: deadline.UnixNano()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.db.Exec(`UPDATE configs SET data = ? WHERE key = ?`, string(blob), configKeyPending); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store, err = NewSQLiteStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			notify := make(chan struct{}, 1)
+			store.SetAutoRollbackNotify(notify)
+			if !expired {
+				select {
+				case <-notify:
+				case <-time.After(3 * time.Second):
+					t.Fatal("reopened store did not re-arm pending rollback")
+				}
+			}
+			cfg, err := store.Load(ctx)
+			if err != nil || cfg.System.Hostname != "previous" {
+				t.Fatalf("reopened rollback config=%+v err=%v", cfg, err)
+			}
+			if _, err := store.loadPending(ctx); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("pending state not cleared: %v", err)
+			}
+			select {
+			case <-notify:
+				t.Fatal("unexpected extra rollback notification")
+			default:
+			}
+		})
+	}
+}
 
 func TestSQLiteStoreSaveLoad(t *testing.T) {
 	dir := t.TempDir()

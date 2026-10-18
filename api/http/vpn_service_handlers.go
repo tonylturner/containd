@@ -40,6 +40,8 @@ func setVPNHandler(store config.Store, services ServicesApplier, engine EngineCl
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -111,6 +113,8 @@ func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, e
 			return
 		}
 
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)

@@ -22,6 +22,7 @@ type engineSync struct {
 	health httpapi.RuntimeHealthClient
 	apply  func(context.Context) ([]string, error)
 	logger *zap.SugaredLogger
+	replay <-chan struct{}
 
 	applied    bool
 	lastBootID string
@@ -42,12 +43,27 @@ func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store confi
 		},
 		logger: logger,
 	}
+	// Register before the first poll: an earlier expiry is covered by boot
+	// replay; an expiry during that replay remains queued for another apply.
+	// A channel, rather than a callback, guarantees the store never blocks or
+	// calls back into itself while holding its mutex.
+	replay := make(chan struct{}, 1)
+	notifier, hasNotifier := store.(interface {
+		SetAutoRollbackNotify(chan<- struct{})
+	})
+	if hasNotifier {
+		notifier.SetAutoRollbackNotify(replay)
+		syncer.replay = replay
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		syncer.run(ctx)
 	}()
 	return func() {
+		if hasNotifier {
+			notifier.SetAutoRollbackNotify(nil)
+		}
 		cancel()
 		<-done
 	}
@@ -66,6 +82,11 @@ func (s *engineSync) run(ctx context.Context) {
 			timer.Stop()
 			return
 		case <-timer.C:
+		case <-s.replay:
+			timer.Stop()
+			// Retain the invalidation across health/apply failures so an
+			// unchanged boot ID cannot suppress the retry.
+			s.applied = false
 		}
 		if !reachable {
 			delay = min(2*delay, engineSyncMaxBackoff)

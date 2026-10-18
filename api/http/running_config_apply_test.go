@@ -190,8 +190,9 @@ func TestApplyRunningConfigCanceledWaiterDoesNotLoad(t *testing.T) {
 
 func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 	for _, endpoint := range []struct {
-		path string
-		body any
+		path   string
+		body   any
+		method string
 	}{
 		{path: "/dataplane", body: config.DefaultConfig().DataPlane},
 		{path: "/pcap/config", body: config.PCAPConfig{Interfaces: []string{"capture"}}},
@@ -199,8 +200,19 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 		{path: "/pcap/stop"},
 		{path: "/interfaces/reconcile", body: map[string]string{"confirm": "REPLACE"}},
 		{path: "/routing/reconcile", body: map[string]string{"confirm": "REPLACE"}},
+		{path: "/services/syslog", body: config.DefaultConfig().Services.Syslog},
+		{path: "/services/syslog", method: http.MethodPatch, body: map[string]string{"format": "json"}},
+		{path: "/services/dns", body: config.DefaultConfig().Services.DNS},
+		{path: "/services/ntp", body: config.DefaultConfig().Services.NTP},
+		{path: "/services/av", body: config.DefaultConfig().Services.AV},
+		{path: "/services/dhcp", body: config.DefaultConfig().Services.DHCP},
+		{path: "/services/proxy/forward", body: config.DefaultConfig().Services.Proxy.Forward},
+		{path: "/services/proxy/reverse", body: config.DefaultConfig().Services.Proxy.Reverse},
+		{path: "/services/vpn", body: config.DefaultConfig().Services.VPN},
+		{path: "/services/vpn/openvpn/profile", body: map[string]string{"name": "test", "ovpn": "client\nremote 192.0.2.1 1194\n"}},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
+			t.Setenv("CONTAIND_OPENVPN_DIR", t.TempDir())
 			cfg := config.DefaultConfig()
 			cfg.Interfaces = nil
 			var loads atomic.Int32
@@ -236,7 +248,11 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 			mutationDone := make(chan struct{})
 			go func() {
 				defer close(mutationDone)
-				req := authedRequest(http.MethodPost, "/api/v1"+endpoint.path, bytes.NewReader(body))
+				method := endpoint.method
+				if method == "" {
+					method = http.MethodPost
+				}
+				req := authedRequest(method, "/api/v1"+endpoint.path, bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				server.ServeHTTP(rec, req)
 			}()

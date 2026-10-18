@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -225,4 +226,198 @@ func TestStartEngineSyncReplaysStoredRunningConfig(t *testing.T) {
 func TestStartEngineSyncWithoutEngine(t *testing.T) {
 	stop := startEngineSync(context.Background(), zap.NewNop().Sugar(), nil, nil, nil)
 	stop()
+}
+
+func TestEngineSyncForcedReplayRetries(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		replay := make(chan struct{}, 1)
+		var up, fail atomic.Bool
+		up.Store(true)
+		var calls atomic.Int32
+		s := engineSync{
+			health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+				if !up.Load() {
+					return engineapi.RuntimeHealth{}, errors.New("down")
+				}
+				return engineapi.RuntimeHealth{BootID: "same"}, nil
+			}),
+			apply: func(context.Context) ([]string, error) {
+				calls.Add(1)
+				if fail.Load() {
+					return nil, errors.New("apply failed")
+				}
+				return nil, nil
+			},
+			logger: zap.NewNop().Sugar(),
+			replay: replay,
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.run(ctx)
+		}()
+		synctest.Wait()
+		up.Store(false)
+		replay <- struct{}{}
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatalf("unreachable engine applied: %d", calls.Load())
+		}
+		up.Store(true)
+		fail.Store(true)
+		time.Sleep(engineSyncInterval)
+		synctest.Wait()
+		if calls.Load() != 2 {
+			t.Fatalf("forced replay lost during outage: %d", calls.Load())
+		}
+		fail.Store(false)
+		time.Sleep(engineSyncInterval)
+		synctest.Wait()
+		if calls.Load() != 3 {
+			t.Fatalf("forced replay did not retry apply failure: %d", calls.Load())
+		}
+		time.Sleep(2 * engineSyncInterval)
+		synctest.Wait()
+		if calls.Load() != 3 {
+			t.Fatalf("successful forced replay repeated: %d", calls.Load())
+		}
+		cancel()
+		<-done
+	})
+}
+
+func TestAutoRollbackReplaysPreviousConfig(t *testing.T) {
+	for _, timing := range []string{"before startup", "after startup", "during replay"} {
+		t.Run(timing, func(t *testing.T) {
+			store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			ctx := context.Background()
+			previous := config.DefaultConfig()
+			previous.Interfaces = nil
+			previous.Firewall.DefaultAction = config.ActionAllow
+			pending := *previous
+			pending.Firewall.DefaultAction = config.ActionDeny
+			if err := store.Save(ctx, previous); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveCandidate(ctx, &pending); err != nil {
+				t.Fatal(err)
+			}
+			ttl := time.Hour
+			if timing == "before startup" {
+				ttl = time.Millisecond
+			}
+			if err := store.CommitConfirmed(ctx, ttl); err != nil {
+				t.Fatal(err)
+			}
+			// Wait for expiry before registering management's hook to verify
+			// that the unconditional boot replay covers the startup gap.
+			if timing == "before startup" {
+				waitForRollback(t, store)
+			}
+			applied := make(chan rules.Action, 8)
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					_, _ = w.Write([]byte(`{"bootId":"same","iec104Enforcement":{"healthy":true}}`))
+					return
+				}
+				if r.URL.Path == "/internal/apply_rules" {
+					var snap rules.Snapshot
+					if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					if timing == "during replay" && snap.Default == rules.ActionDeny {
+						close(entered)
+						<-release
+					}
+					applied <- snap.Default
+				}
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+			stop := startEngineSync(ctx, zap.NewNop().Sugar(), store, engineapi.NewHTTPClient(srv.URL), nil)
+			defer func() {
+				unblock()
+				stop()
+			}()
+			awaitApply := func(want rules.Action) {
+				t.Helper()
+				select {
+				case got := <-applied:
+					if got != want {
+						t.Fatalf("engine rules=%s, want %s", got, want)
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatalf("timed out waiting for rules=%s", want)
+				}
+			}
+			if timing != "before startup" {
+				if timing == "during replay" {
+					select {
+					case <-entered:
+					case <-time.After(3 * time.Second):
+						t.Fatal("replay never reached engine")
+					}
+				} else {
+					awaitApply(rules.ActionDeny)
+				}
+				// Re-arm the still-pending commit with a short deadline.
+				// Seed the candidate with pending, but preserve previous by
+				// restoring it before CommitConfirmed snapshots running.
+				if err := store.Save(ctx, previous); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.SaveCandidate(ctx, &pending); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.CommitConfirmed(ctx, time.Millisecond); err != nil {
+					t.Fatal(err)
+				}
+				waitForRollback(t, store)
+				if timing == "during replay" {
+					unblock()
+					awaitApply(rules.ActionDeny)
+				}
+			}
+			awaitApply(rules.ActionAllow)
+			// The boot ID is unchanged: the next normal tick must not push
+			// a second rollback replay.
+			select {
+			case got := <-applied:
+				t.Fatalf("unexpected extra replay: %s", got)
+			case <-time.After(1100 * time.Millisecond):
+			}
+			stop()
+		})
+	}
+}
+
+func waitForRollback(t *testing.T, store config.Store) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		cfg, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Firewall.DefaultAction == config.ActionAllow {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("store did not auto-rollback")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

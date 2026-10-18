@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Commit-confirmed expiry replays the rolled-back running configuration to the
+  engine without requiring an engine restart. Service and VPN updates serialize
+  persistence and runtime changes with replay.
 - IDS updates, imports and restores return runtime apply errors and warnings
   instead of reporting silent success. Config commits, interface/routing updates
   and dataplane/PCAP changes serialize persistence with engine replay to prevent
