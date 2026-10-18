@@ -278,11 +278,13 @@ assert_dynamic_block() {
 ensure_tools
 
 if [[ "$SMOKE_SKIP_UP" != "1" ]]; then
-  log "Ensuring smoke harness is up ($COMPOSE_FILE)..."
+  # Recreate the containers: a stack left by an earlier run still holds its
+  # 10-minute dynamic blocks and retrying clients, which then block this run.
+  log "Recreating smoke harness ($COMPOSE_FILE)..."
   if [[ "$SMOKE_BUILD" == "1" ]]; then
-    compose up -d --build
+    compose up -d --build --force-recreate
   else
-    compose up -d
+    compose up -d --force-recreate
   fi
 fi
 

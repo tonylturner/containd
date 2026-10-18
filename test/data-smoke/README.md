@@ -34,7 +34,7 @@ override that moves them and point the scripts at it:
 | `COMPOSE_FILE` | colon-separated compose files, base first (as in `docker compose`) |
 | `SMOKE_WAN_NET`, `SMOKE_LAN_NET` | first three octets of the moved subnets |
 | `BASE`, `ENGINE` | management and engine URLs for the moved host ports |
-| `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports) |
+| `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports); without it, `smoke-dpi.sh` recreates the containers, because a reused stack keeps the earlier run's dynamic blocks |
 
 The override replaces the engine image, networks, addresses, ports and the
 `/data` bind with `!override` (Docker Compose 2.24 or later), for example
