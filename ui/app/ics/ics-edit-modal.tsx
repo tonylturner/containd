@@ -260,7 +260,7 @@ export function EditICSModal({
             {protocol === "opcua" &&
               "OPC Unified Architecture binary protocol."}
             {isIEC104 &&
-              "First course types: 3, 13, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
+              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>

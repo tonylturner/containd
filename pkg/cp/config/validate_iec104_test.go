@@ -84,8 +84,8 @@ func TestValidateIEC104PredicateRanges(t *testing.T) {
 	}
 
 	ok := iec104Config(iecRule("r", ActionAllow, ICSPredicate{
-		TypeIDs: []int{46},
-		Classes: []string{"control"},
+		TypeIDs: []int{1, 30, 46},
+		Classes: []string{"monitor", "control"},
 		CA:      []uint16{0, 65534},
 		IOA:     []IOARange{{Start: 0, End: 0}, {Start: 65536, End: 65567}, {Start: 16777215, End: 16777215}},
 	}))

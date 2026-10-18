@@ -74,7 +74,7 @@ func profileError(format string, args ...any) error {
 	return fmt.Errorf("profile: "+format, args...)
 }
 
-// checkProfile applies the B SQ/count restrictions: SQ=1 only for types 3
+// checkProfile applies the B SQ/count restrictions: SQ=1 only for types 1, 3
 // and 13; control and system types need SQ=0 and one object.
 func checkProfile(h asduHeader, d descriptor) error {
 	switch {
@@ -171,6 +171,9 @@ func decodeElement(d descriptor, b []byte, obj map[string]any) error {
 
 func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
 	switch kind {
+	case elemSIQ: // SIQ: SPI bit 0, quality (BL, SB, NT, IV) bits 4-7
+		obj[eventfields.KeyValue] = b[0] & 0x01
+		obj[eventfields.KeyQuality] = b[0] & 0xF0
 	case elemDIQ: // DIQ: DPI bits 0-1, quality (BL, SB, NT, IV) bits 4-7
 		obj[eventfields.KeyValue] = b[0] & 0x03
 		obj[eventfields.KeyQuality] = b[0] & 0xF0

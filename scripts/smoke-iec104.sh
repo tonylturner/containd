@@ -486,11 +486,21 @@ fi
 
 rc=0
 run_cmd gi "$ALLOWED_CA" >"$WORK_DIR/gi.out" 2>&1 || rc=$?
-if grep -q 'type=100 cot=7 negative=0' "$WORK_DIR/gi.out" && grep -q 'cot=20' "$WORK_DIR/gi.out" &&
+if grep -q 'type=100 cot=7 negative=0' "$WORK_DIR/gi.out" &&
+  grep -q 'type=1 cot=20 .*ioa=1002' "$WORK_DIR/gi.out" &&
+  grep -q 'cot=20' "$WORK_DIR/gi.out" &&
   grep -q 'type=100 cot=10' "$WORK_DIR/gi.out"; then
-  pass "monitoring: station GI confirmed, COT 20 data and termination pass server -> client"
+  pass "monitoring: station GI Type 1 IOA 1002, COT 20 data and termination pass server -> client"
 else
   fail "monitoring: station GI did not complete" "exit $rc; $(tr '\n' ' ' <"$WORK_DIR/gi.out" | head -c 200)"
+fi
+
+if compose exec -T cc grep -q 'type=1 cot=20 .*ioa=1002' /tmp/cc.log 2>/dev/null &&
+  compose exec -T cc grep -q 'type=30 cot=3 .*ioa=1002' /tmp/cc.log 2>/dev/null; then
+  pass "monitoring: Type 1 GI and spontaneous Type 30 for trip IOA 1002 reach the control centre"
+else
+  fail "monitoring: Type 1 or Type 30 trip telemetry was not decoded" \
+    "$(compose exec -T cc grep -E 'type=(1|30) ' /tmp/cc.log 2>/dev/null | tr '\n' ' ' | head -c 200)"
 fi
 
 CC_SPONT_START=$(cc_count 'cot=3 ' cc.log)

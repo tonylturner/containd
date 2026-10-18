@@ -28,6 +28,7 @@ type elementKind uint8
 
 const (
 	elemNone     elementKind = iota // read command: IOA only
+	elemSIQ                         // single-point information with quality
 	elemDIQ                         // double-point information with quality
 	elemFloatQDS                    // short float + QDS
 	elemSCO                         // single command
@@ -46,6 +47,7 @@ const (
 
 var elementSize = [...]int{
 	elemNone:     0,
+	elemSIQ:      1,
 	elemDIQ:      1,
 	elemFloatQDS: 5,
 	elemSCO:      1,
@@ -70,7 +72,7 @@ type descriptor struct {
 	class  string
 	elem   elementKind
 	timed  bool // a CP56Time2a follows the element
-	sqOK   bool // B profile: SQ=1 accepted (types 3 and 13 only)
+	sqOK   bool // B profile: SQ=1 accepted (types 1, 3 and 13 only)
 	single bool // B profile: SQ=0 and exactly one object (control and system types)
 }
 
@@ -87,8 +89,10 @@ func (d descriptor) objectSize() int {
 // including 104 and 106 (IEC 101 test and delay commands, not used in IEC
 // 104), is unsupported and of class unknown.
 var descriptors = map[uint8]descriptor{
+	1:  {class: ClassMonitor, elem: elemSIQ, sqOK: true},      // M_SP_NA_1
 	3:  {class: ClassMonitor, elem: elemDIQ, sqOK: true},      // M_DP_NA_1
 	13: {class: ClassMonitor, elem: elemFloatQDS, sqOK: true}, // M_ME_NC_1
+	30: {class: ClassMonitor, elem: elemSIQ, timed: true},     // M_SP_TB_1
 	31: {class: ClassMonitor, elem: elemDIQ, timed: true},     // M_DP_TB_1
 
 	45: {class: ClassControl, elem: elemSCO, single: true},                   // C_SC_NA_1

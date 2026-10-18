@@ -129,7 +129,7 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcLabel: "Type IDs and classes",
     fcPlaceholder: "46, 100",
     fcHelp:
-      "Decoded Type IDs: 3, 13, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
+      "Decoded Type IDs: 1, 3, 13, 30, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
     addrLabel: "CA and IOA",
     addrPlaceholder: "",
     addrHelp:

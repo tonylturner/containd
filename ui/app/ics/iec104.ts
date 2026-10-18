@@ -32,8 +32,10 @@ export type IEC104TypeInfo = {
 
 /** Type IDs named in spec §7.2. Every other Type ID is class `unknown`. */
 export const IEC104_TYPES: Record<number, IEC104TypeInfo> = {
+  1: { name: "M_SP_NA_1 single point", cls: "monitor", descriptor: true },
   3: { name: "M_DP_NA_1 double point", cls: "monitor", descriptor: true },
   13: { name: "M_ME_NC_1 short float", cls: "monitor", descriptor: true },
+  30: { name: "M_SP_TB_1 single point, time", cls: "monitor", descriptor: true },
   31: { name: "M_DP_TB_1 double point, time", cls: "monitor", descriptor: true },
   45: { name: "C_SC_NA_1 single command", cls: "control", descriptor: true },
   46: { name: "C_DC_NA_1 double command", cls: "control", descriptor: true },

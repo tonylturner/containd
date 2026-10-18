@@ -498,15 +498,19 @@ restriction**, not malformed wire.
   consecutive IOAs; reject 24-bit overflow. Apply the descriptor's
   element size to every object. Reject zero count, extra bytes and bad
   layouts.
-- **B profile SQ/count:** SQ = 1 is accepted only for types 3 and 13.
+- **B profile SQ/count:** SQ = 1 is accepted only for types 1, 3 and 13.
   Control and system types need SQ = 0 and count = 1. Timed monitoring
-  (31) needs SQ = 0. Anything else is `malformed` with an `error` that
-  says `profile:`. The standard allows SQ = 1 for other monitor types
-  (W6); B rejects it on purpose.
+  (30 and 31) needs SQ = 0. Anything else is `malformed` with an `error`
+  that says `profile:`. The standard allows SQ = 1 for other monitor
+  types (W6); B rejects it on purpose.
 
 | Type IDs | Class | Element after IOA |
 |---|---|---|
-| 3 `M_DP_NA_1`, 13 `M_ME_NC_1`, 31 `M_DP_TB_1` | monitor | DIQ (1); float32 + QDS (5); DIQ + CP56Time2a (8). Keep value, quality and time validity. |
+| 1 `M_SP_NA_1` | monitor | SIQ (1): SPI bit 0 and quality bits 4-7. Keep value and quality. SQ = 1 is accepted. |
+| 3 `M_DP_NA_1` | monitor | DIQ (1): DPI bits 0-1 and quality bits 4-7. Keep value and quality. SQ = 1 is accepted. |
+| 13 `M_ME_NC_1` | monitor | float32 + QDS (5). Keep value and quality. SQ = 1 is accepted. |
+| 30 `M_SP_TB_1` | monitor | SIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 0 only. |
+| 31 `M_DP_TB_1` | monitor | DIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 0 only. |
 | 45/46/47, 58/59/60 | control | SCO/DCO/RCO (1); timed adds CP56Time2a (7). Bit 7 = S/E (select); bits 2-6 = QU qualifier. SCO: value = bit 0, bit 1 reserved (must be 0). DCO/RCO: value = bits 0-1; only 1 and 2 are legal commands, 0 and 3 are `malformed`. |
 | 48/49/50, 61/62/63 | control | normalized int16 / scaled int16 / float32, + QOS (1); timed adds 7. QOS: bits 0-6 = QL, bit 7 = S/E (select). |
 | 51, 64 | control | bitstring32 (4); timed adds 7. **No select bit and no qualifier**: omit `select`. |
@@ -515,7 +519,7 @@ restriction**, not malformed wire.
 | 104, 106 | unknown | IEC 101 test and delay commands, not used in IEC 104. Header-only `unsupported`. |
 | anything else | unknown | Header-only `unsupported` event. Never read-only. |
 
-The first course uses only 3, 13, 31, 100 and 46. The other control
+The first course uses only 1, 3, 13, 30, 31, 100 and 46. The other control
 layouts are decoded so that a student cannot bypass the classifier with
 a different command type; decoding does not authorize them.
 
@@ -711,7 +715,7 @@ Apache-2.0 test data and contain no lib60870 code.
 
 | Capture | Contents |
 |---|---|
-| `startup-gi-monitor` | handshake; STARTDT act/con; GI act/con/data (COT 20)/term; types 3, 13, 31 with quality and time; spontaneous (COT 3); S-frames; TESTFR act/con |
+| `startup-gi-monitor` | handshake; STARTDT act/con; GI act/con/data (COT 20)/term; types 1, 3, 13, 30, 31 with quality and time; spontaneous (COT 3); S-frames; TESTFR act/con |
 | `sbo-double-command` | type 46 select/con, execute/con/term; execute without select (negative); select expiry; execute value ≠ select value |
 | `session-management` | STOPDT/STARTDT; TESTFR; t1 timeout; FIN; link loss then reconnect + GI |
 | `edge-addressing` | IOA 0, 65535, 65536, 16777215; a second CA |

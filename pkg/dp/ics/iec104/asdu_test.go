@@ -77,11 +77,16 @@ func TestDescriptorTable(t *testing.T) {
 		want    objWant
 		absent  []string
 	}{
+		{"1 M_SP_NA_1 SIQ", srv, asdu(1, 1, cotSpont, 0, 1, cat(ioa(0x123456), []byte{0x91})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(0x123456), eventfields.KeyValue: uint8(1), eventfields.KeyQuality: uint8(0x90)},
+			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
 		{"3 M_DP_NA_1 DIQ", srv, asdu(3, 1, cotSpont, 0, 1, cat(ioa(0x123456), []byte{0x82})...), ClassMonitor, false,
 			objWant{eventfields.KeyIOA: uint32(0x123456), eventfields.KeyValue: uint8(2), eventfields.KeyQuality: uint8(0x80)},
 			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
 		{"13 M_ME_NC_1 float+QDS", srv, asdu(13, 1, cotInrogen, 0, 1, cat(ioa(2001), f32(-12.5), []byte{0x01})...), ClassMonitor, false,
 			objWant{eventfields.KeyValue: float32(-12.5), eventfields.KeyQuality: uint8(0x01)}, append(noSelect, noTime...)},
+		{"30 M_SP_TB_1 SIQ+CP56", srv, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1002), []byte{0x81}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: uint8(1), eventfields.KeyQuality: uint8(0x80)}), noSelect},
 		{"31 M_DP_TB_1 DIQ+CP56", srv, asdu(31, 1, cotSpont, 0, 1, cat(ioa(3001), []byte{0x01}, courseTime)...), ClassMonitor, false,
 			with(timeWant, objWant{eventfields.KeyValue: uint8(1), eventfields.KeyQuality: uint8(0)}), noSelect},
 		{"45 C_SC_NA_1 SCO select", cli, asdu(45, 1, cotAct, 0, 1, cat(ioa(5001), []byte{0x85})...), ClassControl, true,
@@ -183,12 +188,13 @@ func TestHeaderAttributes(t *testing.T) {
 // one APDU share its identity and get their own index.
 func TestMultipleObjects(t *testing.T) {
 	sq := iFrame(0, 0, asdu(13, vsqSQ|3, cotInrogen, 0, 1, cat(ioa(65535), f32(1), []byte{0}, f32(2), []byte{0}, f32(3), []byte{0x80})...))
+	singlePoints := iFrame(1, 0, asdu(1, vsqSQ|2, cotInrogen, 0, 1, cat(ioa(1002), []byte{0x01}, []byte{0x90})...))
 	perIOA := iFrame(1, 0, asdu(31, 2, cotSpont, 0, 1, cat(ioa(16777215), []byte{0x01}, courseTime, ioa(0), []byte{0x02}, courseTime)...))
-	res := parseOne(t, srv, cat(sq, perIOA))
-	if len(res.Frames) != 2 || len(res.Frames[0].Events) != 3 || len(res.Frames[1].Events) != 2 {
+	res := parseOne(t, srv, cat(sq, singlePoints, perIOA))
+	if len(res.Frames) != 3 || len(res.Frames[0].Events) != 3 || len(res.Frames[1].Events) != 2 || len(res.Frames[2].Events) != 2 {
 		t.Fatalf("frames %d", len(res.Frames))
 	}
-	wantIOA := [][]uint32{{65535, 65536, 65537}, {16777215, 0}}
+	wantIOA := [][]uint32{{65535, 65536, 65537}, {1002, 1003}, {16777215, 0}}
 	for fi, f := range res.Frames {
 		apduID := f.Events[0].Attributes[eventfields.KeyAPDUID]
 		for oi, ev := range f.Events {
@@ -201,6 +207,12 @@ func TestMultipleObjects(t *testing.T) {
 	}
 	if got := res.Frames[0].Events[2].Attributes[eventfields.KeyQuality]; got != uint8(0x80) {
 		t.Fatalf("third object quality %#v", got)
+	}
+	if got := res.Frames[1].Events[1].Attributes[eventfields.KeyValue]; got != uint8(0) {
+		t.Fatalf("second single point value %#v", got)
+	}
+	if got := res.Frames[1].Events[1].Attributes[eventfields.KeyQuality]; got != uint8(0x90) {
+		t.Fatalf("second single point quality %#v", got)
 	}
 }
 
@@ -215,6 +227,9 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"I-format without ASDU", cli, iFrame(0, 0, nil), eventfields.KindMalformed, "shorter than its 6-octet header"},
 		{"ASDU header cut", cli, iFrame(0, 0, []byte{100, 1, 6, 0, 1}), eventfields.KindMalformed, "shorter than its 6-octet header"},
 		{"zero objects", cli, iFrame(0, 0, asdu(100, 0, cotAct, 0, 1)), eventfields.KindMalformed, "zero information objects"},
+		{"type 1 missing SIQ", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, ioa(1)...)), eventfields.KindMalformed, "ASDU body is 3 octets, want 4"},
+		{"type 1 extra byte", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4"},
+		{"type 30 missing CP56 byte", srv, iFrame(0, 0, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime[:6])...)), eventfields.KindMalformed, "ASDU body is 10 octets, want 11"},
 		{"extra byte", cli, iFrame(0, 0, asdu(100, 1, cotAct, 0, 1, cat(ioa(0), []byte{20, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4"},
 		{"missing byte", srv, iFrame(0, 0, asdu(13, 1, cotSpont, 0, 1, cat(ioa(1), f32(1))...)), eventfields.KindMalformed, "ASDU body is 7 octets, want 8"},
 		{"SQ=1 IOA overflow", srv, iFrame(0, 0, asdu(3, vsqSQ|2, cotSpont, 0, 1, cat(ioa(16777215), []byte{1, 1})...)), eventfields.KindMalformed, "overflows 24 bits"},
@@ -223,6 +238,7 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"DCO state 3", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "command state 3"},
 		{"RCO state 0", cli, iFrame(0, 0, asdu(60, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00}, courseTime)...)), eventfields.KindMalformed, "command state 0"},
 		{"bad CP56", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, cp56(25, 2, 29, 0, 0, 0))...)), eventfields.KindMalformed, "CP56Time2a day 29"},
+		{"profile: SQ=1 on 30", srv, iFrame(0, 0, asdu(30, vsqSQ|1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), eventfields.KindMalformed, "profile: SQ=1 is not accepted for type 30"},
 		{"profile: SQ=1 on 31", srv, iFrame(0, 0, asdu(31, vsqSQ|1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), eventfields.KindMalformed, "profile: SQ=1 is not accepted for type 31"},
 		{"profile: SQ=1 on 46", cli, iFrame(0, 0, asdu(46, vsqSQ|1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
 		{"profile: two commands", cli, iFrame(0, 0, asdu(46, 2, cotAct, 0, 1, cat(ioa(1), []byte{1}, ioa(2), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
@@ -231,7 +247,7 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"role: client sends 1", cli, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 1"},
 		{"role: server activates 46", srv, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: server sent control type 46 with cause 6"},
 		{"role: server deactivates 100", srv, iFrame(0, 0, asdu(100, 1, cotDeact, 0, 1, cat(ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: server sent system type 100 with cause 8"},
-		{"unsupported 1 from server", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 1 has no B descriptor"},
+		{"unsupported 2", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 2 has no B descriptor"},
 		{"unsupported 104", cli, iFrame(0, 0, asdu(104, 1, cotAct, 0, 1, cat(ioa(0), []byte{0xAA, 0x55})...)), eventfields.KindUnsupported, "type 104"},
 		{"unsupported 106", cli, iFrame(0, 0, asdu(106, 1, cotAct, 0, 1, cat(ioa(0), []byte{0, 0})...)), eventfields.KindUnsupported, "type 106"},
 		{"unsupported 255", srv, iFrame(0, 0, asdu(255, 0, 0, 0, 0)), eventfields.KindUnsupported, "type 255"},
@@ -258,9 +274,9 @@ func TestMalformedAndProfile(t *testing.T) {
 // unknown and carry no object attributes. A role violation whose layout
 // decoded keeps its first object as evidence.
 func TestErrorEventEvidence(t *testing.T) {
-	unsupported := events(parseOne(t, srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 7, cat(ioa(1), []byte{1})...))))[0]
+	unsupported := events(parseOne(t, srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 7, cat(ioa(1), []byte{1})...))))[0]
 	checkAttrs(t, "unsupported", unsupported.Attributes, objWant{
-		eventfields.KeyTypeID: uint8(1), eventfields.KeyClass: ClassUnknown, eventfields.KeyCA: uint16(7),
+		eventfields.KeyTypeID: uint8(2), eventfields.KeyClass: ClassUnknown, eventfields.KeyCA: uint16(7),
 		eventfields.KeyCause: uint8(cotSpont), eventfields.KeyAPCIType: "I",
 	}, eventfields.KeyIOA, eventfields.KeyIsWrite, eventfields.KeyValue)
 
@@ -356,10 +372,10 @@ func TestCP56(t *testing.T) {
 
 func TestClassOf(t *testing.T) {
 	want := map[uint8]string{
-		3: ClassMonitor, 13: ClassMonitor, 31: ClassMonitor,
+		1: ClassMonitor, 3: ClassMonitor, 13: ClassMonitor, 30: ClassMonitor, 31: ClassMonitor,
 		45: ClassControl, 51: ClassControl, 58: ClassControl, 64: ClassControl,
 		70: ClassSystem, 100: ClassSystem, 102: ClassSystem, 103: ClassSystem, 105: ClassSystem, 107: ClassSystem,
-		0: ClassUnknown, 1: ClassUnknown, 30: ClassUnknown, 52: ClassUnknown, 104: ClassUnknown, 106: ClassUnknown, 255: ClassUnknown,
+		0: ClassUnknown, 2: ClassUnknown, 52: ClassUnknown, 104: ClassUnknown, 106: ClassUnknown, 255: ClassUnknown,
 	}
 	for typeID, class := range want {
 		if got := ClassOf(typeID); got != class {

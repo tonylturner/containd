@@ -220,12 +220,18 @@ func APDUID(session string, dir byte /* 'c' | 's' */, start int64) string // "<s
 
 ## K4 IEC104 events (spec §5.5 + W5–W7)
 
+**Amendment (Tony, 2026-10-18).** Type 1 (`M_SP_NA_1`) and Type 30
+(`M_SP_TB_1`) have B descriptors and class `monitor`. Both decode the
+single-point information (SIQ) state and quality; Type 30 also decodes
+CP56Time2a. SQ=1 is accepted for Type 1, alongside Types 3 and 13; Type 30
+requires SQ=0.
+
 - **Proto and kinds.** `Proto="iec104"`. Kinds: `request`, `response`, `apci`, `malformed`, `unsupported`. One event per information object, and one per S-frame, U-frame or error APDU.
 - **Attribute Go types** are as in §5.5. `value` is typed by descriptor:
 
   | Element | `value` type |
   |---|---|
-  | DIQ, SCO, DCO, RCO state | `uint8` |
+  | SIQ, DIQ, SCO, DCO, RCO state | `uint8` |
   | normalized (raw) | `int16` |
   | scaled | `int16` |
   | short float | `float32` |
