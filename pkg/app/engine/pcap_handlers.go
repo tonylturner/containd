@@ -39,7 +39,7 @@ func pcapConfigHandler(mgr *pcap.Manager, ownership *ownershipManager) http.Hand
 			}
 			wasRunning := mgr.Status().Running
 			if ownership != nil && wasRunning && cfg.Enabled {
-				cfg, err = resolvePCAPConfig(cfg, ownership.currentInterfaces())
+				cfg, err = resolvePCAPConfig(cfg, ownership.currentInterfaces(), net.InterfaceByName)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -86,7 +86,7 @@ func pcapStartHandler(mgr *pcap.Manager, ownership *ownershipManager) http.Handl
 			}
 		}
 		if ownership != nil {
-			resolved, err := resolvePCAPConfig(cfg, ownership.currentInterfaces())
+			resolved, err := resolvePCAPConfig(cfg, ownership.currentInterfaces(), net.InterfaceByName)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -101,36 +101,33 @@ func pcapStartHandler(mgr *pcap.Manager, ownership *ownershipManager) http.Handl
 	}
 }
 
-func resolvePCAPConfig(cfg config.PCAPConfig, ifaces []config.Interface) (config.PCAPConfig, error) {
+func resolvePCAPConfig(cfg config.PCAPConfig, ifaces []config.Interface, lookup func(string) (*net.Interface, error)) (config.PCAPConfig, error) {
 	if len(cfg.Interfaces) == 0 && len(cfg.Zones) == 0 {
 		return config.PCAPConfig{}, fmt.Errorf("pcap requires at least one interface or zone")
 	}
 
 	logical := make(map[string]string, len(ifaces))
+	kernelDevice := func(iface config.Interface) string {
+		if device := strings.TrimSpace(iface.Device); device != "" {
+			return device
+		}
+		return strings.TrimSpace(iface.Name)
+	}
 	for _, iface := range ifaces {
 		name := strings.TrimSpace(iface.Name)
 		if name == "" {
 			continue
 		}
-		device := strings.TrimSpace(iface.Device)
-		if device == "" {
-			device = name
-		}
-		logical[name] = device
+		logical[name] = kernelDevice(iface)
 	}
 
 	resolved := make([]string, 0, len(cfg.Interfaces)+len(ifaces))
 	seen := make(map[string]struct{}, cap(resolved))
-	addDevice := func(device, ref string) error {
-		device = strings.TrimSpace(device)
-		if device == "" {
-			return fmt.Errorf("pcap interface %q resolves to an empty kernel device", ref)
-		}
+	addDevice := func(device string) {
 		if _, ok := seen[device]; !ok {
 			seen[device] = struct{}{}
 			resolved = append(resolved, device)
 		}
-		return nil
 	}
 	resolveInterface := func(ref string) error {
 		ref = strings.TrimSpace(ref)
@@ -138,10 +135,15 @@ func resolvePCAPConfig(cfg config.PCAPConfig, ifaces []config.Interface) (config
 			return fmt.Errorf("pcap.interfaces cannot include empty name")
 		}
 		if device, ok := logical[ref]; ok {
-			return addDevice(device, ref)
+			if _, err := lookup(device); err != nil {
+				return fmt.Errorf("pcap interface %q has no existing kernel device %q: %w", ref, device, err)
+			}
+			addDevice(device)
+			return nil
 		}
-		if _, err := net.InterfaceByName(ref); err == nil {
-			return addDevice(ref, ref)
+		if _, err := lookup(ref); err == nil {
+			addDevice(ref)
+			return nil
 		}
 		return fmt.Errorf("pcap interface %q is not a configured logical interface or existing kernel device", ref)
 	}
@@ -157,21 +159,28 @@ func resolvePCAPConfig(cfg config.PCAPConfig, ifaces []config.Interface) (config
 			return config.PCAPConfig{}, fmt.Errorf("pcap.zones cannot include empty name")
 		}
 		found := false
+		bound := false
+		var unbound []string
 		for _, iface := range ifaces {
 			if strings.TrimSpace(iface.Zone) != zone {
 				continue
 			}
 			found = true
-			device := strings.TrimSpace(iface.Device)
-			if device == "" {
-				device = strings.TrimSpace(iface.Name)
+			device := kernelDevice(iface)
+			if device != "" {
+				if _, err := lookup(device); err == nil {
+					bound = true
+					addDevice(device)
+					continue
+				}
 			}
-			if err := addDevice(device, zone); err != nil {
-				return config.PCAPConfig{}, fmt.Errorf("pcap zone %q: %w", zone, err)
-			}
+			unbound = append(unbound, fmt.Sprintf("%q", iface.Name))
 		}
 		if !found {
 			return config.PCAPConfig{}, fmt.Errorf("pcap zone %q has no configured interfaces", zone)
+		}
+		if !bound {
+			return config.PCAPConfig{}, fmt.Errorf("pcap zone %q has no kernel devices (%s unbound); bind members to existing devices", zone, strings.Join(unbound, ", "))
 		}
 	}
 	if len(resolved) == 0 {

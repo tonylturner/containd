@@ -1122,10 +1122,18 @@ paths:
         required: false
         description: >
           An omitted or empty body starts the saved PCAP configuration. A
-          nonempty body replaces the saved configuration and is saved;
-          omitted fields use their normal defaults rather than saved values.
+          nonempty body replaces the PCAP configuration and is saved only
+          after the engine accepts the start. A rejected start leaves the saved
+          configuration unchanged. If no engine is connected, the start is queued
+          and the configuration is saved.
+          Omitted fields use their normal defaults rather than saved values.
           The complete configuration must select at least one interface or
-          zone; an empty selection is rejected.
+          zone; an empty selection is rejected. Logical interfaces resolve to
+          their Device when set, otherwise their Name, and the kernel device
+          must exist. Explicit interfaces that resolve to missing devices are
+          rejected. Zones include only members with existing kernel devices;
+          a zone with none is rejected with its name and unbound members.
+          Start responses and status list resolved kernel devices only.
         content:
           application/json:
             schema: { $ref: "#/components/schemas/PcapConfig" }

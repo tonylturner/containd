@@ -17,8 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows the IEC fields.
 - PCAP capture selects targets by zone (`zones`) and by logical or kernel
   interface name (`interfaces`). The engine resolves both, also when a
-  config commit restarts capture. `filter.port` takes a TCP/UDP port or
-  range.
+  config commit restarts capture. A logical interface uses its `Device`,
+  or its `Name` when unset, only if that kernel device exists. Zones skip
+  unbound members and reject a zone with no existing devices, naming the
+  zone and unbound members. Explicit interfaces with missing devices are
+  rejected. Start responses and status list kernel devices only.
+  `filter.port` takes a TCP/UDP port or range.
 - `/api/v1/health` reports `ipv4Forwarding` (`enabled`, `disabled` or
   `unknown`). A commit with forwarding disabled returns a warning, and the
   engine logs a warning when a blocked sysctl write leaves it at 0.
@@ -35,8 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IEC 104 telemetry does not push them out. Event lists return retained
   DENYs first within `limit`, so they can displace newer telemetry rows.
 - **A non-empty PCAP start body replaces the saved PCAP configuration** and
-  is saved. Omitted fields take their defaults. A body with no interface
-  and no zone is rejected. An empty body starts the saved configuration.
+  is saved only after the engine accepts the start; a rejected start leaves
+  the saved configuration unchanged. With no engine connected, the start is
+  queued and saved. Omitted fields take their defaults. A body with no
+  interface and no zone is rejected. An empty body starts the saved
+  configuration.
 - Normal Modbus replies carry kind `response`; exceptions stay `exception`.
 - Merged 0.1.32 (persistent Modbus/DNP3 inspection, reply orientation,
   port-less rules, Go 1.26.9). IEC 104 keeps failing closed: an unmatched

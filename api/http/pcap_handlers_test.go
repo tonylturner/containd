@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -36,6 +37,16 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 	}
 	store := &mockStore{cfg: cfg}
 	engine := newRuntimeMockEngine()
+	store.save = func(saved *config.Config) error {
+		if !reflect.DeepEqual(saved.PCAP, engine.pcapStartCfg) {
+			t.Fatalf("saved PCAP config = %#v before engine accepted %#v", saved.PCAP, engine.pcapStartCfg)
+		}
+		if err := saved.Validate(); err != nil {
+			return err
+		}
+		store.cfg = saved
+		return nil
+	}
 	server := NewServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
@@ -58,6 +69,9 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 	}
 	if engine.pcapStartCfg.Mode != "" || engine.pcapStartCfg.Snaplen != 0 || engine.pcapStartCfg.FilePrefix != "" {
 		t.Fatalf("engine start inherited omitted fields from stored config: %#v", engine.pcapStartCfg)
+	}
+	if store.calls != 1 || !store.cfg.PCAP.Enabled {
+		t.Fatalf("successful start saved config %d times: %#v", store.calls, store.cfg.PCAP)
 	}
 }
 
@@ -90,6 +104,9 @@ func TestPCAPStartWithoutBodyUsesStoredConfig(t *testing.T) {
 			if got := engine.pcapStartCfg; len(got.Interfaces) != 1 || got.Interfaces[0] != "stored" ||
 				got.Mode != "once" || got.Snaplen != 256 || !got.Enabled {
 				t.Fatalf("engine start config = %#v, want stored settings enabled", got)
+			}
+			if store.calls != 1 || !reflect.DeepEqual(store.cfg.PCAP, engine.pcapStartCfg) {
+				t.Fatalf("successful start did not save engine config: calls=%d cfg=%#v", store.calls, store.cfg.PCAP)
 			}
 		})
 	}
@@ -124,7 +141,10 @@ func TestPCAPStartBodyWithoutSelectionRejectsStoredFallback(t *testing.T) {
 }
 
 func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
-	store := &mockStore{cfg: config.DefaultConfig()}
+	cfg := config.DefaultConfig()
+	cfg.PCAP = config.PCAPConfig{Interfaces: []string{"stored"}, Mode: "once", Snaplen: 256}
+	original := cfg.PCAP
+	store := &mockStore{cfg: cfg}
 	engine := &pcapStartErrorEngine{
 		runtimeMockEngine: newRuntimeMockEngine(),
 		err:               errors.New(`pcap zone "ghost" has no configured interfaces`),
@@ -142,6 +162,26 @@ func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "ghost") {
 		t.Fatalf("pcap start response did not name unknown zone: %s", rec.Body.String())
+	}
+	if store.calls != 0 || !reflect.DeepEqual(store.cfg.PCAP, original) {
+		t.Fatalf("failed start changed stored config: calls=%d cfg=%#v, want %#v", store.calls, store.cfg.PCAP, original)
+	}
+}
+
+func TestPCAPStartWithoutEngineQueuesAndSaves(t *testing.T) {
+	store := &mockStore{cfg: config.DefaultConfig()}
+	server := NewServerWithEngine(store, nil, nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
+		`{"zones":["lan"],"filter":{"port":"502"}}`,
+	)))
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "pcap start queued") {
+		t.Fatalf("queued start status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	want := config.PCAPConfig{Enabled: true, Zones: []string{"lan"}, Filter: config.PCAPFilter{Port: "502"}}
+	if store.calls != 1 || !reflect.DeepEqual(store.cfg.PCAP, want) {
+		t.Fatalf("queued start saved config %d times: %#v, want %#v", store.calls, store.cfg.PCAP, want)
 	}
 }
 

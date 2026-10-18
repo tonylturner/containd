@@ -89,6 +89,14 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		var status pcap.Status
+		if engine != nil {
+			status, err = engine.StartPcap(c.Request.Context(), capture)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		cfg.PCAP = capture
 		if err := store.Save(c.Request.Context(), cfg); err != nil {
 			httpError(c, err)
@@ -96,11 +104,6 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 		}
 		if engine == nil {
 			c.JSON(http.StatusOK, gin.H{"status": "pcap start queued"})
-			return
-		}
-		status, err := engine.StartPcap(c.Request.Context(), cfg.PCAP)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		auditLog(c, audit.Record{Action: "pcap.start", Target: "running"})
