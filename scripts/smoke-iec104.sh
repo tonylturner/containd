@@ -683,12 +683,14 @@ fi
 #     Queue failure at start: enforcement health reports unhealthy.
 reject_check() {
   local name=$1 cfg=$2 code
-  code=$(echo "$cfg" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-    -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/reject.json" 2>/dev/null || true)
-  if [[ "$code" =~ ^4 ]]; then
+  # Expected HTTP errors are data here: -f can discard their response body.
+  code=$(echo "$cfg" | curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/reject.json" || true)
+  if [[ "$code" == "400" && -s "$WORK_DIR/reject.json" ]]; then
     gate_pass "$name" "HTTP $code: $(head -c 160 "$WORK_DIR/reject.json")"
   else
-    gate_fail "$name" "HTTP ${code:-none}: the management API saved it"
+    gate_fail "$name" "HTTP ${code:-none}: expected 400 with a validation error body"
   fi
 }
 reject_check "IEC enforce with the iec104 decoder off is refused before save" \

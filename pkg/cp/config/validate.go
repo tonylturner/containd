@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Validate performs basic consistency checks on the config.
@@ -377,9 +379,11 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				return fmt.Errorf("rule %s has invalid CIDR %q: %w", r.ID, cidr, err)
 			}
 		}
-		for _, p := range r.Protocols {
-			if p.Name == "" {
-				return fmt.Errorf("rule %s has protocol with empty name", r.ID)
+		for i := range r.Protocols {
+			p := &r.Protocols[i]
+			p.Name = strings.ToLower(strings.TrimSpace(p.Name))
+			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
+				return fmt.Errorf("rule %s: %w", r.ID, err)
 			}
 		}
 		for _, id := range r.Identities {

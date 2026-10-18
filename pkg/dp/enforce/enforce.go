@@ -473,7 +473,14 @@ func protocolMatch(p rules.Protocol) (string, error) {
 		if p.Port == "" {
 			return "meta l4proto " + name, nil
 		}
-		return fmt.Sprintf("%s dport %s", name, p.Port), nil
+		lo, hi, err := rules.ParsePortRange(p.Port)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s port: %w", name, err)
+		}
+		if lo == hi {
+			return fmt.Sprintf("%s dport %d", name, lo), nil
+		}
+		return fmt.Sprintf("%s dport %d-%d", name, lo, hi), nil
 	case "icmp":
 		if p.Port != "" {
 			return "", fmt.Errorf("icmp does not take a port (got %q)", p.Port)

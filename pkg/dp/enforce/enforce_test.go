@@ -588,3 +588,15 @@ func TestCompileEntryRejectsInvalidProtocols(t *testing.T) {
 		})
 	}
 }
+
+func TestProtocolMatchPortSerialization(t *testing.T) {
+	for _, tc := range []struct{ port, want string }{
+		{"0502", "tcp dport 502"}, {"0001-0002", "tcp dport 1-2"}, {"0-65535", "tcp dport 0-65535"},
+		{"80 accept", ""}, {"1-0", ""}, {"65536", ""}, {"1; drop", ""}, {"+80", ""},
+	} {
+		got, err := protocolMatch(rules.Protocol{Name: "tcp", Port: tc.port})
+		if got != tc.want || (err != nil) != (tc.want == "") {
+			t.Errorf("port %q: got %q, %v; want %q", tc.port, got, err, tc.want)
+		}
+	}
+}

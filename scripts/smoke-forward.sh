@@ -153,8 +153,8 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
         }
       ])
 ')
-tmp_cfg_resp=$(mktemp)
-tmp_cfg_err=$(mktemp)
+tmp_cfg_resp="$WORK_DIR/tmp_cfg_resp"
+tmp_cfg_err="$WORK_DIR/tmp_cfg_err"
 code=$(echo "$UPDATED_CFG" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$tmp_cfg_resp" 2>"$tmp_cfg_err" || true)
 if [[ "$code" != "200" ]]; then
   log "config save failed (HTTP $code): body=$(cat "$tmp_cfg_resp"), err=$(cat "$tmp_cfg_err")"
@@ -165,7 +165,7 @@ rm -f "$tmp_cfg_resp" "$tmp_cfg_err"
 # Bypass commit in the harness; push snapshot directly to engine.
 ENGINE=${ENGINE:-http://localhost:18081}
 log "Fetching compiled snapshot from mgmt..."
-tmp_ruleset=$(mktemp)
+tmp_ruleset="$WORK_DIR/tmp_ruleset"
 if ! $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$tmp_ruleset"; then
   log "failed to fetch ruleset preview"
   exit 1
@@ -179,7 +179,7 @@ log "Enabling enforcement on engine..."
 $CURL -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data '{"enforcement":true,"enforceTable":"containd"}' >/dev/null
 
 log "Applying snapshot to engine..."
-tmp_apply_resp=$(mktemp)
+tmp_apply_resp="$WORK_DIR/tmp_apply_resp"
 code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/apply_rules" --data "$SNAP" -o "$tmp_apply_resp" || true)
 if [[ "$code" != "200" ]]; then
   log "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"

@@ -182,3 +182,28 @@ func TestFlowPathRecordsEventsBeforeError(t *testing.T) {
 		t.Fatalf("malformed event missing: %v", kinds)
 	}
 }
+
+func TestFlowPathSweepsExpiredStreams(t *testing.T) {
+	for _, hard := range []bool{false, true} {
+		t.Run(map[bool]string{false: "idle", true: "hard"}[hard], func(t *testing.T) {
+			e := recordEngine(t)
+			p := recordPacket(100, capture.TCPFlagPSH, "AB")
+			e.handlePacket(p)
+			for _, st := range e.flows {
+				if hard {
+					st.HardTimeout = time.Second
+				} else {
+					st.IdleTimeout = time.Second
+				}
+			}
+			e.sweepFlows(p.Timestamp.Add(2 * time.Second))
+			if len(e.flows) != 0 {
+				t.Fatal("expired flow retained")
+			}
+			e.handlePacket(recordPacket(102, capture.TCPFlagPSH, "CD"))
+			if got := records(e); len(got) != 0 {
+				t.Fatalf("expired stream tail survived sweep: %v", got)
+			}
+		})
+	}
+}

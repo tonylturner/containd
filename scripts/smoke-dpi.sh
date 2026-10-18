@@ -322,10 +322,14 @@ fi
 UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
   --argjson clients "$CLIENT_SOURCES" --arg server "${WAN_NET}.4/32" \
   --arg capture "$SMOKE_DPI_CAPTURE" --argjson queue "$NFQUEUE_GROUP" '
-  .interfaces |= map(
-    if .name=="wan" then .device=$wan
-    elif .name=="lan1" then .device=$lan | .zone="lan"
-    else . end)
+  # Own the test policy, including zones and NAT. A previously imported
+  # policy may have no lan zone or may contain conflicting IEC envelopes.
+  {schema_version:.schema_version, system:.system,
+   zones:[{name:"wan"},{name:"lan"}],
+   interfaces:[{name:"wan",device:$wan,zone:"wan"},
+               {name:"lan1",device:$lan,zone:"lan"}],
+   dataPlane:{}, ids:{enabled:true},
+   firewall:{defaultAction:"DENY",rules:[],nat:{enabled:true,egressZone:"wan",sourceZones:["lan"]}}}
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"
   | if $capture == "nfqueue"
@@ -338,9 +342,7 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
   | .dataPlane.dpiMode = "enforce"
   | .dataPlane.dpiMock = false
   | .dataPlane.dpiIcsProtocols = ((.dataPlane.dpiIcsProtocols // {}) + {"modbus": true, "dnp3": true})
-  | .firewall.rules = (
-      [ .firewall.rules[]? | select((.id // "") | (startswith("smoke-modbus-") or startswith("smoke-dnp3-")) | not) ]
-      + [
+  | .firewall.rules = [
         {
           id:"smoke-modbus-read",
           description:"Smoke harness allow Modbus reads",
@@ -409,7 +411,7 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
           action:"DENY",
           log:true
         }
-      ])
+      ]
 ')
 
 DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataPlane')
