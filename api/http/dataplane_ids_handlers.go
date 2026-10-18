@@ -176,6 +176,8 @@ func setIDSHandler(store config.Store, engine EngineClient, services ServicesApp
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if err := store.SaveIDSRules(c.Request.Context(), idsCfg.Rules); err != nil {
 			apiError(c, http.StatusInternalServerError, err.Error())
 			return
@@ -192,7 +194,12 @@ func setIDSHandler(store config.Store, engine EngineClient, services ServicesApp
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
 		idsCfg.Rules = nil
 		c.JSON(http.StatusOK, idsCfg)
@@ -248,6 +255,8 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 			return
 		}
 
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		existingRules, err := store.LoadIDSRules(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
@@ -272,7 +281,12 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 			apiError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format})
 
 		c.JSON(http.StatusOK, gin.H{
@@ -354,11 +368,18 @@ func idsRestoreHandler(store config.Store, engine EngineClient, services Service
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if err := store.SaveIDSRules(c.Request.Context(), rules); err != nil {
 			internalError(c, err)
 			return
 		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "ids.rules.restore", Target: "running"})
 		c.JSON(http.StatusOK, gin.H{"status": "restored", "count": len(rules)})
 	}
@@ -404,6 +425,8 @@ func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFun
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)

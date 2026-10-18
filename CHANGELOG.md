@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- IDS updates, imports and restores return runtime apply errors and warnings
+  instead of reporting silent success. Config commits, interface/routing updates
+  and dataplane/PCAP changes serialize persistence with engine replay to prevent
+  lost updates.
 - Management replays the stored running config at boot and after an engine
   restart, detected by a random per-process engine `/health` `bootId`.
   Replays and commit applies are serialized to avoid stale rule pushes.

@@ -40,6 +40,8 @@ func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			httpError(c, err)
@@ -63,6 +65,8 @@ func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFu
 
 func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			httpError(c, err)
@@ -113,6 +117,8 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 
 func stopPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			httpError(c, err)

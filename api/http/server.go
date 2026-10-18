@@ -472,11 +472,13 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 
 func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if err := store.Commit(c.Request.Context()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -504,11 +506,13 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 				ttlSeconds = req.TTLSeconds
 			}
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if err := store.CommitConfirmed(c.Request.Context(), time.Duration(ttlSeconds)*time.Second); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -532,11 +536,13 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 
 func rollbackConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if err := store.Rollback(c.Request.Context()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -553,6 +559,8 @@ func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 	return applyRunningConfig(ctx, store, engine, services)
 }
 
+// runningConfigApplyMu protects replay and running-store mutations coupled to
+// runtime applies. Hold it before loading a config to modify, through its apply.
 var runningConfigApplyMu sync.Mutex
 
 func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
@@ -560,6 +568,12 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 	// snapshot read before a newer commit's apply.
 	runningConfigApplyMu.Lock()
 	defer runningConfigApplyMu.Unlock()
+	return applyRunningConfigLocked(ctx, store, engine, services)
+}
+
+// applyRunningConfigLocked is the single apply sequence. Callers must hold
+// runningConfigApplyMu, including across any preceding store mutation.
+func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

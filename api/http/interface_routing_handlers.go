@@ -55,6 +55,8 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			apiError(c, http.StatusBadRequest, "invalid request")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -89,7 +91,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
@@ -188,6 +190,8 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -209,6 +213,8 @@ func createInterfaceHandler(store config.Store, engine EngineClient, services Se
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -226,7 +232,7 @@ func createInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
@@ -241,6 +247,8 @@ func createInterfaceHandler(store config.Store, engine EngineClient, services Se
 func deleteInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -263,7 +271,7 @@ func deleteInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
@@ -283,6 +291,8 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -323,7 +333,7 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 			return
 		}
 		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+			warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 			if err != nil {
 				apiError(c, http.StatusBadGateway, err.Error())
 				return
@@ -353,6 +363,8 @@ func setRoutingHandler(store config.Store, engine EngineClient, services Service
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
@@ -363,7 +375,7 @@ func setRoutingHandler(store config.Store, engine EngineClient, services Service
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
@@ -387,6 +399,8 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
