@@ -379,8 +379,10 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				return fmt.Errorf("rule %s has invalid CIDR %q: %w", r.ID, cidr, err)
 			}
 		}
-		for _, p := range r.Protocols {
-			if err := rules.ValidateProtocol(strings.ToLower(strings.TrimSpace(p.Name)), p.Port); err != nil {
+		for i := range r.Protocols {
+			p := &r.Protocols[i]
+			p.Name = strings.ToLower(strings.TrimSpace(p.Name))
+			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
 				return fmt.Errorf("rule %s: %w", r.ID, err)
 			}
 		}

@@ -23,3 +23,18 @@ func TestValidateRuleProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCanonicalizesRuleProtocol(t *testing.T) {
+	cfg := Config{System: SystemConfig{Hostname: "test"}, Firewall: FirewallConfig{DefaultAction: ActionDeny, Rules: []Rule{{ID: "test", Action: ActionAllow, Protocols: []Protocol{{Name: " TCP ", Port: "502"}, {Name: "UDP"}, {Name: "ICMP"}}}}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"tcp", "udp", "icmp"} {
+		if got := cfg.Firewall.Rules[0].Protocols[i].Name; got != want {
+			t.Fatalf("protocol = %q, want %q", got, want)
+		}
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
