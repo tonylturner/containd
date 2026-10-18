@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -264,10 +265,12 @@ func TestVPNManagerApplyAndSupervisionLifecycle(t *testing.T) {
 	if err := mgr.stopOpenVPN(); err != nil {
 		t.Fatalf("stopOpenVPN(idempotent): %v", err)
 	}
-	emittedMu.Lock()
-	emittedCount := len(emitted)
-	emittedMu.Unlock()
-	if emittedCount == 0 {
-		t.Fatal("expected emitted vpn supervision events")
-	}
+	// The manager emits started and stopped from goroutines (vpn.go), so wait
+	// for both instead of reading the slice once.
+	waitFor(t, 2*time.Second, func() bool {
+		emittedMu.Lock()
+		defer emittedMu.Unlock()
+		return slices.Contains(emitted, "service.vpn.openvpn.started") &&
+			slices.Contains(emitted, "service.vpn.openvpn.stopped")
+	})
 }
