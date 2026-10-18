@@ -68,7 +68,7 @@ type Store struct {
 	nextID   atomic.Uint64
 
 	mu      sync.Mutex
-	events  []Event
+	general eventRing
 	aborted abortedSet // aborted IEC104 incarnations hidden from Flows
 
 	// Spill-to-disk support.
@@ -87,7 +87,7 @@ func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &Store{capacity: capacity, idBase: idBase}
+	return &Store{capacity: capacity, idBase: idBase, general: eventRing{capacity: capacity}}
 }
 
 // NewStoreWithSpill creates a Store with spill-to-disk enabled.
@@ -231,19 +231,7 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 		if pkt != nil {
 			out.Transport = pkt.Proto
 		}
-		s.events = append(s.events, out)
-		if len(s.events) > s.capacity {
-			// Drop oldest — shift in place to avoid re-allocation.
-			shift := len(s.events) - s.capacity
-			// Spill the evicted events before discarding.
-			if s.spillCh != nil {
-				for i := 0; i < shift; i++ {
-					s.spillEvent(s.events[i])
-				}
-			}
-			copy(s.events, s.events[shift:])
-			s.events = s.events[:s.capacity]
-		}
+		s.appendGeneral(out)
 	}
 }
 
@@ -258,17 +246,7 @@ func (s *Store) Append(e Event) Event {
 	if e.ID == 0 {
 		e.ID = s.idBase + s.nextID.Add(1)
 	}
-	s.events = append(s.events, e)
-	if len(s.events) > s.capacity {
-		shift := len(s.events) - s.capacity
-		if s.spillCh != nil {
-			for i := 0; i < shift; i++ {
-				s.spillEvent(s.events[i])
-			}
-		}
-		copy(s.events, s.events[shift:])
-		s.events = s.events[:s.capacity]
-	}
+	s.appendGeneral(e)
 	return e
 }
 
@@ -282,7 +260,7 @@ func (s *Store) List(limit int) []Event {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := len(s.events)
+	n := len(s.general.events)
 	if n == 0 {
 		return nil
 	}
@@ -291,7 +269,7 @@ func (s *Store) List(limit int) []Event {
 	}
 	out := make([]Event, 0, limit)
 	for i := n - 1; i >= 0 && len(out) < limit; i-- {
-		out = append(out, s.events[i])
+		out = append(out, s.general.at(i))
 	}
 	return out
 }
@@ -306,9 +284,9 @@ func (s *Store) MatchingEvents(predicate func(Event) bool) []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []Event
-	for i := range s.events {
-		if predicate(s.events[i]) {
-			out = append(out, s.events[i])
+	for i := range s.general.events {
+		if predicate(s.general.at(i)) {
+			out = append(out, s.general.at(i))
 			if len(out) >= maxResults {
 				break
 			}
@@ -324,7 +302,7 @@ func (s *Store) Len() int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.events)
+	return len(s.general.events)
 }
 
 // TimeRange returns the timestamps of the oldest and newest events in the store.
@@ -335,17 +313,17 @@ func (s *Store) TimeRange() (oldest, newest time.Time) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.events) == 0 {
+	if len(s.general.events) == 0 {
 		return
 	}
-	oldest = s.events[0].Timestamp
-	newest = s.events[0].Timestamp
-	for i := 1; i < len(s.events); i++ {
-		if s.events[i].Timestamp.Before(oldest) {
-			oldest = s.events[i].Timestamp
+	oldest = s.general.at(0).Timestamp
+	newest = s.general.at(0).Timestamp
+	for i := 1; i < len(s.general.events); i++ {
+		if s.general.at(i).Timestamp.Before(oldest) {
+			oldest = s.general.at(i).Timestamp
 		}
-		if s.events[i].Timestamp.After(newest) {
-			newest = s.events[i].Timestamp
+		if s.general.at(i).Timestamp.After(newest) {
+			newest = s.general.at(i).Timestamp
 		}
 	}
 	return
@@ -361,12 +339,13 @@ func (s *Store) Flows(limit int) []FlowSummary {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.events) == 0 {
+	if len(s.general.events) == 0 {
 		return nil
 	}
 	byFlow := map[string]*FlowSummary{}
 	var order []string
-	for _, ev := range s.events {
+	for i := range s.general.events {
+		ev := s.general.at(i)
 		key, sessionID := flowGroup(ev)
 		if sessionID != "" && s.aborted.has(sessionID) {
 			continue
@@ -412,7 +391,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			f.AvBlocked = true
 		}
 	}
-	s.aborted.prune(s.events)
+	s.aborted.prune(s.general)
 	out := make([]FlowSummary, 0, len(byFlow))
 	for _, k := range order {
 		out = append(out, *byFlow[k])
@@ -432,5 +411,5 @@ func (s *Store) MarkAborted(sessionID string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.aborted.add(sessionID, s.events)
+	s.aborted.add(sessionID, s.general)
 }

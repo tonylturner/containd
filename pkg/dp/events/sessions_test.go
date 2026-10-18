@@ -54,20 +54,20 @@ func TestFlowsGroupIECBySessionAcrossDirections(t *testing.T) {
 func TestAbortedSetIsBounded(t *testing.T) {
 	var a abortedSet
 	for i := 0; i < maxAbortedSessions+10; i++ {
-		a.add(string(rune('a'+i%26))+string(rune(i)), nil)
+		a.add(string(rune('a'+i%26))+string(rune(i)), eventRing{})
 	}
 	if len(a.ids) != maxAbortedSessions || len(a.order) != maxAbortedSessions {
 		t.Fatalf("aborted set size = %d/%d", len(a.ids), len(a.order))
 	}
 	// Entries no retained event names are pruned once the ring moved past.
 	var b abortedSet
-	b.add("gone", []Event{{ID: 5}})
-	b.prune([]Event{{ID: 7}})
+	b.add("gone", eventRing{events: []Event{{ID: 5}}})
+	b.prune(eventRing{events: []Event{{ID: 7}}})
 	if b.has("gone") {
 		t.Fatal("stale aborted entry kept")
 	}
-	b.add("late", []Event{{ID: 9}})
-	b.prune([]Event{{ID: 9}})
+	b.add("late", eventRing{events: []Event{{ID: 9}}})
+	b.prune(eventRing{events: []Event{{ID: 9}}})
 	if !b.has("late") {
 		t.Fatal("entry pruned before the ring passed its mark")
 	}

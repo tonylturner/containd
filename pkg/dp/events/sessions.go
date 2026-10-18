@@ -43,7 +43,7 @@ func (a *abortedSet) has(id string) bool {
 	return ok
 }
 
-func (a *abortedSet) add(id string, ring []Event) {
+func (a *abortedSet) add(id string, ring eventRing) {
 	if a.ids == nil {
 		a.ids = make(map[string]uint64)
 	}
@@ -51,8 +51,8 @@ func (a *abortedSet) add(id string, ring []Event) {
 		return
 	}
 	var next uint64
-	if n := len(ring); n > 0 {
-		next = ring[n-1].ID + 1
+	if n := len(ring.events); n > 0 {
+		next = ring.at(n-1).ID + 1
 	}
 	a.ids[id] = next
 	a.order = append(a.order, id)
@@ -64,17 +64,17 @@ func (a *abortedSet) add(id string, ring []Event) {
 
 // prune forgets incarnations that no retained event names, once the ring
 // holds only events newer than the mark (so nothing older can return).
-func (a *abortedSet) prune(ring []Event) {
-	if len(a.ids) == 0 || len(ring) == 0 {
+func (a *abortedSet) prune(ring eventRing) {
+	if len(a.ids) == 0 || len(ring.events) == 0 {
 		return
 	}
 	live := map[string]bool{}
-	for _, ev := range ring {
+	for _, ev := range ring.events {
 		if _, id := flowGroup(ev); id != "" {
 			live[id] = true
 		}
 	}
-	oldest := ring[0].ID
+	oldest := ring.at(0).ID
 	kept := a.order[:0]
 	for _, id := range a.order {
 		if !live[id] && oldest > a.ids[id] {
