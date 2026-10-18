@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries for the engine address.
 - Flows first seen mid-stream are oriented by the known ICS service port, so
   replies get the correct policy context. Handshake evidence still wins.
+- The UI no longer hides a page behind "Checking session..." while it
+  re-checks a session it has already verified.
 - Rules without an ICS predicate omit `ics` from JSON, so applied firewall
   policies read back without spurious empty predicates.
 - Data-plane rebuilds preserve the process event ring and increasing event
