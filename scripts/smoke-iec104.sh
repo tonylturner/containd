@@ -27,10 +27,28 @@ set -euo pipefail
 # The telemetry freshness check runs for IEC104_FRESHNESS_SECONDS (default
 # 660, the spec's "> 10 minutes"); a shorter value records NOT-IMPLEMENTED.
 #
-# Requirements: docker compose, jq, curl. Builds the branch firewall image and
-# the GPLv3 endpoint image if they are absent. Uses a unique compose project
-# and ephemeral loopback ports, so it never touches another smoke stack's
-# containers, networks or volumes. Everything it creates is torn down on exit.
+# Requirements: docker compose, jq, curl, python3. Builds the branch firewall
+# image and the GPLv3 endpoint image if they are absent. The default endpoint
+# tag hashes its build context, including the Dockerfile's pinned dependencies.
+# Uses a unique compose project and ephemeral loopback ports, so it never
+# touches another smoke stack's containers, networks or volumes. Everything it
+# creates is torn down on exit.
+
+endpoint_source_hash() {
+  python3 - "$ROOT/test/iec104/endpoint" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+digest = hashlib.sha256()
+for path in sorted(root.rglob("*")):
+    if path.is_file():
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+print(digest.hexdigest())
+PY
+}
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMPOSE_FILE="$ROOT/test/iec104/compose.yml"
@@ -38,7 +56,7 @@ TOKEN=${IEC104_ADMIN_TOKEN:-devtoken}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 PROJECT=${IEC104_PROJECT:-iec104-smoke-${STAMP}-$$}
 FIREWALL_IMAGE=${IEC104_FIREWALL_IMAGE:-containd/containd:iec104-smoke}
-ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:iec104-smoke}
+ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:iec104-smoke-$(endpoint_source_hash)}
 RESULTS_DIR=${IEC104_RESULTS_DIR:-$ROOT/build/iec104-smoke}
 RESULTS_FILE="$RESULTS_DIR/results.json"
 WORK_DIR=$(mktemp -d)
