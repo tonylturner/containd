@@ -1122,7 +1122,7 @@ paths:
         required: false
         description: >
           An omitted or empty body starts the saved PCAP configuration. A
-          nonempty body replaces the saved configuration for this start;
+          nonempty body replaces the saved configuration and is saved;
           omitted fields use their normal defaults rather than saved values.
           The complete configuration must select at least one interface or
           zone; an empty selection is rejected.
