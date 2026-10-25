@@ -45,7 +45,7 @@ protecting containerized workloads**.
 | Release | Content | State |
 |---|---|---|
 | 0.1.32 | Current `main` and `:latest` | Released |
-| 0.1.33 | IEC 104 monitor types 5, 7, 9, 11, 15, 21, and 30–37; reserved management path; rule-save commit UX; base-path assets; engine-owned rule preview; IEC evidence retention and query | In progress on `iec104` |
+| 0.1.33 | IEC 104 monitor types 5, 7, 9, 11, 15, 21, and 30–37; reserved management path; staged configuration with a global commit bar; base-path assets; engine-owned rule preview; IEC evidence retention and query; release gate (1.11) | In progress on `iec104` |
 
 `:latest` moves only after a complete work effort is tested and merged to
 `main`. Older RangerDanger releases pull `:latest`.
@@ -60,7 +60,7 @@ tests.
 | 1.1 | The engine control API is private: loopback or authenticated transport only; no unconditional TCP/8081 accept. | QS-Q1 |
 | 1.2 | One account-assurance contract for web, SSH, and CLI: forced password change and MFA apply to SSH; credential and MFA changes revoke sessions; MFA challenges are single-use; the last admin cannot be demoted; login throttling ignores the source port; login redirects stay on-origin. | SRA-H1–H3, M9–M11; QS-Q2, Q3, Q18, Q19; CP-F8; UI-U11 |
 | 1.3 | Two explicit deployment profiles: **training** (open, convenient) and **strict** (no universal bootstrap, HTTPS-first writes, Secure cookies, no Docker socket, management published on loopback). Neither silently falls back to the other. | QS-Q4–Q8, Q15 |
-| 1.4 | The wire enforces what the policy says: reject identity and schedule predicates on kernel-only rules; bind DNAT accepts to the translated destination and a policy allow; one rule-precedence contract for kernel, evaluator, and preview; owned-table apply that keeps other tables and active blocks; explicit established-flow behavior on policy change; reject unsupported IPv6 and domain exclusions. | SRA-H10, L1; DP-2–5, 10, 20, 27, 28 |
+| 1.4 | The wire enforces what the policy says: reject identity and schedule predicates on kernel-only rules; bind DNAT accepts to the translated destination and a policy allow; first-match-in-listed-order precedence for kernel, evaluator, and preview (decided); owned-table apply that keeps other tables and active blocks; explicit established-flow behavior on policy change; reject unsupported IPv6 and domain exclusions. | SRA-H10, L1; DP-2–5, 10, 20, 27, 28 |
 | 1.5 | Interface, DHCP, and WireGuard addressing keeps the host IP; address reconcile removes only owned addresses; correct netlink subscriptions. | DP-1, 21; SRA-H7 |
 | 1.6 | Desired, applied, and protecting revisions with retry on the same boot and a readiness signal that means "protecting". | DP-8, 16; CP-F14, F18; SRA-M1 |
 | 1.7 | No silent data loss on writes: CLI and UI read-modify-write fail on a failed read and keep unrelated fields (NAT, proxies, syslog, IDS rules, service drafts); PCAP apply and template preview use the real API shapes. | SRA-H8, M8; DP-23; ICS-D05, D23; CP-F10, F20; UI-U01, U02, U04, U06–U08 |
@@ -126,14 +126,23 @@ must not stop the PLC or the process.
 - eBPF fast path only if measurements justify it; otherwise remove the
   scaffolding (DP L3).
 
-## Open Decisions
+## Decisions
 
-| Decision | Recommendation |
+Decided by the product owner on 2026-10-25.
+
+| Topic | Decision |
 |---|---|
+| `:latest` promotion | Only tags on `main` move `:latest`, after signing and SBOM. Prereleases never move it. This part of item 1.11 ships in 0.1.33; the CI gate follows in Stage 1. |
 | SRA broker | Integrate an existing gateway (Guacamole-class SSH/RDP/VNC) and an OIDC IdP. Do not build a remote desktop stack. |
-| SSH native shell | Training profile only. The strict profile disables the native shell, and SSH meets the same assurance as the web. |
+| SSH native shell | Training profile only. The strict profile disables the native shell, and SSH meets the same MFA assurance as the web. |
 | Established flows after a policy change | Leases always terminate existing flows. Ordinary edits keep existing connections, and the UI says so. |
-| Rule precedence | One documented order for kernel, evaluator, and preview. Choosing it changes behavior, so it needs an explicit decision. |
+| Rule precedence | First match in listed order, everywhere: kernel, evaluator, and preview. This changes behavior (today the kernel sorts allow before deny). |
+| Stage 1 start | Stage 1 starts after 0.1.33 ships. |
+
+Still open:
+
+| Topic | Recommendation |
+|---|---|
 | External IDS formats | Support a validated native subset; store other formats as non-executable artifacts. |
 
 ## Finding IDs
