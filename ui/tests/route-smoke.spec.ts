@@ -381,6 +381,10 @@ function responseFor(pathname: string) {
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/events" && url.searchParams.has("query")) {
+      await route.fulfill(json({ events: [], historyTruncated: false }));
+      return;
+    }
     if (route.request().method() === "GET") {
       await route.fulfill(responseFor(url.pathname));
       return;

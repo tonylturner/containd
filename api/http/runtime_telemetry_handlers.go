@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,12 +21,16 @@ import (
 
 func listEventsHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		limit := 500
-		if q := c.Query("limit"); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 5000 {
-				limit = v
-			}
+		q, filtered, err := dpevents.ParseQuery(c.Request.URL.Query())
+		if err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
 		}
+		if filtered {
+			queryEvents(c, engine, services, q)
+			return
+		}
+		limit := q.Limit
 
 		out := []dpevents.Event{}
 		var engineErr error
@@ -63,6 +68,41 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 	}
 }
 
+// EventQueryClient is the filtered telemetry capability of the engine API.
+type EventQueryClient interface {
+	QueryEvents(context.Context, dpevents.Query) (dpevents.Page, error)
+}
+
+func queryEvents(c *gin.Context, engine EngineClient, services ServicesApplier, q dpevents.Query) {
+	tc, ok := engine.(EventQueryClient)
+	if !ok {
+		apiError(c, http.StatusBadGateway, "engine does not support event queries")
+		return
+	}
+	source, err := tc.QueryEvents(c.Request.Context(), q)
+	var candidates []dpevents.Event
+	serviceHistoryUnknown := false
+	if err == nil {
+		candidates = append(candidates, source.Events...)
+	}
+	if s, ok := services.(interface{ ListTelemetryEvents(int) []dpevents.Event }); ok && s != nil {
+		serviceHistoryUnknown = true
+		// Zero means all retained rows, avoiding service priority selection before filtering.
+		candidates = append(candidates, s.ListTelemetryEvents(0)...)
+	}
+	page := dpevents.QueryPage(candidates, q, source.HistoryTruncated, source.NextCursor != "")
+	// Service stores do not expose overflow metadata. Their completeness cannot
+	// be established, so mark the merged history conservatively as truncated.
+	if serviceHistoryUnknown {
+		page.HistoryTruncated = true
+	}
+	if err != nil {
+		page.EngineError = err.Error()
+		page.HistoryTruncated = true
+	}
+	c.JSON(http.StatusOK, page)
+}
+
 func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -73,16 +113,16 @@ func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.Handl
 		}
 
 		var all []dpevents.Event
-		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
-			evs, err := tc.ListEvents(c.Request.Context(), 5000)
+		if tc, ok := engine.(EventQueryClient); ok && tc != nil {
+			page, err := tc.QueryEvents(c.Request.Context(), dpevents.Query{EventID: id, Limit: 1})
 			if err == nil {
-				all = append(all, evs...)
+				all = append(all, page.Events...)
 			}
 		}
 		if s, ok := services.(interface {
 			ListTelemetryEvents(limit int) []dpevents.Event
 		}); ok && s != nil {
-			all = append(all, s.ListTelemetryEvents(5000)...)
+			all = append(all, s.ListTelemetryEvents(0)...)
 		}
 
 		for _, ev := range all {

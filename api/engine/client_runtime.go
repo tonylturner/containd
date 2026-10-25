@@ -59,6 +59,25 @@ func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Even
 	return out, nil
 }
 
+// QueryEvents fetches a filtered chronological evidence page from the engine.
+func (c *HTTPClient) QueryEvents(ctx context.Context, q dpevents.Query) (dpevents.Page, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/events?"+q.Values().Encode(), nil)
+	if err != nil {
+		return dpevents.Page{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return dpevents.Page{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return dpevents.Page{}, fmt.Errorf("engine events status %d", resp.StatusCode)
+	}
+	var page dpevents.Page
+	err = json.NewDecoder(resp.Body).Decode(&page)
+	return page, err
+}
+
 // ListProtoStats fetches protocol counters derived from live DPI events.
 func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/stats/protocols", nil)

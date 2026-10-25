@@ -205,39 +205,6 @@ func showFlows(api *API) Command {
 	}
 }
 
-func showEvents(api *API) Command {
-	return func(ctx context.Context, out io.Writer, args []string) error {
-		var events []dpevents.Event
-		if err := api.getJSON(ctx, "/api/v1/events", &events); err != nil {
-			return err
-		}
-		if out == nil {
-			return nil
-		}
-		if len(events) == 0 {
-			fmt.Fprintln(out, "No events.")
-			return nil
-		}
-		t := newTable("ID", "TIME", "FLOW", "PROTO", "KIND", "SRC", "DST", "ATTRS")
-		for _, ev := range events {
-			src := fmt.Sprintf("%s:%d", ev.SrcIP, ev.SrcPort)
-			dst := fmt.Sprintf("%s:%d", ev.DstIP, ev.DstPort)
-			t.addRow(
-				fmt.Sprintf("%d", ev.ID),
-				fmtTime(ev.Timestamp),
-				truncate(ev.FlowID, 12),
-				ev.Proto,
-				ev.Kind,
-				truncate(src, 22),
-				truncate(dst, 22),
-				attrsSummary(ev.Attributes, 60),
-			)
-		}
-		t.render(out)
-		return nil
-	}
-}
-
 func showZones(store config.Store) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		cfg, err := store.Load(ctx)

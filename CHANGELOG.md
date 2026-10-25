@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Query retained events server-side by IEC session/APDU, flow, kind, protocol,
+  decision/verdict and time/cursor bounds; Events deep links and CLI flags search
+  before limiting. Filtered pages include cursor and gap/engine-error metadata;
+  only-limit callers keep the bare-array API response.
+
+- Protect bounded IEC 104 incident bundles (denied decisions, enforcement and
+  abort/reset outcomes, and implicated decoded attempts) from routine telemetry.
+
 - IEC 104 decodes single-point information: TypeID 1 (M_SP_NA_1) and
   TypeID 30 (M_SP_TB_1, with CP56Time2a). Both are monitor-class and match
   read-only IEC 104 rules.

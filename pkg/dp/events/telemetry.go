@@ -9,8 +9,11 @@ const denyCapacity = 1024
 
 func (s *Store) appendEvent(ev Event) {
 	if isDeny(ev) {
-		s.denies.push(ev)
+		if _, overflow := s.denies.push(ev); overflow {
+			s.historyTruncated = true
+		}
 	}
+	s.retainIncident(ev)
 	s.appendGeneral(ev)
 }
 
@@ -18,9 +21,9 @@ func isDeny(ev Event) bool {
 	return ev.Kind == "firewall.rule.hit" && ev.Attributes["action"] == "DENY"
 }
 
-// ListTelemetry includes the independent DENY bank. General-store consumers
+// ListTelemetry includes the independent DENY and IEC incident banks. General-store consumers
 // (List, Flows, MatchingEvents and TimeRange) deliberately do not see that bank.
-// Only DENY insertions evict protected rows; no age expiry or persistence applies.
+// Each bank has independent overflow; no age expiry or persistence applies.
 func (s *Store) ListTelemetry(limit int) []Event {
 	if s == nil {
 		return nil
@@ -29,6 +32,9 @@ func (s *Store) ListTelemetry(limit int) []Event {
 	candidates := make([]Event, 0, len(s.general.events)+len(s.denies.events))
 	candidates = append(candidates, s.general.events...)
 	candidates = append(candidates, s.denies.events...)
+	for _, group := range s.incidents.groups {
+		candidates = append(candidates, group.events...)
+	}
 	s.mu.Unlock()
 	return SelectTelemetry(candidates, limit)
 }
@@ -70,7 +76,7 @@ func telemetryPriority(ev Event) int {
 	if ev.Kind == "system.engine.telemetry_error" {
 		return 0
 	}
-	if isDeny(ev) {
+	if isDeny(ev) || incidentEvidence(ev) {
 		return 1
 	}
 	return 2

@@ -172,7 +172,7 @@ async function mockAPI(
       );
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body(url.pathname)) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)) });
   });
 }
 
@@ -244,7 +244,7 @@ test("client navigation keeps verified page content visible while revalidating t
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(body(url.pathname)),
+      body: JSON.stringify(url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)),
     });
   });
 
@@ -283,7 +283,13 @@ test("ICS editor refuses a broadcast CA before saving", async ({ page }) => {
 test("Events shows decision, verdict and reset evidence and filters by session", async ({ page }) => {
   await mockAPI(page, []);
   const errors = trackErrors(page);
+  const request = page.waitForRequest((req) => {
+    const url = new URL(req.url());
+    return url.pathname === "/api/v1/events" && url.searchParams.get("session") === session && url.searchParams.get("category") === "iec104";
+  });
   await page.goto(`/events?filter=iec104&session=${session}`);
+  await request;
+  await expect(page.getByText(/history may have gaps/)).toBeVisible();
   await expect(page.getByText("IEC 104 APDU denied")).toBeVisible();
   await expect(page.getByText("IEC 104 packets dropped")).toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
@@ -309,6 +315,10 @@ test("Flows shows each IEC session incarnation by session_id", async ({ page }) 
   await expect(page.getByText("IEC 104 sessions: 2")).toBeVisible();
   await expect(page.getByText("IEC 012345…-1f")).toBeVisible();
   await expect(page.getByText("IEC 012345…-20")).toBeVisible();
+  const evidenceRequest = page.waitForRequest((req) => new URL(req.url()).searchParams.get("session") === session);
+  await page.getByRole("link", { name: "Evidence", exact: true }).first().click();
+  await evidenceRequest;
+  await expect(page.getByText("IEC 104 APDU denied")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -374,4 +384,32 @@ test("A rejected decoder change is reverted and its reason shown", async ({ page
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(`Not saved: ${reason}`)).toBeVisible();
   await expect(decoders.getByText("8/8 enabled")).toBeVisible();
+});
+
+test("Events sends edited filters before limiting and loads older evidence with cursor", async ({ page }) => {
+  await mockAPI(page, []);
+  const requests: URL[] = [];
+  await page.route("**/api/v1/events?**", async (route) => {
+    const url = new URL(route.request().url()); requests.push(url);
+    if (url.searchParams.get("session") === "unavailable") { await route.fulfill({ status: 503, json: { error: "offline" } }); return; }
+    const older = url.searchParams.get("cursor") === "older";
+    await route.fulfill({ json: { events: older ? [evidenceEvents[2]] : [evidenceEvents[0]], nextCursor: older ? undefined : "older", historyTruncated: true } });
+  });
+  await page.goto(`/events?flow=flow-a&protocol=iec104&decision=deny&since=2026-01-01T00:00:00Z`);
+  await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
+  expect(requests[0].searchParams.get("flow")).toBe("flow-a");
+  expect(requests[0].searchParams.get("decision")).toBe("deny");
+  expect(requests[0].searchParams.get("since")).toBe("2026-01-01T00:00:00Z");
+  await page.getByLabel("Verdict / outcome").fill("drop_failed");
+  await expect.poll(() => requests[requests.length - 1]?.searchParams.get("verdict")).toBe("drop_failed");
+  await page.getByRole("button", { name: "Live", exact: true }).click();
+  await page.getByRole("button", { name: "Load older evidence", exact: true }).click();
+  await expect(page.getByText("IEC 104 APDU denied")).toBeVisible();
+  await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
+  expect(requests[requests.length - 1]?.searchParams.get("cursor")).toBe("older");
+  expect(requests[requests.length - 1]?.searchParams.get("verdict")).toBe("drop_failed");
+  await page.getByLabel("Session ID", { exact: true }).fill("unavailable");
+  await expect(page.getByText(/Failed to load events/)).toBeVisible();
+  await expect(page.getByText("IEC 104 APDU denied")).not.toBeVisible();
+  await expect(page.getByText("IEC 104 reset sent to client")).not.toBeVisible();
 });
