@@ -56,6 +56,7 @@ func (g *ManagementGuard) watch(ctx context.Context, fd int) {
 			unix.Close(fd)
 		}
 	}()
+	buf := make([]byte, 1<<20)
 	for ctx.Err() == nil {
 		if fd < 0 {
 			next, err := subscribeManagement()
@@ -75,7 +76,7 @@ func (g *ManagementGuard) watch(ctx context.Context, fd int) {
 			g.setActive(true)
 			_ = g.Reconcile(ctx)
 		}
-		changed, err := managementChanged(fd)
+		changed, err := managementChanged(fd, buf)
 		if err != nil {
 			g.setActive(false)
 			g.setError(err)
@@ -89,7 +90,7 @@ func (g *ManagementGuard) watch(ctx context.Context, fd int) {
 		}
 	}
 }
-func managementChanged(fd int) (bool, error) {
+func managementChanged(fd int, buf []byte) (bool, error) {
 	polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	n, err := unix.Poll(polls, 100)
 	if errors.Is(err, unix.EINTR) {
@@ -104,7 +105,6 @@ func managementChanged(fd int) (bool, error) {
 	if polls[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
 		return false, fmt.Errorf("management subscription failed/overflowed")
 	}
-	buf := make([]byte, 1<<20)
 	n, _, flags, _, err := unix.Recvmsg(fd, buf, nil, 0)
 	if err != nil {
 		return false, err
