@@ -217,6 +217,9 @@ Decided by the product owner on 2026-10-25.
 | Established flows after a policy change | Leases always terminate existing flows. Ordinary edits keep existing connections, and the UI says so. |
 | Rule precedence | First match in listed order, everywhere: kernel, evaluator, and preview. This changes behavior (today the kernel sorts allow before deny). |
 | containd admin identity | Local accounts by default. OIDC is optional and configurable (2.9); no deployment requires Keycloak or any IdP. |
+| External rule formats (D.2) | Execute a declared Suricata, Snort, and Sigma subset with full meaning in the native engine, and reject the rest at import. No embedded Suricata. |
+| Stage 1 branch | Stage 1 work happens on a new branch cut from `main` after the 0.1.33 merge. |
+| SRA contract inputs (2.1) | Personas, first protocol, and first access mode come from the RangerDanger project. |
 | Stage 1 start | Stage 1 starts after 0.1.33 ships. |
 | Capabilities that do not work yet | Make each one real under its own ticket. A label or a removal is never the end state. Industrial DPI and firewall performance are priority tracks. |
 
@@ -224,7 +227,6 @@ Still open (decide when the ticket starts):
 
 | Topic | Recommendation |
 |---|---|
-| External rule formats (D.2) | Execute a declared Suricata, Snort, and Sigma subset with full meaning in the native engine, and reject the rest at import. The alternative is to embed Suricata as a second engine. |
 | YARA engine (D.3) | Embed YARA-X through its C API. The alternative is libyara through go-yara. Both need cgo in the image build. |
 
 ## Finding IDs
