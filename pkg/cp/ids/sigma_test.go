@@ -45,7 +45,7 @@ func TestConditionExpressionAndOrNot(t *testing.T) {
 		"sel3":      map[string]any{"c": []any{1, 2}},
 		"condition": "sel1 and (sel2 or not sel3)",
 	}
-	c, err := buildDetectionConditions(det)
+	c, _, err := buildDetectionConditions(det)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSelectionListIsOr(t *testing.T) {
 		},
 		"condition": "selection",
 	}
-	c, err := buildDetectionConditions(det)
+	c, _, err := buildDetectionConditions(det)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestConvertSigmaWildcardSelection(t *testing.T) {
 		"selection2": map[string]any{"y": 2},
 		"condition":  "selection*",
 	}
-	c, err := buildDetectionConditions(det)
+	c, _, err := buildDetectionConditions(det)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,12 +120,15 @@ func TestConvertSigmaWildcardSelection(t *testing.T) {
 	}
 }
 
-func TestConvertSigmaEmptyDetectionsOk(t *testing.T) {
+func TestConvertSigmaEmptyDetectionStoredNonEvaluable(t *testing.T) {
 	r, err := ConvertSigmaRule(SigmaRule{Title: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !reflect.DeepEqual(r.When, config.IDSCondition{}) {
 		t.Fatalf("expected empty condition: %+v", r.When)
+	}
+	if r.Labels["evaluable"] != "false" || len(r.ConversionNotes) == 0 {
+		t.Fatalf("empty detection must be stored as non-evaluable: %+v", r)
 	}
 }

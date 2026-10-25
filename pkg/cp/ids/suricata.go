@@ -102,8 +102,10 @@ func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 	applyRuleReferencesAndMetadata(&rule, opts)
 	applyRuleSourceFormatFields(&rule, opts, sourceFormat)
 	rule.ContentMatches = parseContentMatches(opts)
-	rule.When = buildWhenFromOptions(opts, fields.protocol)
-	rule.ConversionNotes = buildConversionNotes(opts, fields.protocol)
+	rule.When, rule.ConversionNotes = convertSuricataConditions(opts, fields)
+	if len(rule.ConversionNotes) > 0 {
+		rule.Labels["evaluable"] = "false"
+	}
 	if err := ensureRuleIdentity(&rule, sourceFormat); err != nil {
 		return config.IDSRule{}, err
 	}
@@ -415,96 +417,6 @@ func applyContentModifier(current *config.ContentMatch, keyword, value string) {
 	case "within":
 		current.Within = n
 	}
-}
-
-// buildWhenFromOptions generates IDSCondition trees from options that can map
-// to DPI-inspectable fields (e.g., HTTP URI content, protocol-specific fields).
-func buildWhenFromOptions(opts [][2]string, protocol string) config.IDSCondition {
-	var conds []config.IDSCondition
-
-	// Check for http_uri, http_header, etc. sticky buffers following content.
-	var lastContent string
-	for _, o := range opts {
-		kw, val := o[0], o[1]
-		switch kw {
-		case "content":
-			lastContent = unquote(val)
-		case "http_uri", "http.uri":
-			if lastContent != "" {
-				conds = append(conds, config.IDSCondition{
-					Field: "attr.http_uri",
-					Op:    "contains",
-					Value: lastContent,
-				})
-			}
-		case "http_header", "http.header":
-			if lastContent != "" {
-				conds = append(conds, config.IDSCondition{
-					Field: "attr.http_header",
-					Op:    "contains",
-					Value: lastContent,
-				})
-			}
-		case "http_method", "http.method":
-			if lastContent != "" {
-				conds = append(conds, config.IDSCondition{
-					Field: "attr.http_method",
-					Op:    "equals",
-					Value: lastContent,
-				})
-			}
-		case "dns_query", "dns.query":
-			if lastContent != "" {
-				conds = append(conds, config.IDSCondition{
-					Field: "attr.dns_query",
-					Op:    "contains",
-					Value: lastContent,
-				})
-			}
-		case "tls_sni", "tls.sni":
-			if lastContent != "" {
-				conds = append(conds, config.IDSCondition{
-					Field: "attr.tls_sni",
-					Op:    "contains",
-					Value: lastContent,
-				})
-			}
-		}
-	}
-
-	if len(conds) == 0 {
-		return config.IDSCondition{}
-	}
-	if len(conds) == 1 {
-		return conds[0]
-	}
-	return config.IDSCondition{All: conds}
-}
-
-// buildConversionNotes returns notes about options that could not be fully
-// mapped to containd rule semantics.
-func buildConversionNotes(opts [][2]string, protocol string) []string {
-	var notes []string
-	unsupported := map[string]bool{}
-	for _, o := range opts {
-		kw := o[0]
-		switch kw {
-		// Well-known and fully handled keywords.
-		case "msg", "sid", "rev", "classtype", "priority", "reference",
-			"metadata", "content", "nocase", "depth", "offset",
-			"distance", "within", "flow", "threshold", "flowbits",
-			"http_uri", "http.uri", "http_header", "http.header",
-			"http_method", "http.method", "dns_query", "dns.query",
-			"tls_sni", "tls.sni", "activated_by", "count", "tag":
-			continue
-		default:
-			if !unsupported[kw] {
-				unsupported[kw] = true
-				notes = append(notes, fmt.Sprintf("keyword %q not fully mapped", kw))
-			}
-		}
-	}
-	return notes
 }
 
 // convertRulesData parses raw rule file content.
