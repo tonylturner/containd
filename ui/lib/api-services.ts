@@ -1,4 +1,5 @@
 import {
+  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -124,7 +125,7 @@ export const servicesAPI = {
       name,
     }),
   downloadOpenVPNClientURL: (name: string) =>
-    `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
+    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`),
   getWireGuardStatus: (iface?: string) =>
     getJSON<WireGuardStatus>(
       `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,

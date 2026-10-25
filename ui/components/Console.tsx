@@ -6,6 +6,7 @@ import type { FitAddon } from "xterm-addon-fit";
 import "xterm/css/xterm.css";
 
 import { api, getSessionToken } from "../lib/api";
+import { apiWebSocketURL } from "../lib/api-core";
 import { getPersistCLIHistory } from "../lib/prefs";
 
 type CLIResponse = { output?: string; error?: string };
@@ -29,9 +30,12 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
 
   const wsURL = useMemo(() => {
     if (typeof window === "undefined") return "";
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const token = getSessionToken();
-    const base = `${proto}://${window.location.host}/api/v1/cli/ws`;
+    const base = apiWebSocketURL(
+      "/api/v1/cli/ws",
+      window.location.protocol,
+      window.location.host,
+    );
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;
   }, []);
 

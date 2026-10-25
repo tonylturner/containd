@@ -7,14 +7,26 @@ function resolveBasePath(pathname?: string): string {
   return currentPathname.startsWith("/containd/") ? "/containd" : "";
 }
 
-const BASE_PATH = resolveBasePath();
-// An explicit API origin/path still takes precedence for API requests only;
-// public assets must be served from the UI's own base path.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || BASE_PATH;
+function resolveAPIBase(pathname?: string): string {
+  // An explicit API origin/path takes precedence for API requests only;
+  // public assets and same-origin WebSockets use the UI's runtime base path.
+  return process.env.NEXT_PUBLIC_API_BASE || resolveBasePath(pathname);
+}
+
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
 export function staticAssetURL(path: string, pathname?: string): string {
   return `${resolveBasePath(pathname)}${path}`;
+}
+
+export function apiWebSocketURL(
+  path: string,
+  protocol: string,
+  host: string,
+  pathname?: string,
+): string {
+  const wsProtocol = protocol === "https:" ? "wss" : "ws";
+  return `${wsProtocol}://${host}${resolveBasePath(pathname)}${path}`;
 }
 
 const TOKEN_KEY = "containd.auth.token";
@@ -136,7 +148,7 @@ export async function fetchWithSession(
   init: RequestInit,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const url = `${API_BASE}${path}`;
+  const url = apiURL(path);
   const res = await fetch(url, {
     ...init,
     credentials: "include",
@@ -171,8 +183,8 @@ export async function fetchWithSession(
   return res;
 }
 
-export function apiURL(path: string): string {
-  return `${API_BASE}${path}`;
+export function apiURL(path: string, pathname?: string): string {
+  return `${resolveAPIBase(pathname)}${path}`;
 }
 
 export function handleUnauthorized(res: Response) {
