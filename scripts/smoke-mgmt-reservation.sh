@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "FAIL: line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # A fully independent project: no published ports, shared images or host data.
 ROOT=$(git rev-parse --show-toplevel)
@@ -31,6 +32,7 @@ case "$ARCH" in
 esac
 GOFLAGS=-mod=mod GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 \
   go build -o "$SCRATCH/containd" ./cmd/containd
+cp "$ROOT/test/mgmt-reservation/entrypoint.sh" "$SCRATCH/entrypoint.sh"
 docker build -f "$ROOT/test/mgmt-reservation/Dockerfile" -t "$IMAGE" "$SCRATCH"
 
 cat >"$COMPOSE" <<EOF
@@ -40,6 +42,7 @@ services:
     user: "0"
     cap_add: [NET_ADMIN, NET_RAW, NET_BIND_SERVICE]
     environment:
+      MGMT_SMOKE_PREFIX: "$PREFIX"
       CONTAIND_MGMT_RESERVATION: '{"subnet":"$PREFIX.4.0/24","sources":["$PREFIX.4.10","$PREFIX.4.3"],"listen":":8080"}'
       CONTAIND_ENGINE_ADDR: "127.0.0.1:8081"
       CONTAIND_ENGINE_URL: "http://127.0.0.1:8081"
@@ -129,7 +132,7 @@ login
 # A reachable outsider before the edit proves the negative test isn't a bad peer.
 peer outsider --fail "$BASE/health" >"$SCRATCH/outsider-before.json"
 api "$BASE/config" >"$SCRATCH/running.json"
-jq '.interfaces |= map(.access = {mgmt:false,http:false,https:false,ssh:false})' \
+jq '.interfaces |= map(.access = {mgmt:false,http:false,https:false,ssh:false}) | (.interfaces[] | select(.name == "lan4")).addresses = ["192.0.2.14/24"]' \
   "$SCRATCH/running.json" >"$SCRATCH/disabled.json"
 api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/disabled.json" >"$SCRATCH/stage.json"
 api -D /tmp/commit.headers -X POST "$BASE/config/commit" >"$SCRATCH/commit.json"
@@ -141,12 +144,71 @@ if grep -qi '^X-Containd-Warnings:' "$SCRATCH/commit.headers"; then
 fi
 assert_reachability
 reject_address
+OLD_DEVICE=$(jq -er '.device' "$SCRATCH/reservation.json")
+compose exec -T containd sh -c 'echo 1 >/data/nic-generation'
 compose restart containd
 wait_ready
 login
 assert_reachability
 reject_address
 api "$BASE/config" >"$SCRATCH/restarted.json"
+jq -e --arg old "$OLD_DEVICE" '.device != $old and (.bootFault == "")' "$SCRATCH/reservation.json" >/dev/null
 jq -e 'all(.interfaces[]; .access.mgmt == false and .access.http == false and .access.https == false and .access.ssh == false)' \
   "$SCRATCH/restarted.json" >/dev/null
-echo "PASS: reserved health/login, all-access-off commit, exact-source access, substrate rejection, restart"
+
+# Deliberately bypass the API to model legacy stored conflicts, not an allowed
+# student edit. A custom row must survive normalization and trigger recovery.
+DEVICE=$(jq -er '.device' "$SCRATCH/reservation.json")
+jq --arg device "$DEVICE" '
+  (.interfaces[] | select(.device == $device)) |= (.name = "custom-reserved" | .addresses = ["192.0.2.77/24"]) |
+  .system.mgmt.enableHTTP = false | .system.mgmt.httpListenAddr = ":9090" |
+  .system.ssh.listenAddr = ":8080"
+' "$SCRATCH/restarted.json" >"$SCRATCH/legacy-conflict.json"
+inject_conflict() {
+  compose exec -T containd sh -c \
+    'cat >/tmp/legacy-conflict.json && sqlite3 /data/config.db "UPDATE configs SET data=readfile('\''/tmp/legacy-conflict.json'\'') WHERE key='\''running'\''"' \
+    <"$SCRATCH/legacy-conflict.json"
+  compose restart containd
+  wait_ready
+  login
+  assert_reachability
+  jq -e '.bootFault | contains("reserved management path")' "$SCRATCH/reservation.json" >/dev/null
+}
+assert_no_apply() {
+  compose exec -T containd curl -fsS http://127.0.0.1:8081/internal/ruleset_status >"$SCRATCH/fault-ruleset.json"
+  jq -e '.ruleset == "" and .appliedAt == "0001-01-01T00:00:00Z"' "$SCRATCH/fault-ruleset.json" >/dev/null
+  compose exec -T containd nft list ruleset >"$SCRATCH/fault-nft.txt"
+  # Docker's DNS NAT chains exist even in a fresh namespace. The invariant is
+  # no appliance firewall table, not no unrelated kernel tables.
+  compose exec -T containd nft -j list tables >"$SCRATCH/fault-tables.json"
+  jq -e '[.nftables[] | .table? | select(.name == "containd")] | length == 0' "$SCRATCH/fault-tables.json" >/dev/null
+}
+inject_conflict
+assert_no_apply
+sleep 3
+assert_no_apply
+api "$BASE/events?limit=100" >"$SCRATCH/fault-events.json"
+jq -e '[.[] | select(.kind == "management.reservation.boot_fault")] | length == 1' "$SCRATCH/fault-events.json" >/dev/null
+api "$BASE/config" >"$SCRATCH/fault-config.json"
+jq -e '.system.mgmt.enableHTTP == false and .system.mgmt.httpListenAddr == ":9090" and any(.interfaces[]; .name == "custom-reserved" and .addresses == ["192.0.2.77/24"])' \
+  "$SCRATCH/fault-config.json" >/dev/null
+api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/restarted.json" >"$SCRATCH/recovery-stage.json"
+api -X POST "$BASE/config/commit" >"$SCRATCH/recovery-commit.json"
+api "$BASE/system/management-reservation" >"$SCRATCH/recovered.json"
+jq -e '.bootFault == ""' "$SCRATCH/recovered.json" >/dev/null
+compose exec -T containd curl -fsS http://127.0.0.1:8081/internal/ruleset_status >"$SCRATCH/recovered-ruleset.json"
+jq -e '.ruleset | length > 0' "$SCRATCH/recovered-ruleset.json" >/dev/null
+
+# Factory reset is a second recovery path, using the same autobound defaults as
+# first boot. It must work under a valid reservation and revoke the session.
+inject_conflict
+assert_no_apply
+api -d '{"confirm":"NUCLEAR"}' "$BASE/system/factory-reset" >"$SCRATCH/reset.json"
+jq -e '.status == "reset" and .loggedOut' "$SCRATCH/reset.json" >/dev/null
+login
+api "$BASE/system/management-reservation" >"$SCRATCH/reset-reservation.json"
+jq -e '.bootFault == ""' "$SCRATCH/reset-reservation.json" >/dev/null
+api "$BASE/config" >"$SCRATCH/reset-config.json"
+jq -e --arg device "$DEVICE" '[.interfaces[] | select(.device == $device)] | length == 1 and all(.[]; (.addresses // [] | length) == 0 and (.addressMode // "static") == "static")' \
+  "$SCRATCH/reset-config.json" >/dev/null
+echo "PASS: reserved health/login, all-access-off commit, exact-source access, rejection, NIC renumber, fault/no apply, safe commit and factory reset recovery"

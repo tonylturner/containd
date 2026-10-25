@@ -289,6 +289,13 @@ export default function InterfacesPage() {
           {!!reservation.guard?.faults && (
             <p className="mt-1 text-amber-400">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
           )}
+          {reservation.bootFault && (
+            <div role="status" className="mt-2 text-amber-400">
+              <p className="font-semibold">Configuration apply paused</p>
+              <p>{reservation.bootFault}</p>
+              <p>Reserved management remains available. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.</p>
+            </div>
+          )}
           {reservation.rollbackFault && <p className="mt-1 text-amber-400">{reservation.rollbackFault}</p>}
         </aside>
       )}

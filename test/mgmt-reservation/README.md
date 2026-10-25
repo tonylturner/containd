@@ -14,7 +14,15 @@ All API traffic originates inside those clients. It never connects to or changes
 any `rangerdanger-*` container.
 
 Checks health/login, an all-access-off commit, exact-source-only reachability,
-substrate rejection, and restart persistence. Unsafe address changes are rejected
+substrate rejection, and deterministic NIC-renumber restart with no fault. The
+fixture entrypoint renames only its own container NICs before starting containd.
+The script then injects a legacy custom-row/listener conflict directly into its
+private config DB (the API correctly refuses such edits), restarts, and requires
+reserved health/login, one boot-fault event and no engine ruleset apply, including
+a second check after several replay intervals. It records the absent containd
+firewall table (Docker DNS NAT chains remain); fault mode is not fail-closed
+enforcement. Finally, safe commit and factory reset must each clear the fault; reset leaves exactly one unaddressed
+reserved binding. Unsafe address changes are rejected
 at candidate staging, before an invalid commit can exist; store tests separately
 prove legacy unsafe candidates cannot be promoted.
 

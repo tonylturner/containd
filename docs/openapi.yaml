@@ -730,6 +730,14 @@ paths:
                   local: { type: string, description: Host address with prefix length }
                   sources: { type: array, items: { type: string, format: ipv4 } }
                   port: { type: integer, minimum: 1, maximum: 65535 }
+                  bootFault:
+                    type: string
+                    description: >
+                      Residual stored-config conflict after boot normalization; empty
+                      when clear. While set, management serves recovery with safe
+                      boot-only listeners and blocks service/engine apply. A safe
+                      commit, rollback or factory reset clears it. A fresh engine
+                      has no applied ruleset; this is not fail-closed enforcement.
                   rollbackFault:
                     type: string
                     description: Last refused rollback, retained across restarts
@@ -757,9 +765,10 @@ paths:
     post:
       summary: Reset appliance databases (admin)
       description: >
-        Preflights the exact factory configuration against the immutable
-        management reservation before wiping users, sessions, config, or audit.
-        Incompatible defaults are refused without changing these stores.
+        Preflights the autobound appliance defaults (shared with first boot) against
+        the immutable management reservation before wiping users, sessions, config,
+        or audit. Genuine incompatible defaults are refused without changing these
+        stores. A successful reset clears the boot fault and applies the defaults.
       tags: [System]
       requestBody:
         required: true
