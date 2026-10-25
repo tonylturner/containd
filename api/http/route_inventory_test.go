@@ -162,6 +162,14 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, req)
 
+			// Every operational/read route, including mutation verbs, must be
+			// header-free. Successful configuration routes alone classify edits.
+			state := configResponseRouteState(route.Method, route.Path)
+			if rec.Code < 200 || rec.Code >= 300 {
+				state = ""
+			}
+			assertConfigResponseHeader(t, rec, state)
+
 			if rec.Code >= 500 &&
 				rec.Code != http.StatusNotImplemented &&
 				rec.Code != http.StatusServiceUnavailable {

@@ -175,12 +175,14 @@ func editableValue(cfg *config.Config, path string) any {
 	}
 }
 
-func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
+type candidateEndpointCase struct {
+	method, path, list string
+	body               any
+}
+
+func candidateEndpointCases() []candidateEndpointCase {
 	defaults := config.DefaultConfig()
-	for _, test := range []struct {
-		method, path, list string
-		body               any
-	}{
+	return []candidateEndpointCase{
 		{"POST", "/assets", "/assets", map[string]any{"id": "new", "name": "new"}},
 		{"PATCH", "/assets/old", "/assets", map[string]any{"name": "edited"}},
 		{"DELETE", "/assets/old", "/assets", nil},
@@ -218,7 +220,11 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 		{"POST", "/templates/apply", "/firewall/rules", map[string]string{"name": templates.List()[0].Name}},
 		{"POST", "/templates/ics/apply", "/firewall/rules", map[string]string{"template": "modbus_read_only"}},
 		{"POST", "/learn/apply", "/firewall/rules", map[string]any{}},
-	} {
+	}
+}
+
+func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
+	for _, test := range candidateEndpointCases() {
 		t.Run(test.method+test.path, func(t *testing.T) {
 			t.Setenv("CONTAIND_OPENVPN_DIR", t.TempDir())
 			store := stageStore(t)
@@ -242,6 +248,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			if rec.Code != wantStatus {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 			}
+			assertConfigResponseHeader(t, rec, "staged")
 			candidate, err := store.LoadCandidate(ctx)
 			if err != nil || candidate.System.Hostname != "unrelated-edit" {
 				t.Fatalf("lost candidate: %+v %v", candidate, err)
@@ -251,6 +258,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 				t.Fatal("staging changed running or applied runtime state")
 			}
 			rec = requestStage(t, server, "GET", test.list, nil)
+			assertConfigResponseHeader(t, rec, "")
 			var got any
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, jsonValue(t, editableValue(candidate, test.list))) {
 				t.Fatalf("list did not return candidate: status=%d body=%s err=%v", rec.Code, rec.Body, err)
@@ -265,6 +273,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 				t.Fatal("missing actor/object/candidate stage audit")
 			}
 			rec = requestStage(t, server, "POST", "/config/commit", nil)
+			assertConfigResponseHeader(t, rec, "committed")
 			if rec.Code != http.StatusOK || engine.mutations == 0 || services.mutations != 1 {
 				t.Fatalf("commit did not apply: %d %s", rec.Code, rec.Body)
 			}
@@ -273,6 +282,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 				t.Fatal("commit did not promote candidate and IDS bank")
 			}
 			rec = requestStage(t, server, "POST", "/config/rollback", nil)
+			assertConfigResponseHeader(t, rec, "committed")
 			restored, _ := store.Load(ctx)
 			if rec.Code != http.StatusOK || !reflect.DeepEqual(restored, running) {
 				t.Fatalf("rollback did not restore config and bank: %d %s", rec.Code, rec.Body)
@@ -304,6 +314,7 @@ func TestIDSSaveResponseSurvivesSecondSave(t *testing.T) {
 	if rec.Code != http.StatusOK || engine.mutations != 0 {
 		t.Fatalf("IDS import applied or failed: %d %s", rec.Code, rec.Body)
 	}
+	assertConfigResponseHeader(t, rec, "staged")
 	cfg, _ := store.LoadCandidate(context.Background())
 	if len(cfg.IDS.Rules) != 2 {
 		t.Fatalf("IDS import lost candidate bank: %+v", cfg.IDS.Rules)

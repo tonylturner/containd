@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -13,6 +14,28 @@ import (
 )
 
 var errCandidateRejected = errors.New("candidate edit rejected")
+
+// Configuration responses are classified at successful persistence boundaries,
+// not by URL: preview and no-op requests can share a route with staged edits.
+const configResponseHeader = "X-Containd-Config"
+
+func configChangeResponse(c *gin.Context, state string) {
+	c.Header(configResponseHeader, state)
+}
+
+func committedConfigResponse(c *gin.Context, status string) {
+	configChangeResponse(c, "committed")
+	c.JSON(http.StatusOK, gin.H{"status": status})
+}
+
+func replaceCandidate(c *gin.Context, ctx context.Context, store config.Store, cfg *config.Config) bool {
+	if err := store.SaveCandidate(ctx, cfg); err != nil {
+		apiError(c, http.StatusBadRequest, err.Error())
+		return false
+	}
+	configChangeResponse(c, "staged")
+	return true
+}
 
 // stageCandidate owns the complete read/modify/validate/write boundary. A
 // rejected edit has already sent its domain-specific HTTP error and is never
@@ -32,6 +55,7 @@ func stageCandidate(c *gin.Context, store config.Store, edit func(*config.Config
 		}
 		return nil, false
 	}
+	configChangeResponse(c, "staged")
 	auditLog(c, audit.Record{
 		Action: "config.stage",
 		Target: c.Request.URL.Path,

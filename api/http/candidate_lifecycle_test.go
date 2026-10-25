@@ -36,6 +36,7 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 			if rec.Code != http.StatusOK || engine.mutations != 0 {
 				t.Fatalf("replacement failed or applied: %d %s", rec.Code, rec.Body)
 			}
+			assertConfigResponseHeader(t, rec, "staged")
 			candidate, _ := store.LoadCandidate(ctx)
 			after, _ := store.Load(ctx)
 			if candidate.System.Hostname != "replacement" || candidate.Description != "" || !reflect.DeepEqual(after, running) {
@@ -67,6 +68,7 @@ func TestImportValidationIsClientErrorAndPreservesCandidate(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !reflect.DeepEqual(before, after) {
 		t.Fatalf("invalid import status=%d changed candidate=%v", rec.Code, !reflect.DeepEqual(before, after))
 	}
+	assertConfigResponseHeader(t, rec, "")
 }
 
 func TestRunningExportsAndDiffAuthority(t *testing.T) {
@@ -143,6 +145,7 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	for _, body := range []string{"", `{"interfaces":["explicit"]}`} {
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))
+		assertConfigResponseHeader(t, rec, "")
 		want := "running"
 		if body != "" {
 			want = "explicit"
@@ -151,6 +154,7 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 			t.Fatalf("start used incorrect settings: %d %+v", rec.Code, engine.pcapStartCfg)
 		}
 		rec = requestStage(t, server, "POST", "/pcap/stop", nil)
+		assertConfigResponseHeader(t, rec, "")
 		after, _ := store.Load(ctx)
 		desired, _ := store.LoadCandidate(ctx)
 		if rec.Code != http.StatusOK || !reflect.DeepEqual(after, running) || !reflect.DeepEqual(desired, candidate) {

@@ -41,6 +41,10 @@ capture start/stop) remain immediate. `/pcap/start` uses its request body, or
 running PCAP settings when absent; neither start nor stop persists settings.
 CLI configuration commands report `staged; run "commit" to apply`.
 
+Successful staged edits return `X-Containd-Config: staged`. Successful commit,
+commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
+Operational, read, preview-only and failed responses carry neither header value.
+
 ## Event Retention and Page Limits
 
 `GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum

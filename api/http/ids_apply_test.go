@@ -71,6 +71,11 @@ func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 				if rec.Code != result.status {
 					t.Fatalf("status=%d want=%d body=%s", rec.Code, result.status, rec.Body)
 				}
+				wantConfigHeader := "committed"
+				if result.status >= http.StatusBadRequest {
+					wantConfigHeader = ""
+				}
+				assertConfigResponseHeader(t, rec, wantConfigHeader)
 				if !engine.applied {
 					t.Fatal("handler did not apply rules")
 				}

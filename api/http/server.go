@@ -415,8 +415,7 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if err := store.SaveCandidate(ctx, &cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		if !replaceCandidate(c, ctx, store, &cfg) {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.save", Target: "candidate"})
@@ -491,7 +490,7 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+		committedConfigResponse(c, "committed")
 	}
 }
 
@@ -525,7 +524,7 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+		committedConfigResponse(c, "committed")
 	}
 }
 
@@ -536,7 +535,7 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "confirmed"})
+		committedConfigResponse(c, "confirmed")
 	}
 }
 
@@ -555,7 +554,7 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
+		committedConfigResponse(c, "rolled back")
 	}
 }
 

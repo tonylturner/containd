@@ -80,8 +80,7 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := store.SaveCandidate(c.Request.Context(), &cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		if !replaceCandidate(c, c.Request.Context(), store, &cfg) {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.import", Target: "candidate"})
