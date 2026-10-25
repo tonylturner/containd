@@ -67,10 +67,12 @@ type Store struct {
 	idBase   uint64
 	nextID   atomic.Uint64
 
-	mu      sync.Mutex
-	general eventRing
-	denies  eventRing
-	aborted abortedSet // aborted IEC104 incarnations hidden from Flows
+	mu               sync.Mutex
+	general          eventRing
+	denies           eventRing
+	incidents        incidentBank
+	historyTruncated bool
+	aborted          abortedSet // aborted IEC104 incarnations hidden from Flows
 
 	// Spill-to-disk support.
 	spillPath string

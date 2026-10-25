@@ -1032,7 +1032,14 @@ paths:
         bank; there is no age expiry. It survives configuration rebuilds,
         but not process restarts.
 
-        Select DENYs newest-first before filling remaining slots with the
+        A separate IEC104 bank retains 128 incident sessions with up to 32
+        evidence rows each: deny/would_drop decisions, verdicts, abort/reset
+        and unhealthy outcomes, plus implicated decoded APDU context. Routine
+        allowed objects are not pinned. The oldest-created bundle is evicted
+        on session overflow; oldest rows are evicted on per-session overflow.
+        Total retained event slots are general capacity + 5120.
+
+        Select DENYs and IEC incident outcomes newest-first before filling remaining slots with the
         newest other engine and service events. Deduplicate by event ID,
         then return the selected page newest-first (timestamp, then ID).
         An engine telemetry-error event always reserves a slot, including

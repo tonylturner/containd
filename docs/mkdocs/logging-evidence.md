@@ -87,3 +87,30 @@ containd provides useful evidence surfaces, but operators still need to decide:
 - whether external SIEM / log management is required
 
 The project documents the built-in capabilities, but evidence handling policy remains an operator responsibility.
+
+## Bounded IEC 104 incident evidence
+
+In addition to the configurable general ring (4096 rows by default) and the
+independent 1024-row firewall DENY bank, each event store protects **128 IEC
+incident sessions, at most 32 rows per session** (4096 additional event slots).
+The total bound is general capacity + 5120 event slots; maps and ordering indexes
+are bounded by 128 sessions. Payload size follows the producer's event bounds;
+this is a row/reference bound, not a fixed byte-size allocation.
+
+Protected evidence includes `ics.decision` deny/would_drop, `ics.verdict`
+(including dropped/drop_failed), and `ics.session` aborted/reset_sent/reset_failed/
+enforce_unhealthy. Sessionless unhealthy outcomes share one bounded bundle.
+Decoded attempts for implicated `apdu_id`/`apdu_ids`/`trigger_apdu_id` are copied
+from the general ring when the incident arrives, or retained when recorded after
+the decision. Routine allowed GI/monitor objects do not enter this bank. Event
+IDs and payloads are preserved and query results deduplicate by ID. Flow rollups
+and the general ring are unchanged.
+
+Overflow evicts the oldest-created incident bundle as a whole; a session with
+more than 32 evidence rows loses its oldest retained rows. The firewall bank
+still evicts only on DENY overflow. No age expiry or durable retention applies;
+configuration rebuilds preserve stores, process restarts do not. Already-evicted
+decoded context cannot be recovered. Small priority-selected pages can omit
+context: narrow by session and use a sufficiently large page. Export evidence
+off-box for a complete, durable record; this bounded cache cannot promise an
+unlimited session history.

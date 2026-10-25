@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Protect bounded IEC 104 incident bundles (denied decisions, enforcement and
+  abort/reset outcomes, and implicated decoded attempts) from routine telemetry.
+
 - IEC 104 decodes single-point information: TypeID 1 (M_SP_NA_1) and
   TypeID 30 (M_SP_TB_1, with CP56Time2a). Both are monitor-class and match
   read-only IEC 104 rules.
