@@ -498,11 +498,10 @@ restriction**, not malformed wire.
   consecutive IOAs; reject 24-bit overflow. Apply the descriptor's
   element size to every object. Reject zero count, extra bytes and bad
   layouts.
-- **B profile SQ/count:** every monitor descriptor in the table accepts
-  SQ = 1. SQ only elides the repeated IOAs; each object still carries its
-  own element, including its own CP56Time2a where timed. Control and system
-  types need SQ = 0 and count = 1. Anything else is `malformed` with an
-  `error` that says `profile:`.
+- **B profile SQ/count:** untimed monitor types 1, 3, 5, 7, 9, 11, 13, 15
+  and 21 accept SQ = 1. Time-tagged monitor types 30-37 require SQ = 0.
+  Control and system types need SQ = 0 and count = 1. Anything else is
+  `malformed` with an `error` that says `profile:`.
 
 | Type IDs | Class | Element after IOA |
 |---|---|---|
@@ -514,12 +513,12 @@ restriction**, not malformed wire.
 | 13 `M_ME_NC_1` | monitor | float32 + QDS (5). Keep value and quality. SQ = 1 is accepted. |
 | 15 `M_IT_NA_1` | monitor | BCR (5): signed int32 value, sequence in qualifier bits 0-4 and counter flags in quality bits 5-7. SQ = 1 is accepted. |
 | 21 `M_ME_ND_1` | monitor | normalized int16 (2), without quality. SQ = 1 is accepted. |
-| 30 `M_SP_TB_1` / 31 `M_DP_TB_1` | monitor | SIQ / DIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 1 is accepted. |
-| 32 `M_ST_TB_1` | monitor | VTI + QDS + CP56Time2a (9). Keep signed 7-bit value, transient, quality and time validity. SQ = 1 is accepted. |
-| 33 `M_BO_TB_1` | monitor | BSI + QDS + CP56Time2a (12). Keep bitstring, quality and time validity. SQ = 1 is accepted. |
-| 34 `M_ME_TD_1` / 35 `M_ME_TE_1` | monitor | normalized / scaled int16 + QDS + CP56Time2a (10). Keep value, quality and time validity. SQ = 1 is accepted. |
-| 36 `M_ME_TF_1` | monitor | float32 + QDS + CP56Time2a (12). Keep value, quality and time validity. SQ = 1 is accepted. |
-| 37 `M_IT_TB_1` | monitor | BCR + CP56Time2a (12). Keep counter value, sequence, flags and time validity. SQ = 1 is accepted. |
+| 30 `M_SP_TB_1` / 31 `M_DP_TB_1` | monitor | SIQ / DIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 0 only. |
+| 32 `M_ST_TB_1` | monitor | VTI + QDS + CP56Time2a (9). Keep signed 7-bit value, transient, quality and time validity. SQ = 0 only. |
+| 33 `M_BO_TB_1` | monitor | BSI + QDS + CP56Time2a (12). Keep bitstring, quality and time validity. SQ = 0 only. |
+| 34 `M_ME_TD_1` / 35 `M_ME_TE_1` | monitor | normalized / scaled int16 + QDS + CP56Time2a (10). Keep value, quality and time validity. SQ = 0 only. |
+| 36 `M_ME_TF_1` | monitor | float32 + QDS + CP56Time2a (12). Keep value, quality and time validity. SQ = 0 only. |
+| 37 `M_IT_TB_1` | monitor | BCR + CP56Time2a (12). Keep counter value, sequence, flags and time validity. SQ = 0 only. |
 | 45/46/47, 58/59/60 | control | SCO/DCO/RCO (1); timed adds CP56Time2a (7). Bit 7 = S/E (select); bits 2-6 = QU qualifier. SCO: value = bit 0, bit 1 reserved (must be 0). DCO/RCO: value = bits 0-1; only 1 and 2 are legal commands, 0 and 3 are `malformed`. |
 | 48/49/50, 61/62/63 | control | normalized int16 / scaled int16 / float32, + QOS (1); timed adds 7. QOS: bits 0-6 = QL, bit 7 = S/E (select). |
 | 51, 64 | control | bitstring32 (4); timed adds 7. **No select bit and no qualifier**: omit `select`. |

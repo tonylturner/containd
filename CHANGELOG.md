@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only IEC 104 rules.
 - IEC 104 decodes step-position Types 5 and 32, including the signed VTI,
   transient flag, quality and CP56Time2a. It also decodes common monitor
-  Types 7, 9, 11, 15, 21 and 33-37; sequenced addressing is supported for
-  every described monitor type.
+  Types 7, 9, 11, 15, 21 and 33-37. Sequenced addressing is supported for
+  untimed monitor Types 1, 3, 5, 7, 9, 11, 13, 15 and 21; timed monitor
+  Types 30-37 require SQ=0.
 - `set firewall ics-rule ... iec104` accepts `--type-ids`, `--classes`,
   `--ca`, `--ioa`, `--direction` and `--mode`. `show firewall ics-rules`
   shows the IEC fields.
