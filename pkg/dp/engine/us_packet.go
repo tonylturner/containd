@@ -40,6 +40,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // #1) and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow.
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture.Decision {
+	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
 		Payload:     pkt.Payload,
 		Proto:       pkt.Transport,
@@ -183,5 +184,9 @@ func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 			d = capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}
 		}
 	}()
+	// Invalid packets never reach either flow handler; their tuple is untrusted.
+	if pkt.Invalid != "" {
+		e.recordPacketStats(pkt, nil)
+	}
 	return e.handlePacket(pkt)
 }

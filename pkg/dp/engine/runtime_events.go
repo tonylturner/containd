@@ -25,9 +25,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
-// RecordDPIEvents appends events to the telemetry store.
+// RecordDPIEvents records semantic counters and appends events to telemetry.
+// It does not charge packets or bytes; flow-end events use this path too.
 func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if e == nil || e.eventStore == nil {
+	if e == nil {
+		return
+	}
+	e.recordProtoStats(evs)
+	if e.eventStore == nil {
 		return
 	}
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
@@ -38,7 +43,6 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
 	e.enqueueAVTasks(state, evs)
-	e.recordProtoStats(srcIP, dstIP, pkt, evs)
 	e.eventStore.Record(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
@@ -171,14 +175,12 @@ func isAVScanCandidate(ev dpi.Event) bool {
 	return ev.Kind == "request" || ev.Kind == "response"
 }
 
-func (e *Engine) recordProtoStats(srcIP, dstIP string, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if e == nil || e.stats == nil || pkt == nil || srcIP == "" || dstIP == "" {
+func (e *Engine) recordProtoStats(evs []dpi.Event) {
+	if e == nil || e.stats == nil {
 		return
 	}
-	payloadLen := len(pkt.Payload)
 	for _, ev := range evs {
-		e.stats.Record(ev, payloadLen)
-		e.stats.RecordFlow(srcIP, dstIP, ev.Proto, 1, int64(payloadLen))
+		e.stats.RecordEvent(ev)
 	}
 }
 
@@ -220,7 +222,7 @@ func (e *Engine) Inventory() *inventory.Inventory {
 	return e.inventory
 }
 
-// ProtoStats returns current per-protocol statistics derived from DPI events.
+// ProtoStats returns independent transport and DPI event counters per protocol.
 func (e *Engine) ProtoStats() []stats.ProtoStats {
 	if e == nil || e.stats == nil {
 		return nil

@@ -80,11 +80,13 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 			// nft steered this packet as IEC104 envelope traffic, but the
 			// engine finds no envelope for it: fail closed rather than let
 			// it through uninspected.
+			e.recordPacketStats(pkt, state)
 			t.health.fault(faultEnvelope, "nft steering and the engine envelope disagree")
 			return capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}, true
 		}
 		return capture.Decision{}, false
 	}
+	e.recordPacketStats(pkt, state)
 	if len(res.inspect) > 0 {
 		parsed := dpi.ParsedPacket{Payload: pkt.Payload, Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 		e.RecordDPIEvents(state, &parsed, res.inspect)
