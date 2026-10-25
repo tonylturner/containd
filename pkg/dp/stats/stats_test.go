@@ -4,155 +4,125 @@
 package stats
 
 import (
+	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 )
 
-func TestTrackerRecordAndStats(t *testing.T) {
+func TestTrackerIndependentPacketAndEventCounters(t *testing.T) {
 	tracker := New()
-
-	ev1 := dpi.Event{
-		Proto:     "modbus",
-		Kind:      "read_register",
-		Timestamp: time.Now(),
-		Attributes: map[string]any{
-			"src": "10.0.0.1",
-			"dst": "10.0.0.2",
-		},
+	now := time.Now().UTC()
+	tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "modbus", 100, now)
+	for _, kind := range []string{"read_register", "write_coil", "alert_overflow"} {
+		tracker.RecordEvent(dpi.Event{Proto: "modbus", Kind: kind, Timestamp: now.Add(-time.Second),
+			Attributes: map[string]any{"src": "event-source", "dst": "event-destination"}})
 	}
-	ev2 := dpi.Event{
-		Proto:     "modbus",
-		Kind:      "write_coil",
-		Timestamp: time.Now(),
-		Attributes: map[string]any{
-			"src": "10.0.0.1",
-			"dst": "10.0.0.2",
-		},
+	got := tracker.Stats()
+	if len(got) != 1 {
+		t.Fatalf("stats = %+v", got)
 	}
-	ev3 := dpi.Event{
-		Proto:     "http",
-		Kind:      "request",
-		Timestamp: time.Now(),
+	ps := got[0]
+	if ps.PacketCount != 1 || ps.ByteCount != 100 || ps.EventCount != 3 || ps.ReadCount != 1 || ps.WriteCount != 1 || ps.AlertCount != 1 || !ps.LastSeen.Equal(now) {
+		t.Fatalf("independent counters = %+v", ps)
 	}
-
-	tracker.Record(ev1, 100)
-	tracker.Record(ev2, 200)
-	tracker.Record(ev3, 50)
-
-	stats := tracker.Stats()
-	if len(stats) != 2 {
-		t.Fatalf("expected 2 protocols, got %d", len(stats))
-	}
-	// Should be sorted by packet count descending; modbus has 2.
-	if stats[0].Protocol != "modbus" {
-		t.Fatalf("expected modbus first, got %s", stats[0].Protocol)
-	}
-	if stats[0].PacketCount != 2 {
-		t.Fatalf("expected 2 packets for modbus, got %d", stats[0].PacketCount)
-	}
-	if stats[0].ByteCount != 300 {
-		t.Fatalf("expected 300 bytes for modbus, got %d", stats[0].ByteCount)
-	}
-	if stats[0].ReadCount != 1 {
-		t.Fatalf("expected 1 read for modbus, got %d", stats[0].ReadCount)
-	}
-	if stats[0].WriteCount != 1 {
-		t.Fatalf("expected 1 write for modbus, got %d", stats[0].WriteCount)
+	top := tracker.TopTalkers(0)
+	if len(top) != 1 || top[0].SrcIP != "10.0.0.1" || top[0].Packets != 1 || top[0].Bytes != 100 {
+		t.Fatalf("event attributes duplicated/changed packet flow: %+v", top)
 	}
 }
 
-func TestTrackerAlertCounting(t *testing.T) {
+func TestTrackerEventsWithoutPackets(t *testing.T) {
 	tracker := New()
-	ev := dpi.Event{
-		Proto:     "modbus",
-		Kind:      "alert_overflow",
-		Timestamp: time.Now(),
+	now := time.Now().UTC()
+	for _, attrs := range []map[string]any{nil, {"is_write": true}, {"is_write": " TRUE "}, {"is_write": 1}} {
+		tracker.RecordEvent(dpi.Event{Kind: "object", Timestamp: now, Attributes: attrs})
 	}
-	tracker.Record(ev, 10)
-	stats := tracker.Stats()
-	if len(stats) != 1 {
-		t.Fatalf("expected 1 protocol, got %d", len(stats))
+	got := tracker.Stats()[0]
+	if got.Protocol != "unknown" || got.PacketCount != 0 || got.ByteCount != 0 || got.EventCount != 4 || got.ReadCount != 2 || got.WriteCount != 2 || !got.LastSeen.Equal(now) {
+		t.Fatalf("event-only stats = %+v", got)
 	}
-	if stats[0].AlertCount != 1 {
-		t.Fatalf("expected 1 alert, got %d", stats[0].AlertCount)
+	if top := tracker.TopTalkers(1); len(top) != 0 {
+		t.Fatalf("event-only flows = %+v", top)
 	}
 }
 
-func TestTrackerTopTalkers(t *testing.T) {
+func TestTrackerPacketsWithoutEventsAndTopTalkers(t *testing.T) {
 	tracker := New()
-
-	// Create events with different src/dst to populate flow stats.
+	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
-		ev := dpi.Event{
-			Proto:     "modbus",
-			Kind:      "request",
-			Timestamp: time.Now(),
-			Attributes: map[string]any{
-				"src": "10.0.0.1",
-				"dst": "10.0.0.2",
-			},
-		}
-		tracker.Record(ev, 100)
+		tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "modbus", 100, now)
 	}
 	for i := 0; i < 3; i++ {
-		ev := dpi.Event{
-			Proto:     "http",
-			Kind:      "request",
-			Timestamp: time.Now(),
-			Attributes: map[string]any{
-				"src": "10.0.0.3",
-				"dst": "10.0.0.4",
-			},
-		}
-		tracker.Record(ev, 50)
+		tracker.RecordPacket(netip.MustParseAddr("10.0.0.3"), netip.MustParseAddr("10.0.0.4"), "http", 50, now)
 	}
-
-	top := tracker.TopTalkers(10)
-	if len(top) != 2 {
-		t.Fatalf("expected 2 flows, got %d", len(top))
+	tracker.RecordPacket(netip.Addr{}, netip.Addr{}, "", 0, now)
+	got := tracker.Stats()
+	if len(got) != 3 || got[0].Protocol != "modbus" || got[0].PacketCount != 5 || got[0].ByteCount != 500 || got[0].EventCount != 0 {
+		t.Fatalf("packet-only stats = %+v", got)
 	}
-	// First should be the higher byte flow (10.0.0.1->10.0.0.2, 500 bytes).
-	if top[0].SrcIP != "10.0.0.1" {
-		t.Fatalf("expected top talker src 10.0.0.1, got %s", top[0].SrcIP)
+	top := tracker.TopTalkers(0)
+	if len(top) != 2 || top[0].SrcIP != "10.0.0.1" || top[0].Bytes != 500 || top[0].Packets != 5 || top[1].Bytes != 150 {
+		t.Fatalf("top talkers = %+v", top)
 	}
-	if top[0].Bytes != 500 {
-		t.Fatalf("expected 500 bytes, got %d", top[0].Bytes)
-	}
-
-	// TopTalkers with n=1 should return just one.
-	top1 := tracker.TopTalkers(1)
-	if len(top1) != 1 {
-		t.Fatalf("expected 1 top talker, got %d", len(top1))
+	if top := tracker.TopTalkers(1); len(top) != 1 {
+		t.Fatalf("top 1 = %+v", top)
 	}
 }
 
-func TestTrackerRecordFlow(t *testing.T) {
+func TestTrackerConcurrentAccounting(t *testing.T) {
 	tracker := New()
-	tracker.RecordFlow("10.0.0.1", "10.0.0.2", "tcp", 100, 5000)
-	tracker.RecordFlow("10.0.0.1", "10.0.0.2", "tcp", 50, 2500)
-
-	top := tracker.TopTalkers(10)
-	if len(top) != 1 {
-		t.Fatalf("expected 1 flow, got %d", len(top))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Go(func() {
+			for j := 0; j < 100; j++ {
+				tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "test", 10, time.Now())
+				tracker.RecordEvent(dpi.Event{Proto: "test", Kind: "read"})
+				tracker.Stats()
+				tracker.TopTalkers(1)
+			}
+		})
 	}
-	if top[0].Packets != 150 {
-		t.Fatalf("expected 150 packets, got %d", top[0].Packets)
-	}
-	if top[0].Bytes != 7500 {
-		t.Fatalf("expected 7500 bytes, got %d", top[0].Bytes)
+	wg.Wait()
+	got := tracker.Stats()[0]
+	if got.PacketCount != 800 || got.ByteCount != 8000 || got.EventCount != 800 {
+		t.Fatalf("concurrent stats = %+v", got)
 	}
 }
 
 func TestNilTracker(t *testing.T) {
 	var tracker *Tracker
-	tracker.Record(dpi.Event{Proto: "test", Kind: "test", Timestamp: time.Now()}, 10)
-	tracker.RecordFlow("a", "b", "tcp", 1, 1)
+	tracker.RecordEvent(dpi.Event{Proto: "test"})
+	tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "tcp", 1, time.Now())
 	if s := tracker.Stats(); s != nil {
 		t.Fatalf("expected nil stats, got %v", s)
 	}
 	if tt := tracker.TopTalkers(5); tt != nil {
 		t.Fatalf("expected nil top talkers, got %v", tt)
+	}
+}
+
+func TestTrackerBinaryHostPairAggregation(t *testing.T) {
+	tracker := New()
+	now := time.Now()
+	for _, tc := range []struct {
+		src, dst string
+		bytes    int
+	}{
+		{"10.0.0.1", "10.0.0.2", 3},
+		{"::ffff:10.0.0.1", "::ffff:10.0.0.2", 5},
+		{"2001:db8::1", "2001:db8::2", 7},
+		{"2001:db8::1", "2001:db8::2", 11},
+		{"2001:db8::2", "2001:db8::1", 1},
+	} {
+		tracker.RecordPacket(netip.MustParseAddr(tc.src), netip.MustParseAddr(tc.dst), "test", tc.bytes, now)
+	}
+	top := tracker.TopTalkers(0)
+	if len(top) != 3 || top[0].SrcIP != "2001:db8::1" || top[0].Packets != 2 || top[0].Bytes != 18 ||
+		top[1].SrcIP != "10.0.0.1" || top[1].Packets != 2 || top[1].Bytes != 8 ||
+		top[2].SrcIP != "2001:db8::2" || top[2].Packets != 1 || top[2].Bytes != 1 {
+		t.Fatalf("canonical directional host pairs = %+v", top)
 	}
 }
