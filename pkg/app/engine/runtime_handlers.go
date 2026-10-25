@@ -136,9 +136,12 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 
 func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
 	var current config.ServicesConfig
+	var currentMu sync.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			currentMu.Lock()
+			defer currentMu.Unlock()
 			writeJSON(w, current)
 			return
 		case http.MethodPost:
@@ -152,6 +155,18 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+			if ownership != nil {
+				ownership.applyMu.Lock()
+				defer ownership.applyMu.Unlock()
+			}
+			if dpEngine != nil {
+				if err := config.ValidateManagementServices(svc, dpEngine.ManagementReservation()); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			currentMu.Lock()
+			defer currentMu.Unlock()
 			if dpEngine != nil && dpEngine.AVSink() != nil {
 				if adapter, ok := dpEngine.AVSink().(*avSinkAdapter); ok && adapter != nil {
 					avCtx, cancelAV := context.WithTimeout(r.Context(), 3*time.Second)
@@ -283,15 +298,16 @@ func conntrackHandler() http.HandlerFunc {
 }
 
 // healthHandler is engine liveness plus IEC104 enforcement health (K6).
-func healthHandler(dpEngine *engine.Engine) http.HandlerFunc {
+func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, healthResponse{
-			Status:            "ok",
-			Component:         "engine",
-			Build:             config.BuildVersion,
-			BootID:            engineBootID,
-			IEC104Enforcement: dpEngine.IEC104Enforcement(),
-			IPv4Forwarding:    netcfg.ReadIPv4ForwardingStatus(),
+			ManagementReservation: guard.Status(),
+			Status:                "ok",
+			Component:             "engine",
+			Build:                 config.BuildVersion,
+			BootID:                engineBootID,
+			IEC104Enforcement:     dpEngine.IEC104Enforcement(),
+			IPv4Forwarding:        netcfg.ReadIPv4ForwardingStatus(),
 		})
 	}
 }

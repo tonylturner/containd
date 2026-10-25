@@ -8,16 +8,19 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type ctxKey int
 
 const localIPKey ctxKey = 1
+const localAddrKey ctxKey = 2
 
 func connContextWithLocalIP(ctx context.Context, c net.Conn) context.Context {
 	if c == nil {
@@ -30,6 +33,10 @@ func connContextWithLocalIP(ctx context.Context, c net.Conn) context.Context {
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return ctx
+	}
+	local, err := netip.ParseAddrPort(c.LocalAddr().String())
+	if err == nil {
+		ctx = context.WithValue(ctx, localAddrKey, local)
 	}
 	return context.WithValue(ctx, localIPKey, ip)
 }
@@ -152,8 +159,14 @@ func (idx *ipInterfaceIndex) refresh() {
 	idx.lastLoaded = time.Now()
 }
 
-func mgmtAccessHandler(store config.Store, idx *ipInterfaceIndex, next http.Handler) http.Handler {
+func mgmtAccessHandler(store config.Store, idx *ipInterfaceIndex, reservation *mgmtpath.Reservation, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		local, _ := r.Context().Value(localAddrKey).(netip.AddrPort)
+		remote, err := netip.ParseAddrPort(r.RemoteAddr)
+		if r.TLS == nil && err == nil && reservation.Admits(remote, local) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := localIPFromRequest(r)
 		if ip == nil || ip.IsLoopback() {
 			next.ServeHTTP(w, r)

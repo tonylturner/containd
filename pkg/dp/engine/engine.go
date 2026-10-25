@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -40,41 +41,42 @@ type captureRunner interface {
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture         captureRunner
-	runCapture      captureRunner
-	runCancel       context.CancelFunc
-	runDone         chan struct{}
-	ruleSnap        ruleSnapshots
-	started         atomic.Bool
-	epoch           atomic.Uint64 // counts Reconfigure calls; ends stale start retries
-	compiler        *enforce.Compiler
-	applier         enforce.Applier
-	updater         enforce.Updater
-	dpiMgr          *dpi.Manager
-	eventStore      *events.Store
-	rulesetStatus   atomic.Pointer[RulesetStatus]
-	avSink          AVSink
-	inspectAll      bool
-	dpiEnabled      bool           // master DPI on/off
-	dpiMode         string         // "learn" or "enforce"
-	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
-	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
-	nflogStop       func()         // stops the running nflog consumer; nil before Start or after disable
-	onError         func(error)
-	nfqueueGroup    uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
-	lifecycleMu     sync.Mutex // serializes Start and Reconfigure
-	flowMu          sync.Mutex
-	flows           map[string]*flow.State
-	lastSweep       time.Time
-	verdictCache    *VerdictCache
-	inventory       *inventory.Inventory
-	anomalyDetector *anomaly.Detector
-	learner         *learn.Learner
-	sigEngine       *signatures.Engine
-	stats           *stats.Tracker
-	hooks           *inlineHooks
-	iec             *iecTable
-	gate            *envelopeGate // outlives Reconfigure, as the kernel ruleset does
+	managementReservation *mgmtpath.Reservation
+	capture               captureRunner
+	runCapture            captureRunner
+	runCancel             context.CancelFunc
+	runDone               chan struct{}
+	ruleSnap              ruleSnapshots
+	started               atomic.Bool
+	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
+	compiler              *enforce.Compiler
+	applier               enforce.Applier
+	updater               enforce.Updater
+	dpiMgr                *dpi.Manager
+	eventStore            *events.Store
+	rulesetStatus         atomic.Pointer[RulesetStatus]
+	avSink                AVSink
+	inspectAll            bool
+	dpiEnabled            bool           // master DPI on/off
+	dpiMode               string         // "learn" or "enforce"
+	dpiExclusions         []DPIExclusion // IPs/domains excluded from DPI
+	nflogGroup            uint16         // 0 disables nflog consumer + log clauses
+	nflogStop             func()         // stops the running nflog consumer; nil before Start or after disable
+	onError               func(error)
+	nfqueueGroup          uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
+	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
+	flowMu                sync.Mutex
+	flows                 map[string]*flow.State
+	lastSweep             time.Time
+	verdictCache          *VerdictCache
+	inventory             *inventory.Inventory
+	anomalyDetector       *anomaly.Detector
+	learner               *learn.Learner
+	sigEngine             *signatures.Engine
+	stats                 *stats.Tracker
+	hooks                 *inlineHooks
+	iec                   *iecTable
+	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -85,10 +87,11 @@ type RulesetStatus struct {
 }
 
 type EnforceConfig struct {
-	Enabled   bool
-	TableName string
-	Applier   enforce.Applier
-	Updater   enforce.Updater
+	ManagementReservation *mgmtpath.Reservation
+	Enabled               bool
+	TableName             string
+	Applier               enforce.Applier
+	Updater               enforce.Updater
 }
 
 type Config struct {
@@ -133,6 +136,9 @@ type DPIExclusion struct {
 }
 
 func New(cfg Config) (*Engine, error) {
+	if cfg.Enforce.ManagementReservation != nil && !cfg.Enforce.Enabled {
+		return nil, fmt.Errorf("dataplane.enforcement=false conflicts with reserved management path")
+	}
 	if cfg.Capture.OnError == nil {
 		cfg.Capture.OnError = cfg.OnError
 	}
@@ -154,17 +160,18 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{
-		capture:       capManager,
-		onError:       cfg.OnError,
-		inspectAll:    cfg.InspectAll,
-		dpiEnabled:    cfg.DPIEnabled,
-		dpiMode:       cfg.DPIMode,
-		dpiExclusions: cfg.DPIExclusions,
-		nflogGroup:    cfg.NFLogGroup,
-		nfqueueGroup:  cfg.NFQueueGroup,
-		flows:         make(map[string]*flow.State),
-		verdictCache:  NewVerdictCache(30*time.Second, 65536),
-		hooks:         hooks,
+		managementReservation: cfg.Enforce.ManagementReservation,
+		capture:               capManager,
+		onError:               cfg.OnError,
+		inspectAll:            cfg.InspectAll,
+		dpiEnabled:            cfg.DPIEnabled,
+		dpiMode:               cfg.DPIMode,
+		dpiExclusions:         cfg.DPIExclusions,
+		nflogGroup:            cfg.NFLogGroup,
+		nfqueueGroup:          cfg.NFQueueGroup,
+		flows:                 make(map[string]*flow.State),
+		verdictCache:          NewVerdictCache(30*time.Second, 65536),
+		hooks:                 hooks,
 	}
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
@@ -182,6 +189,7 @@ func New(cfg Config) (*Engine, error) {
 	e.bindGate()
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
+		comp.ManagementReservation = e.managementReservation
 		if cfg.Enforce.TableName != "" {
 			comp.TableName = cfg.Enforce.TableName
 		}
@@ -259,6 +267,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Lock()
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
+	if e.compiler != nil {
+		e.compiler.ManagementReservation = e.managementReservation
+	}
 	e.applier = fresh.applier
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
@@ -405,6 +416,11 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
+		return err
+	}
 	var compiled string
 	var applyErr error
 
@@ -660,3 +676,6 @@ func (e *Engine) sweepFlows(now time.Time) {
 		e.endFlowStream(st, nil)
 	}
 }
+
+// ManagementReservation is trusted startup authority, never accepted in payloads.
+func (e *Engine) ManagementReservation() *mgmtpath.Reservation { return e.managementReservation }

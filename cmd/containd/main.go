@@ -27,6 +27,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -47,6 +48,15 @@ func main() {
 		}
 	}
 
+	var reservation *mgmtpath.Reservation
+	if mode == "all" || mode == "mgmt" || mode == "engine" {
+		var err error
+		reservation, err = mgmtpath.Load()
+		if err != nil {
+			slog.Error("fatal management reservation error", "error", err)
+			os.Exit(1)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -62,11 +72,11 @@ func main() {
 	var err error
 	switch mode {
 	case "all":
-		err = runAll(ctx)
+		err = runAll(ctx, reservation)
 	case "mgmt":
-		err = mgmtapp.Run(ctx, mgmtapp.Options{})
+		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation})
 	case "engine":
-		err = engineapp.Run(ctx, engineapp.Options{})
+		err = engineapp.Run(ctx, engineapp.Options{Reservation: reservation})
 	case "version":
 		fmt.Printf("containd %s (%s)\n", config.BuildVersion, config.BuildCommit)
 		return
@@ -254,13 +264,26 @@ func cliLogin(baseURL string) (string, error) {
 	return result.Token, nil
 }
 
-func runAll(ctx context.Context) error {
+func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- engineapp.Run(ctx, engineapp.Options{}) }()
-	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true}) }()
+	var ready chan struct{}
+	if reservation != nil {
+		ready = make(chan struct{})
+	}
+	go func() { errCh <- engineapp.Run(ctx, engineapp.Options{Reservation: reservation, Ready: ready}) }()
+	if ready != nil {
+		select {
+		case <-ready:
+		case err := <-errCh:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true, Reservation: reservation}) }()
 
 	// If either plane exits, cancel the other and drain both results.
 	var firstErr error

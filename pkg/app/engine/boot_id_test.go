@@ -21,7 +21,7 @@ func TestHealthBootIDStableAcrossRequestsAndHandlers(t *testing.T) {
 	var first string
 	for range 3 {
 		rec := httptest.NewRecorder()
-		healthHandler(dp)(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		healthHandler(dp, nil)(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 		var out map[string]json.RawMessage
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 			t.Fatal(err)

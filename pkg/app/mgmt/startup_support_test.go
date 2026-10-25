@@ -5,7 +5,12 @@ package mgmtapp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,9 +18,59 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
+
+func TestReservedStartupEffectiveListeners(t *testing.T) {
+	r := &mgmtpath.Reservation{Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
+	t.Setenv("CONTAIND_MGMT_ADDR", ":8080")
+	t.Setenv("CONTAIND_MGMT_HTTPS_ADDR", ":8443")
+	t.Setenv("CONTAIND_SSH_ADDR", ":2222")
+	cfg := config.DefaultConfig()
+	if err := validateReservedStartup(cfg, r); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"CONTAIND_MGMT_ADDR", "CONTAIND_MGMT_HTTPS_ADDR", "CONTAIND_SSH_ADDR"} {
+		t.Run(name, func(t *testing.T) {
+			value := ":8080"
+			if name == "CONTAIND_MGMT_ADDR" {
+				value = "127.0.0.1:8080"
+			}
+			t.Setenv(name, value)
+			if validateReservedStartup(cfg, r) == nil {
+				t.Fatal("accepted incompatible effective listener")
+			}
+		})
+	}
+}
+
+func TestReservedStartupWaitsForMatchingGuard(t *testing.T) {
+	r := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080, Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}}
+	for _, active := range []bool{false, true} {
+		t.Run(fmt.Sprintf("active_%t", active), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path != "/health" {
+					t.Errorf("unexpected readiness path %s", req.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"managementReservation": netcfg.ManagementHealth{Active: active, Device: r.Device, Local: r.Local.String(), Port: r.Port, Sources: []string{"10.99.99.10"}}})
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			defer cancel()
+			err := waitForReservedEngine(ctx, server.URL, r)
+			if (err == nil) != active {
+				t.Fatalf("active=%t err=%v", active, err)
+			}
+		})
+	}
+	if waitForReservedEngine(context.Background(), "http://192.0.2.1:8081", r) == nil {
+		t.Fatal("accepted non-loopback engine")
+	}
+}
 
 type testAuditStore struct {
 	records []audit.Record

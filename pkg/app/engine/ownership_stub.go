@@ -7,13 +7,20 @@ package engineapp
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
-type ownershipManager struct{}
+type ownershipManager struct {
+	reservation *mgmtpath.Reservation
+	guard       *netcfg.ManagementGuard
+	applyMu     sync.Mutex
+}
 
 func newOwnershipManager(logger *zap.SugaredLogger) *ownershipManager { return &ownershipManager{} }
 func (m *ownershipManager) setInterfaces(_ []config.Interface)        {}

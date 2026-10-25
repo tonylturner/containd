@@ -37,6 +37,14 @@ func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager) h
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if ownership != nil {
+			ownership.applyMu.Lock()
+			defer ownership.applyMu.Unlock()
+			if err := config.ValidateManagementInterfaces(ifaces, ownership.reservation); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if replace {
@@ -109,6 +117,14 @@ func routingHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http
 		if err := json.Unmarshal(body, &routing); err != nil {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
+		}
+		if ownership != nil {
+			ownership.applyMu.Lock()
+			defer ownership.applyMu.Unlock()
+			if err := config.ValidateManagementRouting(routing, ownership.reservation); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()

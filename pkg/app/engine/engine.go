@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
@@ -26,6 +28,8 @@ import (
 )
 
 type Options struct {
+	Reservation       *mgmtpath.Reservation
+	Ready             chan<- struct{}
 	Addr              string
 	CaptureInterfaces []string
 	EnforceEnabled    *bool
@@ -39,8 +43,9 @@ type healthResponse struct {
 	CommitHash string `json:"commitHash,omitempty"`
 	BootID     string `json:"bootId"`
 
-	IEC104Enforcement engine.IEC104Enforcement    `json:"iec104Enforcement"`
-	IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
+	ManagementReservation netcfg.ManagementHealth     `json:"managementReservation"`
+	IEC104Enforcement     engine.IEC104Enforcement    `json:"iec104Enforcement"`
+	IPv4Forwarding        netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
 }
 
 // engineBootID identifies this process, independent of wall-clock time.
@@ -68,13 +73,19 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func Run(ctx context.Context, opts Options) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	addr := opts.Addr
 	if addr == "" {
 		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
 	}
+	if err := opts.Reservation.ValidateEngineBind(addr); err != nil {
+		return err
+	}
 	logger := logging.NewService("engine")
 	logging.InstallSlogBridge(logger.Desugar())
 	ownership := newOwnershipManager(logger)
+	ownership.reservation = opts.Reservation
 
 	ifaces := opts.CaptureInterfaces
 	if len(ifaces) == 0 {
@@ -90,6 +101,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	engineCfg := initialEngineConfig(ifaces, enforceEnabled, enforceTable)
+	engineCfg.Enforce.ManagementReservation = opts.Reservation
 	engineCfg.Events = dpevents.NewStore(4096)
 	engineCfg.OnError = func(err error) {
 		logger.Errorf("data plane capture error: %v", err)
@@ -98,6 +110,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("failed to init dp engine: %w", err)
 	}
+	guard, err := netcfg.StartManagementGuard(ctx, opts.Reservation, func(f netcfg.ManagementFault) {
+		logger.Errorf("reserved management path fault: %s interface=%s address=%s service=%s", f.Reason, f.Interface, f.Address, f.Service)
+		dpEngine.Events().Append(dpevents.Event{Kind: "management.reservation.fault", Timestamp: f.Time, Attributes: map[string]any{"interface": f.Interface, "address": f.Address, "service": f.Service, "reason": f.Reason}})
+	})
+	if err != nil {
+		return fmt.Errorf("reserved management path startup: %w", err)
+	}
+	defer guard.Close()
+	ownership.guard = guard
 	avMgr := services.NewAVManager()
 	if avMgr != nil {
 		wireAVEvents(avMgr, dpEngine)
@@ -138,7 +159,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	mux := http.NewServeMux()
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
-	mux.HandleFunc("/health", healthHandler(dpEngine))
+	mux.HandleFunc("/health", healthHandler(dpEngine, guard))
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if dpEngine == nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
@@ -186,9 +207,16 @@ func Run(ctx context.Context, opts Options) error {
 		Addr:    addr,
 		Handler: mux,
 	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	if opts.Ready != nil {
+		close(opts.Ready)
+	}
 	errCh := make(chan error, 1)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
