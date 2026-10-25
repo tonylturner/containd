@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyConfigMutation } from "../../lib/config-events";
+
 import { postJSONResult } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -87,6 +89,7 @@ async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
       body: form,
     });
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;
@@ -103,6 +106,7 @@ async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
       },
     );
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;

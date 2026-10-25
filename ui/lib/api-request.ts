@@ -61,7 +61,7 @@ export async function postJSON<T>(
     if (handleUnauthorized(res)) return null;
     clearAuthExpired();
     if (!res.ok) return null;
-    notifyConfigMutation(path, "POST", payload);
+    notifyConfigMutation(res);
     return await parseSuccessBody<T>(res);
   } catch {
     return null;
@@ -81,7 +81,7 @@ export async function patchJSON<T>(
     if (handleUnauthorized(res)) return null;
     clearAuthExpired();
     if (!res.ok) return null;
-    notifyConfigMutation(path, "PATCH", payload);
+    notifyConfigMutation(res);
     return await parseSuccessBody<T>(res);
   } catch {
     return null;
@@ -96,7 +96,7 @@ export async function deleteJSON(path: string): Promise<boolean> {
     });
     if (handleUnauthorized(res)) return false;
     clearAuthExpired();
-    if (res.ok) notifyConfigMutation(path, "DELETE");
+    if (res.ok) notifyConfigMutation(res);
     return res.ok;
   } catch {
     return false;
@@ -138,7 +138,7 @@ export async function postJSONResult<T>(
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    notifyConfigMutation(path, "POST", payload);
+    notifyConfigMutation(res);
     return {
       ok: true,
       data: await parseSuccessBody<T>(res),
@@ -165,7 +165,7 @@ export async function patchJSONResult<T>(
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    notifyConfigMutation(path, "PATCH", payload);
+    notifyConfigMutation(res);
     return {
       ok: true,
       data: await parseSuccessBody<T>(res),
@@ -188,7 +188,7 @@ export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    notifyConfigMutation(path, "DELETE");
+    notifyConfigMutation(res);
     return { ok: true, data: undefined, warning: parseWarningHeader(res) };
   } catch (e) {
     return {

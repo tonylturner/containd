@@ -1,3 +1,4 @@
+import { notifyConfigMutation } from "./config-events";
 import {
   apiURL,
   authHeaders,
@@ -88,6 +89,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    notifyConfigMutation(res);
     return {
       ok: true,
       data: (await res.json()) as PcapItem,

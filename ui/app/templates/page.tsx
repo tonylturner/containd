@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyConfigMutation } from "../../lib/config-events";
+
 import { postJSON } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -77,6 +79,7 @@ async function previewTemplate(
       body: JSON.stringify({ ...req, preview: true }),
     });
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as TemplateApplyResponse;
   } catch {
     return null;

@@ -9,14 +9,19 @@ async function setup(page: Page) {
       const body = req.postDataJSON();
       state.writes.push({ path, body });
       if (state.reject) return route.fulfill({ status: 400, json: { error: "mutation rejected" } });
-      if (path.startsWith("/config/commit")) state.dirty = false;
+      const headers: Record<string, string> = {};
+      if (path.startsWith("/config/commit")) {
+        state.dirty = false;
+        headers["X-Containd-Config"] = "committed";
+      }
       else if (path === "/zones") { state.dirty = true; state.zones.push(body); }
       else if (path === "/ids/rules") {
         state.dirty = true;
         state.ids = { ...body, rules: body.rules.map((rule: any) => ({ ...rule, name: "Server-normalized rule" })) };
       }
       else if (path === "/pcap/config") state.dirty = true;
-      return route.fulfill({ json: path === "/ids/rules" ? state.ids : body ?? {} });
+      if (["/zones", "/ids/rules", "/pcap/config"].includes(path)) headers["X-Containd-Config"] = "staged";
+      return route.fulfill({ headers, json: path === "/ids/rules" ? state.ids : body ?? {} });
     }
     if (path === "/config/diff") {
       state.reads++;
@@ -124,7 +129,7 @@ test("PCAP generation stages one rule per request, including partial failure fee
     state.writes.push({ path: "/firewall/rules", body });
     if (body.id === "generated-2") return route.fulfill({ status: 400, json: { error: "second rule rejected" } });
     state.dirty = true;
-    await route.fulfill({ json: body });
+    await route.fulfill({ headers: { "X-Containd-Config": "staged" }, json: body });
   });
   await page.goto("/pcap/");
   await page.getByLabel("Existing PCAP Files").getByRole("button", { name: "Analyze", exact: true }).click();
