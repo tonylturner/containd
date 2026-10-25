@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import type { Interface, InterfaceState, Zone } from "../../lib/api";
 import { interfaceAddresses, OS_ADDRESS_HINT } from "../../lib/interface-addresses";
+import { staticAssetURL } from "../../lib/api-core";
 
 export function InterfaceRow({
   iface,
@@ -296,7 +297,7 @@ export function InterfaceRow({
           >
             {display.source === "os" && (
               <span title={OS_ADDRESS_HINT}>
-                <Image src="/icons/docker.svg" alt="OS/Docker address" width={16} height={16} />
+                <Image src={staticAssetURL("/icons/docker.svg")} alt="OS/Docker address" width={16} height={16} />
               </span>
             )}
             {display.source === "dhcp"
@@ -318,7 +319,7 @@ export function InterfaceRow({
           return (
             <span className="relative inline-flex items-center justify-center rounded-md border border-amber-500/[0.15] bg-[var(--surface)] p-1 text-[var(--text)] group">
               <Image
-                src="/icons/docker.svg"
+                src={staticAssetURL("/icons/docker.svg")}
                 alt="Docker"
                 width={16}
                 height={16}

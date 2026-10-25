@@ -10,6 +10,7 @@ import {
   type ReverseProxyConfig,
   type ReverseProxySite,
 } from "../../lib/api";
+import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
@@ -235,7 +236,7 @@ export default function ProxiesPage() {
       <div className="mb-4 grid gap-4 md:grid-cols-2">
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
-            <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-[var(--text)]">Forward proxy (Envoy)</h2>
             <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
           </div>
@@ -280,7 +281,7 @@ export default function ProxiesPage() {
         </Card>
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
-            <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-[var(--text)]">Reverse proxy (Nginx)</h2>
             <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
           </div>

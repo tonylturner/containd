@@ -1,4 +1,5 @@
 import {
+  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -101,7 +102,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
 }
 
 export function downloadPcapURL(name: string): string {
-  return `/api/v1/pcap/download/${encodeURIComponent(name)}`;
+  return apiURL(`/api/v1/pcap/download/${encodeURIComponent(name)}`);
 }
 
 export async function deletePcap(name: string): Promise<ApiResult<void>> {

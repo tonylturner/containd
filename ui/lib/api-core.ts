@@ -1,26 +1,34 @@
-// API base path resolution. Three precedence rules:
-//   1. NEXT_PUBLIC_API_BASE env var (build-time, explicit override)
-//   2. Runtime auto-detect: if the page is hosted at /containd/* (the
-//      convention rangerdanger uses when embedding containd's UI under
-//      a path prefix), assume the backend is mounted at the same prefix
-//   3. Empty → API calls go to the same origin's root
-// The runtime branch makes the embedded UX Just Work without requiring
-// the embedder to rebuild containd with a baked-in env var.
-function resolveAPIBase(): string {
-  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
-  if (typeof window !== "undefined" && window.location.pathname.startsWith("/containd/")) {
-    return "/containd";
-  }
-  return "";
+// The UI and API share runtime base-path detection. This keeps a statically
+// exported UI usable at both the origin root and RangerDanger's /containd/
+// mount without duplicating the path-prefix convention.
+function resolveBasePath(pathname?: string): string {
+  const currentPathname =
+    pathname ?? (typeof window !== "undefined" ? window.location.pathname : "");
+  return currentPathname.startsWith("/containd/") ? "/containd" : "";
 }
 
-const API_BASE = resolveAPIBase();
+function resolveAPIBase(pathname?: string): string {
+  // An explicit API origin/path takes precedence for API requests only;
+  // public assets and same-origin WebSockets use the UI's runtime base path.
+  return process.env.NEXT_PUBLIC_API_BASE || resolveBasePath(pathname);
+}
+
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
-// apiURL is defined below; both bespoke fetch sites and the apiFetch
-// helper read API_BASE through it (or directly), so updating
-// resolveAPIBase() above is the single source of truth for path
-// prefixing.
+export function staticAssetURL(path: string, pathname?: string): string {
+  return `${resolveBasePath(pathname)}${path}`;
+}
+
+export function apiWebSocketURL(
+  path: string,
+  protocol: string,
+  host: string,
+  pathname?: string,
+): string {
+  const wsProtocol = protocol === "https:" ? "wss" : "ws";
+  return `${wsProtocol}://${host}${resolveBasePath(pathname)}${path}`;
+}
+
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";
@@ -140,7 +148,7 @@ export async function fetchWithSession(
   init: RequestInit,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const url = `${API_BASE}${path}`;
+  const url = apiURL(path);
   const res = await fetch(url, {
     ...init,
     credentials: "include",
@@ -175,8 +183,8 @@ export async function fetchWithSession(
   return res;
 }
 
-export function apiURL(path: string): string {
-  return `${API_BASE}${path}`;
+export function apiURL(path: string, pathname?: string): string {
+  return `${resolveAPIBase(pathname)}${path}`;
 }
 
 export function handleUnauthorized(res: Response) {

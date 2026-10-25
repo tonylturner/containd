@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Static icon URLs now include the runtime `/containd/` base path when the UI
+  is mounted under that prefix.
 - Commit-confirmed expiry replays the rolled-back running configuration to the
   engine without requiring an engine restart. Service and VPN updates serialize
   persistence and runtime changes with replay.

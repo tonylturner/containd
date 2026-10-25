@@ -14,6 +14,7 @@ import {
   type WireGuardStatus,
   type ServicesStatus,
 } from "../../lib/api";
+import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -369,7 +370,7 @@ export default function VPNPage() {
             <div className="flex items-center gap-3">
               <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-blue-500/25 to-sky-500/10">
                 <Image
-                  src="/icons/wireguard.svg"
+                  src={staticAssetURL("/icons/wireguard.svg")}
                   alt="WireGuard"
                   width={24}
                   height={24}

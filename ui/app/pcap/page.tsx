@@ -92,10 +92,13 @@ async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
 
 async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
   try {
-    const res = await fetch(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`, {
-      method: "POST",
-      credentials: "include",
-    });
+    const res = await fetch(
+      apiURL(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`),
+      {
+        method: "POST",
+        credentials: "include",
+      },
+    );
     if (!res.ok) return null;
     return (await res.json()) as PolicyAnalysis;
   } catch {

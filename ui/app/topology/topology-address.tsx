@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { OS_ADDRESS_HINT, type InterfaceAddresses } from "../../lib/interface-addresses";
+import { staticAssetURL } from "../../lib/api-core";
 
 export function TopologyAddress({
   address,
@@ -13,7 +14,7 @@ export function TopologyAddress({
       {address?.source === "os" && (
         <span title={OS_ADDRESS_HINT}>
           <Image
-            src="/icons/docker.svg"
+            src={staticAssetURL("/icons/docker.svg")}
             alt="OS/Docker address"
             width={14}
             height={14}
