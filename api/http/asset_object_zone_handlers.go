@@ -16,7 +16,7 @@ import (
 
 func listAssetsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -32,27 +32,24 @@ func createAssetHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid asset payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Assets {
+				if existing.ID == a.ID {
+					apiError(c, http.StatusBadRequest, "asset already exists")
+					return false
+				}
+				if existing.Name != "" && existing.Name == a.Name {
+					apiError(c, http.StatusBadRequest, "asset name already exists")
+					return false
+				}
+			}
+			cfg.Assets = append(cfg.Assets, a)
+			return true
+		})
+		if !ok {
 			return
 		}
-		for _, existing := range cfg.Assets {
-			if existing.ID == a.ID {
-				apiError(c, http.StatusBadRequest, "asset already exists")
-				return
-			}
-			if existing.Name != "" && existing.Name == a.Name {
-				apiError(c, http.StatusBadRequest, "asset name already exists")
-				return
-			}
-		}
-		cfg.Assets = append(cfg.Assets, a)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "assets.create", Target: a.ID})
+		auditLog(c, audit.Record{Action: "assets.create", Target: a.ID, Detail: "candidate"})
 		c.JSON(http.StatusOK, a)
 	}
 }
@@ -65,34 +62,31 @@ func updateAssetHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid asset payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		updated := false
-		for i, existing := range cfg.Assets {
-			if existing.ID == id {
-				if a.ID == "" {
-					a.ID = existing.ID
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			updated := false
+			for i, existing := range cfg.Assets {
+				if existing.ID == id {
+					if a.ID == "" {
+						a.ID = existing.ID
+					}
+					if a.Name == "" {
+						a.Name = existing.Name
+					}
+					cfg.Assets[i] = a
+					updated = true
+					break
 				}
-				if a.Name == "" {
-					a.Name = existing.Name
-				}
-				cfg.Assets[i] = a
-				updated = true
-				break
 			}
-		}
-		if !updated {
-			apiError(c, http.StatusNotFound, "asset not found")
+			if !updated {
+				apiError(c, http.StatusNotFound, "asset not found")
+				return false
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "assets.update", Target: id})
+		auditLog(c, audit.Record{Action: "assets.update", Target: id, Detail: "candidate"})
 		c.JSON(http.StatusOK, a)
 	}
 }
@@ -100,35 +94,32 @@ func updateAssetHandler(store config.Store) gin.HandlerFunc {
 func deleteAssetHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		original := len(cfg.Assets)
-		filtered := make([]config.Asset, 0, len(cfg.Assets))
-		for _, a := range cfg.Assets {
-			if a.ID != id {
-				filtered = append(filtered, a)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			original := len(cfg.Assets)
+			filtered := make([]config.Asset, 0, len(cfg.Assets))
+			for _, a := range cfg.Assets {
+				if a.ID != id {
+					filtered = append(filtered, a)
+				}
 			}
-		}
-		if len(filtered) == original {
-			apiError(c, http.StatusNotFound, "asset not found")
+			if len(filtered) == original {
+				apiError(c, http.StatusNotFound, "asset not found")
+				return false
+			}
+			cfg.Assets = filtered
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Assets = filtered
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			internalError(c, err)
-			return
-		}
-		auditLog(c, audit.Record{Action: "assets.delete", Target: id})
+		auditLog(c, audit.Record{Action: "assets.delete", Target: id, Detail: "candidate"})
 		c.Status(http.StatusNoContent)
 	}
 }
 
 func listObjectsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -144,27 +135,24 @@ func createObjectHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid object payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Objects {
+				if existing.ID == obj.ID {
+					apiError(c, http.StatusBadRequest, "object already exists")
+					return false
+				}
+				if existing.Name != "" && existing.Name == obj.Name {
+					apiError(c, http.StatusBadRequest, "object name already exists")
+					return false
+				}
+			}
+			cfg.Objects = append(cfg.Objects, obj)
+			return true
+		})
+		if !ok {
 			return
 		}
-		for _, existing := range cfg.Objects {
-			if existing.ID == obj.ID {
-				apiError(c, http.StatusBadRequest, "object already exists")
-				return
-			}
-			if existing.Name != "" && existing.Name == obj.Name {
-				apiError(c, http.StatusBadRequest, "object name already exists")
-				return
-			}
-		}
-		cfg.Objects = append(cfg.Objects, obj)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "objects.create", Target: obj.ID})
+		auditLog(c, audit.Record{Action: "objects.create", Target: obj.ID, Detail: "candidate"})
 		c.JSON(http.StatusOK, obj)
 	}
 }
@@ -177,49 +165,46 @@ func updateObjectHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid object payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		updated := false
-		for i, existing := range cfg.Objects {
-			if existing.ID == id {
-				if obj.ID == "" {
-					obj.ID = existing.ID
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			updated := false
+			for i, existing := range cfg.Objects {
+				if existing.ID == id {
+					if obj.ID == "" {
+						obj.ID = existing.ID
+					}
+					if obj.Name == "" {
+						obj.Name = existing.Name
+					}
+					if obj.Type == "" {
+						obj.Type = existing.Type
+					}
+					if obj.Addresses == nil {
+						obj.Addresses = existing.Addresses
+					}
+					if obj.Members == nil {
+						obj.Members = existing.Members
+					}
+					if obj.Protocols == nil {
+						obj.Protocols = existing.Protocols
+					}
+					if obj.Tags == nil {
+						obj.Tags = existing.Tags
+					}
+					cfg.Objects[i] = obj
+					updated = true
+					break
 				}
-				if obj.Name == "" {
-					obj.Name = existing.Name
-				}
-				if obj.Type == "" {
-					obj.Type = existing.Type
-				}
-				if obj.Addresses == nil {
-					obj.Addresses = existing.Addresses
-				}
-				if obj.Members == nil {
-					obj.Members = existing.Members
-				}
-				if obj.Protocols == nil {
-					obj.Protocols = existing.Protocols
-				}
-				if obj.Tags == nil {
-					obj.Tags = existing.Tags
-				}
-				cfg.Objects[i] = obj
-				updated = true
-				break
 			}
-		}
-		if !updated {
-			apiError(c, http.StatusNotFound, "object not found")
+			if !updated {
+				apiError(c, http.StatusNotFound, "object not found")
+				return false
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "objects.update", Target: id})
+		auditLog(c, audit.Record{Action: "objects.update", Target: id, Detail: "candidate"})
 		c.JSON(http.StatusOK, obj)
 	}
 }
@@ -227,35 +212,32 @@ func updateObjectHandler(store config.Store) gin.HandlerFunc {
 func deleteObjectHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		original := len(cfg.Objects)
-		filtered := make([]config.Object, 0, len(cfg.Objects))
-		for _, obj := range cfg.Objects {
-			if obj.ID != id {
-				filtered = append(filtered, obj)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			original := len(cfg.Objects)
+			filtered := make([]config.Object, 0, len(cfg.Objects))
+			for _, obj := range cfg.Objects {
+				if obj.ID != id {
+					filtered = append(filtered, obj)
+				}
 			}
-		}
-		if len(filtered) == original {
-			apiError(c, http.StatusNotFound, "object not found")
+			if len(filtered) == original {
+				apiError(c, http.StatusNotFound, "object not found")
+				return false
+			}
+			cfg.Objects = filtered
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Objects = filtered
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			internalError(c, err)
-			return
-		}
-		auditLog(c, audit.Record{Action: "objects.delete", Target: id})
+		auditLog(c, audit.Record{Action: "objects.delete", Target: id, Detail: "candidate"})
 		c.Status(http.StatusNoContent)
 	}
 }
 
 func listZonesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -271,22 +253,20 @@ func createZoneHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid zone payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		for _, existing := range cfg.Zones {
-			if existing.Name == z.Name {
-				apiError(c, http.StatusBadRequest, "zone already exists")
-				return
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Zones {
+				if existing.Name == z.Name {
+					apiError(c, http.StatusBadRequest, "zone already exists")
+					return false
+				}
 			}
-		}
-		cfg.Zones = append(cfg.Zones, z)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			cfg.Zones = append(cfg.Zones, z)
+			return true
+		})
+		if !ok {
 			return
 		}
+		auditLog(c, audit.Record{Action: "zones.create", Target: z.Name, Detail: "candidate"})
 		c.JSON(http.StatusOK, z)
 	}
 }
@@ -294,47 +274,46 @@ func createZoneHandler(store config.Store) gin.HandlerFunc {
 func deleteZoneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		for _, iface := range cfg.Interfaces {
-			if iface.Zone == name {
-				apiError(c, http.StatusBadRequest, "zone in use by interface")
-				return
-			}
-		}
-		for _, rule := range cfg.Firewall.Rules {
-			for _, z := range append(rule.SourceZones, rule.DestZones...) {
-				if z == name {
-					apiError(c, http.StatusBadRequest, "zone in use by firewall rule")
-					return
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, iface := range cfg.Interfaces {
+				if iface.Zone == name {
+					apiError(c, http.StatusBadRequest, "zone in use by interface")
+					return false
 				}
 			}
-		}
-		original := len(cfg.Zones)
-		filtered := make([]config.Zone, 0, len(cfg.Zones))
-		for _, z := range cfg.Zones {
-			if z.Name != name {
-				filtered = append(filtered, z)
+			for _, rule := range cfg.Firewall.Rules {
+				for _, z := range append(rule.SourceZones, rule.DestZones...) {
+					if z == name {
+						apiError(c, http.StatusBadRequest, "zone in use by firewall rule")
+						return false
+					}
+				}
 			}
-		}
-		if len(filtered) == original {
-			apiError(c, http.StatusNotFound, "zone not found")
+			original := len(cfg.Zones)
+			filtered := make([]config.Zone, 0, len(cfg.Zones))
+			for _, z := range cfg.Zones {
+				if z.Name != name {
+					filtered = append(filtered, z)
+				}
+			}
+			if len(filtered) == original {
+				apiError(c, http.StatusNotFound, "zone not found")
+				return false
+			}
+			cfg.Zones = filtered
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Zones = filtered
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			internalError(c, err)
-			return
-		}
+		auditLog(c, audit.Record{Action: "zones.delete", Target: name, Detail: "candidate"})
 		c.Status(http.StatusNoContent)
 	}
 }
 
 func updateZoneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var z *config.Zone
 		name := c.Param("name")
 		patch, err := readZonePatch(c)
 		if err != nil {
@@ -342,23 +321,20 @@ func updateZoneHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			idx := zoneIndexByName(cfg.Zones, name)
+			if idx < 0 {
+				apiError(c, http.StatusNotFound, "zone not found")
+				return false
+			}
+			z = &cfg.Zones[idx]
+			applyZonePatch(z, patch)
+			return true
+		})
+		if !ok {
 			return
 		}
-		idx := zoneIndexByName(cfg.Zones, name)
-		if idx < 0 {
-			apiError(c, http.StatusNotFound, "zone not found")
-			return
-		}
-		z := &cfg.Zones[idx]
-		applyZonePatch(z, patch)
-
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		auditLog(c, audit.Record{Action: "zones.update", Target: name, Detail: "candidate"})
 		c.JSON(http.StatusOK, *z)
 	}
 }

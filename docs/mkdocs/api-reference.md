@@ -22,6 +22,29 @@ Authentication and user-management coverage includes:
 
 See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
 
+## Staged Configuration
+
+All persisted configuration edits stage into one shared candidate, including
+object CRUD, service settings, IDS rules, saved PCAP settings, `POST /config`
+and `POST /config/import`. Import replaces the candidate, never running.
+Editable lists and settings read candidate desired state. Staging does not apply
+anything to the engine or services; read-only discovery/validation is permitted.
+Use `GET /config/diff` to review, then `POST /config/commit` or
+`POST /config/commit_confirmed` to promote and apply. Running configuration and
+its IDS bank are promoted and rolled back together. Plain commit cancels an
+outstanding confirmed-commit timer and replaces its rollback baseline.
+
+`GET /config`, `GET /config/export`, config backups, `GET /ids/export` and
+`GET /ids/backup` read running. IDS import and restore stage desired rules.
+Operational commands (blocks, reconcile, credentials, definition updates and
+capture start/stop) remain immediate. `/pcap/start` uses its request body, or
+running PCAP settings when absent; neither start nor stop persists settings.
+CLI configuration commands report `staged; run "commit" to apply`.
+
+Successful staged edits return `X-Containd-Config: staged`. Successful commit,
+commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
+Operational, read, preview-only and failed responses carry neither header value.
+
 ## Event Retention and Page Limits
 
 `GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum
@@ -118,9 +141,9 @@ The following environment variables control runtime behavior. They are read at s
 | `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable). The published starter and dev compose files override this to `1` by default. |
 | `CONTAIND_DPI_MOCK` | `0` | Enable synthetic DPI event generation for testing (`1` to enable) |
 
-### DPI Configuration (Runtime)
+### DPI Configuration (Staged)
 
-DPI mode and per-protocol settings are configured at runtime via the API or UI, not environment variables. Use `POST /api/v1/engine/config` with:
+DPI mode and per-protocol settings are staged via the API or UI, not environment variables. Use `POST /api/v1/dataplane`, then commit, with:
 
 - `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy enforcement)
 - `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)

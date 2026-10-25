@@ -35,18 +35,11 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 		Snaplen:    256,
 		FilePrefix: "stored",
 	}
-	store := &mockStore{cfg: cfg}
+	store := &mockStore{cfg: cfg, load: func() (*config.Config, error) {
+		t.Error("explicit capture request must not read persisted defaults")
+		return nil, errors.New("unexpected config read")
+	}}
 	engine := newRuntimeMockEngine()
-	store.save = func(saved *config.Config) error {
-		if !reflect.DeepEqual(saved.PCAP, engine.pcapStartCfg) {
-			t.Fatalf("saved PCAP config = %#v before engine accepted %#v", saved.PCAP, engine.pcapStartCfg)
-		}
-		if err := saved.Validate(); err != nil {
-			return err
-		}
-		store.cfg = saved
-		return nil
-	}
 	server := NewServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
@@ -70,7 +63,7 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 	if engine.pcapStartCfg.Mode != "" || engine.pcapStartCfg.Snaplen != 0 || engine.pcapStartCfg.FilePrefix != "" {
 		t.Fatalf("engine start inherited omitted fields from stored config: %#v", engine.pcapStartCfg)
 	}
-	if store.calls != 1 || !store.cfg.PCAP.Enabled {
+	if store.calls != 0 || store.cfg.PCAP.Enabled {
 		t.Fatalf("successful start saved config %d times: %#v", store.calls, store.cfg.PCAP)
 	}
 }
@@ -105,8 +98,8 @@ func TestPCAPStartWithoutBodyUsesStoredConfig(t *testing.T) {
 				got.Mode != "once" || got.Snaplen != 256 || !got.Enabled {
 				t.Fatalf("engine start config = %#v, want stored settings enabled", got)
 			}
-			if store.calls != 1 || !reflect.DeepEqual(store.cfg.PCAP, engine.pcapStartCfg) {
-				t.Fatalf("successful start did not save engine config: calls=%d cfg=%#v", store.calls, store.cfg.PCAP)
+			if store.calls != 0 || store.cfg.PCAP.Enabled {
+				t.Fatalf("successful start changed persisted config: calls=%d cfg=%#v", store.calls, store.cfg.PCAP)
 			}
 		})
 	}
@@ -168,7 +161,7 @@ func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 	}
 }
 
-func TestPCAPStartWithoutEngineQueuesAndSaves(t *testing.T) {
+func TestPCAPStartWithoutEngineDoesNotPersist(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
 	server := NewServerWithEngine(store, nil, nil)
 	rec := httptest.NewRecorder()
@@ -179,15 +172,16 @@ func TestPCAPStartWithoutEngineQueuesAndSaves(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "pcap start queued") {
 		t.Fatalf("queued start status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	want := config.PCAPConfig{Enabled: true, Zones: []string{"lan"}, Filter: config.PCAPFilter{Port: "502"}}
-	if store.calls != 1 || !reflect.DeepEqual(store.cfg.PCAP, want) {
-		t.Fatalf("queued start saved config %d times: %#v, want %#v", store.calls, store.cfg.PCAP, want)
+	if store.calls != 0 || store.cfg.PCAP.Enabled {
+		t.Fatal("queued start persisted settings")
 	}
+
 }
 
-func TestPCAPConfigMapsEngineResolutionErrorToBadRequest(t *testing.T) {
+func TestPCAPConfigDoesNotCallEngine(t *testing.T) {
 	engineServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, `pcap interface "missing" is not configured`, http.StatusBadRequest)
+		t.Error("staging called the engine")
+		http.Error(w, "unexpected engine call", http.StatusBadRequest)
 	}))
 	defer engineServer.Close()
 
@@ -201,10 +195,10 @@ func TestPCAPConfigMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 	)
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("pcap config status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), "missing") {
-		t.Fatalf("pcap config response omitted engine resolution detail: %s", rec.Body.String())
+	if len(store.cfg.PCAP.Interfaces) != 1 || store.cfg.PCAP.Interfaces[0] != "missing" {
+		t.Fatal("settings not staged")
 	}
 }

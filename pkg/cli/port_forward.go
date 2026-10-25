@@ -78,6 +78,7 @@ func setPortForwardAddAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showPortForwardsAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -256,6 +257,7 @@ func setPortForwardDelAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showPortForwardsAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -294,6 +296,7 @@ func setPortForwardEnableAPI(api *API, enabled bool) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showPortForwardsAPI(api)(ctx, out, nil)
 		}
 		return nil

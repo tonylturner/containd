@@ -31,6 +31,28 @@ func (m *memStore) Load(ctx context.Context) (*config.Config, error) {
 	return m.cfg, nil
 }
 
+func (m *memStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+	cfg, err := m.LoadCandidate(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return err
+	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	var next config.Config
+	if err := json.Unmarshal(blob, &next); err != nil {
+		return err
+	}
+	if err := edit(&next); err != nil {
+		return err
+	}
+	return m.SaveCandidate(ctx, &next)
+}
+
 func (m *memStore) SaveCandidate(ctx context.Context, cfg *config.Config) error {
 	return m.Save(ctx, cfg)
 }
@@ -284,8 +306,8 @@ func TestSetZoneViaAPI(t *testing.T) {
 	if err := reg.Execute(ctx, "set zone", &buf, []string{"it", "desc"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("ok")) {
-		t.Fatalf("expected ok response, got %s", buf.String())
+	if !bytes.Contains(buf.Bytes(), []byte(stagedMessage)) {
+		t.Fatalf("expected staged response, got %s", buf.String())
 	}
 }
 

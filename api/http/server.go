@@ -246,17 +246,17 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/config/confirm", requireAdmin(), confirmCommitHandler(store))
 		protected.POST("/config/rollback", requireAdmin(), rollbackConfigHandler(store, engine, services))
 		protected.GET("/services/syslog", getSyslogHandler(store))
-		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store, services))
-		protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store, services))
+		protected.POST("/services/syslog", requireAdmin(), setSyslogHandler(store))
+		protected.PATCH("/services/syslog", requireAdmin(), patchSyslogHandler(store))
 		protected.GET("/services/dns", getDNSHandler(store))
 		protected.POST("/services/dns", requireAdmin(), setDNSHandler(store, services))
 		protected.GET("/services/ntp", getNTPHandler(store))
-		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store, services))
+		protected.POST("/services/ntp", requireAdmin(), setNTPHandler(store))
 		protected.GET("/services/dhcp", getDHCPHandler(store))
-		protected.POST("/services/dhcp", requireAdmin(), setDHCPHandler(store, services, engine))
+		protected.POST("/services/dhcp", requireAdmin(), setDHCPHandler(store))
 		protected.GET("/services/vpn", getVPNHandler(store))
-		protected.POST("/services/vpn", requireAdmin(), setVPNHandler(store, services, engine))
-		protected.POST("/services/vpn/openvpn/profile", requireAdmin(), uploadOpenVPNProfileHandler(store, services, engine))
+		protected.POST("/services/vpn", requireAdmin(), setVPNHandler(store))
+		protected.POST("/services/vpn/openvpn/profile", requireAdmin(), uploadOpenVPNProfileHandler(store))
 		protected.GET("/services/vpn/openvpn/clients", requireAdmin(), listOpenVPNClientsHandler(store))
 		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), createOpenVPNClientHandler(store))
 		protected.GET("/services/vpn/openvpn/clients/:name", requireAdmin(), downloadOpenVPNClientHandler(store))
@@ -268,9 +268,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(store, services))
 		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(store, services))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
-		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store, services))
+		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
-		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store, services))
+		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
 		protected.GET("/services/status", getServicesStatusHandler(services))
 		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/events/:id", eventDetailHandler(engine, services))
@@ -285,14 +285,14 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
-		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store, engine))
+		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
 		protected.POST("/dataplane/blocks/host", requireAdmin(), blockHostHandler(engine))
 		protected.POST("/dataplane/blocks/flow", requireAdmin(), blockFlowHandler(engine))
 		protected.GET("/pcap/config", getPCAPConfigHandler(store))
-		protected.POST("/pcap/config", requireAdmin(), setPCAPConfigHandler(store, engine))
+		protected.POST("/pcap/config", requireAdmin(), setPCAPConfigHandler(store))
 		protected.POST("/pcap/start", requireAdmin(), startPCAPHandler(store, engine))
-		protected.POST("/pcap/stop", requireAdmin(), stopPCAPHandler(store, engine))
+		protected.POST("/pcap/stop", requireAdmin(), stopPCAPHandler(engine))
 		protected.GET("/pcap/status", getPCAPStatusHandler(engine))
 		protected.GET("/pcap/list", getPCAPListHandler(engine))
 		protected.POST("/pcap/upload", requireAdmin(), uploadPCAPHandler(engine))
@@ -323,14 +323,14 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
 		protected.GET("/interfaces", listInterfacesHandler(store))
 		protected.GET("/interfaces/state", interfaceStateHandler(store, engine))
-		protected.POST("/interfaces/assign", requireAdmin(), interfacesAssignHandler(store, engine, services))
+		protected.POST("/interfaces/assign", requireAdmin(), interfacesAssignHandler(store, engine))
 		protected.POST("/interfaces/reconcile", requireAdmin(), interfacesReconcileHandler(store, engine))
-		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store, engine, services))
-		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store, engine, services))
-		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store, engine, services))
+		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
+		protected.PATCH("/interfaces/:name", requireAdmin(), updateInterfaceHandler(store))
+		protected.DELETE("/interfaces/:name", requireAdmin(), deleteInterfaceHandler(store))
 		protected.GET("/routing", getRoutingHandler(store))
 		protected.GET("/routing/os", getOSRoutingHandler())
-		protected.POST("/routing", requireAdmin(), setRoutingHandler(store, engine, services))
+		protected.POST("/routing", requireAdmin(), setRoutingHandler(store))
 		protected.POST("/routing/reconcile", requireAdmin(), routingReconcileHandler(store, engine))
 		protected.GET("/firewall/nat", getFirewallNATHandler(store))
 		protected.POST("/firewall/nat", requireAdmin(), setFirewallNATHandler(store))
@@ -349,13 +349,13 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
 		protected.GET("/security/conduits", securityConduitsHandler(store))
 		protected.GET("/ids/rules", getIDSHandler(store))
-		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store, engine, services))
+		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", convertSigmaHandler())
-		protected.POST("/ids/import", requireAdmin(), idsImportHandler(store, engine, services))
-		protected.POST("/ids/export", idsExportHandler(store))
+		protected.POST("/ids/import", requireAdmin(), idsImportHandler(store))
+		protected.GET("/ids/export", idsExportHandler(store))
 		protected.GET("/ids/sources", idsSourcesHandler())
 		protected.GET("/ids/backup", idsBackupHandler(store))
-		protected.POST("/ids/restore", requireAdmin(), idsRestoreHandler(store, engine, services))
+		protected.POST("/ids/restore", requireAdmin(), idsRestoreHandler(store))
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
 		protected.GET("/cli/complete", cliCompleteHandler(store))
@@ -415,12 +415,11 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if err := store.Save(ctx, &cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		if !replaceCandidate(c, ctx, store, &cfg) {
 			return
 		}
-		auditLog(c, audit.Record{Action: "config.save", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "saved"})
+		auditLog(c, audit.Record{Action: "config.save", Target: "candidate"})
+		c.JSON(http.StatusOK, gin.H{"status": "staged"})
 	}
 }
 
@@ -461,17 +460,18 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		// Restore secrets that were redacted in the read response so
-		// round-tripping redacted config doesn't wipe stored secrets.
-		if existing, err := store.Load(c.Request.Context()); err == nil {
+		if _, ok := stageCandidate(c, store, func(existing *config.Config) bool {
 			cfg.RestoreRedactedSecrets(existing)
-		}
-		if err := store.SaveCandidate(c.Request.Context(), &cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			if cfg.IDS.Rules == nil {
+				cfg.IDS.Rules = existing.IDS.Rules
+			}
+			*existing = cfg
+			return true
+		}); !ok {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.save_candidate", Target: "candidate"})
-		c.JSON(http.StatusOK, gin.H{"status": "saved"})
+		c.JSON(http.StatusOK, gin.H{"status": "staged"})
 	}
 }
 
@@ -490,7 +490,7 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+		committedConfigResponse(c, "committed")
 	}
 }
 
@@ -524,7 +524,7 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "committed"})
+		committedConfigResponse(c, "committed")
 	}
 }
 
@@ -535,7 +535,7 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "confirmed"})
+		committedConfigResponse(c, "confirmed")
 	}
 }
 
@@ -554,12 +554,12 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 		}
 		setWarningHeader(c, warnings)
 		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "rolled back"})
+		committedConfigResponse(c, "rolled back")
 	}
 }
 
 // ApplyRunningConfig replays the current stored running config through the same
-// serialized apply path used by commits and runtime configuration handlers.
+// serialized apply path used by commits and rollback.
 func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	return applyRunningConfig(ctx, store, engine, services)
 }
@@ -593,7 +593,7 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 	// Re-bind logical interface names to physical kernel devices before
 	// applying them. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
-	// loadOrInitConfig persists bindings on reads where that behavior is needed.
+	// Bootstrap owns persisted default device bindings.
 	bindDefaultInterfaceDevices(cfg)
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
@@ -632,13 +632,6 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 			if _, err := engine.StopPcap(ctx); err != nil {
 				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
-		}
-		// Load IDS rules from separate storage and inject for compilation.
-		idsRules, idsErr := store.LoadIDSRules(ctx)
-		if idsErr != nil {
-			warnings = append(warnings, fmt.Sprintf("ids rules: %v", idsErr))
-		} else {
-			cfg.IDS.Rules = idsRules
 		}
 		// Always compile and push rules regardless of infrastructure errors.
 		snap, err := compile.CompileSnapshot(cfg)
@@ -686,37 +679,14 @@ func diffConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// loadOrInitConfig only supplies an in-memory default for an uninitialized
+// store. Bootstrap owns persistence; reads must never modify running/candidate.
 func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, error) {
 	cfg, err := store.Load(ctx)
-	if err != nil {
-		if errors.Is(err, config.ErrNotFound) {
-			def := config.DefaultConfig()
-			config.ApplyBootstrapEnvDefaults(def)
-			def.System.Hostname = "containd"
-			def.System.Mgmt.ListenAddr = ":8080"
-			def.System.Mgmt.HTTPListenAddr = ":8080"
-			def.System.Mgmt.HTTPSListenAddr = ":8443"
-			t := true
-			def.System.Mgmt.EnableHTTP = &t
-			def.System.Mgmt.EnableHTTPS = &t
-			def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-			def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-			def.System.SSH.ListenAddr = ":2222"
-			def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
-			autoBindDefaultInterfaceDevices(def)
-			// NOTE: password auth is controlled by runtime bootstrap logic; don't force it in config here.
-			_ = store.Save(ctx, def)
-			return def, nil
-		}
-		return nil, err
+	if errors.Is(err, config.ErrNotFound) {
+		return config.DefaultConfig(), nil
 	}
-	if cfg.Firewall.DefaultAction == "" {
-		cfg.Firewall.DefaultAction = config.ActionDeny
-	}
-	if autoBindDefaultInterfaceDevices(cfg) {
-		_ = store.Save(ctx, cfg)
-	}
-	return cfg, nil
+	return cfg, err
 }
 
 func withAuditStore(store audit.Store) gin.HandlerFunc {

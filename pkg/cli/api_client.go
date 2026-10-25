@@ -87,7 +87,7 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, path)
 	}
 	return nil
 }
@@ -165,7 +165,7 @@ func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Wr
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, path)
 	}
 	return nil
 }
@@ -192,7 +192,39 @@ func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, path)
 	}
 	return nil
+}
+
+// Only persistent config edits are staged; operational and commit output stays unchanged.
+const stagedMessage = `staged; run "commit" to apply`
+
+func writeMutationResult(out io.Writer, path string) {
+	if out == nil {
+		return
+	}
+	if isStagedPath(path) {
+		fmt.Fprintln(out, stagedMessage)
+	} else {
+		fmt.Fprintln(out, "ok")
+	}
+}
+
+func isStagedPath(path string) bool {
+	switch path {
+	case "/api/v1/config", "/api/v1/config/candidate", "/api/v1/config/import",
+		"/api/v1/templates/apply", "/api/v1/templates/ics/apply", "/api/v1/learn/apply",
+		"/api/v1/dataplane", "/api/v1/pcap/config", "/api/v1/routing", "/api/v1/interfaces/assign":
+		return true
+	}
+	for _, prefix := range []string{"/api/v1/firewall/", "/api/v1/zones", "/api/v1/assets", "/api/v1/objects", "/api/v1/interfaces", "/api/v1/services/", "/api/v1/ids/"} {
+		if path == "/api/v1/interfaces/reconcile" {
+			return false
+		}
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }

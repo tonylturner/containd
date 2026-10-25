@@ -326,7 +326,7 @@ func ICSPredicate(p config.ICSPredicate) rules.ICSPredicate // the one CP→DP m
 - **Recovery.** `enforce_healthy` is emitted only after readiness is back (`OnSource{Ready:true}`).
 - **Engine unreachable.** Management keeps HTTP 200 liveness, so the US is unchanged, and returns `{active:false, healthy:false, reason:"engine unreachable"}`. It never invents healthy.
 - **Static causes** (DPI off, iec104 explicitly off, capture not NFQUEUE, queue 0, DPI exclusion overlapping the envelope) are validation errors on commit, candidate and import (E3).
-- **Import.** `/config/import` saves only and does not activate. Clients must commit and then check health.
+- **Import.** `/config/import` replaces the candidate and never activates. Clients must commit and then check health.
 - **Flows.** `/api/v1/flows` stays the event rollup (E4).
   - IEC events, including derived evidence that carries `session_id`, group by `session_id`. Both wire directions of one incarnation form one group, and incarnations that share a tuple are never merged.
   - `FlowSummary` gains `SessionID string \`json:"session_id,omitempty"\``.

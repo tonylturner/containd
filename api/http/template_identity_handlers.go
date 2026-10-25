@@ -91,20 +91,17 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		ctx := c.Request.Context()
-		cfg, err := loadOrInitConfig(ctx, store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			if err := templates.ApplyWithOpts(r.Name, cfg, templates.ApplyOpts{Mode: r.Mode}); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return false
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		if err := templates.ApplyWithOpts(r.Name, cfg, templates.ApplyOpts{Mode: r.Mode}); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := store.Save(ctx, cfg); err != nil {
-			internalError(c, err)
-			return
-		}
+
 		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules), "mode": r.Mode})
 	}
 }
@@ -209,18 +206,16 @@ func applyICSTemplateHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
-		ctx := c.Request.Context()
-		cfg, err := loadOrInitConfig(ctx, store)
-		if err != nil {
-			internalError(c, err)
+		var created, updated int
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			created, updated = upsertFirewallRulesByID(cfg.Firewall.Rules, generated)
+			cfg.Firewall.Rules = appendFirewallRulesUpsert(cfg.Firewall.Rules, generated)
+			return true
+		})
+		if !ok {
 			return
 		}
-		created, updated := upsertFirewallRulesByID(cfg.Firewall.Rules, generated)
-		cfg.Firewall.Rules = appendFirewallRulesUpsert(cfg.Firewall.Rules, generated)
-		if err := store.Save(ctx, cfg); err != nil {
-			internalError(c, err)
-			return
-		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"template":  r.Template,
 			"applied":   true,

@@ -11,8 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func idsApplyRequest(t *testing.T, action string) *http.Request {
@@ -45,7 +43,7 @@ func idsApplyRequest(t *testing.T, action string) *http.Request {
 	return req
 }
 
-func TestIDSHandlersSurfaceApplyResults(t *testing.T) {
+func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 	for _, action := range []string{"set", "import", "restore"} {
 		for _, result := range []struct {
 			name    string
@@ -60,17 +58,24 @@ func TestIDSHandlersSurfaceApplyResults(t *testing.T) {
 			{name: "ruleset warning", err: errors.New("operation not permitted"), status: http.StatusOK, warning: "ruleset: operation not permitted"},
 		} {
 			t.Run(action+"/"+result.name, func(t *testing.T) {
-				cfg := config.DefaultConfig()
-				cfg.Interfaces = nil
-				store := &mockStore{cfg: cfg}
+				store := stageStore(t)
 				engine := &mockEngine{err: result.err, svcErr: result.svcErr}
 				audit := &mockAuditStore{}
 				server := NewServerWithEngine(store, audit, engine)
 				rec := httptest.NewRecorder()
 				server.ServeHTTP(rec, idsApplyRequest(t, action))
+				if rec.Code != http.StatusOK || engine.applied {
+					t.Fatalf("stage unexpectedly applied or failed: status=%d body=%s", rec.Code, rec.Body)
+				}
+				rec = requestStage(t, server, "POST", "/config/commit", nil)
 				if rec.Code != result.status {
 					t.Fatalf("status=%d want=%d body=%s", rec.Code, result.status, rec.Body)
 				}
+				wantConfigHeader := "committed"
+				if result.status >= http.StatusBadRequest {
+					wantConfigHeader = ""
+				}
+				assertConfigResponseHeader(t, rec, wantConfigHeader)
 				if !engine.applied {
 					t.Fatal("handler did not apply rules")
 				}
@@ -82,11 +87,7 @@ func TestIDSHandlersSurfaceApplyResults(t *testing.T) {
 					if !strings.Contains(rec.Body.String(), `"error":"internal server error"`) {
 						t.Fatalf("apply error response=%s", rec.Body)
 					}
-					for _, record := range audit.records {
-						if strings.HasPrefix(record.Action, "ids.rules.") && record.Result == "success" {
-							t.Fatalf("apply failure audited as success: %+v", record)
-						}
-					}
+
 				}
 			})
 		}
