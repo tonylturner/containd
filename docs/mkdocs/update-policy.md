@@ -53,7 +53,7 @@ For a careful update:
 
 ## Versioning and Security Notes
 
-containd single-sources release version metadata from the repo `VERSION` file. The release workflow checks that the pushed tag matches `VERSION`, and release notes are extracted from the matching `CHANGELOG.md` section.
+containd single-sources release version metadata from the repo `VERSION` file. Before building or pushing images, the release workflow requires `VERSION` to use SemVer `MAJOR.MINOR.PATCH` with an optional `-prerelease` suffix and the pushed tag to match it exactly with a `v` prefix. Leading zeros in numeric identifiers, build metadata (`+...`), and versions longer than the container tag limit of 128 characters are rejected. Reserved channels such as `latest` are not release versions. Release notes are extracted from the matching `CHANGELOG.md` section.
 
 This helps keep:
 
@@ -66,11 +66,11 @@ in sync.
 
 ### When `:latest` Moves
 
-A `v*` tag publishes version-tagged mgmt and engine images, digest signatures, SBOMs, and a GitHub release. It does **not** immediately update `:latest`.
+A valid version tag publishes version-tagged mgmt and engine images, digest signatures, SBOMs, and a GitHub release. It does **not** immediately update `:latest`.
 
 Only after signing and SBOM attachment succeed does a separate promotion job move both images' `:latest` tags to the exact signed digests. Promotion requires a stable tag (no `-`) whose tagged commit is an ancestor of `origin/main`, verified using full Git history. Prereleases and tags whose commits have not reached main never move `:latest`.
 
-If a stable tag was published before its commit reached main (for example `v0.1.33` on `iec104`), merge it to main first, then run the **Release** workflow manually with the `tag` input set to that existing tag. The shared promotion job rechecks eligibility, resolves the existing version images, verifies their signatures against this repository's tag-triggered release workflow identity, and checks their attached SBOMs before moving either `:latest` tag. It does not rebuild images or create another GitHub release. Ineligible tags are skipped; missing images, invalid signatures, or missing SBOMs fail promotion.
+If a stable tag was published before its commit reached main (for example `v0.1.33` on `iec104`), merge it to main first, then run the **Release** workflow manually with the `tag` input set to that existing tag. The shared promotion job rechecks eligibility, resolves the existing version images, verifies their signatures against this repository's tag-triggered release workflow identity, and checks their attached SBOMs before moving either `:latest` tag. On both tag push and manual dispatch, signature verification also requires the certificate's workflow SHA to equal the exact peeled tag commit used for the main ancestry check. Moving a tag onto main cannot authorize images signed from its old commit. Dispatch does not rebuild images or create another GitHub release. Malformed release tags fail validation; prereleases and tags outside main's history are skipped; missing images, invalid signatures, or missing SBOMs fail promotion.
 
 The merge must preserve the tagged commit in main's history; squashing or rebasing it into a different commit does not satisfy the ancestry check.
 

@@ -36,6 +36,26 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      - name: Validate release version and tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          number='(0|[1-9][0-9]*)'
+          prerelease_id="($number|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
+          semver="${number}\.${number}\.${number}(-${prerelease_id}(\.${prerelease_id})*)?"
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(cat VERSION)"
+          if [[ ! "$file_version" =~ ^${semver}$ || ! "$GITHUB_REF_NAME" =~ ^v${semver}$ || ${#tag_version} -gt 128 ]]; then
+            echo "Expected VERSION=MAJOR.MINOR.PATCH[-prerelease] and a matching v-prefixed container tag" >&2
+            exit 1
+          fi
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "tag version $tag_version does not match VERSION file $file_version" >&2
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: linux/amd64,linux/arm64
@@ -53,18 +73,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract version from tag
-        id: meta
-        run: |
-          set -euo pipefail
-          tag_version="${GITHUB_REF_NAME#v}"
-          file_version="$(tr -d '\n' < VERSION)"
-          if [ "$tag_version" != "$file_version" ]; then
-            echo "tag version $tag_version does not match VERSION file $file_version" >&2
-            exit 1
-          fi
-          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
 
       - name: Build and push mgmt image
         id: build-mgmt
@@ -201,8 +209,11 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          if [[ "$RELEASE_TAG" != v* || ! "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
-            echo "Expected a v-prefixed release tag with a valid container version tag" >&2
+          number='(0|[1-9][0-9]*)'
+          prerelease_id="($number|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
+          semver="${number}\.${number}\.${number}(-${prerelease_id}(\.${prerelease_id})*)?"
+          if [[ ! "$RELEASE_TAG" =~ ^v${semver}$ || ${#version} -gt 128 ]]; then
+            echo "Expected a v-prefixed MAJOR.MINOR.PATCH[-prerelease] container tag" >&2
             exit 1
           fi
           git check-ref-format "refs/tags/$RELEASE_TAG"
@@ -211,6 +222,7 @@ jobs:
             "+refs/heads/main:refs/remotes/origin/main" \
             "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
           if [[ "$RELEASE_TAG" == *-* ]]; then
             echo "Not promoting prerelease $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
             echo "promote=false" >> "$GITHUB_OUTPUT"
@@ -242,6 +254,8 @@ jobs:
         id: verified
         if: steps.eligible.outputs.promote == 'true'
         shell: bash
+        env:
+          RELEASE_COMMIT: ${{ steps.eligible.outputs.commit }}
         run: |
           set -euo pipefail
           identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${RELEASE_TAG}"
@@ -258,6 +272,7 @@ jobs:
             cosign verify \
               --certificate-identity "$identity" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-github-workflow-sha "$RELEASE_COMMIT" \
               "$image@$digest"
             # Fail closed if an earlier release run signed but did not finish attaching SBOMs.
             cosign download sbom "$image@$digest" > /dev/null
