@@ -26,16 +26,16 @@ export const TAB_META: Record<Tab, { label: string; description: string }> = {
     description: "Backups, restore, and config summary.",
   },
   running: {
-    label: "Live config",
-    description: "What is active on the appliance now.",
+    label: "Running config",
+    description: "Last committed desired state; check live status for enforcement.",
   },
   candidate: {
     label: "Staged config",
-    description: "Saved changes waiting to be reviewed or applied.",
+    description: "Candidate changes waiting for commit.",
   },
   diff: {
     label: "Review changes",
-    description: "Compare staged changes against the live config.",
+    description: "Compare staged changes against the running config.",
   },
 };
 

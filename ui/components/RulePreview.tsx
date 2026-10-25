@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyConfigMutation } from "../lib/config-events";
+
 import { useState } from "react";
 
 import { apiURL } from "../lib/api";
@@ -35,6 +37,7 @@ async function previewRuleImpact(
       body: JSON.stringify(rule),
     });
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as PreviewResult;
   } catch {
     return null;

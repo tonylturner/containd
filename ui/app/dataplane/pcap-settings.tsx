@@ -22,33 +22,31 @@ export function CaptureStatusCard({
   captureSummary,
   runningSince,
   status,
-  settings,
 }: {
   isRunning: boolean;
   captureSummary: string;
   runningSince: string;
   status: PcapStatus | null;
-  settings: PcapConfig;
 }) {
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
-            Capture Status
+            Live Capture Status
           </div>
           <div className="mt-1 text-sm text-[var(--text)]">
-            {isRunning ? "Running" : "Stopped"}
+            {!status ? "Unknown — live status unavailable" : isRunning ? "Running" : "Stopped"}
           </div>
         </div>
         <span
           className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
         >
-          {isRunning ? "active" : "idle"}
+          {!status ? "unknown" : isRunning ? "active" : "idle"}
         </span>
       </div>
       <div className="mt-2 text-xs text-[var(--text-muted)]">
-        {captureSummary}
+        Form settings (not live): {captureSummary}
       </div>
       <div className="mt-2 text-xs text-[var(--text-muted)]">
         Started: <span className="text-[var(--text)]">{runningSince}</span>
@@ -56,9 +54,9 @@ export function CaptureStatusCard({
       <div className="mt-1 text-xs text-[var(--text-muted)]">
         Active interfaces:{" "}
         <span className="text-[var(--text)]">
-          {(status?.interfaces ?? settings.interfaces ?? []).length
-            ? (status?.interfaces ?? settings.interfaces ?? []).join(", ")
-            : "none"}
+          {(status?.interfaces ?? []).length
+            ? (status?.interfaces ?? []).join(", ")
+            : status ? "none" : "unknown"}
         </span>
       </div>
       {status?.lastError ? (
@@ -103,8 +101,7 @@ export function CaptureSetupCard({
         Capture setup
       </h2>
       <p className="mt-1 text-sm text-[var(--text)]">
-        Start/stop packet captures on selected interfaces and store PCAPs for
-        replay.
+        Save PCAP defaults to stage them for commit. Start and stop act immediately; starting uses the form below without saving it.
       </p>
       {configIssues.length > 0 && (
         <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">

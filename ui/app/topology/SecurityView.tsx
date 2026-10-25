@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, Zone, Conduit, ConduitMap } from "../../lib/api";
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+import { useToast } from "../../components/ToastProvider";
+import { api, Conduit, ConduitMap } from "../../lib/api";
 import { type ZoneView, type SRCheck, SR_DEFS, MAX_SL, mapZone, scoreZone, slColor, zoneColor } from "../../lib/security-scoring";
 import s from "./security.module.css";
 import ts from "./topology.module.css";
@@ -13,6 +15,8 @@ const MAX_ZONES = 6;
    ════════════════════════════════════════════════════════════════════ */
 
 export default function SecurityView() {
+  const toast = useToast();
+  const zoneNames = useRef(new Map<string, string>());
   const [allZones, setAllZones] = useState<ZoneView[]>([]);
   const [conduits, setConduits] = useState<ConduitMap>({});
   const [activeIds, setActiveIds] = useState<string[]>([]);
@@ -32,7 +36,9 @@ export default function SecurityView() {
         api.listZones(),
         api.getSecurityConduits(),
       ]);
-      const zv = ((zones as Zone[]) || []).map(mapZone);
+      if (!zones || !conds) throw new Error("Failed to load security data");
+      zoneNames.current = new Map(zones.map((z) => [mapZone(z).id, z.name]));
+      const zv = zones.map(mapZone);
       setAllZones(zv);
       setConduits((conds as ConduitMap) || {});
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, Math.min(MAX_ZONES, zv.length)).map((z) => z.id));
@@ -43,6 +49,7 @@ export default function SecurityView() {
     }
   }, []);
 
+  useConfigRefresh(fetchData);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
@@ -83,36 +90,28 @@ export default function SecurityView() {
     return allZones.filter((z) => !activeIds.includes(z.id) && (q === "" || z.name.toLowerCase().includes(q) || z.id.includes(q)));
   }, [allZones, activeIds, searchQuery]);
 
-  // ── SL-T editor ──
-  const setSLTarget = useCallback((zoneId: string, lvl: number) => {
-    setAllZones((prev) => prev.map((z) => z.id === zoneId ? { ...z, sl_t: lvl } : z));
-    // Fire-and-forget PATCH
-    const zone = allZones.find((z) => z.id === zoneId);
-    if (zone) {
-      const origName = zone.name.charAt(0) + zone.name.slice(1).toLowerCase();
-      api.updateZone(origName, { slTarget: lvl }).catch(() => {});
-    }
-  }, [allZones]);
+  // Candidate zone mutations must succeed before the view changes.
+  const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
+    const name = zoneNames.current.get(zoneId);
+    if (!name) return;
+    const result = await api.updateZone(name, { slTarget: lvl });
+    if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
+    toast("Zone target staged — commit to apply.", "success");
+    await fetchData();
+  }, [fetchData, toast]);
 
-  // ── SR override ──
-  const toggleOverride = useCallback((zoneId: string, srId: string, newVal: boolean) => {
-    setAllZones((prev) => prev.map((z) => {
-      if (z.id !== zoneId) return z;
-      const ov = { ...z.overrides };
-      if (ov.hasOwnProperty(srId)) delete ov[srId];
-      else ov[srId] = newVal;
-      return { ...z, overrides: ov };
-    }));
-    // Fire-and-forget PATCH
+  const toggleOverride = useCallback(async (zoneId: string, srId: string, newVal: boolean) => {
     const zone = allZones.find((z) => z.id === zoneId);
-    if (zone) {
-      const ov = { ...zone.overrides };
-      if (ov.hasOwnProperty(srId)) delete ov[srId];
-      else ov[srId] = newVal;
-      const origName = zone.name.charAt(0) + zone.name.slice(1).toLowerCase();
-      api.updateZone(origName, { slOverrides: ov }).catch(() => {});
-    }
-  }, [allZones]);
+    const name = zoneNames.current.get(zoneId);
+    if (!zone || !name) return;
+    const ov = { ...zone.overrides };
+    if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
+    else ov[srId] = newVal;
+    const result = await api.updateZone(name, { slOverrides: ov });
+    if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
+    toast("Zone override staged — commit to apply.", "success");
+    await fetchData();
+  }, [allZones, fetchData, toast]);
 
   // ── Cell selection ──
   const selectCell = useCallback((key: string) => {
@@ -135,7 +134,7 @@ export default function SecurityView() {
   if (error) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--topo-red)" }}>Failed to load security data</div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--topo-red)" }}>{error}</div>
         <button onClick={fetchData} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "4px 12px", border: "1px solid var(--topo-border)", background: "transparent", color: "var(--amber)", cursor: "pointer" }}>Retry</button>
       </div>
     );
@@ -150,7 +149,7 @@ export default function SecurityView() {
       <div className={s.matrixPane}>
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
-          <div className={s.matrixSubtitle}>Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR compliance. SL-A/T shown on zone headers.</div>
+          <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR compliance. SL-A/T shown on zone headers.</div>
         </div>
 
         {/* Zone selector bar */}
@@ -442,7 +441,7 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
         <div className={s.slEditor}>
           <span className={s.slEditorLabel}>SL-T</span>
           {Array.from({ length: MAX_SL + 1 }, (_, lvl) => (
-            <button key={lvl} className={`${s.slPipBtn} ${lvl === zone.sl_t ? s.slPipSelected : lvl < zone.sl_t ? s.slPipBelow : ""}`} onClick={() => setSLTarget(zone.id, lvl)}>{lvl}</button>
+            <button key={lvl} aria-label={`Stage ${zone.name} target SL ${lvl}`} className={`${s.slPipBtn} ${lvl === zone.sl_t ? s.slPipSelected : lvl < zone.sl_t ? s.slPipBelow : ""}`} onClick={() => setSLTarget(zone.id, lvl)}>{lvl}</button>
           ))}
         </div>
         <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 4 }}>

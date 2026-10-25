@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
@@ -40,6 +42,8 @@ export default function NTPPage() {
     setLastUpdated(new Date());
   }, []);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -73,7 +77,7 @@ export default function NTPPage() {
       toast(msg, "error");
     } else {
       setCfg(saved.data);
-      toast(saved.warning ? `NTP settings saved with warning: ${saved.warning}` : "NTP settings saved", "success");
+      toast(saved.warning ? `NTP settings staged — commit to apply. Warning: ${saved.warning}` : "NTP settings staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -124,7 +128,7 @@ export default function NTPPage() {
       </p>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
@@ -237,7 +241,7 @@ export default function NTPPage() {
           {saveState === "saving"
             ? "saving\u2026"
             : saveState === "saved"
-              ? "saved"
+              ? "staged — commit to apply."
               : saveState === "error"
                 ? "error"
                 : "idle"}

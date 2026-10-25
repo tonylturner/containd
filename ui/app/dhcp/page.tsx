@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -109,6 +111,8 @@ export default function DHCPPage() {
     }
   }, [toast]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -146,7 +150,7 @@ export default function DHCPPage() {
       toast(msg, "error");
     } else {
       setCfg(normalize(saved.data));
-      toast(saved.warning ? `DHCP saved with warning: ${saved.warning}` : "DHCP saved", "success");
+      toast(saved.warning ? `DHCP staged — commit to apply. Warning: ${saved.warning}` : "DHCP staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -200,7 +204,7 @@ export default function DHCPPage() {
         </Link>
       </div>
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
         {loading ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-16 w-full" />
@@ -406,7 +410,7 @@ export default function DHCPPage() {
           {saveState === "saving"
             ? "saving\u2026"
             : saveState === "saved"
-              ? "saved"
+              ? "staged — commit to apply."
               : saveState === "error"
                 ? "error"
                 : "idle"}

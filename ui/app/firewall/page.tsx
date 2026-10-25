@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -114,6 +116,8 @@ export default function FirewallPage() {
     }
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, []);
@@ -138,7 +142,7 @@ export default function FirewallPage() {
       setError(result.error || "Failed to delete rule.");
       return;
     }
-    setNotice(result.warning ? `Rule deleted with warning: ${result.warning}` : "Rule deleted.");
+    setNotice(result.warning ? `Rule staged — commit to apply. Warning: ${result.warning}` : "Rule staged — commit to apply.");
     refresh();
   }
 
@@ -150,7 +154,7 @@ export default function FirewallPage() {
       setError(created.error || "Failed to create rule (check zones/CIDRs).");
       return;
     }
-    setNotice(created.warning ? `Rule created with warning: ${created.warning}` : "Rule created.");
+    setNotice(created.warning ? `Rule staged — commit to apply. Warning: ${created.warning}` : "Rule staged — commit to apply.");
     refresh();
   }
 
@@ -163,7 +167,7 @@ export default function FirewallPage() {
       return;
     }
     setEditing(null);
-    setNotice(updated.warning ? `Rule updated with warning: ${updated.warning}` : "Rule updated.");
+    setNotice(updated.warning ? `Rule staged — commit to apply. Warning: ${updated.warning}` : "Rule staged — commit to apply.");
     refresh();
   }
   const outboundStatus = (() => {
@@ -295,8 +299,8 @@ export default function FirewallPage() {
 
       setNotice(
         warnings.length > 0
-          ? `Enabled outbound quick start with warnings: ${warnings.join(" | ")}`
-          : `Enabled outbound quick start: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
+          ? `Outbound quick start staged — commit to apply. Warnings: ${warnings.join(" | ")}`
+          : `Outbound quick start staged — commit to apply: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
       );
       await refresh();
     } catch (e) {

@@ -1,8 +1,11 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 
 import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
+import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -17,6 +20,7 @@ const criticalityVariant = (c: string) =>
     : "neutral" as const;
 
 export default function AssetsPage() {
+  const toast = useToast();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +42,8 @@ export default function AssetsPage() {
     setAssets(a ?? []);
     setZones(z ?? []);
   }
+
+  useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -69,6 +75,7 @@ export default function AssetsPage() {
       setError(result.error);
       return;
     }
+    toast("Asset staged — commit to apply.", "success");
     setId("");
     setName("");
     setAlias("");
@@ -83,6 +90,7 @@ export default function AssetsPage() {
       setError(result.error);
       return;
     }
+    toast("Asset staged — commit to apply.", "success");
     refresh();
   }
 
@@ -93,6 +101,7 @@ export default function AssetsPage() {
       setError(result.error);
       return;
     }
+    toast("Asset staged — commit to apply.", "success");
     setEditing(null);
     refresh();
   }

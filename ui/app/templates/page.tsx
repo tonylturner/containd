@@ -1,5 +1,10 @@
 "use client";
 
+import { notifyConfigMutation } from "../../lib/config-events";
+
+import { postJSON } from "../../lib/api-request";
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 
 import { api, apiURL, isAdmin, type Zone } from "../../lib/api";
@@ -74,6 +79,7 @@ async function previewTemplate(
       body: JSON.stringify({ ...req, preview: true }),
     });
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as TemplateApplyResponse;
   } catch {
     return null;
@@ -83,18 +89,7 @@ async function previewTemplate(
 async function applyTemplate(
   req: TemplateApplyRequest,
 ): Promise<TemplateApplyResponse | null> {
-  try {
-    const res = await fetch(apiURL("/api/v1/templates/ics/apply"), {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as TemplateApplyResponse;
-  } catch {
-    return null;
-  }
+  return postJSON<TemplateApplyResponse>("/api/v1/templates/ics/apply", req);
 }
 
 /* ── Protocol badge colors ─────────────────────────────────────── */
@@ -128,6 +123,8 @@ export default function TemplatesPage() {
     setTemplates(t);
     setZones(z ?? []);
   }
+
+  useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -287,8 +284,8 @@ function TemplateModal({
     const parts = [];
     if (created > 0) parts.push(`${created} created`);
     if (updated > 0) parts.push(`${updated} updated`);
-    if (parts.length === 0) parts.push(`${res.rules.length} applied`);
-    onSuccess(`Template "${template.name}" applied: ${parts.join(", ")}.`);
+    if (parts.length === 0) parts.push(`${res.rules.length} rules`);
+    onSuccess(`Template "${template.name}" staged — commit to apply. ${parts.join(", ")}.`);
   }
 
   function toggleZone(
@@ -416,7 +413,7 @@ function TemplateModal({
                 disabled={loading}
                 className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm text-white font-medium transition-ui hover:brightness-110 disabled:opacity-40"
               >
-                Apply
+                Stage
               </button>
             )}
           </div>

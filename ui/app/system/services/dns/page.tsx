@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -45,6 +47,8 @@ export default function DNSPage() {
     setLoading(false);
   }, []);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -78,7 +82,7 @@ export default function DNSPage() {
       toast(msg, "error");
     } else {
       setCfg(saved.data);
-      toast(saved.warning ? `DNS settings saved with warning: ${saved.warning}` : "DNS settings saved", "success");
+      toast(saved.warning ? `DNS settings staged — commit to apply. Warning: ${saved.warning}` : "DNS settings staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
     await refresh();
@@ -137,7 +141,7 @@ export default function DNSPage() {
       </div>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
@@ -271,7 +275,7 @@ export default function DNSPage() {
           {saveState === "saving"
             ? "saving\u2026"
             : saveState === "saved"
-              ? "saved"
+              ? "staged — commit to apply."
               : saveState === "error"
                 ? "error"
                 : "idle"}

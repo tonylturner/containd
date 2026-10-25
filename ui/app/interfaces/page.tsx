@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -97,6 +99,8 @@ export default function InterfacesPage() {
     };
   }, [ifaces, state]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, []);
@@ -111,7 +115,7 @@ export default function InterfacesPage() {
       return;
     }
     await refresh();
-    setNotice(res.warning ? `Auto-assign completed with warning: ${res.warning}` : "Interfaces auto-assigned.");
+    setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
   }
 
   async function onReconcileReplace() {
@@ -119,7 +123,7 @@ export default function InterfacesPage() {
     confirm.open({
       title: "Reconcile interfaces",
       message:
-        "Reconcile will REPLACE OS interface addresses for interfaces with configured static addresses. Continue?",
+        "Live reconcile reapplies running config and will REPLACE OS interface addresses for interfaces with configured static addresses. Continue?",
       confirmLabel: "Reconcile",
       variant: "warning",
       onConfirm: async () => {
@@ -196,7 +200,7 @@ export default function InterfacesPage() {
     setVlanId("10");
     setAddresses("");
     await refresh();
-    setNotice(created.warning ? `Interface created with warning: ${created.warning}` : "Interface created.");
+    setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
   }
 
   async function onDelete(ifaceName: string) {
@@ -208,7 +212,7 @@ export default function InterfacesPage() {
       return;
     }
     await refresh();
-    setNotice(result.warning ? `Interface deleted with warning: ${result.warning}` : "Interface deleted.");
+    setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
@@ -227,10 +231,10 @@ export default function InterfacesPage() {
       setError(updated.error || "Failed to update interface.");
       return;
     }
-    // Optimistic config update so the row reflects immediately even if runtime state is slightly delayed.
+    // Reflect candidate state; the separate OS state remains live until commit.
     setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated.data } : i)));
     await refresh();
-    setNotice(updated.warning ? `Saved with warning: ${updated.warning}` : "Saved.");
+    setNotice(updated.warning ? `Interface staged — commit to apply. Warning: ${updated.warning}` : "Interface staged — commit to apply.");
   }
 
   return (
@@ -254,7 +258,7 @@ export default function InterfacesPage() {
                 className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
                 title="Reconcile interface addresses (replace semantics for configured static addresses)"
               >
-                {reconciling ? "Reconciling..." : "Reconcile"}
+                {reconciling ? "Reconciling..." : "Reconcile live"}
               </button>
             </>
           )}
