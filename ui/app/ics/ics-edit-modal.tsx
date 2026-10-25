@@ -8,6 +8,8 @@ import { RulePreviewButton } from "../../components/RulePreview";
 import {
   buildICSRulePreview,
   buildICSRuleUpdate,
+  type ICSMode,
+  type ICSModeSelection,
   PROTOCOL_KEYS,
   PROTOCOLS,
   protoMeta,
@@ -21,10 +23,12 @@ import { IEC104Fields } from "./iec104-fields";
 
 export function EditICSModal({
   rule,
+  globalMode,
   onClose,
   onSave,
 }: {
   rule: FirewallRule;
+  globalMode?: ICSMode;
   onClose: () => void;
   onSave: (ics: ICSPredicate | undefined) => void;
 }) {
@@ -42,16 +46,14 @@ export function EditICSModal({
   );
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
-  const [mode, setMode] = useState<"enforce" | "learn">(
-    rule.ics?.mode ?? "learn",
-  );
+  const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
   const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
   const [error, setError] = useState<string | null>(null);
 
   const meta = protoMeta(protocol);
   const isIEC104 = protocol === "iec104";
   const iecBuild = isIEC104
-    ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics)
+    ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
     : null;
 
   function save() {
@@ -135,10 +137,15 @@ export function EditICSModal({
               </label>
               <select
                 value={mode}
-                onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
+                onChange={(e) => setMode(e.target.value as ICSModeSelection)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
               >
+                {!rule.ics?.mode && (
+                  <option value="">
+                    Inherit ({globalMode === "enforce" ? "enforce" : "learning"})
+                  </option>
+                )}
                 <option value="learn">Safe learning (alert-only)</option>
                 <option value="enforce">Enforce (block)</option>
               </select>
@@ -269,7 +276,7 @@ export function EditICSModal({
           <RulePreviewButton
             rule={
               isIEC104
-                ? buildIEC104RulePreview(rule, enabled, iec, mode)
+                ? buildIEC104RulePreview(rule, enabled, iec, mode, globalMode)
                 : buildICSRulePreview(
                     rule,
                     enabled,

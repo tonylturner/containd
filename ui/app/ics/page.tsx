@@ -16,11 +16,35 @@ import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
-import { PROTOCOL_KEYS, PROTOCOLS, protoMeta } from "./ics-shared";
+import {
+  formatICSMode,
+  type ICSMode,
+  PROTOCOL_KEYS,
+  PROTOCOLS,
+  protoMeta,
+} from "./ics-shared";
 import { summarizeIEC104 } from "./iec104";
 import { IEC104HealthStatus } from "./iec104-health";
 
 /* -- Page ----------------------------------------------------------------- */
+
+function ICSModeBadge({
+  ruleMode,
+  globalMode,
+}: {
+  ruleMode?: ICSMode;
+  globalMode?: ICSMode;
+}) {
+  const mode = formatICSMode(ruleMode, globalMode);
+  return (
+    <StatusBadge
+      variant={mode.effectiveMode === "learn" ? "warning" : "success"}
+      dot
+    >
+      {mode.label}
+    </StatusBadge>
+  );
+}
 
 export default function ICSPolicyPage() {
   const canEdit = isAdmin();
@@ -263,12 +287,10 @@ export default function ICSPolicyPage() {
                       : "R/W"}
                 </td>
                 <td className="px-4 py-3 text-[var(--text)]">
-                  <StatusBadge
-                    variant={r.ics?.mode === "learn" ? "warning" : "success"}
-                    dot
-                  >
-                    {r.ics?.mode === "learn" ? "learning" : "enforce"}
-                  </StatusBadge>
+                  <ICSModeBadge
+                    ruleMode={r.ics?.mode}
+                    globalMode={dpiConfig.dpiMode}
+                  />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
@@ -287,6 +309,7 @@ export default function ICSPolicyPage() {
       {editing && (
         <EditICSModal
           rule={editing}
+          globalMode={dpiConfig.dpiMode}
           onClose={() => setEditing(null)}
           onSave={(ics) => onSave(editing.id, ics)}
         />

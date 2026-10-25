@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - IEC 104 rule previews use the decoder's shared `SafeRead` classification, so
   read-only rules can match eligible forward and reverse traffic.
+- ICS policy views show the effective inherited mode, and saving an inherited
+  filter no longer writes a rule-level `learn` override.
 - Commit-confirmed expiry replays the rolled-back running configuration to the
   engine without requiring an engine restart. Service and VPN updates serialize
   persistence and runtime changes with replay.
