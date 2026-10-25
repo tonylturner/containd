@@ -1,3 +1,4 @@
+import { notifyConfigMutation } from "./config-events";
 import {
   apiURL,
   authHeaders,
@@ -56,6 +57,7 @@ export const policyAPI = {
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      notifyConfigMutation("/api/v1/ids/import", "POST");
       return { ok: true, data: (await res.json()) as IDSImportResult };
     } catch (e) {
       return {

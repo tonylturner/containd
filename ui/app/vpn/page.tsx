@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -164,6 +166,8 @@ export default function VPNPage() {
     [toast],
   );
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh({ silent: true });
   }, [refresh]);
@@ -239,7 +243,7 @@ export default function VPNPage() {
       toast(msg, "error");
     } else {
       setCfg(normalize(saved.data));
-      toast(saved.warning ? `VPN saved with warning: ${saved.warning}` : "VPN saved", "success");
+      toast(saved.warning ? `VPN staged — commit to apply. Warning: ${saved.warning}` : "VPN staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -259,7 +263,7 @@ export default function VPNPage() {
         return;
       }
       setUploadState("uploaded");
-      toast(res.warning ? `Profile uploaded with warning: ${res.warning}` : "Profile uploaded", "success");
+      toast(res.warning ? `Profile staged — commit to apply. Warning: ${res.warning}` : "Profile staged — commit to apply.", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
       const next = normalize(res.data.vpn);
       setCfg({
@@ -586,7 +590,7 @@ export default function VPNPage() {
         {saveState === "saving"
           ? "saving\u2026"
           : saveState === "saved"
-            ? "saved"
+            ? "staged — commit to apply."
             : saveState === "error"
               ? "error"
               : "idle"}

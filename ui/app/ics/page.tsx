@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -11,6 +13,7 @@ import {
   type FirewallRule,
   type ICSPredicate,
 } from "../../lib/api";
+import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
@@ -47,6 +50,7 @@ function ICSModeBadge({
 }
 
 export default function ICSPolicyPage() {
+  const toast = useToast();
   const canEdit = isAdmin();
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +63,8 @@ export default function ICSPolicyPage() {
 
   async function refresh() {
     setError(null);
-    const list = await api.listFirewallRules();
+    const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    if (dp) setDpiConfig(dp);
     if (!list) {
       setError("Failed to load firewall rules.");
       return;
@@ -67,13 +72,10 @@ export default function ICSPolicyPage() {
     setRules(list);
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
-  }, []);
-  useEffect(() => {
-    fetchDataPlane().then((dp) => {
-      if (dp) setDpiConfig(dp);
-    });
   }, []);
 
   const icsRules = useMemo(
@@ -101,6 +103,7 @@ export default function ICSPolicyPage() {
       setError(result.error);
       return;
     }
+    toast("ICS filter staged — commit to apply.", "success");
     setEditing(null);
     refresh();
   }
@@ -124,7 +127,7 @@ export default function ICSPolicyPage() {
       )}
 
       {/* -- DPI status --------------------------------------------------- */}
-      <Card title="DPI Status" className="mb-4">
+      <Card title="Candidate DPI Settings" className="mb-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-[var(--text)]">
             ICS protocol filters require DPI to be enabled with at least one capture interface configured.
@@ -172,7 +175,7 @@ export default function ICSPolicyPage() {
             Go to Firewall Rules &rarr;
           </Link>
         </Card>
-        <Card title="Active Filters">
+        <Card title="Candidate Filters">
           {Object.keys(protoCounts).length === 0 ? (
             <div className="text-xs text-[var(--text-muted)]">
               No ICS filters configured yet.

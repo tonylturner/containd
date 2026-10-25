@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
@@ -87,6 +89,8 @@ export default function ProxiesPage() {
     }
   }, [toast]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -138,7 +142,7 @@ export default function ProxiesPage() {
       toast(msg, "error");
     } else {
       setForward(saved.data);
-      toast(saved.warning ? `Forward proxy saved with warning: ${saved.warning}` : "Forward proxy saved", "success");
+      toast(saved.warning ? `Forward proxy staged — commit to apply. Warning: ${saved.warning}` : "Forward proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -155,7 +159,7 @@ export default function ProxiesPage() {
       toast(msg, "error");
     } else {
       setReverse(saved.data);
-      toast(saved.warning ? `Reverse proxy saved with warning: ${saved.warning}` : "Reverse proxy saved", "success");
+      toast(saved.warning ? `Reverse proxy staged — commit to apply. Warning: ${saved.warning}` : "Reverse proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -248,7 +252,7 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Running: {status?.envoy_running ? "yes" : "no"}{" "}
+                Live running: {status?.envoy_running ? "yes" : "no"}{" "}
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
               </p>
               <p className="text-xs text-[var(--text-muted)]">
@@ -293,7 +297,7 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Running: {status?.nginx_running ? "yes" : "no"}{" "}
+                Live running: {status?.nginx_running ? "yes" : "no"}{" "}
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
               </p>
               <p className="text-xs text-[var(--text-muted)]">
@@ -465,7 +469,7 @@ export default function ProxiesPage() {
                 <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-emerald-400">Saved</span>
+                <span className="text-sm text-emerald-400">Staged — commit to apply.</span>
               )}
               {canEdit && (
                 <button
@@ -607,7 +611,7 @@ export default function ProxiesPage() {
                 <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-emerald-400">Saved</span>
+                <span className="text-sm text-emerald-400">Staged — commit to apply.</span>
               )}
               {canEdit && (
                 <button

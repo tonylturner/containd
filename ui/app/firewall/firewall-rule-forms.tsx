@@ -357,7 +357,7 @@ function ICSPredicateFields({
           <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Rule Mode</label>
           <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
             <option value="learn">Learning (passive)</option>
-            <option value="enforce">Enforcement (active)</option>
+            <option value="enforce">Enforcement (after commit)</option>
           </select>
         </div>
         <div className="flex items-end">

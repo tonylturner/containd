@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -70,6 +72,8 @@ function ConfigPage() {
     if (d?.candidate) setCandidateLoadedAt(new Date());
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
     refreshBackups();
@@ -90,7 +94,7 @@ function ConfigPage() {
         return;
       }
       setCandidateLoadedAt(new Date());
-      setStatus(statusWithWarning("Candidate saved.", res.warning));
+      setStatus(statusWithWarning("Candidate staged — commit to apply.", res.warning));
       refresh();
     } catch (e) {
       setStatus("Invalid JSON.");
@@ -107,7 +111,7 @@ function ConfigPage() {
     }
     setCandidateText(JSON.stringify(running, null, 2));
     setCandidateLoadedAt(new Date());
-    setStatus(statusWithWarning("Candidate replaced with running.", res.warning));
+    setStatus(statusWithWarning("Candidate replaced with running and staged — commit to apply.", res.warning));
     refresh();
   }
 
@@ -126,7 +130,6 @@ function ConfigPage() {
         const result = await api.commit();
         if (result.ok) {
           setStatus(statusWithWarning("Committed.", result.warning));
-          window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Commit failed: ${result.error}`);
         }
@@ -174,7 +177,6 @@ function ConfigPage() {
         const result = await api.rollback();
         if (result.ok) {
           setStatus(statusWithWarning("Rolled back.", result.warning));
-          window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Rollback failed: ${result.error}`);
         }
@@ -212,7 +214,7 @@ function ConfigPage() {
       const text = await uploadFile.text();
       const parsed = JSON.parse(text) as ConfigBundle;
       const res = await api.importConfig(parsed);
-      setStatus(res.ok ? statusWithWarning("Config restored.", res.warning) : `Restore failed: ${res.error}`);
+      setStatus(res.ok ? statusWithWarning("Config import staged — commit to apply.", res.warning) : `Restore failed: ${res.error}`);
       refresh();
     } catch {
       setStatus("Invalid JSON file.");
@@ -323,7 +325,7 @@ function ConfigPage() {
     {
       id: "config:restore",
       title: "Restore carefully",
-      body: "Restore replaces the live config; use commit-confirmed if you need a safe rollback window.",
+      body: "Restore replaces the candidate config; use commit-confirmed if you need a safe rollback window.",
       when: () => canEdit,
     },
     {
@@ -383,7 +385,7 @@ function ConfigPage() {
           className={`mb-4 rounded-sm px-4 py-3 text-sm ${
             status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
               ? "border border-red-500/30 bg-red-500/10 text-red-400"
-              : status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
+              : status.includes("staged") || status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                 : "border border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
           }`}
@@ -449,7 +451,7 @@ function ConfigPage() {
                   return;
                 }
                 const res = await api.restoreIDSRules(rules);
-                setStatus(res.ok ? `Restored ${res.data.count} IDS rules.` : `Restore failed: ${res.error}`);
+                setStatus(res.ok ? `IDS restore staged (${res.data.count} rules) — commit to apply.` : `Restore failed: ${res.error}`);
                 refresh();
               } catch {
                 setStatus("Invalid JSON file.");
@@ -502,7 +504,7 @@ function ConfigPage() {
                   onClick={copyRunningToCandidate}
                   className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
-                  Copy live → staged
+                  Copy running → staged
                 </button>
                 <button
                   onClick={saveCandidate}
@@ -529,11 +531,11 @@ function ConfigPage() {
       {tab === "running" && (
         <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
           <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <div>Live config</div>
+            <div>Running config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
           </div>
           <div className="mb-3 text-xs text-[var(--text-muted)]">
-            This is the config currently applied on the appliance.
+            This is the last committed config, not proof of live enforcement.
           </div>
           <pre>{runningText}</pre>
         </div>
@@ -543,7 +545,7 @@ function ConfigPage() {
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
             <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
-              Staged config looks older than live config. Copy live → staged first if you want to review your latest active state.
+              Staged config looks older than running config. Copy running → staged first if you want to review your latest committed state.
             </div>
           )}
           {!candidate ? (
@@ -552,7 +554,7 @@ function ConfigPage() {
             </div>
           ) : diffBlocks.length === 0 ? (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
-              No differences between live and staged config.
+              No differences between running and staged config.
             </div>
           ) : (
             diffBlocks.map((block) => (

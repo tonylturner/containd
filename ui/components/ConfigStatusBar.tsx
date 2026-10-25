@@ -2,99 +2,91 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { api } from "../lib/api";
+import { api, isAdmin } from "../lib/api";
+import { useConfigRefresh } from "../lib/use-config-refresh";
+import { ConfirmDialog, useConfirm } from "./ConfirmDialog";
 
-/** Thin status bar shown when uncommitted config changes exist. */
+/** Candidate status is not a runtime health indicator. */
 export function ConfigStatusBar() {
-  const [dirty, setDirty] = React.useState(false);
+  const [status, setStatus] = React.useState<"unknown" | "clean" | "dirty">("unknown");
   const [committing, setCommitting] = React.useState(false);
+  const [confirmedPending, setConfirmedPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const checkingRef = React.useRef(false);
+  const [warning, setWarning] = React.useState<string | null>(null);
+  const request = React.useRef(0);
+  const confirm = useConfirm();
 
   const check = React.useCallback(async () => {
-    if (checkingRef.current) return;
-    checkingRef.current = true;
+    // A mutation arriving during a poll must start a new read, not be dropped.
+    const id = ++request.current;
     try {
       const diff = await api.diffConfig();
-      if (!diff) {
-        setDirty(false);
-        return;
-      }
-      const r = JSON.stringify(diff.running ?? null);
-      const c = JSON.stringify(diff.candidate ?? null);
-      setDirty(r !== c);
+      if (id !== request.current) return;
+      setStatus(!diff ? "unknown" : JSON.stringify(diff.running ?? null) !== JSON.stringify(diff.candidate ?? null) ? "dirty" : "clean");
     } catch {
-      setDirty(false);
-    } finally {
-      checkingRef.current = false;
+      if (id === request.current) setStatus("unknown");
     }
   }, []);
 
+  const invalidateCheck = React.useCallback(() => { ++request.current; }, []);
+  useConfigRefresh(check);
   React.useEffect(() => {
-    check();
+    void check();
     const timer = setInterval(check, 30_000);
-    return () => clearInterval(timer);
-  }, [check]);
+    return () => { clearInterval(timer); invalidateCheck(); };
+  }, [check, invalidateCheck]);
 
-  React.useEffect(() => {
-    const onCommit = () => {
-      setDirty(false);
-      setTimeout(check, 1000);
-    };
-    window.addEventListener("containd:config:committed", onCommit);
-    return () => window.removeEventListener("containd:config:committed", onCommit);
-  }, [check]);
+  function doCommit(confirmed: boolean) {
+    if (committing || !isAdmin()) return;
+    confirm.open({
+      title: confirmed ? "Commit with auto-rollback" : "Commit configuration",
+      message: confirmed
+        ? 'Apply the candidate for 60 seconds. Open Config and click "Confirm" before the timer expires, or it will roll back automatically.'
+        : "Apply all staged changes to the appliance now? Network changes may interrupt your connection.",
+      confirmLabel: confirmed ? "Commit-confirmed" : "Commit",
+      onConfirm: async () => {
+        setCommitting(true);
+        setError(null);
+        setWarning(null);
+        try {
+          const result = await (confirmed ? api.commitConfirmed(60) : api.commit());
+          if (!result.ok) setError(result.error || "Commit failed");
+          else {
+            setConfirmedPending(confirmed);
+            setWarning(result.warning ?? null);
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Commit failed");
+        } finally {
+          setCommitting(false);
+          void check();
+        }
+      },
+    });
+  }
 
-  // Commit the staged candidate from wherever the bar is shown (e.g. the
-  // Firewall page), so the commit step isn't stranded on the Config page.
-  const doCommit = React.useCallback(async () => {
-    if (committing) return;
-    setError(null);
-    setCommitting(true);
-    try {
-      const result = await api.commit();
-      if (result.ok) {
-        setDirty(false);
-        window.dispatchEvent(new CustomEvent("containd:config:committed"));
-      } else {
-        setError(result.error || "Commit failed");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Commit failed");
-    } finally {
-      setCommitting(false);
-    }
-  }, [committing]);
-
-  if (!dirty) return null;
-
+  if (status === "clean" && !confirmedPending && !warning && !error) return null;
+  const buttonClass = "rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 transition-ui hover:bg-amber-500/25 disabled:opacity-60";
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-2.5 text-sm animate-fade-in">
-      <div className="flex items-center gap-2 text-amber-400">
-        <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
-          <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
-        </svg>
-        <span>
-          Candidate config differs from running config
-          {error ? <span className="ml-2 text-red-400">— {error}</span> : null}
-        </span>
+    <>
+      <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-2.5 text-sm">
+        <div className="text-amber-400">
+          <span>{status === "unknown" ? "Configuration status unknown — unable to check pending changes." : status === "dirty" ? "Uncommitted changes — not active until you commit." : "No uncommitted changes."}</span>
+          {confirmedPending && <span className="ml-2">Commit-confirmed requested (60s). Confirm in Config before the deadline to prevent rollback.</span>}
+          {warning && <span className="ml-2">Warning: {warning}</span>}
+          {error && <span className="ml-2 text-red-400">{error}</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/config/?tab=diff" className={buttonClass}>Review diff</Link>
+          {confirmedPending && <Link href="/config/?tab=diff" className={buttonClass}>Confirm / rollback</Link>}
+          {status === "unknown" && <button onClick={check} className={buttonClass}>Retry</button>}
+          {status === "dirty" && isAdmin() && <>
+            <button onClick={() => doCommit(false)} disabled={committing} className={buttonClass}>{committing ? "Committing…" : "Commit"}</button>
+            <button onClick={() => doCommit(true)} disabled={committing} className={buttonClass}>Commit-confirmed</button>
+          </>}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Link
-          href="/config/?tab=diff"
-          className="rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 transition-ui hover:bg-amber-500/25"
-        >
-          Review Candidate Diff
-        </Link>
-        <button
-          type="button"
-          onClick={doCommit}
-          disabled={committing}
-          className="rounded-lg bg-amber-500/90 px-3 py-1 text-xs font-semibold text-amber-950 transition-ui hover:bg-amber-400 disabled:opacity-60"
-        >
-          {committing ? "Committing…" : "Commit"}
-        </button>
-      </div>
-    </div>
+      <ConfirmDialog {...confirm.props} />
+    </>
   );
 }

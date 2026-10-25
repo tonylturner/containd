@@ -199,7 +199,7 @@ export function ImportPanel({
       return;
     }
     onImported(
-      `Imported ${result.data.imported} rule${result.data.imported !== 1 ? "s" : ""} (${result.data.skipped} skipped). Format: ${result.data.format}. Total: ${result.data.total}.`,
+      `IDS rules staged — commit to apply. Imported ${result.data.imported} rule${result.data.imported !== 1 ? "s" : ""} (${result.data.skipped} skipped). Format: ${result.data.format}. Total: ${result.data.total}.`,
     );
     if (fileRef.current) {
       fileRef.current.value = "";

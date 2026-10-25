@@ -27,7 +27,7 @@ type BlockItem = {
 };
 
 const VIEWER_SOURCE_LABEL: Record<ViewerSource, string> = {
-  running: "Live",
+  running: "Running",
   candidate: "Staged",
 };
 
@@ -241,7 +241,7 @@ export function ConfigBlockExplorer({
         </div>
       </div>
       <div className="mt-3 text-xs text-[var(--text-muted)]">
-        Select a block to jump to its JSON. Use Live for current runtime state and Staged for saved changes waiting to be applied.
+        Select a block to jump to its JSON. Use Running for the last committed config and Staged for candidate changes waiting for commit.
       </div>
     </Card>
   );

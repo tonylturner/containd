@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 
 import {
@@ -65,6 +67,8 @@ export default function RoutingPage() {
     setOSRouting(osr);
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, []);
@@ -84,9 +88,7 @@ export default function RoutingPage() {
       routes: updated.data.routes ?? [],
       rules: updated.data.rules ?? [],
     });
-    if (updated.warning) {
-      setNotice(`Saved with warning: ${updated.warning}`);
-    }
+    setNotice(updated.warning ? `Routing staged — commit to apply. Warning: ${updated.warning}` : "Routing staged — commit to apply.");
     return { ok: true, warning: updated.warning };
   }
 
@@ -138,7 +140,7 @@ export default function RoutingPage() {
     confirm.open({
       title: "Reconcile Routing",
       message:
-        "Reconcile will REPLACE containd-managed routes/rules in the OS routing tables (best-effort). Continue?",
+        "Live reconcile reapplies running config and will REPLACE containd-managed routes/rules in the OS routing tables (best-effort). Continue?",
       variant: "warning",
       confirmLabel: "Reconcile",
       onConfirm: async () => {
@@ -291,8 +293,8 @@ export default function RoutingPage() {
       if (!result.ok) return;
       setNotice(
         result.warning
-          ? `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) with warning: ${result.warning}`
-          : `Created/updated '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
+          ? `Gateway and default route staged — commit to apply. '${gwName}' (${inferredGw} via ${wanDev}) with warning: ${result.warning}`
+          : `Gateway and default route staged — commit to apply. '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
       );
     } catch (e) {
       setError(`Failed to auto-configure WAN default route: ${e instanceof Error ? e.message : String(e)}`);
@@ -357,8 +359,8 @@ export default function RoutingPage() {
         if (!result.ok) return;
         setNotice(
           result.warning
-            ? `Adopted OS default route via ${dev} \u2192 ${gwIP} with warning: ${result.warning}`
-            : `Adopted OS default route via ${dev} \u2192 ${gwIP} into routing config.`,
+            ? `Default route staged — commit to apply. OS route via ${dev} \u2192 ${gwIP} with warning: ${result.warning}`
+            : `Default route staged — commit to apply. OS route via ${dev} \u2192 ${gwIP} into routing config.`,
         );
       },
     });
@@ -392,7 +394,7 @@ export default function RoutingPage() {
               className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
               title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
             >
-              {reconciling ? "Reconciling..." : "Reconcile"}
+              {reconciling ? "Reconciling..." : "Reconcile live"}
             </button>
           )}
           <button

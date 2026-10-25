@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useState } from "react";
 
 import { Shell } from "../../components/Shell";
@@ -43,6 +45,8 @@ export default function IDSPage() {
     setSources(src ?? []);
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => { refresh(); }, []);
 
   async function onSave() {
@@ -51,7 +55,7 @@ export default function IDSPage() {
     const saved = await api.setIDS(ids);
     if (!saved.ok) { setError(saved.error || "Failed to save IDS rules."); return; }
     setIds(saved.data);
-    flashSuccess("Rules saved.");
+    flashSuccess("IDS rules staged — commit to apply.");
   }
 
   function onDelete(id: string) {

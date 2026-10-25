@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -80,6 +82,12 @@ export default function PcapPage() {
     [settings],
   );
   const isDirty = savedConfigJson ? settingsSnapshot !== savedConfigJson : false;
+  useConfigRefresh(() => {
+    void refresh();
+    void api.listInterfaces().then((list) => setIfaces(list ?? []));
+    void api.listZones().then((list) => setZones(list ?? []));
+  });
+
   useEffect(() => {
     dirtyRef.current = isDirty;
   }, [isDirty]);
@@ -258,8 +266,8 @@ export default function PcapPage() {
     }
     return issues;
   }, [settings, ifaces, ifaceStates, captureIfaceOptions.length, zoneOptions]);
-  const isRunning = status?.running ?? settings.enabled ?? false;
-  const canStart = canEdit && configIssues.length === 0 && state === "idle" && !isRunning;
+  const isRunning = status?.running ?? false;
+  const canStart = canEdit && status !== null && configIssues.length === 0 && state === "idle" && !isRunning;
   const captureSummary = useMemo(() => {
     const selections = [
       ...(settings.interfaces ?? []),
@@ -374,22 +382,14 @@ export default function PcapPage() {
       return;
     }
     setState("starting");
-    const saved = await setPcapConfig(settings);
-    if (!saved.ok) {
-      setNotice(saved.error || "Failed to save capture settings.");
-      setState("idle");
-      return;
-    }
-    setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
-    const st = await startPcap(saved.data);
+    const st = await startPcap(settings);
     if (!st.ok) {
       setNotice(st.error || "Failed to start capture.");
     } else {
       setStatus(st.data);
-      setSettings((prev) => ({ ...prev, enabled: true }));
       setNotice(
-        [saved.warning, st.warning].filter(Boolean).length > 0
-          ? `Capture started with warning: ${[saved.warning, st.warning].filter(Boolean).join(" | ")}`
+        st.warning
+          ? `Capture started with warning: ${st.warning}`
           : "Capture started.",
       );
     }
@@ -405,7 +405,6 @@ export default function PcapPage() {
       setNotice(st.error || "Failed to stop capture.");
     } else {
       setStatus(st.data);
-      setSettings((prev) => ({ ...prev, enabled: false }));
       setNotice(st.warning ? `Capture stopped with warning: ${st.warning}` : "Capture stopped.");
     }
     setState("idle");
@@ -425,7 +424,7 @@ export default function PcapPage() {
     }
     setSettings(normalizeConfig(saved.data));
     setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
-    setNotice(saved.warning ? `Capture settings saved with warning: ${saved.warning}` : "Capture settings saved.");
+    setNotice(saved.warning ? `PCAP defaults staged — commit to apply. Warning: ${saved.warning}` : "PCAP defaults staged — commit to apply.");
     await refresh();
   }
 
@@ -461,14 +460,14 @@ export default function PcapPage() {
                 disabled={state !== "idle"}
                 className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
               >
-                Save settings
+                Save PCAP defaults
               </button>
               <button
                 onClick={startCapture}
                 disabled={!canStart}
                 className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
               >
-                {state === "starting" ? "Starting..." : "Start capture"}
+                {state === "starting" ? "Starting..." : "Start capture now"}
               </button>
               <button
                 onClick={stopCapture}
@@ -495,7 +494,6 @@ export default function PcapPage() {
         captureSummary={captureSummary}
         runningSince={runningSince}
         status={status}
-        settings={settings}
       />
       <CaptureSetupCard
         canEdit={canEdit}

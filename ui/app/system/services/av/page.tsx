@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type AVConfig } from "../../../../lib/api";
@@ -62,6 +64,8 @@ export default function AVPage() {
     }
   }, [toast]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -92,7 +96,7 @@ export default function AVPage() {
     if (result.ok) {
       setSaveState("saved");
       setCfg(result.data);
-      toast(result.warning ? `AV settings saved with warning: ${result.warning}` : "AV settings saved", "success");
+      toast(result.warning ? `AV settings staged — commit to apply. Warning: ${result.warning}` : "AV settings staged — commit to apply.", "success");
     } else {
       setSaveState("error");
       const msg = result.error || "Failed to save AV settings.";
@@ -216,11 +220,11 @@ export default function AVPage() {
 
       {status && cfg.enabled !== (status?.enabled ?? false) && (
         <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
-          Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status?.enabled ? "enabled" : "disabled"}. Click Save to apply your changes.
+          Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status?.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
         </div>
       )}
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Runtime status</h2>
+        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
         {loading || !status ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-24 w-full" />
@@ -545,7 +549,7 @@ export default function AVPage() {
         {saveState === "saving"
           ? "saving\u2026"
           : saveState === "saved"
-            ? "saved"
+            ? "staged — commit to apply."
             : saveState === "error"
               ? "error"
               : "idle"}

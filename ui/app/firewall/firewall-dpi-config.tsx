@@ -47,7 +47,7 @@ export function DPIConfigSection({
     (p) => icsProtos[p.key] !== false,
   ).length;
 
-  // Applies the change optimistically and reverts it when the server
+  // Stages the change optimistically and reverts it when the server
   // rejects it, for example an IEC 104 enforce policy that needs the decoder.
   async function save(updated: DataPlaneConfig) {
     if (!canEdit) return;
@@ -105,7 +105,7 @@ export function DPIConfigSection({
               </span>
             )}
             {saveState === "saved" && (
-              <span className="text-[10px] text-emerald-400">Saved</span>
+              <span className="text-[10px] text-emerald-400">Staged — commit to apply.</span>
             )}
             {saveState === "error" && (
               <span className="text-[10px] text-red-400">Error</span>
@@ -173,8 +173,8 @@ export function DPIConfigSection({
               </div>
               <p className="mt-1 text-[10px] text-[var(--text-dim)]">
                 {dpiMode === "learn"
-                  ? "Passively observing ICS traffic to build protocol baseline. No traffic will be blocked."
-                  : "Actively enforcing DPI policy rules. Non-conforming traffic may be blocked."}
+                  ? "Candidate learning mode — commit to apply. Observes traffic without blocking."
+                  : "Candidate enforcement mode — commit to apply. Non-conforming traffic may then be blocked."}
               </p>
             </div>
 
@@ -635,7 +635,7 @@ function ICSDPIConfigModal({
                         </span>
                         {on ? (
                           <span className="text-emerald-400">
-                            Active — inspecting traffic on port {p.port}
+                            Candidate decoder enabled on port {p.port}
                           </span>
                         ) : (
                           <span className="text-[var(--text-dim)]">
@@ -655,7 +655,7 @@ function ICSDPIConfigModal({
         <div className="mt-4 text-[10px] text-[var(--text-dim)]">
           Protocol-specific DPI parameters (function codes, register addresses,
           unit IDs) are configured per-rule in firewall entries with ICS
-          predicates. This panel controls which ICS decoders are active at the
+          predicates. This panel controls which ICS decoders will be enabled after commit at the
           engine level.
         </div>
 
@@ -814,7 +814,7 @@ function DPIExclusionModal({
         </div>
 
         <div className="mt-3 text-[10px] text-[var(--text-dim)]">
-          IP and CIDR exclusions take effect immediately. Domain exclusions will
+          IP and CIDR exclusions take effect after commit. Domain exclusions will
           be supported when TLS interception is added.
         </div>
 
