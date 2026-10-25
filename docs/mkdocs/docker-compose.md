@@ -57,6 +57,8 @@ Docker Compose automatically loads `.env` from the same directory as the compose
 - `CONTAIND_TRUSTED_PROXIES`: comma-separated list of proxy IPs/CIDRs you trust for client IP resolution (e.g. `127.0.0.1,::1,10.0.0.0/8`).
 - `CONTAIND_ALLOWED_ORIGINS`: optional comma-separated browser origins that may embed or call the appliance cross-origin. Leave empty unless you intentionally integrate containd into another UI or portal.
 
+The default `:latest` tag moves only to signed, SBOM-attached stable releases whose commits have reached main; prereleases never move it. A tag published before merging to main requires manual promotion after the merge. Pin `CONTAIND_IMAGE` to a version tag or digest for a fixed lab release. See [Update Policy](update-policy.md#when-latest-moves).
+
 ### Management ↔ Engine connectivity
 
 The management plane talks to the dataplane engine over the engine’s HTTP API. In combined mode, both run in one container:

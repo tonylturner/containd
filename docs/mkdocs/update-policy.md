@@ -64,6 +64,18 @@ This helps keep:
 
 in sync.
 
+### When `:latest` Moves
+
+A `v*` tag publishes version-tagged mgmt and engine images, digest signatures, SBOMs, and a GitHub release. It does **not** immediately update `:latest`.
+
+Only after signing and SBOM attachment succeed does a separate promotion job move both images' `:latest` tags to the exact signed digests. Promotion requires a stable tag (no `-`) whose tagged commit is an ancestor of `origin/main`, verified using full Git history. Prereleases and tags whose commits have not reached main never move `:latest`.
+
+If a stable tag was published before its commit reached main (for example `v0.1.33` on `iec104`), merge it to main first, then run the **Release** workflow manually with the `tag` input set to that existing tag. The shared promotion job rechecks eligibility, resolves the existing version images, verifies their signatures against this repository's tag-triggered release workflow identity, and checks their attached SBOMs before moving either `:latest` tag. It does not rebuild images or create another GitHub release. Ineligible tags are skipped; missing images, invalid signatures, or missing SBOMs fail promotion.
+
+The merge must preserve the tagged commit in main's history; squashing or rebasing it into a different commit does not satisfy the ancestry check.
+
+Operators who need a fixed release should pin a version tag or digest rather than the moving `:latest` tag.
+
 ## Classroom Guidance
 
 For teaching environments, the most important update habit is consistency:

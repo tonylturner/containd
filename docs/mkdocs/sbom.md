@@ -37,6 +37,8 @@ SBOMs are generated and attached as part of the [release workflow](https://githu
 4. SBOMs are attached to the signed images via `cosign attach sbom`.
 5. SBOMs are uploaded as GitHub Actions artifacts for each release.
 
+Only then can a stable tag whose commit is an ancestor of `origin/main` promote both images' `:latest` tags to the signed digests. Prereleases never move `:latest`. If a stable tag reaches main later, a manual **Release** workflow run with its `tag` input verifies the existing images' release-workflow signatures and attached SBOMs before promoting, without rebuilding. See [Update Policy](update-policy.md#when-latest-moves).
+
 ## Retrieving an SBOM
 
 ### From the container image (via Cosign)
