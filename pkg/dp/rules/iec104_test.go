@@ -97,8 +97,10 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 	}{
 		{"GI request", "request", iFrame(100, "system", 1, 0, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"single-point monitor telemetry", "response", iFrame(1, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
+		{"step-position GI telemetry", "response", iFrame(5, "monitor", 1, 1301, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"monitor telemetry", "response", iFrame(13, "monitor", 1, 4001, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"timed single-point monitor telemetry", "response", iFrame(30, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
+		{"timed step-position telemetry", "response", iFrame(32, "monitor", 1, 1301, true), ActionAllow, "cc-rtu-iec104-session"},
 		{"S-frame", "request", IEC104Context{APCIType: "S", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
 		{"STOPDT act", "request", IEC104Context{APCIType: "U", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
 		{"allowed breaker command", "request", iFrame(46, "control", 1, 2001, false), ActionAllow, "cc-rtu-breaker-command"},
@@ -122,6 +124,34 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 				t.Fatalf("EvaluateIEC104 = %s by %s, want %s by %s", action, id, tc.want, tc.rule)
 			}
 		})
+	}
+}
+
+func TestMonitorClassAndGIEnforcePolicy(t *testing.T) {
+	evaluator := NewEvaluator(&Snapshot{Firewall: []Entry{
+		iecEntry("monitor", ActionAllow, ICSPredicate{Classes: []string{"monitor"}, Direction: "response", Mode: "enforce"}),
+		iecEntry("gi", ActionAllow, ICSPredicate{TypeIDs: []int{100}, ReadOnly: true, Mode: "enforce"}),
+		iecEntry("deny-other", ActionDeny, ICSPredicate{Mode: "enforce"}),
+	}})
+	for _, typeID := range []uint8{1, 3, 5, 13, 30, 31, 32} {
+		obj := iFrame(typeID, "monitor", 1, uint32(typeID), true)
+		action, entry := evaluator.EvaluateIEC104(sessionCtx("response", obj))
+		if action != ActionAllow || entry == nil || entry.ID != "monitor" {
+			t.Errorf("monitor type %d = %s by %v, want monitor ALLOW", typeID, action, entry)
+		}
+	}
+	for _, direction := range []string{"request", "response"} {
+		gi := iFrame(100, "system", 1, 0, true)
+		action, entry := evaluator.EvaluateIEC104(sessionCtx(direction, gi))
+		if action != ActionAllow || entry == nil || entry.ID != "gi" {
+			t.Errorf("GI %s = %s by %v, want GI ALLOW", direction, action, entry)
+		}
+	}
+	unknown := IEC104Context{
+		APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown", Unsupported: true,
+	}
+	if action, entry := evaluator.EvaluateIEC104(sessionCtx("response", unknown)); action != ActionDeny || entry == nil || entry.ID != "deny-other" {
+		t.Errorf("unsupported type = %s by %v, want deny-other DENY", action, entry)
 	}
 }
 

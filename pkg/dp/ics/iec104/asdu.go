@@ -74,8 +74,9 @@ func profileError(format string, args ...any) error {
 	return fmt.Errorf("profile: "+format, args...)
 }
 
-// checkProfile applies the B SQ/count restrictions: SQ=1 only for types 1, 3
-// and 13; control and system types need SQ=0 and one object.
+// checkProfile applies the B SQ/count restrictions: SQ=1 is accepted for
+// monitor descriptors that mark it valid; control and system types need SQ=0
+// and one object.
 func checkProfile(h asduHeader, d descriptor) error {
 	switch {
 	case d.single && (h.sq || h.count != 1):
@@ -177,6 +178,27 @@ func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
 	case elemDIQ: // DIQ: DPI bits 0-1, quality (BL, SB, NT, IV) bits 4-7
 		obj[eventfields.KeyValue] = b[0] & 0x03
 		obj[eventfields.KeyQuality] = b[0] & 0xF0
+	case elemVTI: // VTI: signed 7-bit position and transient bit, then QDS
+		value := int16(b[0] & 0x7F)
+		if value&0x40 != 0 {
+			value -= 0x80
+		}
+		obj[eventfields.KeyValue] = int8(value)
+		obj[keyTransient] = b[0]&0x80 != 0
+		obj[eventfields.KeyQuality] = b[1]
+	case elemBSIQDS: // BSI + QDS
+		obj[eventfields.KeyValue] = binary.LittleEndian.Uint32(b[0:4])
+		obj[eventfields.KeyQuality] = b[4]
+	case elemNVAQDS, elemSVAQDS: // normalized or scaled value (int16) + QDS
+		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
+		obj[eventfields.KeyQuality] = b[2]
+	case elemNVA: // normalized value (int16), no quality descriptor
+		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
+	case elemBCR: // signed counter value, sequence number and counter flags
+		flags := b[4]
+		obj[eventfields.KeyValue] = int32(binary.LittleEndian.Uint32(b[0:4]))
+		obj[eventfields.KeyQualifier] = flags & 0x1F
+		obj[eventfields.KeyQuality] = flags & 0xE0
 	case elemFloatQDS: // R32-IEEE STD 754 + QDS
 		shortFloat(b[0:4], obj)
 		obj[eventfields.KeyQuality] = b[4]

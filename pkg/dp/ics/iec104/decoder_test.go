@@ -168,6 +168,11 @@ func TestOnPacket(t *testing.T) {
 func TestSplitAtEveryByte(t *testing.T) {
 	decodertest.CheckSplits(t, NewDecoder(), iecState(), view(dpi.ClientToServer, 0, clientStream()))
 	decodertest.CheckSplits(t, NewDecoder(), iecState(), view(dpi.ServerToClient, 4096, serverStream()))
+	stepPositionTraffic := cat(
+		iFrame(0, 0, asdu(5, 1, cotInrogen, 0, 1, cat(ioa(1301), []byte{0xC2, 0x90})...)),
+		iFrame(1, 0, asdu(32, 1, cotSpont, 0, 1, cat(ioa(1301), []byte{0xC2, 0x90}, courseTime)...)),
+	)
+	decodertest.CheckSplits(t, NewDecoder(), iecState(), view(dpi.ServerToClient, 8192, stepPositionTraffic))
 	withError := cat(serverStream()[:22], []byte{0x68, 0x04, 0x01, 0x00, 0x01, 0x00}, uFrame(testfrAct))
 	decodertest.CheckSplits(t, NewDecoder(), iecState(), view(dpi.ServerToClient, 9, withError))
 }
