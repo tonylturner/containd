@@ -112,6 +112,10 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	store := &SQLiteStore{db: db}
+	if err := store.upgradeSnapshots(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.checkAndSchedulePending(); err != nil {
 		db.Close()
 		return nil, err
@@ -154,9 +158,9 @@ func bootstrapSchema(db *sql.DB) error {
 	return nil
 }
 
-// Save validates and writes the config as the running config.
-// It also clears any stale candidate so that LoadCandidate will re-seed
-// from the updated running config, keeping the two in sync.
+// Save validates and writes running only, retaining an omitted IDS bank.
+// Candidate, previous and pending state are untouched. Boot repairs must use
+// Repair instead; callers replacing everything must explicitly WipeAll first.
 func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
@@ -185,15 +189,12 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	if replaceIDSRules {
-		if err := replaceIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
+		if err := replaceChangedIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 			return err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyRunning, string(blob), time.Now().Unix()); err != nil {
 		return fmt.Errorf("persist config: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate); err != nil {
-		return fmt.Errorf("clear candidate: %w", err)
 	}
 	return tx.Commit()
 }
@@ -205,7 +206,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
-	blob, err := json.Marshal(cfg)
+	blob, err := marshalStoredConfig(kind, cfg)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -235,11 +236,20 @@ func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
 }
 
 func (s *SQLiteStore) loadRunningLocked(ctx context.Context) (*Config, error) {
-	cfg, err := s.loadKind(ctx, configKeyRunning)
+	return loadRunningFrom(ctx, s.db)
+}
+
+type configReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func loadRunningFrom(ctx context.Context, db configReader) (*Config, error) {
+	cfg, err := loadKindFrom(ctx, db, configKeyRunning)
 	if err != nil {
 		return nil, err
 	}
-	rules, err := s.loadIDSRulesRaw(ctx)
+	rules, err := loadIDSRulesFrom(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +260,11 @@ func (s *SQLiteStore) loadRunningLocked(ctx context.Context) (*Config, error) {
 }
 
 func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, kind)
+	return loadKindFrom(ctx, s.db, kind)
+}
+
+func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, error) {
+	row := db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, kind)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -258,12 +272,27 @@ func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error
 		}
 		return nil, fmt.Errorf("load config: %w", err)
 	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+	var stored storedConfig
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	cfg := stored.Config
 	if err := UpgradeInPlace(&cfg); err != nil {
 		return nil, err
+	}
+	if kind == configKeyCandidate || kind == configKeyPrevious {
+		switch stored.SnapshotFormat {
+		case snapshotFormatBankUnchanged:
+			running, err := loadRunningFrom(ctx, db)
+			if err != nil {
+				return nil, err
+			}
+			cfg.IDS.Rules = running.IDS.Rules
+		case snapshotFormatEmbeddedBank:
+			// Even an omitted/empty rules field is an authoritative empty bank.
+		default:
+			return nil, fmt.Errorf("unsupported snapshot format %d", stored.SnapshotFormat)
+		}
 	}
 	return &cfg, nil
 }
@@ -434,7 +463,13 @@ func (s *SQLiteStore) LoadIDSRules(ctx context.Context) ([]IDSRule, error) {
 }
 
 func (s *SQLiteStore) loadIDSRulesRaw(ctx context.Context) ([]IDSRule, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT data FROM ids_rules ORDER BY id`)
+	return loadIDSRulesFrom(ctx, s.db)
+}
+
+func loadIDSRulesFrom(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) ([]IDSRule, error) {
+	rows, err := db.QueryContext(ctx, `SELECT data FROM ids_rules ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("query ids_rules: %w", err)
 	}

@@ -168,11 +168,24 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 	// authoritative determinism source (see CONTAIND_AUTO_*_SUBNET env vars
 	// + assignBySubnet); we're not changing that, just making sure it runs.
 	if cfg != nil {
-		blankDefaultInterfaceDevices(cfg)
-		if httpapi.AutoBindDefaultInterfaceDevices(cfg) {
-			if saveErr := stores.store.Save(context.Background(), cfg); saveErr != nil {
-				logger.Warnf("failed to persist autobound interface devices on startup: %v", saveErr)
+		repaired, repairErr := config.Repair(context.Background(), stores.store, func(next *config.Config) error {
+			// Keep the old bindings if discovery cannot produce a replacement.
+			devices := make([]string, len(next.Interfaces))
+			for i := range next.Interfaces {
+				devices[i] = next.Interfaces[i].Device
 			}
+			blankDefaultInterfaceDevices(next)
+			if !httpapi.AutoBindDefaultInterfaceDevices(next) {
+				for i := range next.Interfaces {
+					next.Interfaces[i].Device = devices[i]
+				}
+			}
+			return nil
+		})
+		if repairErr != nil {
+			logger.Warnf("failed to persist autobound interface devices on startup: %v", repairErr)
+		} else {
+			cfg = repaired
 		}
 	}
 	return stores, cfg, nil
