@@ -90,20 +90,6 @@ export function diffLines(aLines: string[], bLines: string[]): DiffLine[] {
     ];
   }
 
-  let prev = new Array(sm + 1).fill(0);
-  let curr = new Array(sm + 1).fill(0);
-  for (let i = 1; i <= sn; i += 1) {
-    for (let j = 1; j <= sm; j += 1) {
-      if (aSlice[i - 1] === bSlice[j - 1]) {
-        curr[j] = prev[j - 1] + 1;
-      } else {
-        curr[j] = Math.max(prev[j], curr[j - 1]);
-      }
-    }
-    [prev, curr] = [curr, prev];
-    curr.fill(0);
-  }
-
   const dp: number[][] = Array.from({ length: sn + 1 }, () =>
     new Array(sm + 1).fill(0),
   );
