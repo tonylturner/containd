@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { ConfigDiff } from "../lib/api-config";
 
 async function setup(page: Page) {
   const state = { dirty: false, offline: false, reject: false, reads: 0, writes: [] as { path: string; body: any }[], zones: [{ name: "lan" }], ids: { enabled: false, rules: [{ id: "keep-me", name: "Keep me", type: "suricata", enabled: true }] } };
@@ -41,6 +42,7 @@ async function setup(page: Page) {
       "/pcap/status": { running: false },
       "/pcap/list": [],
       "/system/info": {},
+      "/config/backups": [],
     };
     await route.fulfill({ json: data[path] ?? {} });
   });
@@ -220,4 +222,172 @@ test("committed events clear commit-confirmed and warning notices", async ({ pag
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
   await expect(page.getByRole("link", { name: "Confirm / rollback" })).toHaveCount(0);
   await expect(page.getByText("Warning: test apply warning", { exact: true })).toHaveCount(0);
+});
+
+const unchangedBank = { count: 30000, sha256: "a".repeat(64) };
+
+function configDiff(overrides: Partial<ConfigDiff> = {}): ConfigDiff {
+  return {
+    changed: false,
+    changedSections: [],
+    running: {},
+    candidate: {},
+    idsBank: { running: unchangedBank, candidate: unchangedBank },
+    ...overrides,
+  };
+}
+
+async function setupConfigReview(page: Page, diff: ConfigDiff) {
+  const state = await setup(page);
+  await page.route("**/api/v1/config/diff", (route) => route.fulfill(
+    state.offline ? { status: 503, json: { error: "offline" } } : { json: diff },
+  ));
+  return state;
+}
+
+test("Config review shows a secret-only section without values or digests", async ({ page }) => {
+  const redacted = { services: { wireguard: { privateKey: "" } } };
+  await setupConfigReview(page, configDiff({
+    changed: true, changedSections: ["services"], running: redacted, candidate: redacted,
+  }));
+  await page.goto("/config/?tab=diff");
+  const block = page.getByRole("region", { name: "Services changes", exact: true });
+  await expect(block.getByText("Secret values changed (hidden).", { exact: true })).toBeVisible();
+  await expect(block).not.toContainText("privateKey");
+  await expect(block).not.toContainText("SHA-256");
+  await expect(block).not.toContainText(unchangedBank.sha256);
+  await expect(block).not.toContainText("0 added");
+  await expect(page.getByText("No differences between running and staged config.", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Commit", exact: true }).last().click();
+  await expect(page.getByRole("dialog")).toContainText("1 changed block");
+});
+
+for (const bank of [
+  { name: "count change", count: 30001, sha256: "b".repeat(64) },
+  { name: "same-count replacement", count: 30000, sha256: "b".repeat(64) },
+  { name: "empty bank", count: 0, sha256: "b".repeat(64) },
+]) {
+  test(`Config review shows IDS bank ${bank.name} without a bank body`, async ({ page }) => {
+    await setupConfigReview(page, configDiff({
+      changed: true, changedSections: ["ids"],
+      running: { ids: { enabled: true } }, candidate: { ids: { enabled: true } },
+      idsBank: { running: unchangedBank, candidate: bank },
+    }));
+    await page.goto("/config/?tab=diff");
+    const block = page.getByRole("region", { name: "IDS changes", exact: true });
+    await expect(block.getByText("IDS rule bank", { exact: true })).toBeVisible();
+    await expect(block).toContainText("Running: 30,000 rules · SHA-256 aaaaaaaaaaaa");
+    await expect(block).toContainText(`Staged: ${bank.count.toLocaleString("en-US")} rules · SHA-256 bbbbbbbbbbbb`);
+    await expect(block).not.toContainText(unchangedBank.sha256);
+    await expect(block).not.toContainText(bank.sha256);
+    await expect(block.getByText("Secret values changed (hidden).", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("No differences between running and staged config.", { exact: true })).toHaveCount(0);
+  });
+}
+
+test("Config review includes unknown sections and complete known top-level sections", async ({ page }) => {
+  const running: ConfigDiff["running"] & Record<string, unknown> = {
+    firewall: { defaultAction: "ALLOW" }, dataplane: { dpiMode: "learn" }, futureSection: { mode: "before" },
+  };
+  const candidate: ConfigDiff["candidate"] & Record<string, unknown> = {
+    firewall: { defaultAction: "DENY" }, dataplane: { dpiMode: "enforce" }, futureSection: { mode: "after" },
+  };
+  await setupConfigReview(page, configDiff({
+    changed: true, changedSections: ["firewall", "dataplane", "futureSection", "hiddenFuture"],
+    running, candidate,
+  }));
+  await page.goto("/config/?tab=diff");
+  const firewall = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await expect(firewall).toContainText('"defaultAction": "ALLOW"');
+  await expect(firewall).toContainText('"defaultAction": "DENY"');
+  await expect(page.getByRole("region", { name: "Data plane changes", exact: true })).toContainText('"dpiMode": "enforce"');
+  const future = page.getByRole("region", { name: "futureSection changes", exact: true });
+  await expect(future).toContainText('"mode": "before"');
+  await expect(future).toContainText('"mode": "after"');
+  await expect(page.getByRole("region", { name: "hiddenFuture changes", exact: true })).toContainText("Secret values changed (hidden).");
+  await expect(page.getByRole("region", { name: / changes$/ })).toHaveCount(4);
+});
+
+test("Config review combines IDS settings lines and bank summary", async ({ page }) => {
+  await setupConfigReview(page, configDiff({
+    changed: true, changedSections: ["ids"],
+    running: { ids: { enabled: false } }, candidate: { ids: { enabled: true } },
+    idsBank: { running: unchangedBank, candidate: { count: 30001, sha256: "b".repeat(64) } },
+  }));
+  await page.goto("/config/?tab=diff");
+  const block = page.getByRole("region", { name: "IDS changes", exact: true });
+  await expect(block).toContainText('"enabled": false');
+  await expect(block).toContainText('"enabled": true');
+  await expect(block).toContainText("IDS rule bank");
+});
+
+test("Config review distinguishes clean, missing candidate, and failed diff reads", async ({ page }) => {
+  const diff = configDiff();
+  const state = await setupConfigReview(page, diff);
+  await page.goto("/config/?tab=diff");
+  const clean = page.getByText("No differences between running and staged config.", { exact: true });
+  await expect(clean).toBeVisible();
+  diff.candidate = null;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByText("No staged config to compare. Save staged changes to review them here.", { exact: true })).toBeVisible();
+  state.offline = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Unable to load configuration changes." })).toBeVisible();
+  await expect(clean).toHaveCount(0);
+  state.offline = false;
+  diff.candidate = {};
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(clean).toBeVisible();
+});
+
+test("Config candidate editor saves the omitted bank unchanged and summary uses its count", async ({ page }) => {
+  const diff = configDiff({ running: { ids: { enabled: true } }, candidate: { ids: { enabled: false } } });
+  const state = await setupConfigReview(page, diff);
+  await page.goto("/config/?tab=candidate");
+  const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+  await expect(editor).toHaveValue(JSON.stringify(diff.candidate, null, 2));
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect.poll(() => state.writes.length).toBe(1);
+  expect(state.writes[0]).toEqual({ path: "/config/candidate", body: diff.candidate });
+  expect(state.writes[0].body.ids).not.toHaveProperty("rules");
+  expect(state.writes[0].body).not.toHaveProperty("idsBank");
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.getByText("Running IDS bank: 30000 committed rules. Restores stage the candidate bank; commit promotes both.", { exact: true })).toBeVisible();
+});
+
+test("Config IDS explorer shows the selected bank count and a browse link without fetching rules", async ({ page }) => {
+  const diff = configDiff({
+    changed: true, changedSections: ["ids"],
+    running: { ids: { enabled: true } }, candidate: { ids: { enabled: false } },
+    idsBank: { running: unchangedBank, candidate: { count: 42000, sha256: "b".repeat(64) } },
+  });
+  await setupConfigReview(page, diff);
+  const bankRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.includes("/api/v1/ids/")) {
+      bankRequests.push(request.url());
+    }
+  });
+  await page.goto("/config/");
+  await page.getByRole("button", { name: "IDS", exact: true }).click();
+  const bank = page.getByRole("region", { name: "IDS rule bank", exact: true });
+  await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  await expect(bank.getByRole("link", { name: "Browse IDS rules", exact: true })).toHaveAttribute("href", "/ids/");
+  await expect(bank).toContainText("Rule bodies are omitted from this viewer.");
+
+  await page.getByRole("button", { name: "Staged", exact: true }).click();
+  await expect(bank).toContainText("Staged IDS bank: 42,000 rules.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  diff.idsBank.candidate.count = 0;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(bank).toContainText("Staged IDS bank: 0 rules.");
+
+  diff.candidate = null;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(bank).toContainText("No config loaded for this source.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  await page.getByRole("button", { name: "Running", exact: true }).click();
+  await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
+  expect(bankRequests).toEqual([]);
 });

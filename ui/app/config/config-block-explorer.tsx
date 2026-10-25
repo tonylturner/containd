@@ -60,6 +60,7 @@ type Props = {
   selectedItem: unknown;
   blockValue: unknown;
   viewerConfig: unknown;
+  idsBankCount: number | null;
   setSelectedRef: (node: HTMLDivElement | null) => void;
 };
 
@@ -74,6 +75,7 @@ export function ConfigBlockExplorer({
   selectedItem,
   blockValue,
   viewerConfig,
+  idsBankCount,
   setSelectedRef,
 }: Props) {
   return (
@@ -130,6 +132,27 @@ export function ConfigBlockExplorer({
           ))}
         </div>
         <div className="grid gap-3">
+          {selectedBlock === "ids" && (
+            <div
+              role="region"
+              aria-label="IDS rule bank"
+              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-sm text-[var(--text)]"
+            >
+              <p>
+                {viewerConfig == null
+                  ? "No config loaded for this source."
+                  : idsBankCount === null
+                    ? "IDS rule count unavailable."
+                    : `${VIEWER_SOURCE_LABEL[viewerSource]} IDS bank: ${idsBankCount.toLocaleString()} rules.`}
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Rule bodies are omitted from this viewer.
+              </p>
+              <a href="/ids/" className="mt-2 inline-block text-xs text-[var(--amber)] hover:underline transition-ui">
+                Browse IDS rules
+              </a>
+            </div>
+          )}
           {blockItems.length > 0 && (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 shadow-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -178,11 +201,6 @@ export function ConfigBlockExplorer({
                     {selectedBlock === "assets" && (
                       <a href="/assets/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
                         Open Assets
-                      </a>
-                    )}
-                    {selectedBlock === "ids" && (
-                      <a href="/ids/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
-                        Open IDS
                       </a>
                     )}
                   </div>
