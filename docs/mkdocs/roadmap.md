@@ -98,7 +98,7 @@ must not stop the PLC or the process.
 | 2.1 | SRA contract: personas (operator, sponsor, vendor, auditor), first protocol, broker and IdP choice, strict-profile rules. | SRA §4.2, N4; UI N1 |
 | 2.2 | Grant and lease API: a narrow machine-authenticated adapter (not an admin session) takes grant ID, subject, asset, protocol, deadline, and reason, and returns an applied lease ID and revision. Leases expire in the engine even if management is down, and are reconciled on restart. | SRA X1, X2; DP X2 |
 | 2.3 | Active revocation: expiry, revoke, or account disable closes established flows and conntrack and denies reconnects, without collateral damage to other sessions. | SRA M6, X2; DP-18, 27 |
-| 2.4 | Broker integration on a reference Compose topology: broker in a DMZ zone, one unavoidable conduit through containd to each approved asset. | SRA X3, §6 |
+| 2.4 | Broker integration on an optional reference Compose stack, separate from the containd image: Keycloak (local accounts or upstream IdP), Guacamole (session mode) and OpenZiti (network mode), both on OIDC. Each broker sits in its own DMZ zone with one unavoidable conduit through containd to each approved asset; OpenZiti's edge router traffic to assets passes industrial DPI. | SRA X3, §6 |
 | 2.5 | SRA operator UI: requests, approvals, active sessions, terminate, expiry. The current **Sessions** page (conntrack) is renamed **Connections**. | UI X1, X5 |
 | 2.6 | Correlated evidence: identity → approval → lease → flow → rule → recording reference, exportable without secrets. | SRA X3; UI X3; DP X4 |
 | 2.7 | Golden Compose topology and bypass matrix: same-network peers, alternate networks, published ports, direct addresses, IPv6, and crash/restart are tested and denied. | DP N5 |
@@ -211,7 +211,7 @@ Decided by the product owner on 2026-10-25.
 | Topic | Decision |
 |---|---|
 | `:latest` promotion | Only tags on `main` move `:latest`, after signing and SBOM. Prereleases never move it. This part of item 1.11 ships in 0.1.33; the CI gate follows in Stage 1. |
-| SRA broker | Integrate an existing gateway (Guacamole-class SSH/RDP/VNC) and an OIDC IdP. Do not build a remote desktop stack. |
+| SRA broker | Broker-agnostic. containd never bundles a broker or an IdP; it supports them through the lease API and zone/conduit topology. The reference is an optional, separate Compose stack: Keycloak (local accounts or federation to an upstream IdP) with OIDC to Guacamole for session access and to OpenZiti for network access. Do not build a remote desktop stack. |
 | SSH native shell | Training profile only. The strict profile disables the native shell, and SSH meets the same MFA assurance as the web. |
 | Established flows after a policy change | Leases always terminate existing flows. Ordinary edits keep existing connections, and the UI says so. |
 | Rule precedence | First match in listed order, everywhere: kernel, evaluator, and preview. This changes behavior (today the kernel sorts allow before deny). |
