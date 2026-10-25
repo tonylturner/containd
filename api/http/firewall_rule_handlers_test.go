@@ -167,3 +167,33 @@ func TestPreviewFirewallRuleIEC104(t *testing.T) {
 		t.Fatalf("deny rule matched %d events %+v; want events 1-3 and 5", resp.MatchCount, resp.SampleMatches)
 	}
 }
+
+func TestPreviewFirewallRuleIEC104ReadOnlyUsesDecoderClassification(t *testing.T) {
+	events := []dpevents.Event{
+		iecEvent(1, "request", true, map[string]any{
+			"apci_type": "I", "direction": "request", "class": "system",
+			"type_id": float64(100), "ca": float64(1),
+		}),
+		iecEvent(2, "response", false, map[string]any{
+			"apci_type": "I", "direction": "response", "class": "monitor",
+			"type_id": float64(1), "ca": float64(1),
+		}),
+		iecEvent(3, "request", true, map[string]any{
+			"apci_type": "I", "direction": "request", "class": "monitor",
+			"type_id": float64(1), "ca": float64(1),
+		}),
+		iecEvent(4, "unsupported", true, map[string]any{
+			"apci_type": "I", "direction": "request", "class": "unknown",
+			"type_id": float64(2), "ca": float64(1), "error": "type 2 has no B descriptor",
+		}),
+		iecEvent(5, "request", true, map[string]any{
+			"apci_type": "I", "direction": "request", "class": "system",
+			"type_id": float64(100), "ca": float64(65535),
+		}),
+	}
+	rule := `{"id":"read","action":"ALLOW","ics":{"protocol":"iec104","readOnly":true}}`
+	resp := previewRule(t, events, rule)
+	if resp.MatchCount != 2 || resp.SampleMatches[0].ID != 1 || resp.SampleMatches[1].ID != 2 {
+		t.Fatalf("readOnly rule matched %d events %+v; want forward GI and reverse monitor events", resp.MatchCount, resp.SampleMatches)
+	}
+}
