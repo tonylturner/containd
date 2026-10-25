@@ -64,7 +64,7 @@ func (s *SQLiteStore) SaveCandidate(ctx context.Context, cfg *Config) error {
 }
 
 func writeConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config) error {
-	blob, err := json.Marshal(cfg)
+	blob, err := marshalStoredConfig(key, cfg)
 	if err != nil {
 		return err
 	}

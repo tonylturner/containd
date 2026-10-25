@@ -263,43 +263,35 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
 	}
 	cfg, err := store.Load(context.Background())
 	if err == nil && cfg != nil {
-		changed := false
-		if strings.TrimSpace(cfg.System.Hostname) == "" {
-			cfg.System.Hostname = "containd"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.ListenAddr) == "" {
-			cfg.System.Mgmt.ListenAddr = ":8080"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.HTTPListenAddr) == "" {
-			cfg.System.Mgmt.HTTPListenAddr = ":8080"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) == "" {
-			cfg.System.Mgmt.HTTPSListenAddr = ":8443"
-			changed = true
-		}
-		if cfg.System.Mgmt.EnableHTTP == nil {
-			cfg.System.Mgmt.EnableHTTP = boolPtr(true)
-			changed = true
-		}
-		if cfg.System.Mgmt.EnableHTTPS == nil {
-			cfg.System.Mgmt.EnableHTTPS = boolPtr(true)
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.TLSCertFile) == "" {
-			cfg.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.TLSKeyFile) == "" {
-			cfg.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-			changed = true
-		}
-		if changed {
-			if err := store.Save(context.Background(), cfg); err != nil {
-				logger.Errorf("failed to backfill default config values: %v", err)
+		_, repairErr := config.Repair(context.Background(), store, func(next *config.Config) error {
+			if strings.TrimSpace(next.System.Hostname) == "" {
+				next.System.Hostname = "containd"
 			}
+			if strings.TrimSpace(next.System.Mgmt.ListenAddr) == "" {
+				next.System.Mgmt.ListenAddr = ":8080"
+			}
+			if strings.TrimSpace(next.System.Mgmt.HTTPListenAddr) == "" {
+				next.System.Mgmt.HTTPListenAddr = ":8080"
+			}
+			if strings.TrimSpace(next.System.Mgmt.HTTPSListenAddr) == "" {
+				next.System.Mgmt.HTTPSListenAddr = ":8443"
+			}
+			if next.System.Mgmt.EnableHTTP == nil {
+				next.System.Mgmt.EnableHTTP = boolPtr(true)
+			}
+			if next.System.Mgmt.EnableHTTPS == nil {
+				next.System.Mgmt.EnableHTTPS = boolPtr(true)
+			}
+			if strings.TrimSpace(next.System.Mgmt.TLSCertFile) == "" {
+				next.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+			}
+			if strings.TrimSpace(next.System.Mgmt.TLSKeyFile) == "" {
+				next.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+			}
+			return nil
+		})
+		if repairErr != nil {
+			logger.Errorf("failed to backfill default config values: %v", repairErr)
 		}
 		return
 	}
