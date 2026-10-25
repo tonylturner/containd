@@ -130,7 +130,7 @@ func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
 		}
 	}
 	if strings.TrimSpace(cfg.AddressCIDR) != "" {
-		_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cfg.AddressCIDR))
+		ipnet, err := parseAddressCIDR(cfg.AddressCIDR)
 		if err != nil || ipnet == nil {
 			return fmt.Errorf("wireguard: invalid addressCIDR %q", cfg.AddressCIDR)
 		}

@@ -188,7 +188,7 @@ func applyDHCPInterface(ctx context.Context, iface config.Interface, dev string)
 	if err != nil {
 		return fmt.Errorf("dhcp on %s: %w", dev, err)
 	}
-	_, ipnet, err := net.ParseCIDR(strings.TrimSpace(lease.AddrCIDR))
+	ipnet, err := parseAddressCIDR(lease.AddrCIDR)
 	if err != nil || ipnet == nil {
 		return fmt.Errorf("dhcp on %s: invalid lease cidr %q", dev, lease.AddrCIDR)
 	}
@@ -253,7 +253,7 @@ func desiredInterfaceAddrs(ctx context.Context, iface config.Interface) (map[str
 		if cidr == "" {
 			continue
 		}
-		_, ipnet, err := net.ParseCIDR(cidr)
+		ipnet, err := parseAddressCIDR(cidr)
 		if err != nil || ipnet == nil || ipnet.IP == nil {
 			return nil, nil, fmt.Errorf("interface %s invalid CIDR %q", iface.Name, cidr)
 		}
@@ -266,8 +266,14 @@ func desiredInterfaceAddrs(ctx context.Context, iface config.Interface) (map[str
 }
 
 func replaceInterfaceAddrsIfNeeded(ifIndex int, dev string, desired, desiredV4 map[string]struct{}, opts ApplyOptions) error {
+	// Delete stale addresses before installing the new ones: removing an IPv4
+	// primary also removes its same-subnet secondaries on kernels without
+	// promote_secondaries. Adding the desired host first can therefore lose it.
+	if err := deleteStaleInterfaceAddrs(ifIndex, dev, desired, desiredV4, opts); err != nil {
+		return err
+	}
 	for cidr := range desired {
-		_, ipnet, err := net.ParseCIDR(cidr)
+		ipnet, err := parseAddressCIDR(cidr)
 		if err != nil || ipnet == nil {
 			return fmt.Errorf("interface %s invalid desired CIDR %q", dev, cidr)
 		}
@@ -275,7 +281,10 @@ func replaceInterfaceAddrsIfNeeded(ifIndex int, dev string, desired, desiredV4 m
 			return fmt.Errorf("add addr %s %s: %w", dev, ipnet.String(), err)
 		}
 	}
+	return nil
+}
 
+func deleteStaleInterfaceAddrs(ifIndex int, dev string, desired, desiredV4 map[string]struct{}, opts ApplyOptions) error {
 	replaceV4 := len(desiredV4) > 0
 	if !opts.Replace && !replaceV4 {
 		return nil
