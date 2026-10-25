@@ -65,3 +65,40 @@ func TestEvaluatorNestedAllAnyNot(t *testing.T) {
 		t.Fatal("expected no match")
 	}
 }
+
+func TestEvaluatorNonEvaluableRulesNeverAlert(t *testing.T) {
+	enabled := true
+	for _, flag := range []*bool{nil, &enabled} {
+		for _, condition := range []rules.IDSCondition{{}, {Field: "proto", Value: "dns"}} {
+			rule := rules.IDSRule{
+				ID: "stored-only", Enabled: flag, When: condition,
+				Labels: map[string]string{"evaluable": "false"},
+			}
+			ev := dpi.Event{Proto: "dns", Kind: "query"}
+			if idsRuleMatchesEvent(rule, ev) {
+				t.Fatal("non-evaluable rule matched")
+			}
+			if out := New(rules.IDSConfig{Enabled: true, Rules: []rules.IDSRule{rule}}).Evaluate(ev); len(out) != 0 {
+				t.Fatalf("non-evaluable rule alerted: %+v", out)
+			}
+		}
+	}
+}
+
+func TestEvaluatorNativeEmptyCondition(t *testing.T) {
+	// Native kind-only signatures deliberately have no When predicate
+	// (e.g. the built-in service.av.detected signature).
+	for _, labels := range []map[string]string{nil, {"evaluable": "true"}} {
+		rule := rules.IDSRule{ID: "native", Proto: "dns", Kind: "query", Labels: labels}
+		e := New(rules.IDSConfig{Enabled: true, Rules: []rules.IDSRule{rule}})
+		if out := e.Evaluate(dpi.Event{Proto: "dns", Kind: "query"}); len(out) != 1 {
+			t.Fatalf("native kind-only rule no longer alerts: %+v", out)
+		}
+		if out := e.Evaluate(dpi.Event{Proto: "dns", Kind: "response"}); len(out) != 0 {
+			t.Fatalf("kind filter ignored: %+v", out)
+		}
+		if out := e.Evaluate(dpi.Event{Proto: "http", Kind: "query"}); len(out) != 0 {
+			t.Fatalf("protocol filter ignored: %+v", out)
+		}
+	}
+}

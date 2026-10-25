@@ -4,11 +4,78 @@
 package compile
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	cpids "github.com/tonylturner/containd/pkg/cp/ids"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	dpids "github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestCompileImportedYARANeverAlerts(t *testing.T) {
+	const source = `rule StoredOnly {
+    strings:
+        $a = "malware"
+    condition:
+        $a
+}`
+	imports, err := cpids.ImportRules([]byte(source), cpids.FormatYARA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imports) != 1 {
+		t.Fatalf("expected one imported rule, got %+v", imports)
+	}
+	imported := imports[0]
+	enabled := true
+	for _, flag := range []*bool{nil, &enabled} {
+		imported.Enabled = flag
+		cfg := config.DefaultConfig()
+		cfg.IDS = config.IDSConfig{Enabled: true, Rules: []config.IDSRule{imported}}
+
+		// Stored/API config JSON must retain the rule and its non-evaluable
+		// status, rather than hiding it or rewriting Enabled.
+		stored, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var loaded config.Config
+		if err := json.Unmarshal(stored, &loaded); err != nil {
+			t.Fatal(err)
+		}
+		if len(loaded.IDS.Rules) != 1 || !reflect.DeepEqual(loaded.IDS.Rules[0], imported) {
+			t.Fatalf("stored import changed: %+v", loaded.IDS)
+		}
+		snap, err := CompileSnapshot(&loaded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Exercise the management-to-engine snapshot JSON boundary too.
+		wire, err := json.Marshal(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var received rules.Snapshot
+		if err := json.Unmarshal(wire, &received); err != nil {
+			t.Fatal(err)
+		}
+		if len(received.IDS.Rules) != 1 || received.IDS.Rules[0].Labels["evaluable"] != "false" {
+			t.Fatalf("snapshot lost non-evaluable import: %+v", received.IDS)
+		}
+		e := dpids.New(received.IDS)
+		for _, ev := range []dpi.Event{
+			{Proto: "dns", Kind: "query", Attributes: map[string]any{"qname": "example.com"}},
+			{Proto: "http", Kind: "request", Attributes: map[string]any{"payload": "malware"}},
+		} {
+			if alerts := e.Evaluate(ev); len(alerts) != 0 {
+				t.Fatalf("YARA import alerted on %+v: %+v", ev, alerts)
+			}
+		}
+	}
+}
 
 func TestCompileSnapshotFirewallMapping(t *testing.T) {
 	cfg := &config.Config{

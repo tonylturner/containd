@@ -44,7 +44,10 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 
 	// Handle COTP Connection Request / Connection Confirm as connection events.
-	if cotp.PDUType == COTPConnectionRequest || cotp.PDUType == COTPConnectionConfirm {
+	// CR/CC carry credit in the low nibble; retain the original wire octet
+	// in the event, but compare only their TPDU code.
+	switch cotp.PDUType & 0xF0 {
+	case COTPConnectionRequest, COTPConnectionConfirm:
 		return []dpi.Event{newS7ConnectionEvent(state, cotp, rawHex)}, nil
 	}
 

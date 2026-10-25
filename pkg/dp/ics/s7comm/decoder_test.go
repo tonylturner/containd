@@ -23,10 +23,10 @@ func buildTPKT(payload []byte) []byte {
 	return buf
 }
 
-// buildCOTPData builds a minimal COTP DT header (length=2, PDU type=0x0F, TPDU=0x80).
+// buildCOTPData builds a minimal COTP DT header (length=2, PDU type=0xF0, TPDU=0x80).
 func buildCOTPData(payload []byte) []byte {
 	// COTP DT header: length(1) + pdu_type(1) + tpdu_number_eot(1) = 3 bytes, length field = 2
-	hdr := []byte{0x02, 0x0F, 0x80}
+	hdr := []byte{0x02, 0xF0, 0x80}
 	return append(hdr, payload...)
 }
 
@@ -116,14 +116,14 @@ func TestParseTPKTRejectsShortDeclaredLength(t *testing.T) {
 }
 
 func TestParseCOTPValid(t *testing.T) {
-	// length=2, pdu_type=0x0F, tpdu=0x80, then payload 0xAA
-	data := []byte{0x02, 0x0F, 0x80, 0xAA}
+	// ITU-T X.224 §13.7: length=2, pdu_type=0xF0, tpdu=0x80, then payload 0xAA.
+	data := []byte{0x02, 0xF0, 0x80, 0xAA}
 	hdr, rem, err := ParseCOTP(data)
 	if err != nil {
 		t.Fatalf("ParseCOTP: %v", err)
 	}
-	if hdr.PDUType != 0x0F {
-		t.Errorf("PDUType = 0x%02X, want 0x0F", hdr.PDUType)
+	if hdr.PDUType != 0xF0 {
+		t.Errorf("PDUType = 0x%02X, want 0xF0", hdr.PDUType)
 	}
 	if len(rem) != 1 || rem[0] != 0xAA {
 		t.Errorf("remaining = %v, want [0xAA]", rem)

@@ -41,7 +41,7 @@ func (d *RDPDecoder) Supports(state *flow.State) bool {
 // RDP X.224 COTP type codes.
 const (
 	x224ConnectionRequest = 0xE0
-	x224ConnectionConfirm = 0xC0
+	x224ConnectionConfirm = 0xD0
 )
 
 // RDP negotiation type codes.
@@ -158,7 +158,7 @@ func (d *RDPDecoder) parseConnectionRequest(state *flow.State, pkt *dpi.ParsedPa
 	return []dpi.Event{ev}, nil
 }
 
-// parseConnectionConfirm handles X.224 Connection Confirm (0xC0).
+// parseConnectionConfirm handles X.224 Connection Confirm (0xD0).
 func (d *RDPDecoder) parseConnectionConfirm(state *flow.State, pkt *dpi.ParsedPacket, p []byte, tpktLen int) ([]dpi.Event, error) {
 	attrs := map[string]any{
 		"stage":     "connection_confirm",
