@@ -534,9 +534,9 @@ cannot bypass the classifier with a different command type; decoding does
 not authorize them.
 
 The common monitor layouts added for EU step-position and mixed RTU traffic
-are 5, 7, 9, 11, 15, 21 and 32-37. Other monitor-direction IDs, including
-the CP24-time-tagged 4, 6, 8, 10, 12, 14 and 16 and the protection/event
-layouts 17-20, remain unsupported until a consumer requires them.
+are 5, 7, 9, 11, 15, 21 and 32-37. Other monitor-direction IDs not in this
+scope remain unsupported: CP24-time-tagged 2, 4, 6, 8, 10, 12, 14 and 16,
+protection/event layouts 17-20, and reserved IDs 22-29 and 38-44.
 
 ### 7.3 Role and cause
 
