@@ -176,13 +176,17 @@ func pairKey(client, server netip.AddrPort) string {
 
 // sessionCtx is the opener-oriented evaluation context of a session.
 func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
+	return iecSessionContext(t.snap, client, server, resolveZonesForFlow)
+}
+
+func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, resolve zoneResolver) rules.EvalContext {
 	ctx := rules.EvalContext{
 		SrcIP: net.IP(client.Addr().AsSlice()),
 		DstIP: net.IP(server.Addr().AsSlice()),
 		Proto: "tcp",
 		Port:  strconv.Itoa(int(server.Port())),
 	}
-	ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(t.snap, ctx.SrcIP, ctx.DstIP)
+	ctx.SrcZone, ctx.DstZone = resolve(snap, ctx.SrcIP, ctx.DstIP)
 	return ctx
 }
 

@@ -66,8 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Static icon URLs now include the runtime `/containd/` base path when the UI
   is mounted under that prefix.
-- IEC 104 rule previews use the decoder's shared `SafeRead` classification, so
-  read-only rules can match eligible forward and reverse traffic.
+- Firewall and ICS rule previews run in the engine with its live zone mappings
+  and runtime context builders. IEC 104 uses the decoder's shared `SafeRead`
+  classification, so read-only rules match eligible forward and reverse traffic;
+  envelope-level denials are not counted as candidate-rule matches.
 - ICS policy views show the effective inherited mode, and saving an inherited
   filter no longer writes a rule-level `learn` override.
 - Commit-confirmed expiry replays the rolled-back running configuration to the

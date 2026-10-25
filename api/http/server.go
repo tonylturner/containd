@@ -74,6 +74,11 @@ type EngineClient interface {
 	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
 }
 
+// RulePreviewClient delegates impact evaluation to the engine's live policy context.
+type RulePreviewClient interface {
+	PreviewRule(ctx context.Context, entry rules.Entry) (dpengine.PreviewRuleResponse, error)
+}
+
 type TelemetryClient interface {
 	ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
 	ListFlows(ctx context.Context, limit int) ([]dpevents.FlowSummary, error)

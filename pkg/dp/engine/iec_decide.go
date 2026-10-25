@@ -37,16 +37,8 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 // learn-mode rule, a deny is would_drop.
 func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode}
-	switch {
-	case ev.Kind == iecKindMalformed && anomaly.IEC104RoleViolation(ev.Attributes):
-		d.reason = reasonRole
-	case ev.Kind == iecKindMalformed:
-		d.reason = reasonMalformed
-	case ev.Kind == iecKindUnsupported:
-		d.reason = reasonUnsupported
-	case iecBroadcast(ev.Attributes):
-		d.reason = reasonBroadcast
-	default:
+	d.reason = iecEventDenialReason(ev)
+	if d.reason == "" {
 		ctx := s.ctx
 		ctx.ICS = t.iecContext(ev)
 		action, entry := rules.ActionDeny, (*rules.Entry)(nil)
@@ -71,8 +63,29 @@ func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 	return d
 }
 
+// iecEventDenialReason is the pre-rule fail-closed gate shared with preview.
+// Such events are denied by the envelope, not matched by a candidate rule.
+func iecEventDenialReason(ev dpi.Event) string {
+	switch {
+	case ev.Kind == iecKindMalformed && anomaly.IEC104RoleViolation(ev.Attributes):
+		return reasonRole
+	case ev.Kind == iecKindMalformed:
+		return reasonMalformed
+	case ev.Kind == iecKindUnsupported:
+		return reasonUnsupported
+	case iecBroadcast(ev.Attributes):
+		return reasonBroadcast
+	default:
+		return ""
+	}
+}
+
 // iecContext builds the rule context of one IEC104 event.
 func (t *iecTable) iecContext(ev dpi.Event) *rules.ICSContext {
+	return iecContextFromDPIEvent(ev, t.safeRead)
+}
+
+func iecContextFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSContext {
 	a := ev.Attributes
 	c := &rules.IEC104Context{Malformed: ev.Kind == iecKindMalformed, Unsupported: ev.Kind == iecKindUnsupported}
 	c.APCIType, _ = eventfields.String(a, eventfields.KeyAPCIType)
@@ -87,7 +100,7 @@ func (t *iecTable) iecContext(ev dpi.Event) *rules.ICSContext {
 		c.IOA = &v
 	}
 	c.Broadcast = iecBroadcast(a)
-	c.SafeRead = t.safeRead(a)
+	c.SafeRead = safeRead(a)
 	dir, _ := eventfields.String(a, eventfields.KeyDirection)
 	return &rules.ICSContext{Protocol: iecProtocol, Direction: dir, IEC104: c}
 }
