@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -22,6 +23,7 @@ import (
 
 // dataPlane is what the config handler drives. *engine.Engine implements it.
 type dataPlane interface {
+	ManagementReservation() *mgmtpath.Reservation
 	Events() *events.Store
 	Reconfigure(fresh *engine.Engine)
 	StartWithRetry(ctx context.Context) error
@@ -67,13 +69,17 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+			if err := config.ValidateManagementDataPlane(next, dp.ManagementReservation()); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			post.Lock()
 			defer post.Unlock()
 			current.mu.Lock()
 			unchanged := current.applied && sameDataPlane(current.dp, next)
 			current.mu.Unlock()
 			if !unchanged {
-				fresh, err := newEngineFor(logger, next, store)
+				fresh, err := newEngineFor(logger, next, store, dp.ManagementReservation())
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -107,7 +113,7 @@ func sameDataPlane(a, b config.DataPlaneConfig) bool {
 }
 
 // newEngineFor builds an engine for a data-plane configuration.
-func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *events.Store) (*engine.Engine, error) {
+func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *events.Store, reservation *mgmtpath.Reservation) (*engine.Engine, error) {
 	var excl []engine.DPIExclusion
 	for _, e := range dp.DPIExclusions {
 		excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
@@ -119,7 +125,7 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 		OnError: func(err error) {
 			logger.Errorf("data plane capture error: %v", err)
 		},
-		Enforce:         engine.EnforceConfig{Enabled: dp.Enforcement, TableName: table, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(table)},
+		Enforce:         engine.EnforceConfig{ManagementReservation: reservation, Enabled: dp.Enforcement, TableName: table, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(table)},
 		InspectAll:      dp.DPIMock,
 		DPIEnabled:      dp.DPIEnabled,
 		DPIMode:         dp.DPIMode,

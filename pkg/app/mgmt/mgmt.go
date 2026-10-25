@@ -18,6 +18,7 @@ import (
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/identity"
@@ -28,7 +29,8 @@ import (
 )
 
 type Options struct {
-	Combined bool
+	Reservation *mgmtpath.Reservation
+	Combined    bool
 }
 
 type mgmtStores struct {
@@ -59,6 +61,12 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
+		return err
+	}
+	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
+		return err
+	}
 	stores, cfg, err := initMgmtStores(logger)
 	if err != nil {
 		return err
@@ -67,6 +75,12 @@ func Run(ctx context.Context, opts Options) error {
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
 
+	if err := config.ValidateManagementReservation(cfg, opts.Reservation); err != nil {
+		return err
+	}
+	if err := validateReservedStartup(cfg, opts.Reservation); err != nil {
+		return err
+	}
 	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg)
 	if err != nil {
 		return err
@@ -108,7 +122,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
-	handler := mgmtAccessHandler(stores.store, ipIndex, router)
+	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
 	sshAddr, sshEnabled := startSSH(logger, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)

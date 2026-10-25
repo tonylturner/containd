@@ -15,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"golang.org/x/sys/unix"
@@ -26,8 +27,11 @@ type ownershipState struct {
 }
 
 type ownershipManager struct {
-	stateMu sync.Mutex
-	logger  *zap.SugaredLogger
+	reservation *mgmtpath.Reservation
+	guard       *netcfg.ManagementGuard
+	applyMu     sync.Mutex
+	stateMu     sync.Mutex
+	logger      *zap.SugaredLogger
 
 	state atomic.Value // ownershipState
 	// reconcile requests are coalesced.
@@ -114,6 +118,12 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 	}()
 
 	reconcileNow := func(reason string) {
+		m.applyMu.Lock()
+		defer m.applyMu.Unlock()
+		if err := m.guard.Reconcile(ctx); err != nil {
+			m.setLastError(err)
+			return
+		}
 		st := m.state.Load().(ownershipState)
 		if len(st.ifaces) == 0 && len(st.routing.Routes) == 0 && len(st.routing.Rules) == 0 {
 			return
@@ -121,6 +131,14 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 		applyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
+		if err := config.ValidateManagementInterfaces(st.ifaces, m.reservation); err != nil {
+			m.setLastError(err)
+			return
+		}
+		if err := config.ValidateManagementRouting(st.routing, m.reservation); err != nil {
+			m.setLastError(err)
+			return
+		}
 		// Interfaces: additive, non-destructive apply (REPLACE is admin-triggered only).
 		if len(st.ifaces) > 0 {
 			if err := netcfg.ApplyInterfaces(applyCtx, st.ifaces); err != nil {
@@ -248,10 +266,11 @@ func ownershipStatus(m *ownershipManager) map[string]any {
 	}
 	sort.Strings(ifaces)
 	return map[string]any{
-		"enabled":     true,
-		"ifaces":      ifaces,
-		"routes":      len(st.routing.Routes),
-		"policyRules": len(st.routing.Rules),
-		"lastError":   m.getLastError(),
+		"enabled":               true,
+		"ifaces":                ifaces,
+		"routes":                len(st.routing.Routes),
+		"policyRules":           len(st.routing.Rules),
+		"lastError":             m.getLastError(),
+		"managementReservation": m.guard.Status(),
 	}
 }

@@ -62,7 +62,7 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 	t.Run("health", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
-		healthHandler(dp)(rec, req)
+		healthHandler(dp, nil)(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d", rec.Code)
 		}

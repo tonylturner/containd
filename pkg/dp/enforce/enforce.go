@@ -15,13 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Compiler turns a dp rules.Snapshot into an nftables ruleset.
 // This is a minimal Phase 1 skeleton.
 type Compiler struct {
-	TableName string
+	ManagementReservation *mgmtpath.Reservation
+	TableName             string
 	// QueueID, when non-zero, causes DPI-eligible rules (those with an
 	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
 	// steering matched traffic through NFQUEUE for selective DPI.
@@ -128,6 +130,7 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
+	c.writeManagementInput(buf)
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)

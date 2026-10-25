@@ -5,27 +5,30 @@ package mgmtapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
-
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
+	"go.uber.org/zap"
 )
 
 func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
 	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
-	if engineURL == "" && opts.Combined {
+	if engineURL == "" && (opts.Combined || opts.Reservation != nil) {
 		engineAddr := common.EnvTrimmed("CONTAIND_ENGINE_ADDR", "")
 		if engineAddr == "" {
 			engineAddr = ":8081"
@@ -336,5 +339,82 @@ func ensureLoopbackHTTPAddr(addr string) string {
 		return addr
 	default:
 		return net.JoinHostPort("127.0.0.1", port)
+	}
+}
+
+// validateReservedStartup checks effective environment-resolved listeners as well
+// as the pure configured aliases checked by ValidateManagementReservation.
+func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error {
+	if r == nil {
+		return nil
+	}
+	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
+		return err
+	}
+	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerOverlaps(resolveHTTPSAddr(cfg), r) {
+		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
+	}
+	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
+	if ssh == "" && cfg != nil {
+		ssh = cfg.System.SSH.ListenAddr
+	}
+	if ssh == "" {
+		ssh = ":2222"
+	}
+	if config.ManagementListenerOverlaps(ssh, r) {
+		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
+	}
+	return nil
+}
+
+// No management-owned service may start until the engine has subscribed and
+// completed its initial guard scan. This also orders split-process startup.
+func waitForReservedEngine(ctx context.Context, base string, r *mgmtpath.Reservation) error {
+	if r == nil {
+		return nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "http" || r.ValidateEngineBind(u.Host) != nil {
+		return fmt.Errorf("reserved management path requires a loopback HTTP engine URL")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	client := &http.Client{Timeout: time.Second}
+	var last error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/health", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			var body struct {
+				ManagementReservation netcfg.ManagementHealth `json:"managementReservation"`
+			}
+			decodeErr := json.NewDecoder(resp.Body).Decode(&body)
+			resp.Body.Close()
+			h := body.ManagementReservation
+			same := len(h.Sources) == len(r.Sources)
+			for _, source := range r.Sources {
+				found := false
+				for _, s := range h.Sources {
+					if s == source.String() {
+						found = true
+					}
+				}
+				same = same && found
+			}
+			if resp.StatusCode == http.StatusOK && decodeErr == nil && h.Active && h.Error == "" && h.Device == r.Device && h.Local == r.Local.String() && h.Port == r.Port && same {
+				return nil
+			}
+			last = fmt.Errorf("engine reservation guard is not ready or does not match startup authority")
+		} else {
+			last = err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("reserved management path engine guard: %w: %v", ctx.Err(), last)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }

@@ -54,6 +54,7 @@ nav:
   - Operations:
       - CLI: cli.md
       - Services: services.md
+      - Reserved Management Path: management-reservation.md
   - Architecture:
       - Overview: architecture.md
       - Dataplane: dataplane.md

@@ -10,15 +10,72 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type testConn struct {
 	local net.Addr
+}
+
+func TestReservedHTTPGateSocketTupleAndSameAuth(t *testing.T) {
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "cfg.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.DefaultConfig()
+	cfg.Interfaces = []config.Interface{{Name: "lan3", Device: "eth7", Access: config.InterfaceAccess{Mgmt: boolPtr(false), HTTP: boolPtr(false), HTTPS: boolPtr(false)}}}
+	if err := store.Save(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	idx := newIPInterfaceIndex()
+	idx.byIP["10.99.99.2"] = "eth7"
+	idx.lastLoaded = time.Now()
+	reservation := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
+	// The ordinary downstream auth/router is still authoritative.
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer valid" {
+			http.Error(w, "auth required", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := mgmtAccessHandler(store, idx, reservation, next)
+	for _, tc := range []struct {
+		name, remote, auth string
+		port               int
+		tls                bool
+		want               int
+	}{
+		{"reserved authenticated", "10.99.99.10:45100", "Bearer valid", 8080, false, 204},
+		{"reserved unauthenticated", "10.99.99.10:45100", "", 8080, false, 401},
+		{"other peer spoofs headers", "10.99.99.11:45100", "Bearer valid", 8080, false, 403},
+		{"wrong local port", "10.99.99.10:45100", "Bearer valid", 8081, false, 403},
+		{"HTTPS not reserved", "10.99.99.10:45100", "Bearer valid", 8080, true, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://10.99.99.10:8080/ordinary/router", nil)
+			req.RemoteAddr = tc.remote
+			req.Header.Set("Authorization", tc.auth)
+			req.Header.Set("X-Forwarded-For", "10.99.99.10")
+			req.Header.Set("Forwarded", "for=10.99.99.10;host=10.99.99.2:8080")
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			req = req.WithContext(connContextWithLocalIP(req.Context(), testConn{local: &net.TCPAddr{IP: net.ParseIP("10.99.99.2"), Port: tc.port}}))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status %d want %d: %s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
 }
 
 func (c testConn) Read([]byte) (int, error)         { return 0, io.EOF }
@@ -103,7 +160,7 @@ func TestIPInterfaceIndexLookupAndMgmtAccessHandler(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := mgmtAccessHandler(store, idx, next)
+	handler := mgmtAccessHandler(store, idx, nil, next)
 
 	t.Run("denies management on disabled interface", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.invalid", nil)
