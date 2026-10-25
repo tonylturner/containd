@@ -4,6 +4,7 @@
 package stats
 
 import (
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -37,14 +38,22 @@ type FlowStats struct {
 type Tracker struct {
 	mu    sync.RWMutex
 	proto map[string]*ProtoStats
-	flows map[string]*FlowStats
+	flows map[hostPair]*FlowStats
+}
+
+// hostPair deliberately excludes transport ports: top talkers aggregate all
+// captured traffic by directional host pair and protocol, not by connection.
+// Binary addresses avoid formatting/allocating map keys on every packet.
+type hostPair struct {
+	src, dst netip.Addr
+	protocol string
 }
 
 // New creates a new statistics tracker.
 func New() *Tracker {
 	return &Tracker{
 		proto: make(map[string]*ProtoStats),
-		flows: make(map[string]*FlowStats),
+		flows: make(map[hostPair]*FlowStats),
 	}
 }
 
@@ -80,7 +89,7 @@ func (t *Tracker) RecordEvent(ev dpi.Event) {
 // RecordPacket charges one captured packet and its transport payload bytes to
 // exactly one protocol and directional flow, including retransmissions and
 // packets that emit no events. Header bytes are not included.
-func (t *Tracker) RecordPacket(srcIP, dstIP, protocol string, bytes int, timestamp time.Time) {
+func (t *Tracker) RecordPacket(srcIP, dstIP netip.Addr, protocol string, bytes int, timestamp time.Time) {
 	if t == nil {
 		return
 	}
@@ -93,13 +102,14 @@ func (t *Tracker) RecordPacket(srcIP, dstIP, protocol string, bytes int, timesta
 	if timestamp.After(ps.LastSeen) {
 		ps.LastSeen = timestamp
 	}
-	if srcIP == "" || dstIP == "" {
+	if !srcIP.IsValid() || !dstIP.IsValid() {
 		return
 	}
-	flowKey := srcIP + "|" + dstIP + "|" + ps.Protocol
+	srcIP, dstIP = srcIP.Unmap(), dstIP.Unmap()
+	flowKey := hostPair{src: srcIP, dst: dstIP, protocol: ps.Protocol}
 	fs, ok := t.flows[flowKey]
 	if !ok {
-		fs = &FlowStats{SrcIP: srcIP, DstIP: dstIP, Protocol: ps.Protocol}
+		fs = &FlowStats{SrcIP: srcIP.String(), DstIP: dstIP.String(), Protocol: ps.Protocol}
 		t.flows[flowKey] = fs
 	}
 	fs.Packets++

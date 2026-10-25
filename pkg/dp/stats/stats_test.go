@@ -4,6 +4,7 @@
 package stats
 
 import (
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 func TestTrackerIndependentPacketAndEventCounters(t *testing.T) {
 	tracker := New()
 	now := time.Now().UTC()
-	tracker.RecordPacket("10.0.0.1", "10.0.0.2", "modbus", 100, now)
+	tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "modbus", 100, now)
 	for _, kind := range []string{"read_register", "write_coil", "alert_overflow"} {
 		tracker.RecordEvent(dpi.Event{Proto: "modbus", Kind: kind, Timestamp: now.Add(-time.Second),
 			Attributes: map[string]any{"src": "event-source", "dst": "event-destination"}})
@@ -52,18 +53,18 @@ func TestTrackerPacketsWithoutEventsAndTopTalkers(t *testing.T) {
 	tracker := New()
 	now := time.Now().UTC()
 	for i := 0; i < 5; i++ {
-		tracker.RecordPacket("a", "b", "modbus", 100, now)
+		tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "modbus", 100, now)
 	}
 	for i := 0; i < 3; i++ {
-		tracker.RecordPacket("c", "d", "http", 50, now)
+		tracker.RecordPacket(netip.MustParseAddr("10.0.0.3"), netip.MustParseAddr("10.0.0.4"), "http", 50, now)
 	}
-	tracker.RecordPacket("", "", "", 0, now)
+	tracker.RecordPacket(netip.Addr{}, netip.Addr{}, "", 0, now)
 	got := tracker.Stats()
 	if len(got) != 3 || got[0].Protocol != "modbus" || got[0].PacketCount != 5 || got[0].ByteCount != 500 || got[0].EventCount != 0 {
 		t.Fatalf("packet-only stats = %+v", got)
 	}
 	top := tracker.TopTalkers(0)
-	if len(top) != 2 || top[0].SrcIP != "a" || top[0].Bytes != 500 || top[0].Packets != 5 || top[1].Bytes != 150 {
+	if len(top) != 2 || top[0].SrcIP != "10.0.0.1" || top[0].Bytes != 500 || top[0].Packets != 5 || top[1].Bytes != 150 {
 		t.Fatalf("top talkers = %+v", top)
 	}
 	if top := tracker.TopTalkers(1); len(top) != 1 {
@@ -77,7 +78,7 @@ func TestTrackerConcurrentAccounting(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		wg.Go(func() {
 			for j := 0; j < 100; j++ {
-				tracker.RecordPacket("a", "b", "test", 10, time.Now())
+				tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "test", 10, time.Now())
 				tracker.RecordEvent(dpi.Event{Proto: "test", Kind: "read"})
 				tracker.Stats()
 				tracker.TopTalkers(1)
@@ -94,11 +95,34 @@ func TestTrackerConcurrentAccounting(t *testing.T) {
 func TestNilTracker(t *testing.T) {
 	var tracker *Tracker
 	tracker.RecordEvent(dpi.Event{Proto: "test"})
-	tracker.RecordPacket("a", "b", "tcp", 1, time.Now())
+	tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "tcp", 1, time.Now())
 	if s := tracker.Stats(); s != nil {
 		t.Fatalf("expected nil stats, got %v", s)
 	}
 	if tt := tracker.TopTalkers(5); tt != nil {
 		t.Fatalf("expected nil top talkers, got %v", tt)
+	}
+}
+
+func TestTrackerBinaryHostPairAggregation(t *testing.T) {
+	tracker := New()
+	now := time.Now()
+	for _, tc := range []struct {
+		src, dst string
+		bytes    int
+	}{
+		{"10.0.0.1", "10.0.0.2", 3},
+		{"::ffff:10.0.0.1", "::ffff:10.0.0.2", 5},
+		{"2001:db8::1", "2001:db8::2", 7},
+		{"2001:db8::1", "2001:db8::2", 11},
+		{"2001:db8::2", "2001:db8::1", 1},
+	} {
+		tracker.RecordPacket(netip.MustParseAddr(tc.src), netip.MustParseAddr(tc.dst), "test", tc.bytes, now)
+	}
+	top := tracker.TopTalkers(0)
+	if len(top) != 3 || top[0].SrcIP != "2001:db8::1" || top[0].Packets != 2 || top[0].Bytes != 18 ||
+		top[1].SrcIP != "10.0.0.1" || top[1].Packets != 2 || top[1].Bytes != 8 ||
+		top[2].SrcIP != "2001:db8::2" || top[2].Packets != 1 || top[2].Bytes != 1 {
+		t.Fatalf("canonical directional host pairs = %+v", top)
 	}
 }

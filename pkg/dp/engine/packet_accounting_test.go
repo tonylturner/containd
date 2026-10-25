@@ -4,6 +4,8 @@
 package engine
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,4 +250,72 @@ func TestAccountingEventsWithoutPacketOrStore(t *testing.T) {
 	if len(got) != 1 || got[0].EventCount != 1 || got[0].PacketCount != 0 || got[0].ByteCount != 0 {
 		t.Fatalf("event-only accounting = %+v", got)
 	}
+}
+
+type accountingCountingFramer struct {
+	recordFramer
+	supportCalls atomic.Int64
+}
+
+func (d *accountingCountingFramer) Supports(state *flow.State) bool {
+	d.supportCalls.Add(1)
+	return d.recordFramer.Supports(state)
+}
+
+func TestAccountingResolvesEachFlowOnce(t *testing.T) {
+	e := recordEngine(t)
+	dec := &accountingCountingFramer{}
+	e.dpiMgr = dpi.NewManager(dec)
+	pkt := recordPacket(100, capture.TCPFlagACK, "")
+	state := e.trackFlow(pkt, pkt.Timestamp)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
+				e.recordPacketStats(pkt, state)
+			}
+		})
+	}
+	wg.Wait()
+	if got := dec.supportCalls.Load(); got != 1 {
+		t.Fatalf("Supports called %d times for one flow, want 1", got)
+	}
+	assertAccounting(t, e, "rec", 800, 0, 0, 0, 0, 0)
+	if allocs := testing.AllocsPerRun(100, func() { e.recordPacketStats(pkt, state) }); allocs != 0 {
+		t.Fatalf("steady-state accounting allocated %g times per packet", allocs)
+	}
+}
+
+func TestAccountingLaterEventsDoNotRelabelTransport(t *testing.T) {
+	e := recordEngine(t)
+	pkt := recordPacket(100, capture.TCPFlagACK, "")
+	state := e.trackFlow(pkt, pkt.Timestamp)
+	e.recordPacketStats(pkt, state)
+	// Transport attribution is a flow-service label, not payload detection.
+	// A new event protocol must neither move nor duplicate captured traffic.
+	e.RecordDPIEvents(state, nil, []dpi.Event{{Proto: "later-service", Kind: "detect"}})
+	e.recordPacketStats(pkt, state)
+	assertAccounting(t, e, "rec", 2, 0, 0, 0, 0, 0)
+}
+
+func TestAccountingDecoderReconfigureResolvesFreshFlow(t *testing.T) {
+	e, err := New(Config{DPIEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt := clientSegment("", 100, capture.TCPFlagACK, nil)
+	oldState := e.trackFlow(pkt, pkt.Timestamp)
+	e.recordPacketStats(pkt, oldState)
+	assertAccounting(t, e, "modbus", 1, 0, 0, 0, 0, 0)
+	fresh, err := New(Config{DPIEnabled: true, Events: e.Events(), DPIICSProtocols: map[string]bool{"modbus": false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Reconfigure(fresh)
+	state := e.trackFlow(pkt, pkt.Timestamp)
+	if state == oldState {
+		t.Fatal("reconfigure reused a flow carrying an old decoder-set label")
+	}
+	e.recordPacketStats(pkt, state)
+	assertAccounting(t, e, "tcp", 1, 0, 0, 0, 0, 0)
 }

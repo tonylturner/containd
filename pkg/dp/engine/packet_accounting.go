@@ -4,13 +4,31 @@
 package engine
 
 import (
-	"fmt"
+	"net/netip"
+	"reflect"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
+
+// Resolve the legacy registration names before any engines dispatch packets.
+// StreamDecoder supplies its own protocol, including for custom registrations.
+var accountingProtocolByType = func() map[reflect.Type]string {
+	names := make(map[reflect.Type]string)
+	for _, dec := range DefaultDecoders() {
+		typ := reflect.TypeOf(dec)
+		name := icsDecoderProto[typ.String()]
+		if name == "" {
+			name = itDecoderProto[typ.String()]
+		}
+		if name != "" {
+			names[typ] = name
+		}
+	}
+	return names
+}()
 
 // recordPacketStats is called once by the handler that owns the packet. Generic
 // flows count before any cached verdict return; IEC probes count once ownership
@@ -22,9 +40,10 @@ func (e *Engine) recordPacketStats(pkt capture.Packet, state *flow.State) {
 		return
 	}
 	proto := pkt.Transport
-	src, dst := "", ""
+	var src, dst netip.Addr
 	if state != nil {
-		src, dst = stateIPs(state)
+		src, _ = netip.AddrFromSlice(state.Key.SrcIP)
+		dst, _ = netip.AddrFromSlice(state.Key.DstIP)
 		proto = e.packetStatsProtocol(state, proto)
 	}
 	now := pkt.Timestamp
@@ -35,10 +54,25 @@ func (e *Engine) recordPacketStats(pkt capture.Packet, state *flow.State) {
 }
 
 // packetStatsProtocol attributes packets without consulting emitted events.
-// Supporting decoders identify the service even for a split APDU's first
-// segment, an ACK or a retransmit. Shared-port/unknown services retain their
-// transport label rather than arbitrarily charging one protocol or both.
+// Resolve once per directional flow, before the first payload is decoded, and
+// cache in Application under flowMu. Supports is a flow-level predicate; later
+// event protocols never relabel transport counters. Shared-port/unknown services
+// retain their transport label. Reconfigure replaces both flows and decoders,
+// so no cached labels survive a decoder-set change.
 func (e *Engine) packetStatsProtocol(state *flow.State, transport string) string {
+	e.flowMu.Lock()
+	defer e.flowMu.Unlock()
+	if state.Application != "" {
+		return state.Application
+	}
+	state.Application = e.resolvePacketStatsProtocol(state, transport)
+	return state.Application
+}
+
+func (e *Engine) resolvePacketStatsProtocol(state *flow.State, transport string) string {
+	if transport == "" {
+		transport = "unknown"
+	}
 	proto := ""
 	for _, dec := range e.dpiMgr.Decoders() {
 		if dec == nil || !dec.Supports(state) {
@@ -48,11 +82,7 @@ func (e *Engine) packetStatsProtocol(state *flow.State, transport string) string
 		if sd, ok := dec.(dpi.StreamDecoder); ok {
 			name = sd.Protocol()
 		} else {
-			typeName := fmt.Sprintf("%T", dec)
-			name = icsDecoderProto[typeName]
-			if name == "" {
-				name = itDecoderProto[typeName]
-			}
+			name = accountingProtocolByType[reflect.TypeOf(dec)]
 		}
 		if name == "" {
 			continue // Utility detectors do not identify a unique service.
