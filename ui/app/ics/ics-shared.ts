@@ -1,5 +1,22 @@
 import type { ICSPredicate } from "../../lib/api";
 
+export type ICSMode = "enforce" | "learn";
+export type ICSModeSelection = ICSMode | "";
+
+export function formatICSMode(
+  ruleMode: ICSMode | undefined,
+  globalMode: ICSMode | undefined,
+): { label: string; effectiveMode: ICSMode; inherited: boolean } {
+  const effectiveMode = ruleMode ?? globalMode ?? "learn";
+  const inherited = ruleMode === undefined;
+  const effectiveLabel = effectiveMode === "learn" ? "learning" : "enforce";
+  return {
+    label: inherited ? `inherit (${effectiveLabel})` : effectiveLabel,
+    effectiveMode,
+    inherited,
+  };
+}
+
 export type ProtocolMeta = {
   label: string;
   port: string;
@@ -130,7 +147,7 @@ export function buildICSRulePreview(
   addresses: string,
   readOnly: boolean,
   writeOnly: boolean,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
 ): Record<string, unknown> {
   return {
     id: rule.id,
@@ -147,7 +164,7 @@ export function buildICSRulePreview(
             .filter(Boolean),
           readOnly,
           writeOnly,
-          mode,
+          ...(mode ? { mode } : {}),
         }
       : undefined,
   };
@@ -161,7 +178,7 @@ export function buildICSRuleUpdate(
   objectClasses: string,
   readOnly: boolean,
   writeOnly: boolean,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
 ): ICSPredicate {
   const ics: ICSPredicate = {
     protocol,
@@ -176,7 +193,7 @@ export function buildICSRuleUpdate(
       .filter(Boolean),
     readOnly,
     writeOnly,
-    mode,
+    ...(mode ? { mode } : {}),
   };
 
   if (protocol === "modbus" && unitId.trim()) {

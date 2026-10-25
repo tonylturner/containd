@@ -200,11 +200,19 @@ func TestShowFirewallICSRulesIncludesIEC104Fields(t *testing.T) {
 			Mode:      "enforce",
 		},
 	}
+	inherited := config.Rule{
+		ID:     "iec-inherited",
+		Action: config.ActionAllow,
+		ICS:    config.ICSPredicate{Protocol: "iec104", ReadOnly: true},
+	}
 	client := &dispatchHTTPClient{
 		t: t,
 		handlers: map[string]func(*http.Request) (*http.Response, error){
 			"GET /api/v1/firewall/ics-rules": func(*http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(http.StatusOK, []config.Rule{rule}, nil), nil
+				return jsonHTTPResponse(http.StatusOK, []config.Rule{rule, inherited}, nil), nil
+			},
+			"GET /api/v1/dataplane": func(*http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(http.StatusOK, config.DataPlaneConfig{DPIMode: "enforce"}, nil), nil
 			},
 		},
 	}
@@ -213,7 +221,7 @@ func TestShowFirewallICSRulesIncludesIEC104Fields(t *testing.T) {
 	if err := showFirewallICSRulesAPI(api)(context.Background(), &out, nil); err != nil {
 		t.Fatalf("show IEC104 rules: %v", err)
 	}
-	for _, want := range []string{"TYPE_IDS", "CLASSES", "CA", "IOA", "DIRECTION", "45,46", "monitor", "65536-65567", "response", "enforce"} {
+	for _, want := range []string{"TYPE_IDS", "CLASSES", "CA", "IOA", "DIRECTION", "45,46", "monitor", "65536-65567", "response", "enforce (effective: enforce)", "inherit (enforce)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output = %q, want %q", out.String(), want)
 		}

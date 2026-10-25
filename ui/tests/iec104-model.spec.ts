@@ -11,6 +11,10 @@ import {
   iec104DraftFrom,
   type IEC104Draft,
 } from "../app/ics/iec104";
+import {
+  buildICSRuleUpdate,
+  formatICSMode,
+} from "../app/ics/ics-shared";
 
 // Pure model tests: no page, no server.
 
@@ -39,6 +43,59 @@ test("an empty draft emits no list fields and no forbidden keys", () => {
     ok: true,
     ics: { protocol: "iec104", readOnly: true, mode: "learn" },
   });
+});
+
+test("inherited mode display resolves the global mode without inventing a rule override", () => {
+  expect(formatICSMode(undefined, "enforce")).toEqual({
+    label: "inherit (enforce)",
+    effectiveMode: "enforce",
+    inherited: true,
+  });
+  expect(formatICSMode(undefined, undefined)).toEqual({
+    label: "inherit (learning)",
+    effectiveMode: "learn",
+    inherited: true,
+  });
+  expect(formatICSMode("learn", "enforce")).toEqual({
+    label: "learning",
+    effectiveMode: "learn",
+    inherited: false,
+  });
+
+  const generic = buildICSRuleUpdate(
+    "modbus",
+    "",
+    "",
+    "",
+    "",
+    false,
+    false,
+    "",
+  );
+  expect(generic.mode).toBeUndefined();
+  expect(JSON.stringify(generic)).not.toContain('"mode"');
+});
+
+test("saving an inherited IEC 104 mode omits the mode override", () => {
+  const res = buildIEC104RuleICS(
+    { ...empty, readOnly: true },
+    "",
+    "ALLOW",
+    undefined,
+    "enforce",
+  );
+  expect(res).toEqual({
+    ok: true,
+    ics: { protocol: "iec104", readOnly: true },
+  });
+  const unsupported = buildIEC104RuleICS(
+    { ...empty, typeIds: "104" },
+    "",
+    "ALLOW",
+    undefined,
+    "enforce",
+  );
+  expect(unsupported.ok).toBe(false);
 });
 
 test("client checks mirror the K5 ranges", () => {

@@ -4,6 +4,7 @@ import type {
   IEC104Class,
   IOARange,
 } from "../../lib/api";
+import type { ICSMode, ICSModeSelection } from "./ics-shared";
 
 // IEC 60870-5-104 rule model for the editors (spec §6.1, contracts K5).
 // The client-side checks mirror the K5 ranges so operators see mistakes before
@@ -197,8 +198,9 @@ export type IEC104BuildResult =
  */
 function buildIEC104Predicate(
   draft: IEC104Draft,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
   action: FirewallRule["action"],
+  globalMode?: ICSMode,
 ): IEC104BuildResult {
   const typeIds = parseTypeIds(draft.typeIds);
   if (!typeIds.ok) return typeIds;
@@ -207,7 +209,8 @@ function buildIEC104Predicate(
   const ioa = parseIOARanges(draft.ioa);
   if (!ioa.ok) return ioa;
 
-  if (action === "ALLOW" && mode !== "learn") {
+  const effectiveMode = mode || globalMode || "learn";
+  if (action === "ALLOW" && effectiveMode !== "learn") {
     const undecoded = typeIds.value.filter((t) => !iec104TypeInfo(t).descriptor);
     if (undecoded.length > 0) {
       return {
@@ -226,7 +229,7 @@ function buildIEC104Predicate(
   if (ca.value.length > 0) ics.ca = ca.value;
   if (ioa.value.length > 0) ics.ioa = ioa.value;
   ics.readOnly = draft.readOnly;
-  ics.mode = mode;
+  if (mode) ics.mode = mode;
   return { ok: true, ics };
 }
 
@@ -242,11 +245,12 @@ const CLEARABLE_FIELDS = ["typeIds", "classes", "direction", "ca", "ioa"] as con
  */
 export function buildIEC104RuleICS(
   draft: IEC104Draft,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
   action: FirewallRule["action"],
   existing?: ICSPredicate,
+  globalMode?: ICSMode,
 ): IEC104BuildResult {
-  const built = buildIEC104Predicate(draft, mode, action);
+  const built = buildIEC104Predicate(draft, mode, action, globalMode);
   if (!built.ok || existing?.protocol !== "iec104") return built;
   const stuck = CLEARABLE_FIELDS.filter(
     (field) => existing[field] !== undefined && built.ics[field] === undefined,
@@ -263,9 +267,10 @@ export function buildIEC104RulePreview(
   rule: Pick<FirewallRule, "id" | "action">,
   enabled: boolean,
   draft: IEC104Draft,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
+  globalMode?: ICSMode,
 ): Record<string, unknown> {
-  const built = buildIEC104Predicate(draft, mode, rule.action);
+  const built = buildIEC104Predicate(draft, mode, rule.action, globalMode);
   return { id: rule.id, ics: enabled && built.ok ? built.ics : undefined };
 }
 

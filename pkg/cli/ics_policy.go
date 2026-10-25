@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // setFirewallICSRuleAPI creates or updates an ICS-specific firewall rule.
@@ -317,6 +318,10 @@ func showFirewallICSRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/firewall/ics-rules", &rules); err != nil {
 			return err
 		}
+		var dataPlane config.DataPlaneConfig
+		if err := api.getJSON(ctx, "/api/v1/dataplane", &dataPlane); err != nil {
+			return err
+		}
 		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE")
 		for _, r := range rules {
 			fcs := make([]string, 0, len(r.ICS.FunctionCode))
@@ -349,9 +354,10 @@ func showFirewallICSRulesAPI(api *API) Command {
 			} else if r.ICS.WriteOnly {
 				rw = "write-only"
 			}
-			mode := "—"
-			if r.ICS.Mode != "" {
-				mode = r.ICS.Mode
+			effectiveMode := dprules.EffectiveMode(r.ICS.Mode, dataPlane.DPIMode)
+			mode := fmt.Sprintf("%s (effective: %s)", strings.TrimSpace(r.ICS.Mode), effectiveMode)
+			if strings.TrimSpace(r.ICS.Mode) == "" {
+				mode = "inherit (" + effectiveMode + ")"
 			}
 			t.addRow(
 				r.ID,

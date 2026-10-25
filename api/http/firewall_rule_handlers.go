@@ -18,6 +18,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -316,8 +317,7 @@ var iec104WireKinds = map[string]struct{}{
 // (spec §6.3, B8). Other events keep ctx unchanged and cannot match an
 // IEC104 rule.
 //
-// SafeRead stays false: deciding it belongs to the decoder's
-// iec104.SafeRead, so readOnly IEC104 rules match nothing in a preview.
+// SafeRead is classified by the same authority as decoder events.
 func previewIEC104Context(ctx rules.EvalContext, ev dpevents.Event) rules.EvalContext {
 	if ev.Proto != eventfields.ProtoIEC104 {
 		return ctx
@@ -343,6 +343,7 @@ func previewIEC104Context(ctx rules.EvalContext, ev dpevents.Event) rules.EvalCo
 	}
 	obj.APCIType, _ = eventfields.String(attrs, eventfields.KeyAPCIType)
 	obj.Class, _ = eventfields.String(attrs, eventfields.KeyClass)
+	obj.SafeRead = iec104.SafeRead(attrs)
 	if v, ok := eventfields.Uint8(attrs, eventfields.KeyTypeID); ok {
 		obj.TypeID = &v
 	}
