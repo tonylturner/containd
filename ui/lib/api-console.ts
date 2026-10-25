@@ -7,6 +7,16 @@ import type {
   TelemetryEvent,
 } from "./api";
 
+export type EventQuery = {
+  session?: string; flow?: string; kind?: string; protocol?: string;
+  decision?: string; verdict?: string; since?: string; cursor?: string;
+  apdu?: string; category?: string; detections?: string;
+};
+export type EventPage = {
+  events: TelemetryEvent[]; nextCursor?: string;
+  historyTruncated: boolean; engineError?: string;
+};
+
 export const consoleAPI = {
   listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
@@ -16,6 +26,11 @@ export const consoleAPI = {
 
   listEvents: (limit = 500, signal?: AbortSignal) =>
     getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`, signal),
+  queryEvents: (query: EventQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ query: "1", limit: "500" });
+    for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
+    return getJSON<EventPage>(`/api/v1/events?${params}`, signal);
+  },
   listFlows: (limit = 200, signal?: AbortSignal) =>
     getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`, signal),
   getEvent: (id: number) => getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
