@@ -236,3 +236,34 @@ func TestManagementBootFaultRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestManagementBootFaultDoesNotGateRemovedReservation(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "config.db")
+	valid, r := reservationFixture()
+	store, err := NewSQLiteStore(path, WithManagementReservation(r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetManagementBootFault(ctx, "historical fault"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := CheckManagementBootFault(ctx, store); err != nil {
+		t.Fatalf("removed reservation still gates replay: %v", err)
+	}
+	fault, err := store.ManagementBootFault(ctx)
+	if err != nil || fault != "historical fault" {
+		t.Fatalf("inactive boot path changed fault history: %q %v", fault, err)
+	}
+}

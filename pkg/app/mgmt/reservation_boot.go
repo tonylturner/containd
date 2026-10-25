@@ -71,12 +71,20 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 }
 
 func recordReservationBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
+	if r == nil {
+		return nil, nil
+	}
+	store, ok := stores.store.(interface {
+		SetManagementBootFault(context.Context, string) error
+	})
+	if !ok {
+		return nil, errors.New("config store does not support management boot fault persistence")
+	}
 	conflict := reservationBootConflict(cfg, r)
 	fault := ""
 	if conflict != nil {
 		fault = conflict.Error()
 	}
-	store := stores.store.(*config.SQLiteStore)
 	ctx := context.Background()
 	if err := store.SetManagementBootFault(ctx, fault); err != nil {
 		return nil, err

@@ -47,6 +47,11 @@ func ManagementBootFaultForStore(ctx context.Context, store Store) (string, erro
 }
 
 func CheckManagementBootFault(ctx context.Context, store Store) error {
+	// Removing the deployment reservation must not leave its historical fault
+	// gating ordinary replay. The fault remains available as persisted history.
+	if ReservationForStore(store) == nil {
+		return nil
+	}
 	fault, err := ManagementBootFaultForStore(ctx, store)
 	if err != nil {
 		return err
