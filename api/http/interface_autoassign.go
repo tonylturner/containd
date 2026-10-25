@@ -282,8 +282,8 @@ func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
 // AutoBindDefaultInterfaceDevices is the exported wrapper around the
 // in-package autoBindDefaultInterfaceDevices so other startup paths can
 // trigger the same logical-name → kernel-device autobind that the
-// commit/getConfig handlers already run. Callers should Save the config
-// back to the store if true is returned.
+// commit/getConfig handlers already run. Boot callers persist the result with
+// config.Repair so running and any staged candidate get the same repair.
 func AutoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	return autoBindDefaultInterfaceDevices(cfg)
 }
