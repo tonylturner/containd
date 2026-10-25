@@ -223,12 +223,6 @@ export function buildBlockItems(
         label: String(o.name || o.id),
         meta: o.type || "Object",
       }));
-    case "ids":
-      return (cfg.ids?.rules ?? []).map((r: any): BlockItem => ({
-        id: String(r.id || r.title),
-        label: String(r.title || r.id),
-        meta: r.severity || "Rule",
-      }));
     default:
       return [];
   }
@@ -259,12 +253,6 @@ export function findSelectedItem(
       return (
         (cfg.objects ?? []).find((o: any) => (o.id || o.name) === selectedItemId) ??
         null
-      );
-    case "ids":
-      return (
-        (cfg.ids?.rules ?? []).find(
-          (r: any) => (r.id || r.title) === selectedItemId,
-        ) ?? null
       );
     default:
       return null;

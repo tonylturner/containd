@@ -354,3 +354,40 @@ test("Config candidate editor saves the omitted bank unchanged and summary uses 
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await expect(page.getByText("Running IDS bank: 30000 committed rules. Restores stage the candidate bank; commit promotes both.", { exact: true })).toBeVisible();
 });
+
+test("Config IDS explorer shows the selected bank count and a browse link without fetching rules", async ({ page }) => {
+  const diff = configDiff({
+    changed: true, changedSections: ["ids"],
+    running: { ids: { enabled: true } }, candidate: { ids: { enabled: false } },
+    idsBank: { running: unchangedBank, candidate: { count: 42000, sha256: "b".repeat(64) } },
+  });
+  await setupConfigReview(page, diff);
+  const bankRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.includes("/api/v1/ids/")) {
+      bankRequests.push(request.url());
+    }
+  });
+  await page.goto("/config/");
+  await page.getByRole("button", { name: "IDS", exact: true }).click();
+  const bank = page.getByRole("region", { name: "IDS rule bank", exact: true });
+  await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  await expect(bank.getByRole("link", { name: "Browse IDS rules", exact: true })).toHaveAttribute("href", "/ids/");
+  await expect(bank).toContainText("Rule bodies are omitted from this viewer.");
+
+  await page.getByRole("button", { name: "Staged", exact: true }).click();
+  await expect(bank).toContainText("Staged IDS bank: 42,000 rules.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  diff.idsBank.candidate.count = 0;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(bank).toContainText("Staged IDS bank: 0 rules.");
+
+  diff.candidate = null;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(bank).toContainText("No config loaded for this source.");
+  await expect(bank).not.toContainText(/\b0 rules\b/);
+  await page.getByRole("button", { name: "Running", exact: true }).click();
+  await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
+  expect(bankRequests).toEqual([]);
+});

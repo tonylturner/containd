@@ -471,6 +471,7 @@ function ConfigPage() {
             selectedItem={selectedItem}
             blockValue={blockValue}
             viewerConfig={viewerConfig}
+            idsBankCount={configDiff?.idsBank[viewerSource].count ?? null}
             setSelectedRef={(node) => {
               selectedRef.current = node;
             }}
