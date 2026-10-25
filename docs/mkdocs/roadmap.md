@@ -103,6 +103,7 @@ must not stop the PLC or the process.
 | 2.6 | Correlated evidence: identity → approval → lease → flow → rule → recording reference, exportable without secrets. | SRA X3; UI X3; DP X4 |
 | 2.7 | Golden Compose topology and bypass matrix: same-network peers, alternate networks, published ports, direct addresses, IPv6, and crash/restart are tested and denied. | DP N5 |
 | 2.8 | RangerDanger SRA acceptance scenarios (owned by RangerDanger): stolen password cannot launch access; wrong asset and self-approval are denied; active sessions end on expiry, idle, and revoke; recordings link to the approval. | SRA §6 |
+| 2.9 | Optional OIDC sign-in for containd admins, configured per deployment and off by default. Local accounts with TOTP stay the default and remain break-glass when OIDC is on; containd never requires an IdP. SRA labs point it at Keycloak; OT segmentation labs leave it off. Roles map from IdP claims. | SRA L1 |
 
 ## Capability Tracks
 
@@ -194,7 +195,7 @@ rejects or labels it (Principle 3).
 
 ## Stage 4 — Later, On Demand
 
-- OIDC federation, phishing-resistant MFA (WebAuthn/passkeys; local TOTP MFA already ships), and vendor lifecycle (SRA L1).
+- Phishing-resistant MFA (WebAuthn/passkeys; local TOTP MFA already ships) and vendor lifecycle (SRA L1). Optional admin OIDC moved to 2.9.
 - Session and file-transfer governance (SRA L2).
 - Outbound site connectors and multi-site isolation (SRA L3).
 - Workload identity controller for Docker names and labels (DP X5).
@@ -215,6 +216,7 @@ Decided by the product owner on 2026-10-25.
 | SSH native shell | Training profile only. The strict profile disables the native shell, and SSH meets the same MFA assurance as the web. |
 | Established flows after a policy change | Leases always terminate existing flows. Ordinary edits keep existing connections, and the UI says so. |
 | Rule precedence | First match in listed order, everywhere: kernel, evaluator, and preview. This changes behavior (today the kernel sorts allow before deny). |
+| containd admin identity | Local accounts by default. OIDC is optional and configurable (2.9); no deployment requires Keycloak or any IdP. |
 | Stage 1 start | Stage 1 starts after 0.1.33 ships. |
 | Capabilities that do not work yet | Make each one real under its own ticket. A label or a removal is never the end state. Industrial DPI and firewall performance are priority tracks. |
 
