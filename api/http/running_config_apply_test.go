@@ -130,7 +130,7 @@ func TestApplyRunningConfigSerializesReplayAndRunningMutation(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("mutation status=%d body=%s", rec.Code, rec.Body)
 			}
-			if running != &newer || loads != 2 || !reflect.DeepEqual(engine.applied, []rules.Action{rules.ActionDeny, rules.ActionAllow}) {
+			if running != &newer || loads != 3 || !reflect.DeepEqual(engine.applied, []rules.Action{rules.ActionDeny, rules.ActionAllow}) {
 				t.Fatalf("lost update: running=%p, want=%p, loads=%d, applied=%v", running, &newer, loads, engine.applied)
 			}
 		})

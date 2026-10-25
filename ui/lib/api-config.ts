@@ -8,13 +8,22 @@ import {
 
 import type { ConfigBackup, ConfigBundle } from "./api";
 
+export type IDSBankSummary = { count: number; sha256: string };
+export type ConfigDiff = {
+  changed: boolean;
+  changedSections: string[];
+  running: ConfigBundle | null;
+  candidate: ConfigBundle | null;
+  idsBank: { running: IDSBankSummary; candidate: IDSBankSummary };
+};
+
 export const configAPI = {
-  getRunningConfig: () => getJSON<ConfigBundle>("/api/v1/config"),
+  getRunningConfig: (signal?: AbortSignal) => getJSON<ConfigBundle>("/api/v1/config", signal),
   getCandidateConfig: () => getJSON<ConfigBundle>("/api/v1/config/candidate"),
   setCandidateConfig: (cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg),
   diffConfig: () =>
-    getJSON<{ running: ConfigBundle | null; candidate: ConfigBundle | null }>(
+    getJSON<ConfigDiff>(
       "/api/v1/config/diff",
     ),
   exportConfig: (redacted = true) =>

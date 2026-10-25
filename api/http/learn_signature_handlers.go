@@ -88,6 +88,7 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 			return
 		}
 
+		auditLog(c, audit.Record{Action: "learn.apply", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"status": "staged", "count": added, "rules": generated})
 	}
 }

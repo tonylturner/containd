@@ -142,6 +142,7 @@ func routeProbeRequest(t *testing.T, method, path string) *http.Request {
 }
 
 func TestAPIEndpointInventorySanity(t *testing.T) {
+	t.Setenv("CONTAIND_CONFIG_BACKUP_DIR", t.TempDir())
 	routes := newRouteInventoryServer(t).Routes()
 
 	for _, route := range routes {

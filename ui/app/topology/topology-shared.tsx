@@ -16,6 +16,7 @@ import {
   fetchHealth,
 } from "../../lib/api";
 import s from "./topology.module.css";
+import { normalizeFirewallRules } from "../../lib/api-normalize";
 import { interfaceAddresses, runtimeFor, type InterfaceAddresses } from "../../lib/interface-addresses";
 import { TopologyAddress } from "./topology-address";
 
@@ -387,29 +388,20 @@ export function nodeOperatorHint(data: TopoNodeData): string {
 }
 
 export async function buildTopology(): Promise<TopoResult | null> {
-  const [
-    health,
-    zones,
-    ifaces,
-    ifaceState,
-    routing,
-    osRouting,
-    fwRules,
-    flows,
-    events,
-    sysStats,
-  ] = await Promise.all([
+  const [health, running, ifaceState, osRouting, flows, events, sysStats] = await Promise.all([
     fetchHealth(),
-    api.listZones(),
-    api.listInterfaces(),
+    api.getRunningConfig(),
     api.listInterfaceState(),
-    api.getRouting(),
     api.getOSRouting(),
-    api.listFirewallRules(),
     api.listFlows(),
     api.listEvents(),
     api.getSystemStats().catch(() => null),
   ]);
+  if (!running) return null;
+  const zones = running.zones;
+  const ifaces = running.interfaces;
+  const routing = running.routing;
+  const fwRules = normalizeFirewallRules(running.firewall?.rules);
 
   const zoneSubnet: Record<string, string> = {};
   const zoneAddresses: Record<string, { address: InterfaceAddresses; fullAddrs: string[] }> = {};

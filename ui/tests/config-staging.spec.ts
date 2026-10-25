@@ -13,6 +13,7 @@ async function setup(page: Page) {
       if (path.startsWith("/config/commit")) {
         state.dirty = false;
         headers["X-Containd-Config"] = "committed";
+        headers["X-Containd-Warnings"] = "test apply warning";
       }
       else if (path === "/zones") { state.dirty = true; state.zones.push(body); }
       else if (path === "/ids/rules") {
@@ -25,7 +26,7 @@ async function setup(page: Page) {
     }
     if (path === "/config/diff") {
       state.reads++;
-      return route.fulfill(state.offline ? { status: 503, json: { error: "offline" } } : { json: { running: {}, candidate: state.dirty ? { zones: state.zones } : {} } });
+      return route.fulfill(state.offline ? { status: 503, json: { error: "offline" } } : { json: { changed: state.dirty, changedSections: state.dirty ? ["zones"] : [], running: {}, candidate: state.dirty ? { zones: state.zones } : {}, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } } });
     }
     const data: Record<string, unknown> = {
       "/auth/me": { id: "admin-1", username: "containd", role: "admin" },
@@ -168,9 +169,9 @@ test("an event during an in-flight diff read is not lost or overwritten", async 
     reads++;
     if (reads === 1) {
       await held;
-      return route.fulfill({ json: { running: {}, candidate: {} } });
+      return route.fulfill({ json: { changed: false, changedSections: [], running: {}, candidate: {} } });
     }
-    return route.fulfill({ json: { running: {}, candidate: { zones: [{ name: "staged" }] } } });
+    return route.fulfill({ json: { changed: true, changedSections: ["zones"], running: {}, candidate: { zones: [{ name: "staged" }] } } });
   });
   try {
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
@@ -195,4 +196,28 @@ test("failed commit preserves pending status and exposes the server error", asyn
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByText("mutation rejected", { exact: true })).toBeVisible();
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
+});
+
+
+test("secret-only edits trust authoritative changed even when redacted snapshots match", async ({ page }) => {
+  await setup(page);
+  await page.route("**/api/v1/config/diff", (route) => route.fulfill({ json: {
+    changed: true, changedSections: ["services"], running: {}, candidate: {},
+    idsBank: { running: { count: 30000, sha256: "same" }, candidate: { count: 30000, sha256: "same" } },
+  } }));
+  await page.goto("/zones/");
+  await expect(page.getByText(pending, { exact: true })).toBeVisible();
+});
+
+test("committed events clear commit-confirmed and warning notices", async ({ page }) => {
+  const state = await setup(page);
+  state.dirty = true;
+  await page.goto("/zones/");
+  await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Commit-confirmed", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Confirm / rollback" })).toBeVisible();
+  await expect(page.getByText("Warning: test apply warning", { exact: true })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
+  await expect(page.getByRole("link", { name: "Confirm / rollback" })).toHaveCount(0);
+  await expect(page.getByText("Warning: test apply warning", { exact: true })).toHaveCount(0);
 });

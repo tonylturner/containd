@@ -25,12 +25,8 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func interfaceStateHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, err := loadOrInitConfig(c.Request.Context(), store); err != nil {
-			internalError(c, err)
-			return
-		}
 		if engine == nil {
 			c.JSON(http.StatusOK, []config.InterfaceState{})
 			return
@@ -55,20 +51,23 @@ func interfacesAssignHandler(store config.Store, engine EngineClient) gin.Handle
 			apiError(c, http.StatusBadRequest, "invalid request")
 			return
 		}
+		state, err := engine.ListInterfaceState(c.Request.Context())
+		if err != nil {
+			apiError(c, http.StatusBadGateway, err.Error())
+			return
+		}
+		deviceSet := interfaceDeviceSet(state)
+		defaultRouteIface := ""
+		if req.Mode == "auto" {
+			defaultRouteIface = detectKernelDefaultRouteIface()
+		}
 		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
-			state, err := engine.ListInterfaceState(c.Request.Context())
-			if err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return false
-			}
-			deviceSet := interfaceDeviceSet(state)
-
 			ifaceByName := map[string]*config.Interface{}
 			for i := range cfg.Interfaces {
 				ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
 			}
 
-			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req)
+			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req, defaultRouteIface)
 			if err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return false
@@ -113,12 +112,12 @@ func normalizedInterfaceAssignMode(req interfaceAssignRequest) string {
 	return mode
 }
 
-func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest) (map[string]string, error) {
+func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest, defaultRouteIface string) (map[string]string, error) {
 	switch req.Mode {
 	case "auto":
 		return computeDefaultInterfaceAssignments(ifaces, state, autoAssignOptions{
 			AllowFallback:     true,
-			DefaultRouteIface: detectKernelDefaultRouteIface(),
+			DefaultRouteIface: defaultRouteIface,
 		})
 	case "explicit":
 		return normalizedInterfaceMappings(req.Mappings)

@@ -11,6 +11,7 @@ import {
   fetchHealth,
   ServicesStatus,
 } from "../../lib/api";
+import { CONFIG_COMMITTED } from "../../lib/config-events";
 import s from "./physical.module.css";
 import ts from "./topology.module.css";
 import { interfaceAddresses, runtimeFor } from "../../lib/interface-addresses";
@@ -204,21 +205,22 @@ export default function PhysicalView() {
 
   const fetchData = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [stats, inspection, health, interfaces, ifaceState, flows, services] =
+      const [stats, inspection, health, running, ifaceState, flows, services] =
         await Promise.all([
           api.getSystemStats(signal).catch(() => null),
           api.getSystemInspection(signal).catch(() => null),
           fetchHealth(signal).catch(() => null),
-          api.listInterfaces(signal).catch(() => []),
+          api.getRunningConfig(signal),
           api.listInterfaceState(signal).catch(() => []),
           api.listFlows(200, signal).catch(() => []),
           api.getServicesStatus(signal).catch(() => null),
         ]);
+      if (!running) throw new Error("Running configuration unavailable");
       setData({
         stats: stats as SystemStats | null,
         inspection: inspection as SystemInspection | null,
         health,
-        interfaces: (interfaces as Interface[]) || [],
+        interfaces: running?.interfaces || [],
         ifaceState: (ifaceState as InterfaceState[]) || [],
         flows: (flows as FlowSummary[]) || [],
         services: services as ServicesStatus | null,
@@ -231,6 +233,12 @@ export default function PhysicalView() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const refresh = () => { void fetchData(); };
+    window.addEventListener(CONFIG_COMMITTED, refresh);
+    return () => window.removeEventListener(CONFIG_COMMITTED, refresh);
+  }, [fetchData]);
 
   useEffect(() => {
     const controller = new AbortController();
