@@ -31,13 +31,13 @@ The SBOMs enumerate:
 
 SBOMs are generated and attached as part of the [release workflow](https://github.com/tonylturner/containd/actions/workflows/release.yml):
 
-1. Container images are built and pushed to GHCR.
+1. The release version and matching `v`-prefixed tag are validated as `MAJOR.MINOR.PATCH[-prerelease]` before container images are built and pushed to GHCR. Reserved channels such as `latest` cannot be built as release versions.
 2. Images are signed with [Cosign](https://github.com/sigstore/cosign) (keyless, GitHub OIDC).
 3. Syft generates CycloneDX JSON SBOMs for each image.
 4. SBOMs are attached to the signed images via `cosign attach sbom`.
 5. SBOMs are uploaded as GitHub Actions artifacts for each release.
 
-Only then can a stable tag whose commit is an ancestor of `origin/main` promote both images' `:latest` tags to the signed digests. Prereleases never move `:latest`. If a stable tag reaches main later, a manual **Release** workflow run with its `tag` input verifies the existing images' release-workflow signatures and attached SBOMs before promoting, without rebuilding. See [Update Policy](update-policy.md#when-latest-moves).
+Only then can a stable tag whose commit is an ancestor of `origin/main` promote both images' `:latest` tags to the signed digests. Prereleases never move `:latest`. If a stable tag reaches main later, a manual **Release** workflow run with its `tag` input verifies the existing images' release-workflow signatures and attached SBOMs before promoting, without rebuilding. Both push and dispatch promotion bind signature verification to the exact peeled commit checked for main ancestry using Cosign's `--certificate-github-workflow-sha`, in addition to the tag-specific workflow identity and GitHub OIDC issuer. See [Update Policy](update-policy.md#when-latest-moves).
 
 ## Retrieving an SBOM
 
