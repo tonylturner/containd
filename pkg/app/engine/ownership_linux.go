@@ -26,7 +26,8 @@ type ownershipState struct {
 }
 
 type ownershipManager struct {
-	logger *zap.SugaredLogger
+	stateMu sync.Mutex
+	logger  *zap.SugaredLogger
 
 	state atomic.Value // ownershipState
 	// reconcile requests are coalesced.
@@ -47,6 +48,8 @@ func newOwnershipManager(logger *zap.SugaredLogger) *ownershipManager {
 }
 
 func (m *ownershipManager) setInterfaces(ifaces []config.Interface) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
 	st := m.state.Load().(ownershipState)
 	st.ifaces = append([]config.Interface(nil), ifaces...)
 	m.state.Store(st)
@@ -54,6 +57,8 @@ func (m *ownershipManager) setInterfaces(ifaces []config.Interface) {
 }
 
 func (m *ownershipManager) setRouting(routing config.RoutingConfig) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
 	st := m.state.Load().(ownershipState)
 	st.routing = routing
 	m.state.Store(st)
@@ -180,13 +185,13 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 
 	groups := uint32(0)
 	// Link state changes.
-	groups |= unix.RTNLGRP_LINK
+	groups |= 1 << (unix.RTNLGRP_LINK - 1)
 	// IPv4/IPv6 address changes.
-	groups |= unix.RTNLGRP_IPV4_IFADDR
-	groups |= unix.RTNLGRP_IPV6_IFADDR
+	groups |= 1 << (unix.RTNLGRP_IPV4_IFADDR - 1)
+	groups |= 1 << (unix.RTNLGRP_IPV6_IFADDR - 1)
 	// Route changes (useful for default route drift).
-	groups |= unix.RTNLGRP_IPV4_ROUTE
-	groups |= unix.RTNLGRP_IPV6_ROUTE
+	groups |= 1 << (unix.RTNLGRP_IPV4_ROUTE - 1)
+	groups |= 1 << (unix.RTNLGRP_IPV6_ROUTE - 1)
 
 	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: groups}); err != nil {
 		m.logger.Warnf("ownership netlink watch disabled: %v", err)
@@ -200,7 +205,17 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 			return
 		default:
 		}
-		// Block until something changes.
+		// Bounded wait so context cancellation cannot leak this worker.
+		polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		ready, pollErr := unix.Poll(polls, 100)
+		if pollErr != nil {
+			m.logger.Warnf("ownership watch poll: %v", pollErr)
+			return
+		}
+		if ready == 0 {
+			continue
+		}
+		// Read the available event.
 		n, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
 			// If the socket becomes invalid (container constraints), stop watching.
