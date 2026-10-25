@@ -51,9 +51,10 @@ func TestStoreReservationPersistenceBoundaries(t *testing.T) {
 	putSnapshot(configKeyCandidate, invalid)
 	requireReservationError(t, store.Commit(ctx))
 	requireReservationError(t, store.CommitConfirmed(ctx, time.Hour))
-	if _, err := Repair(ctx, store, func(c *Config) error { c.System.Hostname = "repaired"; return nil }); err == nil {
-		t.Fatal("repair accepted unsafe candidate")
+	if _, err := Repair(ctx, store, func(c *Config) error { c.System.Hostname = "repaired"; return nil }); err != nil {
+		t.Fatalf("boot normalization blocked by residual candidate conflict: %v", err)
 	}
+	requireReservationError(t, store.Commit(ctx))
 	putSnapshot(configKeyCandidate, valid)
 	putSnapshot(configKeyPrevious, invalid)
 	requireReservationError(t, store.Rollback(ctx))
@@ -159,7 +160,7 @@ func TestStoreReservationRefusesTimedRollback(t *testing.T) {
 	}
 }
 
-func TestStoreReservationPreflightsStoredRunning(t *testing.T) {
+func TestStoreReservationOpensConflictingStoredRunning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.db")
 	invalid, r := reservationFixture()
 	invalid.DataPlane.Enforcement = false
@@ -174,9 +175,64 @@ func TestStoreReservationPreflightsStoredRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, err = NewSQLiteStore(path, WithManagementReservation(r))
-	if store != nil {
-		store.Close()
-		t.Fatal("unsafe boot returned a store")
+	if err != nil {
+		t.Fatal(err)
 	}
-	requireReservationError(t, err)
+	defer store.Close()
+	running, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireReservationError(t, store.ValidateConfig(running))
+}
+
+func TestManagementBootFaultRecovery(t *testing.T) {
+	for _, recovery := range []string{"commit", "rollback", "reset"} {
+		t.Run(recovery, func(t *testing.T) {
+			ctx := context.Background()
+			valid, r := reservationFixture()
+			path := filepath.Join(t.TempDir(), "config.db")
+			store, err := NewSQLiteStore(path, WithManagementReservation(r))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(ctx, valid); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveCandidate(ctx, valid); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store, err = NewSQLiteStore(path, WithManagementReservation(r))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) {
+				t.Fatalf("fault lost on reopen: %v", err)
+			}
+			switch recovery {
+			case "commit":
+				err = store.Commit(ctx)
+			case "rollback":
+				err = store.Rollback(ctx)
+			case "reset":
+				err = store.WipeAll(ctx)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := CheckManagementBootFault(ctx, store); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

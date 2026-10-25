@@ -254,13 +254,43 @@ func ValidateManagementListeners(s SystemConfig, r *mgmtpath.Reservation) error 
 			return err
 		}
 	}
-	if (m.EnableHTTPS == nil || *m.EnableHTTPS) && ManagementListenerOverlaps(managementDefault(m.HTTPSListenAddr, ":8443"), r) {
+	httpAddr := managementDefault(m.HTTPListenAddr, managementDefault(m.ListenAddr, ":8080"))
+	if (m.EnableHTTPS == nil || *m.EnableHTTPS) && ManagementListenerConflictsHTTP(managementDefault(m.HTTPSListenAddr, ":8443"), httpAddr, true, r) {
 		return managementConflict("system.mgmt.httpsListenAddr")
 	}
-	if ManagementListenerOverlaps(managementDefault(s.SSH.ListenAddr, ":2222"), r) {
+	if ManagementListenerConflictsHTTP(managementDefault(s.SSH.ListenAddr, ":2222"), httpAddr, false, r) {
 		return managementConflict("system.ssh.listenAddr")
 	}
 	return nil
+}
+
+// ManagementListenerConflictsHTTP also protects the HTTP socket, not just its
+// reserved destination IP. A wildcard HTTP bind claims every local IPv4 address;
+// an exact bind additionally starts management's 127.0.0.1 convenience listener.
+// withLoopback identifies HTTPS, which also starts a convenience listener.
+func ManagementListenerConflictsHTTP(addr, httpAddr string, withLoopback bool, r *mgmtpath.Reservation) bool {
+	if r == nil {
+		return false
+	}
+	if ManagementListenerOverlaps(addr, r) {
+		return true
+	}
+	host, port, err := net.SplitHostPort(addr)
+	p, pe := strconv.ParseUint(port, 10, 16)
+	if err != nil || pe != nil || p != uint64(r.Port) {
+		return false
+	}
+	httpHost, _, err := net.SplitHostPort(httpAddr)
+	if err != nil {
+		return false // HTTP validation reports the malformed primary bind.
+	}
+	// HTTPS always also claims the loopback port.
+	if withLoopback {
+		return true
+	}
+	a, ae := netip.ParseAddr(host)
+	ipv4 := ae != nil || a.Unmap().Is4()
+	return httpHost == "" || httpHost == "0.0.0.0" && ipv4 || ae == nil && a.Unmap() == netip.MustParseAddr("127.0.0.1")
 }
 func managementDefault(s, d string) string {
 	if s == "" {

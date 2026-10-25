@@ -47,8 +47,14 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 				return
 			}
 		}
+		bootFault, err := config.ManagementBootFaultForStore(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"active": true, "device": r.Device, "local": r.Local.String(),
+			"bootFault": bootFault,
+			"active":    true, "device": r.Device, "local": r.Local.String(),
 			"sources": sources, "port": r.Port, "guard": guard, "rollbackFault": fault,
 		})
 	}

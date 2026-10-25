@@ -116,16 +116,6 @@ func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 	for _, opt := range opts {
 		opt(&store.options)
 	}
-	// Preflight stored running before any migration, expiry, or boot repair.
-	if cfg, err := store.Load(context.Background()); err == nil {
-		if err := ValidateManagementReservation(cfg, store.options.reservation); err != nil {
-			db.Close()
-			return nil, err
-		}
-	} else if !errors.Is(err, ErrNotFound) {
-		db.Close()
-		return nil, err
-	}
 	if err := store.upgradeSnapshots(context.Background()); err != nil {
 		db.Close()
 		return nil, err

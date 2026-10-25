@@ -421,3 +421,36 @@ func waitForRollback(t *testing.T, store config.Store) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestEngineSyncBootFaultWaitsWithoutReplayOrSpam(t *testing.T) {
+	ctx := context.Background()
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Save(ctx, config.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
+		t.Fatal(err)
+	}
+	core, logs := observer.New(zap.InfoLevel)
+	calls := 0
+	s := engineSync{store: store, logger: zap.New(core).Sugar(), health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+		return engineapi.RuntimeHealth{BootID: "a"}, nil
+	}), apply: func(context.Context) ([]string, error) { calls++; return nil, nil }}
+	for range 3 {
+		s.poll(ctx)
+	}
+	if calls != 0 || logs.Len() != 0 {
+		t.Fatalf("fault retried/logged: %d %v", calls, logs.All())
+	}
+	if err := store.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.poll(ctx)
+	if calls != 1 || !s.applied {
+		t.Fatal("recovery did not resume replay")
+	}
+}

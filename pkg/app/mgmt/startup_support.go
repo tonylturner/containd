@@ -293,31 +293,14 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 			return nil
 		})
 		if repairErr != nil {
-			return fmt.Errorf("backfill default config: %w", repairErr)
+			logger.Warnf("backfill default config: %v", repairErr)
 		}
 		return nil
 	}
 	if !errors.Is(err, config.ErrNotFound) {
 		return fmt.Errorf("load default config: %w", err)
 	}
-	def := config.DefaultConfig()
-	config.ApplyBootstrapEnvDefaults(def)
-	def.System.Hostname = "containd"
-	def.System.Mgmt.ListenAddr = ":8080"
-	def.System.Mgmt.HTTPListenAddr = ":8080"
-	def.System.Mgmt.HTTPSListenAddr = ":8443"
-	def.System.Mgmt.EnableHTTP = boolPtr(true)
-	def.System.Mgmt.EnableHTTPS = boolPtr(true)
-	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-	// First-boot defaults are not a repair: resolve bindings in memory before
-	// the first Save. Existing snapshots are never normalized past preflight.
-	if r := config.ReservationForStore(store); r != nil {
-		httpapi.AutoBindDefaultInterfaceDevicesReserved(def, r)
-		if err := validateReservedStartup(def, r); err != nil {
-			return err
-		}
-	}
+	def := httpapi.ApplianceDefaults(config.ReservationForStore(store))
 	if err := store.Save(context.Background(), def); err != nil {
 		return fmt.Errorf("initialize default config: %w", err)
 	}
@@ -349,7 +332,7 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
 		return err
 	}
-	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerOverlaps(resolveHTTPSAddr(cfg), r) {
+	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerConflictsHTTP(resolveHTTPSAddr(cfg), resolveHTTPAddr(cfg), true, r) {
 		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
 	}
 	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
@@ -359,7 +342,7 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if ssh == "" {
 		ssh = ":2222"
 	}
-	if config.ManagementListenerOverlaps(ssh, r) {
+	if config.ManagementListenerConflictsHTTP(ssh, resolveHTTPAddr(cfg), false, r) {
 		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
 	}
 	return nil

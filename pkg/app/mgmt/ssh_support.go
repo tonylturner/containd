@@ -31,8 +31,7 @@ type sshRuntimeConfig struct {
 	baseURL       string
 }
 
-func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
-	cfg, _ := store.Load(context.Background())
+func startSSH(logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
 	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
 
 	opts := sshserver.Options{

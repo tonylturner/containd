@@ -37,6 +37,7 @@ type mgmtStores struct {
 	store      config.Store
 	auditStore audit.Store
 	userStore  users.Store
+	bootEvent  *dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -64,6 +65,9 @@ func Run(ctx context.Context, opts Options) error {
 	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
 		return err
 	}
+	if err := validateReservedEnvironment(opts.Reservation); err != nil {
+		return err
+	}
 	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
 		return err
 	}
@@ -75,13 +79,11 @@ func Run(ctx context.Context, opts Options) error {
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
 
-	if err := config.ValidateManagementReservation(cfg, opts.Reservation); err != nil {
+	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
+	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
 		return err
 	}
-	if err := validateReservedStartup(cfg, opts.Reservation); err != nil {
-		return err
-	}
-	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg)
+	listenerCfg, err := resolveMgmtListenerConfig(logger, runtimeCfg)
 	if err != nil {
 		return err
 	}
@@ -91,11 +93,11 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := services.NewManager(services.ManagerOptions{})
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	identityResolver := identity.NewResolver()
 	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)))
 	// Best-effort initial service render on startup.
-	if cfg, err := stores.store.Load(context.Background()); err == nil {
+	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
 			logger.Warnf("failed to apply initial service config: %v", applyErr)
 		}
@@ -125,7 +127,7 @@ func Run(ctx context.Context, opts Options) error {
 	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(logger, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
+	sshAddr, sshEnabled := startSSH(logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
 	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 
@@ -160,27 +162,13 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return mgmtStores{}, nil, err
 	}
 	stores := mgmtStores{store: store}
-	// The constructor preflights existing running before pending rollback. Do not
-	// open users, repair defaults, or discover/apply bindings until it succeeds.
+	// Stored conflicts are recovery state, never a reason to remove management.
 	fail := func(err error) (mgmtStores, *config.Config, error) { store.Close(); return mgmtStores{}, nil, err }
-	if stored, err := store.Load(context.Background()); err == nil {
-		if err := validateReservedStartup(stored, r); err != nil {
-			return fail(err)
-		}
-	} else if !errors.Is(err, config.ErrNotFound) {
-		return fail(err)
-	}
 	if err := ensureDefaultConfig(logger, store); err != nil {
 		return fail(err)
 	}
 	cfg, err := store.Load(context.Background())
 	if err != nil {
-		return fail(err)
-	}
-	if err := config.ValidateManagementReservation(cfg, r); err != nil {
-		return fail(err)
-	}
-	if err := validateReservedStartup(cfg, r); err != nil {
 		return fail(err)
 	}
 
@@ -214,7 +202,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 			return nil
 		})
 		if repairErr != nil {
-			return fail(fmt.Errorf("boot interface repair: %w", repairErr))
+			logger.Warnf("boot interface repair: %v", repairErr)
 		} else {
 			cfg = repaired
 		}
@@ -226,6 +214,13 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
+	event, err := recordReservationBootDecision(logger, stores, cfg, r)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	stores.bootEvent = event
 	return stores, cfg, nil
 }
 
@@ -243,8 +238,11 @@ func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservat
 	for _, name := range config.DefaultPhysicalInterfaces() {
 		defaults[name] = struct{}{}
 	}
+	// A matching device name alone is not ownership after NIC renumbering:
+	// an addressed default row may now point at the reserved NIC by accident.
+	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
 	for i := range cfg.Interfaces {
-		if r != nil && cfg.Interfaces[i].Device == r.Device {
+		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
 			continue
 		}
 		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {

@@ -5,6 +5,7 @@ package mgmtapp
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	httpapi "github.com/tonylturner/containd/api/http"
@@ -19,6 +20,7 @@ const (
 )
 
 type engineSync struct {
+	store  config.Store
 	health httpapi.RuntimeHealthClient
 	apply  func(context.Context) ([]string, error)
 	logger *zap.SugaredLogger
@@ -37,6 +39,7 @@ func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store confi
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	syncer := &engineSync{
+		store:  store,
 		health: health,
 		apply: func(ctx context.Context) ([]string, error) {
 			return httpapi.ApplyRunningConfig(ctx, store, engine, services)
@@ -94,9 +97,17 @@ func (s *engineSync) run(ctx context.Context) {
 	}
 }
 
-// poll reports health reachability, not apply success: apply failures retry at
-// the normal interval, while health failures use the capped backoff.
+// poll controls retry pacing: boot faults wait quietly at the normal interval
+// without contacting the engine. Otherwise it reports health reachability, not
+// apply success; health failures use the capped backoff.
 func (s *engineSync) poll(ctx context.Context) bool {
+	if err := config.CheckManagementBootFault(ctx, s.store); err != nil {
+		s.applied = false
+		if !errors.Is(err, config.ErrManagementBootFault) {
+			s.logger.Warnf("engine sync boot fault check: %v", err)
+		}
+		return true
+	}
 	healthCtx, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
 	health, err := s.health.RuntimeHealth(healthCtx)
 	cancel()

@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -117,5 +118,32 @@ func TestManagementReservationReplayPreflight(t *testing.T) {
 	_, err := ApplyRunningConfig(context.Background(), replay, engine, services)
 	if err == nil || !strings.Contains(err.Error(), "reserved management path") || engine.mutations != 0 || services.mutations != 0 {
 		t.Fatalf("replay escaped preflight: %v engine=%d services=%d", err, engine.mutations, services.mutations)
+	}
+}
+
+func TestManagementBootFaultGatesReplayAndView(t *testing.T) {
+	store, _ := reservedAPIStore(t)
+	ctx := context.Background()
+	if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
+		t.Fatal(err)
+	}
+	engine := &stageEngine{mockEngine: &mockEngine{}}
+	services := &stageServices{}
+	_, err := ApplyRunningConfig(ctx, store, engine, services)
+	if !errors.Is(err, config.ErrManagementBootFault) || engine.mutations != 0 || services.mutations != 0 {
+		t.Fatalf("boot fault replay escaped: %v", err)
+	}
+	rec := requestStage(t, NewServer(store, nil), "GET", "/system/management-reservation", nil)
+	if !strings.Contains(rec.Body.String(), `"bootFault":"stored conflict"`) {
+		t.Fatalf("fault invisible: %s", rec.Body)
+	}
+	if err := store.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyRunningConfig(ctx, store, engine, services); err != nil {
+		t.Fatal(err)
+	}
+	if engine.mutations == 0 || services.mutations == 0 {
+		t.Fatal("safe recovery did not resume apply")
 	}
 }

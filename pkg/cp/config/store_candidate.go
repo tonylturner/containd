@@ -101,7 +101,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err := writeRunningTx(ctx, tx, candidate); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyCandidate, configKeyPending); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?, ?)`, configKeyCandidate, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
 	if ttl > 0 {
@@ -151,7 +151,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	if err := writeRunningTx(ctx, tx, prev); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

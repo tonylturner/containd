@@ -237,7 +237,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
-		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler(store))
@@ -605,6 +605,9 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 // runningConfigApplyMu, including across any preceding store mutation.
 func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) ([]string, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := config.CheckManagementBootFault(ctx, store); err != nil {
 		return nil, err
 	}
 	cfg, err := store.Load(ctx)
