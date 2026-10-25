@@ -286,7 +286,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap config: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := strings.Join(eng.pcapCfgSet.Interfaces, ","); got != "wan" {
+	if got := strings.Join(store.cfg.PCAP.Interfaces, ","); got != "wan" {
 		t.Fatalf("pcap config interfaces = %q", got)
 	}
 
@@ -296,8 +296,8 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap start: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !store.cfg.PCAP.Enabled {
-		t.Fatal("expected pcap to be enabled in saved config")
+	if store.cfg.PCAP.Enabled {
+		t.Fatal("start must not enable persisted PCAP settings")
 	}
 	if got := strings.Join(eng.pcapStartCfg.Interfaces, ","); got != "wan" {
 		t.Fatalf("pcap start interfaces = %q", got)
@@ -637,7 +637,7 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload openvpn profile: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := filepath.Base(store.cfg.Services.VPN.OpenVPN.ConfigPath); got != "labclient.ovpn" {
+	if got := filepath.Base(store.cfg.Services.VPN.OpenVPN.ConfigPath); !strings.HasPrefix(got, "labclient-") || !strings.HasSuffix(got, ".ovpn") {
 		t.Fatalf("unexpected config path %q", store.cfg.Services.VPN.OpenVPN.ConfigPath)
 	}
 
@@ -729,8 +729,8 @@ func TestVPNServiceReadWritePreservesRedactedSecrets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set vpn: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("X-Containd-Warnings"); !strings.Contains(got, "engine services: runtime services unavailable") {
-		t.Fatalf("expected runtime warning header, got %q", got)
+	if got := rec.Header().Get("X-Containd-Warnings"); got != "" {
+		t.Fatalf("staging must not return runtime warnings, got %q", got)
 	}
 
 	if store.cfg.Services.VPN.WireGuard.PrivateKey != wireGuardKey {

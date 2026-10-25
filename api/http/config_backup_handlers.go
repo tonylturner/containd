@@ -80,12 +80,12 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := store.Save(c.Request.Context(), &cfg); err != nil {
-			internalError(c, err)
+		if err := store.SaveCandidate(c.Request.Context(), &cfg); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		auditLog(c, audit.Record{Action: "config.import", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "imported"})
+		auditLog(c, audit.Record{Action: "config.import", Target: "candidate"})
+		c.JSON(http.StatusOK, gin.H{"status": "staged"})
 	}
 }
 
@@ -253,7 +253,9 @@ func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
 		if name == "" {
 			name = fmt.Sprintf("Backup %s", now.Format("2006-01-02 15:04 UTC"))
 		}
-		idsRules, _ := store.LoadIDSRules(c.Request.Context())
+		// Use the bank from the same running snapshot, not a second read
+		// that could cross a concurrent commit or timed rollback.
+		idsRules := cfg.IDS.Rules
 		meta := configBackupMeta{
 			ID:           id,
 			Name:         name,

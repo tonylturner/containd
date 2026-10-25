@@ -235,22 +235,10 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 		body   any
 		method string
 	}{
-		{path: "/dataplane", body: config.DefaultConfig().DataPlane},
-		{path: "/pcap/config", body: config.PCAPConfig{Interfaces: []string{"capture"}}},
 		{path: "/pcap/start", body: config.PCAPConfig{Interfaces: []string{"capture"}}},
 		{path: "/pcap/stop"},
 		{path: "/interfaces/reconcile", body: map[string]string{"confirm": "REPLACE"}},
 		{path: "/routing/reconcile", body: map[string]string{"confirm": "REPLACE"}},
-		{path: "/services/syslog", body: config.DefaultConfig().Services.Syslog},
-		{path: "/services/syslog", method: http.MethodPatch, body: map[string]string{"format": "json"}},
-		{path: "/services/dns", body: config.DefaultConfig().Services.DNS},
-		{path: "/services/ntp", body: config.DefaultConfig().Services.NTP},
-		{path: "/services/av", body: config.DefaultConfig().Services.AV},
-		{path: "/services/dhcp", body: config.DefaultConfig().Services.DHCP},
-		{path: "/services/proxy/forward", body: config.DefaultConfig().Services.Proxy.Forward},
-		{path: "/services/proxy/reverse", body: config.DefaultConfig().Services.Proxy.Reverse},
-		{path: "/services/vpn", body: config.DefaultConfig().Services.VPN},
-		{path: "/services/vpn/openvpn/profile", body: map[string]string{"name": "test", "ovpn": "client\nremote 192.0.2.1 1194\n"}},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
 			t.Setenv("CONTAIND_OPENVPN_DIR", t.TempDir())

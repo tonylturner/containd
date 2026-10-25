@@ -60,10 +60,11 @@ func setOutboundQuickstartLANWAN(api *API) Command {
 			return err
 		}
 
-		fmt.Fprintf(out, "ok\n\n")
-		fmt.Fprintf(out, "Enabled outbound quick start:\n")
+		fmt.Fprintln(out, stagedMessage)
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "Staged outbound quick start:\n")
 		fmt.Fprintf(out, "- default route via %s (%s on %s)\n", quickstartGatewayName, gwIP, wanDev)
-		fmt.Fprintf(out, "- SNAT enabled (sources: lan, mgmt → egress: wan)\n")
+		fmt.Fprintf(out, "- SNAT desired enabled (sources: lan, mgmt → egress: wan)\n")
 		fmt.Fprintf(out, "- firewall rule %q: ALLOW (lan, mgmt) → wan\n", quickstartAllowRuleID)
 		return nil
 	}

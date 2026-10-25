@@ -66,31 +66,29 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 			c.JSON(http.StatusOK, gin.H{"status": "no rules to apply", "count": 0})
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		existing := map[string]bool{}
-		for _, r := range cfg.Firewall.Rules {
-			existing[r.ID] = true
-		}
 		added := 0
-		for _, r := range generated {
-			if existing[r.ID] {
-				continue
+		_, staged := stageCandidate(c, store, func(cfg *config.Config) bool {
+			existing := map[string]bool{}
+			for _, r := range cfg.Firewall.Rules {
+				existing[r.ID] = true
 			}
-			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
-			added++
-		}
-		if cfg.Firewall.DefaultAction == "" {
-			cfg.Firewall.DefaultAction = config.ActionDeny
-		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			for _, r := range generated {
+				if existing[r.ID] {
+					continue
+				}
+				cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+				added++
+			}
+			if cfg.Firewall.DefaultAction == "" {
+				cfg.Firewall.DefaultAction = config.ActionDeny
+			}
+			return true
+		})
+		if !staged {
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "applied", "count": added, "rules": generated})
+
+		c.JSON(http.StatusOK, gin.H{"status": "staged", "count": added, "rules": generated})
 	}
 }
 

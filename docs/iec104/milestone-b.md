@@ -908,7 +908,7 @@ any change needs a matching RangerDanger change.
 | `GET /api/v1/events?limit=N` | bare JSON array of events (`C:pkg/dp/events/store.go:21-34`) |
 | `GET /api/v1/flows` | a rollup of the event ring, not the engine flow table (W1; `C:api/http/runtime_telemetry_handlers.go:102-123`). After an abort it hides the old IEC incarnation's flow group; the events stay in `/events` (E4). `GET /api/v1/conntrack` (`:278`) is not required. |
 | `GET /api/v1/config` | rule summaries; reads `firewall.rules[].ics` |
-| `POST /api/v1/config/candidate` then `POST /api/v1/config/commit` | loads and activates a whole policy JSON. `POST /api/v1/config/import` only saves; it does not activate. After import, RangerDanger must commit and then check health (K6). |
+| `POST /api/v1/config/candidate` then `POST /api/v1/config/commit` | loads and activates a whole policy JSON. `POST /api/v1/config/import` replaces the candidate and never activates. After import, RangerDanger must commit and then check health (K6). |
 | `/api/v1/pcap/*` | student captures |
 
 RangerDanger's client calls `/api/v1/sessions` today, a route containd

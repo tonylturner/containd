@@ -85,7 +85,7 @@ func assignInterfacesAPI(api *API) Command {
 		if out == nil {
 			return nil
 		}
-		fmt.Fprintln(out, "ok")
+		fmt.Fprintln(out, stagedMessage)
 		if len(payload.Interfaces) > 0 {
 			fmt.Fprintln(out)
 			t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS")

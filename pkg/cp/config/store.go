@@ -34,13 +34,14 @@ type Store interface {
 	Load(ctx context.Context) (*Config, error)
 	SaveCandidate(ctx context.Context, cfg *Config) error
 	LoadCandidate(ctx context.Context) (*Config, error)
+	MutateCandidate(ctx context.Context, edit func(*Config) error) error
 	Commit(ctx context.Context) error
 	CommitConfirmed(ctx context.Context, ttl time.Duration) error
 	ConfirmCommit(ctx context.Context) error
 	Rollback(ctx context.Context) error
 
-	// IDS rules are stored separately from the config to avoid bloating
-	// the config blob with potentially thousands of imported rules.
+	// Running IDS rules have a separate persisted bank. Load includes it in
+	// the returned snapshot; candidate/previous snapshots embed their banks.
 	SaveIDSRules(ctx context.Context, rules []IDSRule) error
 	LoadIDSRules(ctx context.Context) ([]IDSRule, error)
 
@@ -197,11 +198,6 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	return tx.Commit()
 }
 
-// SaveCandidate stores a candidate config (staged).
-func (s *SQLiteStore) SaveCandidate(ctx context.Context, cfg *Config) error {
-	return s.saveKind(ctx, configKeyCandidate, cfg)
-}
-
 func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
@@ -231,45 +227,26 @@ func cloneConfigForPersist(cfg *Config) *Config {
 	return &cp
 }
 
-// Load returns the running config or ErrNotFound if none exists.
+// Load returns a consistent running configuration including its IDS bank.
 func (s *SQLiteStore) Load(ctx context.Context) (*Config, error) {
-	return s.loadKind(ctx, configKeyRunning)
-}
-
-// LoadCandidate returns the candidate config or ErrNotFound if none exists.
-func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
-	cfg, err := s.loadKind(ctx, configKeyCandidate)
-	if err == nil {
-		return cfg, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.loadCandidateLocked(ctx)
+	return s.loadRunningLocked(ctx)
 }
 
-// loadCandidateLocked loads the candidate, lazily seeding it from running
-// when absent. The caller must hold s.mu.
-func (s *SQLiteStore) loadCandidateLocked(ctx context.Context) (*Config, error) {
-	candidate, err := s.loadKind(ctx, configKeyCandidate)
-	if err == nil {
-		return candidate, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
+func (s *SQLiteStore) loadRunningLocked(ctx context.Context) (*Config, error) {
+	cfg, err := s.loadKind(ctx, configKeyRunning)
+	if err != nil {
 		return nil, err
 	}
-
-	// Appliance UX: treat "candidate missing" as "candidate == running" and
-	// lazily seed candidate so operations like `diff` and `commit` behave
-	// predictably on fresh installs.
-	running, rerr := s.Load(ctx)
-	if rerr != nil {
+	rules, err := s.loadIDSRulesRaw(ctx)
+	if err != nil {
 		return nil, err
 	}
-	_ = s.saveKind(ctx, configKeyCandidate, running)
-	return running, nil
+	if len(rules) > 0 || cfg.IDS.Rules == nil {
+		cfg.IDS.Rules = rules
+	}
+	return cfg, nil
 }
 
 func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
@@ -291,83 +268,39 @@ func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error
 	return &cfg, nil
 }
 
-// Commit promotes candidate to running and stores previous running for rollback.
+// Commit promotes the candidate and cancels any pending confirmed commit.
 func (s *SQLiteStore) Commit(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	candidate, err := s.loadCandidateLocked(ctx)
-	if err != nil {
-		return fmt.Errorf("load candidate: %w", err)
-	}
-	if running, err := s.Load(ctx); err == nil {
-		if err := s.saveKind(ctx, configKeyPrevious, running); err != nil {
-			return fmt.Errorf("save previous: %w", err)
-		}
-	}
-	if err := s.saveKind(ctx, configKeyRunning, candidate); err != nil {
-		return fmt.Errorf("promote candidate: %w", err)
-	}
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
-	_ = s.clearPendingLocked(ctx)
-	return nil
+	return s.promoteLocked(ctx, 0)
 }
 
 type pendingCommit struct {
 	DeadlineUnix int64 `json:"deadline_unix"`
 }
 
-// CommitConfirmed commits candidate to running and schedules auto-rollback unless confirmed.
+// CommitConfirmed promotes the candidate and schedules transactional rollback.
 func (s *SQLiteStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
 	if ttl <= 0 {
 		return errors.New("ttl must be > 0")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	candidate, err := s.loadCandidateLocked(ctx)
-	if err != nil {
-		return fmt.Errorf("load candidate: %w", err)
-	}
-	if running, err := s.Load(ctx); err == nil {
-		if err := s.saveKind(ctx, configKeyPrevious, running); err != nil {
-			return fmt.Errorf("save previous: %w", err)
-		}
-	}
-	if err := s.saveKind(ctx, configKeyRunning, candidate); err != nil {
-		return fmt.Errorf("promote candidate: %w", err)
-	}
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyCandidate)
-
-	pending := pendingCommit{DeadlineUnix: time.Now().Add(ttl).UnixNano()}
-	blob, _ := json.Marshal(pending)
-	if _, err := s.db.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyPending, string(blob), time.Now().Unix()); err != nil {
-		return fmt.Errorf("persist pending commit: %w", err)
-	}
-	s.schedulePendingLocked(ttl)
-	return nil
+	return s.promoteLocked(ctx, ttl)
 }
 
 // ConfirmCommit cancels any pending auto-rollback from CommitConfirmed.
 func (s *SQLiteStore) ConfirmCommit(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_ = s.clearPendingLocked(ctx)
-	return nil
+	return s.clearPendingLocked(ctx)
 }
 
 // Rollback restores the previous running config if available.
 func (s *SQLiteStore) Rollback(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prev, err := s.loadKind(ctx, configKeyPrevious)
-	if err != nil {
-		return fmt.Errorf("load previous: %w", err)
-	}
-	if err := s.saveKind(ctx, configKeyRunning, prev); err != nil {
-		return fmt.Errorf("restore previous: %w", err)
-	}
-	_ = s.clearPendingLocked(ctx)
-	return nil
+	return s.rollbackLocked(ctx)
 }
 
 // Close releases database resources.
@@ -435,20 +368,11 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 			slog.Error("auto-rollback failed", "error", err)
 			return
 		}
-		_ = s.clearPendingLocked(bg)
 		select {
 		case s.autoRollbackNotify <- struct{}{}:
 		default:
 		}
 	})
-}
-
-func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
-	prev, err := s.loadKind(ctx, configKeyPrevious)
-	if err != nil {
-		return err
-	}
-	return s.saveKind(ctx, configKeyRunning, prev)
 }
 
 // SaveIDSRules replaces all stored IDS rules.
@@ -491,37 +415,22 @@ func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {
 	return nil
 }
 
-// LoadIDSRules returns all stored IDS rules. If the ids_rules table is empty
-// but the running config contains legacy embedded rules, they are migrated
-// to the separate table automatically.
+// LoadIDSRules reads the running bank without migrating or writing on reads.
 func (s *SQLiteStore) LoadIDSRules(ctx context.Context) ([]IDSRule, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rules, err := s.loadIDSRulesRaw(ctx)
-	if err != nil {
-		return nil, err
+	if err != nil || len(rules) > 0 {
+		return rules, err
 	}
-	if len(rules) > 0 {
-		return rules, nil
-	}
-
-	// Migration: check if running config has embedded IDS rules to migrate.
-	cfg, err := s.Load(ctx)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if len(cfg.IDS.Rules) == 0 {
+	cfg, err := s.loadRunningLocked(ctx)
+	if errors.Is(err, ErrNotFound) {
 		return nil, nil
 	}
-	slog.Info("migrating IDS rules from config to separate storage", "count", len(cfg.IDS.Rules))
-	if err := s.SaveIDSRules(ctx, cfg.IDS.Rules); err != nil {
-		return nil, fmt.Errorf("migrate ids rules: %w", err)
+	if err != nil {
+		return nil, err
 	}
-	// Clear rules from the config blob to avoid duplication.
-	cfg.IDS.Rules = nil
-	_ = s.saveKind(ctx, configKeyRunning, cfg)
-	return s.loadIDSRulesRaw(ctx)
+	return cfg.IDS.Rules, nil
 }
 
 func (s *SQLiteStore) loadIDSRulesRaw(ctx context.Context) ([]IDSRule, error) {
