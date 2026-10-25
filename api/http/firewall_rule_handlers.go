@@ -6,19 +6,13 @@ package httpapi
 import (
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpevents "github.com/tonylturner/containd/pkg/dp/events"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
-	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -196,18 +190,6 @@ func mergeRulePatch(existing config.Rule, patch map[string]json.RawMessage) (con
 	return rule, err
 }
 
-type previewRuleResponse struct {
-	MatchCount    int               `json:"match_count"`
-	SampleMatches []dpevents.Event  `json:"sample_matches"`
-	TimeRange     *previewTimeRange `json:"time_range"`
-	TotalEvents   int               `json:"total_events"`
-}
-
-type previewTimeRange struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
-}
-
 func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req config.Rule
@@ -238,130 +220,19 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			entry.Protocols = append(entry.Protocols, rules.Protocol{Name: p.Name, Port: p.Port})
 		}
 
-		tc, ok := engine.(TelemetryClient)
-		if !ok || tc == nil {
-			c.JSON(http.StatusOK, previewRuleResponse{
-				SampleMatches: []dpevents.Event{},
-			})
+		client, ok := engine.(RulePreviewClient)
+		if !ok || client == nil {
+			apiError(c, http.StatusServiceUnavailable, "engine rule preview unavailable")
 			return
 		}
-
-		evs, err := tc.ListEvents(c.Request.Context(), 5000)
+		result, err := client.PreviewRule(c.Request.Context(), entry)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, "failed to fetch events: "+err.Error())
+			apiError(c, http.StatusBadGateway, "failed to preview rule: "+err.Error())
 			return
 		}
-
-		totalEvents := len(evs)
-		var tr *previewTimeRange
-		if totalEvents > 0 {
-			oldest := evs[0].Timestamp
-			newest := evs[0].Timestamp
-			for _, ev := range evs[1:] {
-				if ev.Timestamp.Before(oldest) {
-					oldest = ev.Timestamp
-				}
-				if ev.Timestamp.After(newest) {
-					newest = ev.Timestamp
-				}
-			}
-			tr = &previewTimeRange{Start: oldest, End: newest}
-		}
-
-		const maxSamples = 50
-		var matchCount int
-		var samples []dpevents.Event
-		iec104 := entry.ICS.Protocol == rules.ProtocolIEC104
-		for _, ev := range evs {
-			ctx := rules.EvalContext{
-				SrcIP: net.ParseIP(ev.SrcIP),
-				DstIP: net.ParseIP(ev.DstIP),
-				Proto: ev.Transport,
-				Port:  strconv.Itoa(int(ev.DstPort)),
-				Now:   ev.Timestamp,
-			}
-			if iec104 {
-				ctx = previewIEC104Context(ctx, ev)
-			}
-			if rules.PreviewMatch(entry, ctx) {
-				matchCount++
-				if len(samples) < maxSamples {
-					samples = append(samples, ev)
-				}
-			}
-		}
-
-		if samples == nil {
-			samples = []dpevents.Event{}
-		}
-
-		c.JSON(http.StatusOK, previewRuleResponse{
-			MatchCount:    matchCount,
-			SampleMatches: samples,
-			TimeRange:     tr,
-			TotalEvents:   totalEvents,
-		})
+		c.JSON(http.StatusOK, result)
 	}
 }
-
-// iec104WireKinds are the event kinds the IEC104 decoder emits for wire
-// objects. Decision and outcome events (ics.*) are evidence about them
-// and must not count again.
-var iec104WireKinds = map[string]struct{}{
-	"request": {}, "response": {}, "apci": {}, "malformed": {}, "unsupported": {},
-}
-
-// previewIEC104Context adds the IEC104 object of a decoded IEC104 event to
-// ctx and turns the tuple into the session tuple (source = client,
-// destination = server, port = server port) that IEC104 rules match
-// (spec §6.3, B8). Other events keep ctx unchanged and cannot match an
-// IEC104 rule.
-//
-// SafeRead is classified by the same authority as decoder events.
-func previewIEC104Context(ctx rules.EvalContext, ev dpevents.Event) rules.EvalContext {
-	if ev.Proto != eventfields.ProtoIEC104 {
-		return ctx
-	}
-	if _, ok := iec104WireKinds[ev.Kind]; !ok {
-		return ctx
-	}
-	attrs := ev.Attributes
-	direction, ok := eventfields.String(attrs, eventfields.KeyDirection)
-	if !ok {
-		direction = "request"
-		if ev.SrcPort == iec104Port && ev.DstPort != iec104Port {
-			direction = "response"
-		}
-	}
-	if direction == "response" {
-		ctx.SrcIP, ctx.DstIP = ctx.DstIP, ctx.SrcIP
-		ctx.Port = strconv.Itoa(int(ev.SrcPort))
-	}
-	obj := &rules.IEC104Context{
-		Malformed:   ev.Kind == "malformed",
-		Unsupported: ev.Kind == "unsupported",
-	}
-	obj.APCIType, _ = eventfields.String(attrs, eventfields.KeyAPCIType)
-	obj.Class, _ = eventfields.String(attrs, eventfields.KeyClass)
-	obj.SafeRead = iec104.SafeRead(attrs)
-	if v, ok := eventfields.Uint8(attrs, eventfields.KeyTypeID); ok {
-		obj.TypeID = &v
-	}
-	if v, ok := eventfields.Uint16(attrs, eventfields.KeyCA); ok {
-		obj.CA = &v
-		obj.Broadcast = obj.APCIType == "I" && v == iec104BroadcastCA
-	}
-	if v, ok := eventfields.Uint32(attrs, eventfields.KeyIOA); ok {
-		obj.IOA = &v
-	}
-	ctx.ICS = &rules.ICSContext{Protocol: rules.ProtocolIEC104, Direction: direction, IEC104: obj}
-	return ctx
-}
-
-const (
-	iec104Port        = 2404
-	iec104BroadcastCA = 65535
-)
 
 func hasICSPredicate(r config.Rule) bool {
 	return strings.TrimSpace(r.ICS.Protocol) != "" ||

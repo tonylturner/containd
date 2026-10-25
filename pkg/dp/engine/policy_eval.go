@@ -143,7 +143,22 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 	return ctx, true
 }
 
+type zoneResolver func(*rules.Snapshot, net.IP, net.IP) (string, string)
+
 func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, string) {
+	return resolveZonesWithAddrs(snap, srcIP, dstIP, interfaceAddrs)
+}
+
+// interfaceAddrs keeps OS interface lookup in the engine's network namespace.
+func interfaceAddrs(name string) ([]net.Addr, error) {
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return nil, err
+	}
+	return iface.Addrs()
+}
+
+func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor func(string) ([]net.Addr, error)) (string, string) {
 	if snap == nil || len(snap.ZoneIfaces) == 0 {
 		return "", ""
 	}
@@ -155,11 +170,7 @@ func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, str
 	for zone, ifaces := range snap.ZoneIfaces {
 		zn := zoneNets{name: zone}
 		for _, ifaceName := range ifaces {
-			iface, err := net.InterfaceByName(ifaceName)
-			if err != nil {
-				continue
-			}
-			addrs, err := iface.Addrs()
+			addrs, err := addrsFor(ifaceName)
 			if err != nil {
 				continue
 			}
