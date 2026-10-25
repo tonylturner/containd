@@ -61,6 +61,13 @@ func idsRuleMatchesEvent(r rules.IDSRule, ev dpi.Event) bool {
 	if r.Enabled != nil && !*r.Enabled {
 		return false
 	}
+	// Imports such as YARA are stored for inspection/export but have no
+	// executable DPI predicate. Enabled does not make them evaluable.
+	// Do not reject empty When predicates generally: native kind-only
+	// signatures intentionally match every event of that kind.
+	if r.Labels["evaluable"] == "false" {
+		return false
+	}
 	if r.Proto != "" && !strings.EqualFold(r.Proto, ev.Proto) {
 		return false
 	}
