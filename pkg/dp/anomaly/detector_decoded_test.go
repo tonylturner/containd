@@ -123,9 +123,8 @@ func TestDecodedS7FunctionCodeDrift(t *testing.T) {
 	param := []byte{0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x50, 0x5F, 0x50, 0x52, 0x4F, 0x47, 0x52, 0x41, 0x4D}
 	s7 := []byte{0x32, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, byte(len(param)), 0x00, 0x00}
 	s7 = append(s7, param...)
-	// The decoder's COTP DT type constant is 0x0F (s7comm/frame.go), so the
-	// fixture uses it; on the wire DT is 0xF0.
-	cotp := append([]byte{0x02, 0x0F, 0x80}, s7...)
+	// COTP DT (ISO 8073 class 0): length 2, TPDU code 0xF0, EOT.
+	cotp := append([]byte{0x02, 0xF0, 0x80}, s7...)
 	tpkt := binary.BigEndian.AppendUint16([]byte{0x03, 0x00}, uint16(4+len(cotp)))
 	ev := decodeOne(t, s7comm.NewDecoder(), 102, append(tpkt, cotp...))
 	for _, e := range []dpi.Event{ev, jsonRoundTrip(t, ev)} {
