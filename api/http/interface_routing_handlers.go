@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -67,7 +68,7 @@ func interfacesAssignHandler(store config.Store, engine EngineClient) gin.Handle
 				ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
 			}
 
-			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req, defaultRouteIface)
+			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req, defaultRouteIface, config.ReservationForStore(store))
 			if err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return false
@@ -112,10 +113,11 @@ func normalizedInterfaceAssignMode(req interfaceAssignRequest) string {
 	return mode
 }
 
-func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest, defaultRouteIface string) (map[string]string, error) {
+func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest, defaultRouteIface string, r *mgmtpath.Reservation) (map[string]string, error) {
 	switch req.Mode {
 	case "auto":
 		return computeDefaultInterfaceAssignments(ifaces, state, autoAssignOptions{
+			Reservation:       r,
 			AllowFallback:     true,
 			DefaultRouteIface: defaultRouteIface,
 		})
@@ -183,6 +185,10 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
+			return
+		}
+		if err := config.ValidateForStore(store, cfg); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {

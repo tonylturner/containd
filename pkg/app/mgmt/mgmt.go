@@ -37,6 +37,7 @@ type mgmtStores struct {
 	store      config.Store
 	auditStore audit.Store
 	userStore  users.Store
+	bootEvent  *dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -64,10 +65,13 @@ func Run(ctx context.Context, opts Options) error {
 	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
 		return err
 	}
+	if err := validateReservedEnvironment(opts.Reservation); err != nil {
+		return err
+	}
 	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
 		return err
 	}
-	stores, cfg, err := initMgmtStores(logger)
+	stores, cfg, err := initMgmtStores(logger, opts.Reservation)
 	if err != nil {
 		return err
 	}
@@ -75,13 +79,11 @@ func Run(ctx context.Context, opts Options) error {
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
 
-	if err := config.ValidateManagementReservation(cfg, opts.Reservation); err != nil {
+	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
+	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
 		return err
 	}
-	if err := validateReservedStartup(cfg, opts.Reservation); err != nil {
-		return err
-	}
-	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg)
+	listenerCfg, err := resolveMgmtListenerConfig(logger, runtimeCfg)
 	if err != nil {
 		return err
 	}
@@ -91,11 +93,11 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := services.NewManager(services.ManagerOptions{})
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver)
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)))
 	// Best-effort initial service render on startup.
-	if cfg, err := stores.store.Load(context.Background()); err == nil {
+	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
 			logger.Warnf("failed to apply initial service config: %v", applyErr)
 		}
@@ -125,7 +127,7 @@ func Run(ctx context.Context, opts Options) error {
 	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(logger, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
+	sshAddr, sshEnabled := startSSH(logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
 	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 
@@ -154,19 +156,22 @@ func validateJWTSecret(logger *zap.SugaredLogger) error {
 	return nil
 }
 
-func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, error) {
-	stores := mgmtStores{
-		store:      mustInitStore(),
-		auditStore: mustInitAuditStore(),
-		userStore:  mustInitUsersStore(),
+func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtStores, *config.Config, error) {
+	store, err := initStore(r)
+	if err != nil {
+		return mgmtStores{}, nil, err
 	}
-	ensureDefaultConfig(logger, stores.store)
-	_ = stores.userStore.EnsureDefaultAdmin(context.Background())
+	stores := mgmtStores{store: store}
+	// Stored conflicts are recovery state, never a reason to remove management.
+	fail := func(err error) (mgmtStores, *config.Config, error) { store.Close(); return mgmtStores{}, nil, err }
+	if err := ensureDefaultConfig(logger, store); err != nil {
+		return fail(err)
+	}
+	cfg, err := store.Load(context.Background())
+	if err != nil {
+		return fail(err)
+	}
 
-	cfg, err := stores.store.Load(context.Background())
-	if err != nil && !errors.Is(err, config.ErrNotFound) {
-		logger.Warnf("failed to load config on startup: %v", err)
-	}
 	// Repair stale interface.device bindings before the HTTP server begins
 	// serving traffic. Without this, mgmtAccessHandler reads the stored
 	// config with device fields pointing at kernel devices the OS may have
@@ -188,8 +193,8 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 			for i := range next.Interfaces {
 				devices[i] = next.Interfaces[i].Device
 			}
-			blankDefaultInterfaceDevices(next)
-			if !httpapi.AutoBindDefaultInterfaceDevices(next) {
+			blankDefaultInterfaceDevicesExcept(next, r)
+			if !httpapi.AutoBindDefaultInterfaceDevicesReserved(next, r) {
 				for i := range next.Interfaces {
 					next.Interfaces[i].Device = devices[i]
 				}
@@ -197,11 +202,25 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 			return nil
 		})
 		if repairErr != nil {
-			logger.Warnf("failed to persist autobound interface devices on startup: %v", repairErr)
+			logger.Warnf("boot interface repair: %v", repairErr)
 		} else {
 			cfg = repaired
 		}
 	}
+	stores.auditStore = mustInitAuditStore()
+	stores.userStore = mustInitUsersStore()
+	if err := stores.userStore.EnsureDefaultAdmin(context.Background()); err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	event, err := recordReservationBootDecision(logger, stores, cfg, r)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	stores.bootEvent = event
 	return stores, cfg, nil
 }
 
@@ -209,7 +228,9 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 // logical interface (wan/dmz/lan1..lan6) so the subsequent
 // AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
 // Non-default interfaces (custom user-named) are left untouched.
-func blankDefaultInterfaceDevices(cfg *config.Config) {
+func blankDefaultInterfaceDevices(cfg *config.Config) { blankDefaultInterfaceDevicesExcept(cfg, nil) }
+
+func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservation) {
 	if cfg == nil {
 		return
 	}
@@ -217,7 +238,13 @@ func blankDefaultInterfaceDevices(cfg *config.Config) {
 	for _, name := range config.DefaultPhysicalInterfaces() {
 		defaults[name] = struct{}{}
 	}
+	// A matching device name alone is not ownership after NIC renumbering:
+	// an addressed default row may now point at the reserved NIC by accident.
+	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
 	for i := range cfg.Interfaces {
+		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
+			continue
+		}
 		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
 			cfg.Interfaces[i].Device = ""
 		}

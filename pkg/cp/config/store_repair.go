@@ -15,7 +15,9 @@ import (
 // candidate in one transaction. It never seeds a candidate or changes previous
 // or pending state. The callback must not call Store or mutate external state.
 // Repair requires SQLite persistence; it is intentionally not part of the
-// general Store interface used by API/CLI consumers.
+// general Store interface used by API/CLI consumers. Reservation validation is
+// deliberately deferred until after normalization: legacy NIC bindings and
+// residual conflicts must not prevent management from serving recovery.
 func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config, error) {
 	s, ok := store.(*SQLiteStore)
 	if !ok {

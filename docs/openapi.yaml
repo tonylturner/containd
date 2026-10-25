@@ -708,7 +708,100 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DashboardResponse" }
 
+  /system/management-reservation:
+    get:
+      summary: Read immutable management access and runtime guard health
+      description: >
+        Boot authority, not candidate or running config. Exact source peers keep
+        HTTP access despite interface access toggles; normal authentication still
+        applies. An unreachable engine is reported as a guard error, never healthy.
+      tags: [System]
+      responses:
+        "200":
+          description: Reservation view; exactly {"active":false} when unset
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [active]
+                properties:
+                  active: { type: boolean }
+                  device: { type: string }
+                  local: { type: string, description: Host address with prefix length }
+                  sources: { type: array, items: { type: string, format: ipv4 } }
+                  port: { type: integer, minimum: 1, maximum: 65535 }
+                  bootFault:
+                    type: string
+                    description: >
+                      Residual stored-config conflict after boot normalization; empty
+                      when clear. While set, management serves recovery with safe
+                      boot-only listeners and blocks service/engine apply. A safe
+                      commit, rollback or factory reset clears it. A fresh engine
+                      has no applied ruleset; this is not fail-closed enforcement.
+                  rollbackFault:
+                    type: string
+                    description: Last refused rollback, retained across restarts
+                  guard:
+                    type: object
+                    required: [active, faults]
+                    properties:
+                      active: { type: boolean }
+                      device: { type: string }
+                      local: { type: string }
+                      sources: { type: array, items: { type: string, format: ipv4 } }
+                      port: { type: integer }
+                      error: { type: string }
+                      faults: { type: integer, minimum: 0 }
+                      lastFault:
+                        type: object
+                        properties:
+                          time: { type: string, format: date-time }
+                          interface: { type: string }
+                          address: { type: string }
+                          service: { type: string }
+                          reason: { type: string }
+
+  /system/factory-reset:
+    post:
+      summary: Reset appliance databases (admin)
+      description: >
+        Preflights the autobound appliance defaults (shared with first boot) against
+        the immutable management reservation before wiping users, sessions, config,
+        or audit. Genuine incompatible defaults are refused without changing these
+        stores. A successful reset clears the boot fault and applies the defaults.
+      tags: [System]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string, enum: [NUCLEAR] }
+      responses:
+        "200": { description: Reset complete; reauthenticate with default credentials }
+        "400": { description: Invalid confirmation or defaults conflict with reserved management path }
+        "403": { description: Admin role required }
+
   # ── Config ────────────────────────────────────────────────────────
+  /config/validate:
+    post:
+      summary: Validate configuration without staging (admin)
+      description: >
+        Uses the same structural and immutable management-reservation checks as
+        persistence. Reservation errors name the field and "reserved management path".
+        Disabling all ordinary interface access flags is permitted.
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200": { description: Configuration valid }
+        "400": { description: Invalid configuration or reserved management path conflict }
+        "403": { description: Admin role required }
+
   /config:
     get:
       summary: Get running configuration
@@ -821,7 +914,9 @@ paths:
         never changes running or activates anything: the data plane keeps its
         current policy until POST /config/commit. After importing, commit and
         then check GET /health iec104Enforcement. Validation is the same as
-        for a candidate. Success sets `X-Containd-Config: staged`.
+        for a candidate, including the immutable reserved management path.
+        Reservation conflicts are 400 errors naming the field; running and
+        candidate are unchanged. Success sets `X-Containd-Config: staged`.
       tags: [Config]
       requestBody:
         required: true

@@ -5,7 +5,6 @@ package mgmtapp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -17,12 +16,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
-	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"go.uber.org/zap"
 )
 
@@ -260,9 +259,9 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
+func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 	if store == nil {
-		return
+		return nil
 	}
 	cfg, err := store.Load(context.Background())
 	if err == nil && cfg != nil {
@@ -294,29 +293,19 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
 			return nil
 		})
 		if repairErr != nil {
-			logger.Errorf("failed to backfill default config values: %v", repairErr)
+			logger.Warnf("backfill default config: %v", repairErr)
 		}
-		return
+		return nil
 	}
 	if !errors.Is(err, config.ErrNotFound) {
-		logger.Warnf("failed to load config (continuing): %v", err)
-		return
+		return fmt.Errorf("load default config: %w", err)
 	}
-	def := config.DefaultConfig()
-	config.ApplyBootstrapEnvDefaults(def)
-	def.System.Hostname = "containd"
-	def.System.Mgmt.ListenAddr = ":8080"
-	def.System.Mgmt.HTTPListenAddr = ":8080"
-	def.System.Mgmt.HTTPSListenAddr = ":8443"
-	def.System.Mgmt.EnableHTTP = boolPtr(true)
-	def.System.Mgmt.EnableHTTPS = boolPtr(true)
-	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+	def := httpapi.ApplianceDefaults(config.ReservationForStore(store))
 	if err := store.Save(context.Background(), def); err != nil {
-		logger.Errorf("failed to initialize default config: %v", err)
-		return
+		return fmt.Errorf("initialize default config: %w", err)
 	}
 	logger.Info("initialized default config")
+	return nil
 }
 
 func ensureLoopbackHTTPAddr(addr string) string {
@@ -343,7 +332,7 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
 		return err
 	}
-	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerOverlaps(resolveHTTPSAddr(cfg), r) {
+	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerConflictsHTTP(resolveHTTPSAddr(cfg), resolveHTTPAddr(cfg), true, r) {
 		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
 	}
 	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
@@ -353,7 +342,7 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if ssh == "" {
 		ssh = ":2222"
 	}
-	if config.ManagementListenerOverlaps(ssh, r) {
+	if config.ManagementListenerConflictsHTTP(ssh, resolveHTTPAddr(cfg), false, r) {
 		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
 	}
 	return nil
@@ -371,21 +360,11 @@ func waitForReservedEngine(ctx context.Context, base string, r *mgmtpath.Reserva
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	client := &http.Client{Timeout: time.Second}
+	health := managementGuardHealth(base)
 	var last error
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/health", nil)
-		if err != nil {
-			return err
-		}
-		resp, err := client.Do(req)
+		h, err := health(ctx)
 		if err == nil {
-			var body struct {
-				ManagementReservation netcfg.ManagementHealth `json:"managementReservation"`
-			}
-			decodeErr := json.NewDecoder(resp.Body).Decode(&body)
-			resp.Body.Close()
-			h := body.ManagementReservation
 			same := len(h.Sources) == len(r.Sources)
 			for _, source := range r.Sources {
 				found := false
@@ -396,13 +375,14 @@ func waitForReservedEngine(ctx context.Context, base string, r *mgmtpath.Reserva
 				}
 				same = same && found
 			}
-			if resp.StatusCode == http.StatusOK && decodeErr == nil && h.Active && h.Error == "" && h.Device == r.Device && h.Local == r.Local.String() && h.Port == r.Port && same {
+			if h.Active && h.Error == "" && h.Device == r.Device && h.Local == r.Local.String() && h.Port == r.Port && same {
 				return nil
 			}
 			last = fmt.Errorf("engine reservation guard is not ready or does not match startup authority")
 		} else {
 			last = err
 		}
+
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("reserved management path engine guard: %w: %v", ctx.Err(), last)

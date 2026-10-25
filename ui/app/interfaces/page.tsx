@@ -13,9 +13,11 @@ import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { chipClass, InterfaceRow } from "./interface-row";
+import type { ManagementReservation } from "../../lib/api-console";
 import { runtimeFor } from "../../lib/interface-addresses";
 
 export default function InterfacesPage() {
+  const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -66,11 +68,13 @@ export default function InterfacesPage() {
   ];
 
   async function refresh() {
-    const [i, z, s] = await Promise.all([
+    const [i, z, s, r] = await Promise.all([
       api.listInterfaces(),
       api.listZones(),
       api.listInterfaceState(),
+      api.getManagementReservation(),
     ]);
+    setReservation(r);
     setIfaces(i ?? []);
     setZones(z ?? []);
     setState(s ?? []);
@@ -272,6 +276,29 @@ export default function InterfacesPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {reservation?.active && (
+        <aside aria-label="Reserved management path" className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <p className="font-semibold">RangerDanger management access is reserved</p>
+          <p className="mt-1 break-words">
+            {reservation.sources?.join(", ")} can reach HTTP management on {reservation.device} ({reservation.local}, port {reservation.port}),
+            even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
+          </p>
+          {(!reservation.guard?.active || reservation.guard?.error) && (
+            <p className="mt-1 text-amber-400">Guard fault: {reservation.guard?.error || "engine guard unavailable"}</p>
+          )}
+          {!!reservation.guard?.faults && (
+            <p className="mt-1 text-amber-400">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
+          )}
+          {reservation.bootFault && (
+            <div role="status" className="mt-2 text-amber-400">
+              <p className="font-semibold">Configuration apply paused</p>
+              <p>{reservation.bootFault}</p>
+              <p>Reserved management remains available. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.</p>
+            </div>
+          )}
+          {reservation.rollbackFault && <p className="mt-1 text-amber-400">{reservation.rollbackFault}</p>}
+        </aside>
+      )}
       {!isAdmin() && (
         <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.

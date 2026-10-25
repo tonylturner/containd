@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type autoAssignOptions struct {
+	Reservation       *mgmtpath.Reservation
 	AllowFallback     bool
 	DefaultRouteIface string
 }
@@ -94,6 +96,14 @@ func computeDefaultInterfaceAssignments(ifaces []config.Interface, state []confi
 
 	assignments := map[string]string{}
 	usedDev := map[string]bool{}
+	if opts.Reservation != nil {
+		for _, iface := range ifaces {
+			if iface.Device == opts.Reservation.Device || iface.Device == "" && iface.Name == opts.Reservation.Device {
+				assignments[iface.Name] = opts.Reservation.Device
+				usedDev[opts.Reservation.Device] = true
+			}
+		}
+	}
 	assignByNamePrefix(order, ifaceByName, candidates, assignments, usedDev)
 	assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultAutoAssignSubnets())
 	assignDefaultRouteWAN(ifaceByName, opts, stateByName, assignments, usedDev)
@@ -120,6 +130,9 @@ func defaultLogicalInterfaces(ifaces []config.Interface, order []string) (map[st
 func assignByNamePrefix(order []string, ifaceByName map[string]config.Interface, candidates []autoAssignCandidate, assignments map[string]string, usedDev map[string]bool) {
 	for _, logical := range order {
 		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		if _, pinned := assignments[logical]; pinned {
 			continue
 		}
 		for _, cand := range candidates {
@@ -285,10 +298,15 @@ func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
 // commit/getConfig handlers already run. Boot callers persist the result with
 // config.Repair so running and any staged candidate get the same repair.
 func AutoBindDefaultInterfaceDevices(cfg *config.Config) bool {
-	return autoBindDefaultInterfaceDevices(cfg)
+	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
 }
 
 func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
+	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
+}
+
+// AutoBindDefaultInterfaceDevicesReserved never moves an existing reserved binding.
+func AutoBindDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Reservation) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
@@ -296,14 +314,19 @@ func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	if err != nil {
 		return false
 	}
-	return autoBindDefaultInterfaceDevicesFromState(cfg, state, detectKernelDefaultRouteIface())
+	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, detectKernelDefaultRouteIface(), r)
 }
 
 func autoBindDefaultInterfaceDevicesFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string) bool {
+	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, defaultRouteIface, nil)
+}
+
+func autoBindDefaultInterfaceDevicesReservedFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string, r *mgmtpath.Reservation) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
 	assignments, err := computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+		Reservation:       r,
 		AllowFallback:     false,
 		DefaultRouteIface: defaultRouteIface,
 	})

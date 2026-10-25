@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"go.uber.org/zap"
@@ -419,5 +421,42 @@ func waitForRollback(t *testing.T, store config.Store) {
 			t.Fatal("store did not auto-rollback")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestEngineSyncBootFaultWaitsWithoutReplayOrSpam(t *testing.T) {
+	ctx := context.Background()
+	r := &mgmtpath.Reservation{Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"), config.WithManagementReservation(r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.DefaultConfig()
+	cfg.Interfaces = []config.Interface{{Name: "custom", Device: r.Device, Zone: "lan"}}
+	cfg.DataPlane.Enforcement = true
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
+		t.Fatal(err)
+	}
+	core, logs := observer.New(zap.InfoLevel)
+	calls := 0
+	s := engineSync{store: store, logger: zap.New(core).Sugar(), health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+		return engineapi.RuntimeHealth{BootID: "a"}, nil
+	}), apply: func(context.Context) ([]string, error) { calls++; return nil, nil }}
+	for range 3 {
+		s.poll(ctx)
+	}
+	if calls != 0 || logs.Len() != 0 {
+		t.Fatalf("fault retried/logged: %d %v", calls, logs.All())
+	}
+	if err := store.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.poll(ctx)
+	if calls != 1 || !s.applied {
+		t.Fatal("recovery did not resume replay")
 	}
 }

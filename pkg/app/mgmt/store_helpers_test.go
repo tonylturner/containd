@@ -126,7 +126,10 @@ func TestMustInitStores(t *testing.T) {
 	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(tmp, "audit", "audit.db"))
 	t.Setenv("CONTAIND_USERS_DB", filepath.Join(tmp, "users", "users.db"))
 
-	cfgStore := mustInitStore()
+	cfgStore, err := initStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cfgStore.Save(context.Background(), config.DefaultConfig()); err != nil {
 		t.Fatalf("config store save: %v", err)
 	}

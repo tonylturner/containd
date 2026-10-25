@@ -27,6 +27,16 @@ func TestManagementReservationRejections(t *testing.T) {
 		{"redirect", "redirect", func(c *Config) { c.System.Mgmt.RedirectHTTPToHTTPS = &tr }},
 		{"http port", "httpListenAddr", func(c *Config) { c.System.Mgmt.HTTPListenAddr = ":9090" }},
 		{"legacy alias", "listenAddr", func(c *Config) { c.System.Mgmt.ListenAddr = ":9090" }},
+		{"https loopback socket collision", "httpsListenAddr", func(c *Config) { c.System.Mgmt.HTTPSListenAddr = "127.0.0.1:8080" }},
+		{"https companion socket collision", "httpsListenAddr", func(c *Config) {
+			c.System.Mgmt.HTTPListenAddr = "10.99.99.2:8080"
+			c.System.Mgmt.HTTPSListenAddr = "192.0.2.1:8080"
+		}},
+		{"SSH wildcard HTTP collision", "ssh.listenAddr", func(c *Config) { c.System.SSH.ListenAddr = "127.0.0.1:8080" }},
+		{"SSH exact HTTP companion collision", "ssh.listenAddr", func(c *Config) {
+			c.System.Mgmt.HTTPListenAddr = "10.99.99.2:8080"
+			c.System.SSH.ListenAddr = "127.0.0.1:8080"
+		}},
 		{"https collision", "httpsListenAddr", func(c *Config) { c.System.Mgmt.HTTPSListenAddr = ":8080" }},
 		{"ssh collision", "ssh", func(c *Config) { c.System.SSH.ListenAddr = "10.99.99.2:8080" }},
 		{"enforcement off", "enforcement", func(c *Config) { c.DataPlane.Enforcement = false }},
@@ -106,5 +116,19 @@ func TestManagementReservationAllowed(t *testing.T) {
 	}
 	if err := ValidateManagementReservation(nil, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagementListenersDisjointSSHBind(t *testing.T) {
+	for _, tc := range []struct{ http, ssh string }{
+		{"10.99.99.2:8080", "192.0.2.1:8080"},
+		{"0.0.0.0:8080", "[::1]:8080"},
+	} {
+		cfg, r := reservationFixture()
+		cfg.System.Mgmt.HTTPListenAddr = tc.http
+		cfg.System.SSH.ListenAddr = tc.ssh
+		if err := ValidateManagementListeners(cfg.System, r); err != nil {
+			t.Fatalf("disjoint SSH socket rejected: %v", err)
+		}
 	}
 }

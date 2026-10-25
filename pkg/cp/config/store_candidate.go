@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -80,7 +81,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err != nil {
 		return err
 	}
-	if err := candidate.Validate(); err != nil {
+	if err := s.ValidateConfig(candidate); err != nil {
 		return err
 	}
 	running, err := s.loadRunningLocked(ctx)
@@ -100,7 +101,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err := writeRunningTx(ctx, tx, candidate); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyCandidate, configKeyPending); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?, ?)`, configKeyCandidate, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
 	if ttl > 0 {
@@ -136,6 +137,12 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := s.ValidateConfig(prev); err != nil {
+		if recordErr := s.recordRollbackRefusal(ctx, err); recordErr != nil {
+			return fmt.Errorf("record rollback refusal (%v): %w", err, recordErr)
+		}
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -144,7 +151,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	if err := writeRunningTx(ctx, tx, prev); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
