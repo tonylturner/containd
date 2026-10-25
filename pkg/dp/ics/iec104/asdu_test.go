@@ -247,7 +247,7 @@ func TestMultipleObjects(t *testing.T) {
 	}
 }
 
-func TestSQ1MonitorDescriptors(t *testing.T) {
+func TestSQ1UntimedMonitorDescriptors(t *testing.T) {
 	cases := []struct {
 		typeID uint8
 		elem   []byte
@@ -261,14 +261,6 @@ func TestSQ1MonitorDescriptors(t *testing.T) {
 		{13, cat(f32(1.5), []byte{0x10})},
 		{15, []byte{0xFE, 0xFF, 0xFF, 0xFF, 0xE5}},
 		{21, []byte{0xFF, 0x7F}},
-		{30, cat([]byte{1}, courseTime)},
-		{31, cat([]byte{2}, courseTime)},
-		{32, cat([]byte{0xC2, 0x90}, courseTime)},
-		{33, cat([]byte{1, 2, 3, 4, 0x90}, courseTime)},
-		{34, cat([]byte{0xFE, 0xFF, 0x10}, courseTime)},
-		{35, cat([]byte{0xD2, 0x04, 0x40}, courseTime)},
-		{36, cat(f32(1.5), []byte{0x10}, courseTime)},
-		{37, cat([]byte{0xFE, 0xFF, 0xFF, 0xFF, 0xE5}, courseTime)},
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprint(tc.typeID), func(t *testing.T) {
@@ -288,6 +280,25 @@ func TestSQ1MonitorDescriptors(t *testing.T) {
 					eventfields.KeyIOA:         uint32(200 + i),
 					eventfields.KeyObjectIndex: uint8(i),
 				})
+			}
+		})
+	}
+}
+
+func TestSQ1TimedMonitorDescriptorsRejected(t *testing.T) {
+	for typeID := uint8(30); typeID <= 37; typeID++ {
+		t.Run(fmt.Sprint(typeID), func(t *testing.T) {
+			d := descriptors[typeID]
+			body := cat(ioa(200), make([]byte, d.objectSize()))
+			frame := iFrame(0, 0, asdu(typeID, vsqSQ|1, cotSpont, 0, 1, body...))
+			evs := events(parseOne(t, srv, frame))
+			if len(evs) != 1 {
+				t.Fatalf("got %d events, want one profile error", len(evs))
+			}
+			want := fmt.Sprintf("profile: SQ=1 is not accepted for type %d", typeID)
+			if evs[0].Kind != eventfields.KindMalformed || evs[0].Attributes[eventfields.KeyError] != want {
+				t.Errorf("type %d = %s %q, want malformed %q",
+					typeID, evs[0].Kind, evs[0].Attributes[eventfields.KeyError], want)
 			}
 		})
 	}

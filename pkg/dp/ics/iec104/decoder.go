@@ -26,8 +26,7 @@
 // malformed with an error that starts with "profile:"): control and system
 // types with SQ=1 or more than one object; monitor-direction types (1..44)
 // from the client; control or system types from the server with cause 6 or 8.
-// The descriptor table marks monitor types that accept SQ=1; this includes
-// time-tagged types because each sequenced object retains its own timestamp.
+// The descriptor table marks untimed monitor types that accept SQ=1.
 //
 // The decoder never resynchronises: bytes that cannot start an APDU end the
 // parse with a *dpi.FrameError, and nothing after them is parsed.

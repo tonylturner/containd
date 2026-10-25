@@ -84,7 +84,7 @@ type descriptor struct {
 	class  string
 	elem   elementKind
 	timed  bool // a CP56Time2a follows the element
-	sqOK   bool // B profile: SQ=1 accepted for this monitor layout
+	sqOK   bool // B profile: SQ=1 accepted for this untimed monitor layout
 	single bool // B profile: SQ=0 and exactly one object (control and system types)
 }
 
@@ -101,23 +101,23 @@ func (d descriptor) objectSize() int {
 // including 104 and 106 (IEC 101 test and delay commands, not used in IEC
 // 104), is unsupported and of class unknown.
 var descriptors = map[uint8]descriptor{
-	1:  {class: ClassMonitor, elem: elemSIQ, sqOK: true},                   // M_SP_NA_1
-	3:  {class: ClassMonitor, elem: elemDIQ, sqOK: true},                   // M_DP_NA_1
-	5:  {class: ClassMonitor, elem: elemVTI, sqOK: true},                   // M_ST_NA_1
-	7:  {class: ClassMonitor, elem: elemBSIQDS, sqOK: true},                // M_BO_NA_1
-	9:  {class: ClassMonitor, elem: elemNVAQDS, sqOK: true},                // M_ME_NA_1
-	11: {class: ClassMonitor, elem: elemSVAQDS, sqOK: true},                // M_ME_NB_1
-	13: {class: ClassMonitor, elem: elemFloatQDS, sqOK: true},              // M_ME_NC_1
-	15: {class: ClassMonitor, elem: elemBCR, sqOK: true},                   // M_IT_NA_1
-	21: {class: ClassMonitor, elem: elemNVA, sqOK: true},                   // M_ME_ND_1
-	30: {class: ClassMonitor, elem: elemSIQ, timed: true, sqOK: true},      // M_SP_TB_1
-	31: {class: ClassMonitor, elem: elemDIQ, timed: true, sqOK: true},      // M_DP_TB_1
-	32: {class: ClassMonitor, elem: elemVTI, timed: true, sqOK: true},      // M_ST_TB_1
-	33: {class: ClassMonitor, elem: elemBSIQDS, timed: true, sqOK: true},   // M_BO_TB_1
-	34: {class: ClassMonitor, elem: elemNVAQDS, timed: true, sqOK: true},   // M_ME_TD_1
-	35: {class: ClassMonitor, elem: elemSVAQDS, timed: true, sqOK: true},   // M_ME_TE_1
-	36: {class: ClassMonitor, elem: elemFloatQDS, timed: true, sqOK: true}, // M_ME_TF_1
-	37: {class: ClassMonitor, elem: elemBCR, timed: true, sqOK: true},      // M_IT_TB_1
+	1:  {class: ClassMonitor, elem: elemSIQ, sqOK: true},       // M_SP_NA_1
+	3:  {class: ClassMonitor, elem: elemDIQ, sqOK: true},       // M_DP_NA_1
+	5:  {class: ClassMonitor, elem: elemVTI, sqOK: true},       // M_ST_NA_1
+	7:  {class: ClassMonitor, elem: elemBSIQDS, sqOK: true},    // M_BO_NA_1
+	9:  {class: ClassMonitor, elem: elemNVAQDS, sqOK: true},    // M_ME_NA_1
+	11: {class: ClassMonitor, elem: elemSVAQDS, sqOK: true},    // M_ME_NB_1
+	13: {class: ClassMonitor, elem: elemFloatQDS, sqOK: true},  // M_ME_NC_1
+	15: {class: ClassMonitor, elem: elemBCR, sqOK: true},       // M_IT_NA_1
+	21: {class: ClassMonitor, elem: elemNVA, sqOK: true},       // M_ME_ND_1
+	30: {class: ClassMonitor, elem: elemSIQ, timed: true},      // M_SP_TB_1
+	31: {class: ClassMonitor, elem: elemDIQ, timed: true},      // M_DP_TB_1
+	32: {class: ClassMonitor, elem: elemVTI, timed: true},      // M_ST_TB_1
+	33: {class: ClassMonitor, elem: elemBSIQDS, timed: true},   // M_BO_TB_1
+	34: {class: ClassMonitor, elem: elemNVAQDS, timed: true},   // M_ME_TD_1
+	35: {class: ClassMonitor, elem: elemSVAQDS, timed: true},   // M_ME_TE_1
+	36: {class: ClassMonitor, elem: elemFloatQDS, timed: true}, // M_ME_TF_1
+	37: {class: ClassMonitor, elem: elemBCR, timed: true},      // M_IT_TB_1
 
 	45: {class: ClassControl, elem: elemSCO, single: true},                   // C_SC_NA_1
 	46: {class: ClassControl, elem: elemDCO, single: true},                   // C_DC_NA_1
