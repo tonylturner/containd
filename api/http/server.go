@@ -165,8 +165,15 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 }
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
-// opts may contain an *identity.Resolver as the first element; if absent identity endpoints are not registered.
+// opts may contain an *identity.Resolver as the first element and a
+// ManagementGuardHealth provider; absent identity disables identity endpoints.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
+	var guardHealth ManagementGuardHealth
+	for _, opt := range opts {
+		if provider, ok := opt.(ManagementGuardHealth); ok {
+			guardHealth = provider
+		}
+	}
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
@@ -224,6 +231,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/auth/me/mfa/enable", rateLimitSensitive(), enableMyMFAHandler(userStore))
 		protected.POST("/auth/me/mfa/disable", rateLimitSensitive(), disableMyMFAHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
+		protected.GET("/system/management-reservation", managementReservationHandler(store, guardHealth))
 		protected.GET("/system/stats", systemStatsHandler())
 		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
@@ -232,7 +240,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
-		protected.POST("/config/validate", requireAdmin(), validateConfigHandler())
+		protected.POST("/config/validate", requireAdmin(), validateConfigHandler(store))
 		protected.GET("/config/export", exportConfigHandler(store))
 		protected.POST("/config/import", requireAdmin(), rateLimitSensitive(), importConfigHandler(store))
 		protected.GET("/config/candidate", getCandidateConfigHandler(store))
@@ -424,14 +432,14 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func validateConfigHandler() gin.HandlerFunc {
+func validateConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var cfg config.Config
 		if err := c.ShouldBindJSON(&cfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := cfg.Validate(); err != nil {
+		if err := config.ValidateForStore(store, &cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -610,7 +618,17 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 	// applying them. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
-	bindDefaultInterfaceDevices(cfg)
+	if err := config.ValidateForStore(store, cfg); err != nil {
+		return nil, err
+	}
+	// Reserved bindings were persisted by bootstrap. Never normalize them during
+	// replay: preflight must precede every runtime side effect.
+	if config.ReservationForStore(store) == nil {
+		bindDefaultInterfaceDevices(cfg)
+	}
+	if err := config.ValidateForStore(store, cfg); err != nil {
+		return nil, err
+	}
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
 			return nil, err

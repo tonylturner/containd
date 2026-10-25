@@ -81,14 +81,56 @@ false**. Default deny, ordinary rules, routes, later/disjoint policy rules and
 managed/external OpenVPN profiles remain allowed. Profiles are not read by the
 validator; pushed addresses are handled by the runtime guard.
 
-The full validator is a persistence/replay preflight contract; component guards
+The full validator is installed at persistence/replay boundaries; component guards
 also protect the engine's partial interfaces, routing, services and configuration
 APIs. DNAT snapshots are checked before any kernel application or state swap.
 
+## Persistence, boot and operator visibility
+
+Starter and dev Compose pass `CONTAIND_MGMT_RESERVATION` through. In reserved
+mode, also set the loopback engine bind and enforcement variables shown above.
+
+The store captures immutable validation context at construction. Save, staging,
+promotion, confirmation, rollback and boot repairs all use it. Boot checks stored
+running **before** snapshot migration, pending expiry and repairs; replay checks
+before services or engine calls. Repairs still update running and an existing
+candidate transactionally without discarding staged work or snapshot IDS banks.
+
+Fresh bootstrap resolves default bindings in memory before its first Save; set
+the normal `CONTAIND_AUTO_*_SUBNET` variables to match the deployment. Existing
+configs missing a binding to the currently discovered reserved device, addressing
+that device, or disabling enforcement fail preflight rather than being silently
+repaired into compliance.
+Provision a compatible config before enabling the reservation. Runtime replay
+never moves the reserved binding.
+Docker can renumber devices on restart: if an addressed logical row now binds the
+discovered reserved device, strict stored-config preflight refuses startup before
+autobinding. The current contract does not migrate such a snapshot automatically.
+
+Factory reset checks the exact factory defaults before revoking sessions or
+wiping any database. Current defaults have no device bindings and enforcement
+off, so reset is refused while a reservation is active; it does not erase data
+and then discover the conflict.
+
+## Faults and visibility
+
+`GET /api/v1/system/management-reservation` requires the normal API authentication.
+It returns device, local host prefix, exact sources, HTTP port, engine guard
+health/fault history and the last refused rollback. Without a reservation it
+returns exactly `{"active":false}`. Interfaces displays a read-only explanatory
+note; neither the view nor config imports can change the authority.
+
+Unsafe manual rollback returns an error and records `config.rollback.refused`
+in structured logs plus a persistent operator fault. Unsafe timed rollback
+(including expiry at store open) **keeps running and candidate, retains previous,
+clears pending**, and records the same fault. It never applies or repeatedly
+retries the unsafe target. Fault-recording failures remain errors and do not
+clear pending.
+
 ## Threat boundary
 
-The guarantee covers policy/API edits, including import, rollback and replay
-when their persistence preflights are installed. It does not cover a root shell,
+The guarantee covers policy/API edits, including import, rollback and replay.
+It does not cover a root shell,
 host/Compose/environment changes, network deletion, source spoofing, denial of
 service, process failure or revoked credentials. An uploaded OpenVPN profile's
 script hooks are root code execution and outside this boundary. A script-free
@@ -108,3 +150,12 @@ It makes real TCP connections over veth with strict reverse-path filtering,
 competing rules at 2/9000/10000, competing routes, REPLACE/reconcile, local-table
 takeover and an actual OpenVPN source assignment. Recovery and visible faults are
 required within five seconds. Ordinary test runs skip this opt-in kernel matrix.
+
+## Isolated management smoke
+
+Run `bash scripts/smoke-mgmt-reservation.sh` from the worktree root; see
+`test/mgmt-reservation/README.md`. This separate Compose project publishes no
+ports and proves health/login, an all-access-off commit, exact-source-only
+reachability, substrate rejection and restart persistence. It never connects to
+or changes the RangerDanger stack. Guard history is process-local; the last
+refused rollback survives store reopen.

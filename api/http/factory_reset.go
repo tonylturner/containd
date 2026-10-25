@@ -29,6 +29,25 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 			return
 		}
 
+		def := config.DefaultConfig()
+		def.System.Hostname = "containd"
+		def.System.Mgmt.ListenAddr = ":8080"
+		def.System.Mgmt.HTTPListenAddr = ":8080"
+		def.System.Mgmt.HTTPSListenAddr = ":8443"
+		t := true
+		def.System.Mgmt.EnableHTTP = &t
+		def.System.Mgmt.EnableHTTPS = &t
+		def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+		def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+		def.System.SSH.ListenAddr = ":2222"
+		def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
+		// Validate the exact replacement before revoking sessions or wiping any
+		// database. An incompatible factory default is an explicit refusal.
+		if err := config.ValidateForStore(cfgStore, def); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		ctx := c.Request.Context()
 
 		// Log intent before wiping anything (best-effort). Note: the audit DB itself is wiped
@@ -76,18 +95,6 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 			return
 		}
 
-		def := config.DefaultConfig()
-		def.System.Hostname = "containd"
-		def.System.Mgmt.ListenAddr = ":8080"
-		def.System.Mgmt.HTTPListenAddr = ":8080"
-		def.System.Mgmt.HTTPSListenAddr = ":8443"
-		t := true
-		def.System.Mgmt.EnableHTTP = &t
-		def.System.Mgmt.EnableHTTPS = &t
-		def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-		def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-		def.System.SSH.ListenAddr = ":2222"
-		def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 		if err := cfgStore.Save(ctx, def); err != nil {
 			internalError(c, err)
 			return

@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
 		return err
 	}
-	stores, cfg, err := initMgmtStores(logger)
+	stores, cfg, err := initMgmtStores(logger, opts.Reservation)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func Run(ctx context.Context, opts Options) error {
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := services.NewManager(services.ManagerOptions{})
 	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver)
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)))
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(context.Background()); err == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -154,19 +154,36 @@ func validateJWTSecret(logger *zap.SugaredLogger) error {
 	return nil
 }
 
-func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, error) {
-	stores := mgmtStores{
-		store:      mustInitStore(),
-		auditStore: mustInitAuditStore(),
-		userStore:  mustInitUsersStore(),
+func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtStores, *config.Config, error) {
+	store, err := initStore(r)
+	if err != nil {
+		return mgmtStores{}, nil, err
 	}
-	ensureDefaultConfig(logger, stores.store)
-	_ = stores.userStore.EnsureDefaultAdmin(context.Background())
+	stores := mgmtStores{store: store}
+	// The constructor preflights existing running before pending rollback. Do not
+	// open users, repair defaults, or discover/apply bindings until it succeeds.
+	fail := func(err error) (mgmtStores, *config.Config, error) { store.Close(); return mgmtStores{}, nil, err }
+	if stored, err := store.Load(context.Background()); err == nil {
+		if err := validateReservedStartup(stored, r); err != nil {
+			return fail(err)
+		}
+	} else if !errors.Is(err, config.ErrNotFound) {
+		return fail(err)
+	}
+	if err := ensureDefaultConfig(logger, store); err != nil {
+		return fail(err)
+	}
+	cfg, err := store.Load(context.Background())
+	if err != nil {
+		return fail(err)
+	}
+	if err := config.ValidateManagementReservation(cfg, r); err != nil {
+		return fail(err)
+	}
+	if err := validateReservedStartup(cfg, r); err != nil {
+		return fail(err)
+	}
 
-	cfg, err := stores.store.Load(context.Background())
-	if err != nil && !errors.Is(err, config.ErrNotFound) {
-		logger.Warnf("failed to load config on startup: %v", err)
-	}
 	// Repair stale interface.device bindings before the HTTP server begins
 	// serving traffic. Without this, mgmtAccessHandler reads the stored
 	// config with device fields pointing at kernel devices the OS may have
@@ -188,8 +205,8 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 			for i := range next.Interfaces {
 				devices[i] = next.Interfaces[i].Device
 			}
-			blankDefaultInterfaceDevices(next)
-			if !httpapi.AutoBindDefaultInterfaceDevices(next) {
+			blankDefaultInterfaceDevicesExcept(next, r)
+			if !httpapi.AutoBindDefaultInterfaceDevicesReserved(next, r) {
 				for i := range next.Interfaces {
 					next.Interfaces[i].Device = devices[i]
 				}
@@ -197,10 +214,17 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 			return nil
 		})
 		if repairErr != nil {
-			logger.Warnf("failed to persist autobound interface devices on startup: %v", repairErr)
+			return fail(fmt.Errorf("boot interface repair: %w", repairErr))
 		} else {
 			cfg = repaired
 		}
+	}
+	stores.auditStore = mustInitAuditStore()
+	stores.userStore = mustInitUsersStore()
+	if err := stores.userStore.EnsureDefaultAdmin(context.Background()); err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
 	}
 	return stores, cfg, nil
 }
@@ -209,7 +233,9 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 // logical interface (wan/dmz/lan1..lan6) so the subsequent
 // AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
 // Non-default interfaces (custom user-named) are left untouched.
-func blankDefaultInterfaceDevices(cfg *config.Config) {
+func blankDefaultInterfaceDevices(cfg *config.Config) { blankDefaultInterfaceDevicesExcept(cfg, nil) }
+
+func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservation) {
 	if cfg == nil {
 		return
 	}
@@ -218,6 +244,9 @@ func blankDefaultInterfaceDevices(cfg *config.Config) {
 		defaults[name] = struct{}{}
 	}
 	for i := range cfg.Interfaces {
+		if r != nil && cfg.Interfaces[i].Device == r.Device {
+			continue
+		}
 		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
 			cfg.Interfaces[i].Device = ""
 		}

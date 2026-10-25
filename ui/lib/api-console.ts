@@ -17,7 +17,18 @@ export type EventPage = {
   historyTruncated: boolean; engineError?: string;
 };
 
+export type ManagementReservation = {
+  active: boolean;
+  device?: string;
+  local?: string;
+  sources?: string[];
+  port?: number;
+  guard?: { active: boolean; error?: string; faults: number; lastFault?: { reason: string } };
+  rollbackFault?: string;
+};
+
 export const consoleAPI = {
+  getManagementReservation: () => getJSON<ManagementReservation>("/api/v1/system/management-reservation"),
   listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
     postJSON<CLIExecuteResponse>("/api/v1/cli/execute", { line }),

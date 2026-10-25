@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -80,7 +81,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err != nil {
 		return err
 	}
-	if err := candidate.Validate(); err != nil {
+	if err := s.ValidateConfig(candidate); err != nil {
 		return err
 	}
 	running, err := s.loadRunningLocked(ctx)
@@ -134,6 +135,12 @@ func writeRunningTx(ctx context.Context, tx *sql.Tx, cfg *Config) error {
 func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	prev, err := s.loadKind(ctx, configKeyPrevious)
 	if err != nil {
+		return err
+	}
+	if err := s.ValidateConfig(prev); err != nil {
+		if recordErr := s.recordRollbackRefusal(ctx, err); recordErr != nil {
+			return fmt.Errorf("record rollback refusal (%v): %w", err, recordErr)
+		}
 		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

@@ -45,7 +45,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		if err := edit(cfg); err != nil {
 			return nil, err
 		}
-		if err := cfg.Validate(); err != nil {
+		if err := s.ValidateConfig(cfg); err != nil {
 			return nil, fmt.Errorf("repaired config validation failed: %w", err)
 		}
 	}

@@ -54,6 +54,7 @@ type SQLiteStore struct {
 	mu                 sync.Mutex
 	pendingTimer       *time.Timer
 	autoRollbackNotify chan<- struct{}
+	options            storeOptions
 }
 
 // SetAutoRollbackNotify registers a best-effort notification after a successful
@@ -94,7 +95,7 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 }
 
 // NewSQLiteStore opens or creates a SQLite database at the given path.
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
+func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -112,6 +113,19 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	store := &SQLiteStore{db: db}
+	for _, opt := range opts {
+		opt(&store.options)
+	}
+	// Preflight stored running before any migration, expiry, or boot repair.
+	if cfg, err := store.Load(context.Background()); err == nil {
+		if err := ValidateManagementReservation(cfg, store.options.reservation); err != nil {
+			db.Close()
+			return nil, err
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		db.Close()
+		return nil, err
+	}
 	if err := store.upgradeSnapshots(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -165,7 +179,7 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := s.ValidateConfig(cfg); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
@@ -203,7 +217,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := s.ValidateConfig(cfg); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 	blob, err := marshalStoredConfig(kind, cfg)
@@ -322,6 +336,13 @@ func (s *SQLiteStore) CommitConfirmed(ctx context.Context, ttl time.Duration) er
 func (s *SQLiteStore) ConfirmCommit(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cfg, err := s.loadRunningLocked(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.ValidateConfig(cfg); err != nil {
+		return err
+	}
 	return s.clearPendingLocked(ctx)
 }
 
@@ -393,8 +414,12 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 			s.schedulePendingLocked(remain)
 			return
 		}
-		if err := s.rollbackLocked(bg); err != nil {
+		applied, err := s.timedRollbackLocked(bg)
+		if err != nil {
 			slog.Error("auto-rollback failed", "error", err)
+			return
+		}
+		if !applied {
 			return
 		}
 		select {
@@ -503,7 +528,7 @@ func (s *SQLiteStore) checkAndSchedulePending() error {
 	}
 	deadline := time.Unix(0, pending.DeadlineUnix)
 	if time.Now().After(deadline) {
-		if err := s.rollbackLocked(ctx); err != nil {
+		if _, err := s.timedRollbackLocked(ctx); err != nil {
 			return err
 		}
 		return s.clearPendingLocked(ctx)

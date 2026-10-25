@@ -48,7 +48,7 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stores, running, err := initMgmtStores(zap.NewNop().Sugar())
+	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
