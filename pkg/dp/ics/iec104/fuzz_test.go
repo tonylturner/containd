@@ -45,7 +45,7 @@ func checkEvents(t *testing.T, res dpi.StreamResult) {
 }
 
 func addFixtureSeeds(f *testing.F) {
-	for _, fx := range loadFixtures(f) {
+	for _, fx := range append(loadFixtures(f), capturedFuzzFixtures(f)...) {
 		f.Add(fx.bytes, fx.dir == dpi.ServerToClient)
 	}
 }
@@ -80,6 +80,20 @@ func FuzzASDU(f *testing.F) {
 	for _, fx := range loadFixtures(f) {
 		if len(fx.bytes) > apciLen && fx.bytes[2]&0x01 == 0 {
 			f.Add(fx.bytes[apciLen:], fx.dir == dpi.ServerToClient)
+		}
+	}
+	for _, fx := range capturedFuzzFixtures(f) {
+		// Walk complete wire APDUs, including every APDU of coalesced
+		// capture streams; partial APDUs remain stream/APCI seeds.
+		for b := fx.bytes; len(b) >= apciLen; {
+			n := int(b[1]) + 2
+			if b[0] != 0x68 || n < apciLen || n > len(b) {
+				break
+			}
+			if n > apciLen && b[2]&0x01 == 0 {
+				f.Add(b[apciLen:n], fx.dir == dpi.ServerToClient)
+			}
+			b = b[n:]
 		}
 	}
 	f.Fuzz(func(t *testing.T, body []byte, server bool) {

@@ -32,8 +32,8 @@ test/iec104/capture/capture.sh            # writes into test/iec104/testdata/
 - `NAME.expected.tsv` is Wireshark's independent decode of each pcap
   (TShark 4.6.7), one row per TCP segment that carries APDUs; several APDUs
   or objects in one segment are comma-separated. It is a second-parser
-  cross-check for the containd decoder. Go tests must not run tshark; derive
-  byte fixtures from the pcaps with checked-in extraction metadata (§9).
+  cross-check for the containd decoder. Go tests read the pcaps directly,
+  without tshark or a separately extracted copy of their bytes (see below).
 - Timestamps, ports, ISNs and the SHA256 sums change on every regeneration;
   the APDU bytes do not, apart from CP56Time2a values and the drifting feeder
   current.
@@ -139,3 +139,43 @@ Types 45, 47-51, 58-64 and 103-107, SQ = 1 objects, IPv4 fragments and
 out-of-order delivery are not here; use documented synthetic fixtures for
 those (spec §9). The `abort-reconnect` evidence comes from
 `scripts/smoke-iec104.sh` once the integrated engine resets sessions.
+
+## Go decoder regression corpus
+
+`pkg/dp/ics/iec104/captures_test.go` reads all five pcaps listed in
+`SHA256SUMS`, verifies each SHA256, decodes Ethernet/IPv4/TCP, and groups
+payloads by directional connection tuple. Capture name, packet number,
+tuple and port-derived direction remain attached to each input. This is
+deterministic extraction at test time, with no generated fixture to drift.
+The reader intentionally rejects different pcap formats, truncated records,
+tuple reuse, TCP gaps or retransmissions rather than silently changing the
+corpus. Regeneration that introduces those features needs an explicit
+reader update; this helper is not a general TCP reassembler.
+
+`TestReferenceCapturePackets` delivers the original segments, retaining
+incomplete bytes until an APDU completes, and compares the decoder with
+every Wireshark row: framing, sequences, U-functions, ASDU headers, object
+counts, addresses, values, command select bits, qualifiers, quality and
+timestamps. Float comparisons allow the TSV's float32 rounding. CP56Time2a
+has no wire timezone, so timestamp comparison uses wall-clock fields,
+not Wireshark's attached host offset.
+
+The explicit strictness exceptions are `malformed.pcap` frames 28 and 29
+(invalid DCS: malformed), 37 (Type 104: unsupported), and 16 (bad APCI
+length: framing error). Wireshark reports object fields for the first
+three, but containd deliberately emits no decoded object for these invalid
+APDUs; their headers and event kinds are checked instead. The truncated
+stream starting at frame 4 stays incomplete and emits no event.
+
+`TestReferenceCaptureStreamTransforms` coalesces each connection direction,
+splits it at every byte, and tests complete prefixes with partial-next-APDU
+tails. These are labelled transforms of captured bytes, including the
+capture's malformed and incomplete streams, not additional captured traffic.
+`FuzzAPCI` and `FuzzStream` use both original segments and coalesced streams;
+`FuzzASDU` uses every complete captured I-format APDU's ASDU. Synthetic
+fixtures remain separate and retain their existing coverage.
+
+```sh
+go test ./pkg/dp/ics/iec104/ -run '^TestReferenceCapture'
+go test ./pkg/dp/ics/iec104/ -run '^$' -fuzz '^FuzzStream$' -fuzztime 30s
+```
