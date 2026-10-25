@@ -9,6 +9,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to promote after it reaches main (for example v0.1.33)"
+        required: true
+        type: string
 
 permissions:
   contents: write   # needed to attach SBOMs to GitHub releases
@@ -22,7 +28,11 @@ env:
 
 jobs:
   build-and-push:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      mgmt-digest: ${{ steps.build-mgmt.outputs.digest }}
+      engine-digest: ${{ steps.build-engine.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -64,9 +74,7 @@ jobs:
           file: build/Dockerfile.mgmt
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ env.IMAGE_MGMT }}:${{ steps.meta.outputs.version }}
-            ${{ env.IMAGE_MGMT }}:latest
+          tags: ${{ env.IMAGE_MGMT }}:${{ steps.meta.outputs.version }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
@@ -81,9 +89,7 @@ jobs:
           file: build/Dockerfile.engine
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ env.IMAGE_ENGINE }}:${{ steps.meta.outputs.version }}
-            ${{ env.IMAGE_ENGINE }}:latest
+          tags: ${{ env.IMAGE_ENGINE }}:${{ steps.meta.outputs.version }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
@@ -171,3 +177,105 @@ jobs:
             sbom-engine.cdx.json
             release-images.txt
             csaf-documents.tgz
+
+  # Both entry points use this job; a dispatch never rebuilds or signs images.
+  promote:
+    needs: build-and-push
+    if: ${{ !cancelled() && (needs.build-and-push.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-latest
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      BUILT_MGMT_DIGEST: ${{ needs.build-and-push.outputs.mgmt-digest }}
+      BUILT_ENGINE_DIGEST: ${{ needs.build-and-push.outputs.engine-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # Full history is required to prove ancestry, including annotated tags.
+
+      - name: Check promotion eligibility
+        id: eligible
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ "$RELEASE_TAG" != v* || ! "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo "Expected a v-prefixed release tag with a valid container version tag" >&2
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          # Refresh explicit refs; neither the dispatch branch nor the push ref proves main ancestry.
+          git fetch --force --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            echo "Not promoting prerelease $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+          elif git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if (( status != 1 )); then
+              exit "$status"
+            fi
+            echo "Not promoting $RELEASE_TAG: $commit is not an ancestor of origin/main" >> "$GITHUB_STEP_SUMMARY"
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.eligible.outputs.promote == 'true'
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.eligible.outputs.promote == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: steps.eligible.outputs.promote == 'true'
+
+      - name: Resolve and verify both signed release images and SBOMs
+        id: verified
+        if: steps.eligible.outputs.promote == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${RELEASE_TAG}"
+          verify_image() {
+            local image="$1" digest="$2" output="$3"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              digest="$(docker buildx imagetools inspect "$image:${RELEASE_TAG#v}" \
+                --format '{{json .Manifest}}' | jq -er '.digest')"
+            fi
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "Missing or invalid digest for $image" >&2
+              exit 1
+            fi
+            cosign verify \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$image@$digest"
+            # Fail closed if an earlier release run signed but did not finish attaching SBOMs.
+            cosign download sbom "$image@$digest" > /dev/null
+            echo "$output=$digest" >> "$GITHUB_OUTPUT"
+          }
+          verify_image "$IMAGE_MGMT" "$BUILT_MGMT_DIGEST" mgmt
+          verify_image "$IMAGE_ENGINE" "$BUILT_ENGINE_DIGEST" engine
+
+      - name: Promote exact verified digests to latest
+        if: steps.eligible.outputs.promote == 'true'
+        shell: bash
+        env:
+          MGMT_DIGEST: ${{ steps.verified.outputs.mgmt }}
+          ENGINE_DIGEST: ${{ steps.verified.outputs.engine }}
+        run: |
+          set -euo pipefail
+          # A single index source is copied verbatim, retaining its signatures and SBOM references.
+          docker buildx imagetools create --prefer-index=false \
+            --tag "$IMAGE_MGMT:latest" "$IMAGE_MGMT@$MGMT_DIGEST"
+          docker buildx imagetools create --prefer-index=false \
+            --tag "$IMAGE_ENGINE:latest" "$IMAGE_ENGINE@$ENGINE_DIGEST"
