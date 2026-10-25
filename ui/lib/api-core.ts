@@ -1,26 +1,22 @@
-// API base path resolution. Three precedence rules:
-//   1. NEXT_PUBLIC_API_BASE env var (build-time, explicit override)
-//   2. Runtime auto-detect: if the page is hosted at /containd/* (the
-//      convention rangerdanger uses when embedding containd's UI under
-//      a path prefix), assume the backend is mounted at the same prefix
-//   3. Empty → API calls go to the same origin's root
-// The runtime branch makes the embedded UX Just Work without requiring
-// the embedder to rebuild containd with a baked-in env var.
-function resolveAPIBase(): string {
-  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
-  if (typeof window !== "undefined" && window.location.pathname.startsWith("/containd/")) {
-    return "/containd";
-  }
-  return "";
+// The UI and API share runtime base-path detection. This keeps a statically
+// exported UI usable at both the origin root and RangerDanger's /containd/
+// mount without duplicating the path-prefix convention.
+function resolveBasePath(pathname?: string): string {
+  const currentPathname =
+    pathname ?? (typeof window !== "undefined" ? window.location.pathname : "");
+  return currentPathname.startsWith("/containd/") ? "/containd" : "";
 }
 
-const API_BASE = resolveAPIBase();
+const BASE_PATH = resolveBasePath();
+// An explicit API origin/path still takes precedence for API requests only;
+// public assets must be served from the UI's own base path.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || BASE_PATH;
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
-// apiURL is defined below; both bespoke fetch sites and the apiFetch
-// helper read API_BASE through it (or directly), so updating
-// resolveAPIBase() above is the single source of truth for path
-// prefixing.
+export function staticAssetURL(path: string, pathname?: string): string {
+  return `${resolveBasePath(pathname)}${path}`;
+}
+
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";

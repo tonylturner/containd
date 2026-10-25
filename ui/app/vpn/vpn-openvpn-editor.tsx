@@ -4,6 +4,7 @@ import Image from "next/image";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { Zone } from "../../lib/api";
+import { staticAssetURL } from "../../lib/api-core";
 import { InfoTip } from "../../components/InfoTip";
 import {
   Badge,
@@ -63,7 +64,7 @@ export function OpenVPNEditorCard({
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-amber-500/25 to-rose-500/10">
             <Image
-              src="/icons/openvpn.svg"
+              src={staticAssetURL("/icons/openvpn.svg")}
               alt="OpenVPN"
               width={24}
               height={24}
