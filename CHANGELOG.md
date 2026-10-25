@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IEC 104 decodes single-point information: TypeID 1 (M_SP_NA_1) and
   TypeID 30 (M_SP_TB_1, with CP56Time2a). Both are monitor-class and match
   read-only IEC 104 rules.
+- IEC 104 decodes step-position Types 5 and 32, including the signed VTI,
+  transient flag, quality and CP56Time2a. It also decodes common monitor
+  Types 7, 9, 11, 15, 21 and 33-37; sequenced addressing is supported for
+  every described monitor type.
 - `set firewall ics-rule ... iec104` accepts `--type-ids`, `--classes`,
   `--ca`, `--ioa`, `--direction` and `--mode`. `show firewall ics-rules`
   shows the IEC fields.

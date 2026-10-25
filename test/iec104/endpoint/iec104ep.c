@@ -47,6 +47,7 @@
 #define CA_AUX 2
 #define IOA_BREAKER_POS 1001   /* M_DP_NA_1 / M_DP_TB_1, monitor */
 #define IOA_TRIP_STATUS 1002   /* M_SP_NA_1 / M_SP_TB_1, monitor */
+#define IOA_STEP_POSITION 1301 /* M_ST_NA_1 / M_ST_TB_1, monitor */
 #define IOA_FEEDER_CURRENT 1101 /* M_ME_NC_1, monitor */
 #define IOA_BUSBAR_VOLTAGE 1102 /* M_ME_NC_1, monitor */
 #define IOA_BREAKER_CMD 2001   /* C_DC_NA_1 on CA 1, policy-allowed breaker */
@@ -82,6 +83,7 @@ isCommandPoint(int ca, int ioa)
 
 static volatile bool running = true;
 static bool tripActive = false;
+static int stepPosition = 12;
 
 static void
 sigint_handler(int signalId)
@@ -186,6 +188,22 @@ sendTripSpontaneous(CS104_Slave slave)
 }
 
 static void
+sendStepPositionSpontaneous(CS104_Slave slave)
+{
+    CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
+    struct sCP56Time2a ts;
+    CP56Time2a_createFromMsTimestamp(&ts, Hal_getTimeInMs());
+    CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_SPONTANEOUS, 0, CA_MAIN, false, false);
+    InformationObject io = (InformationObject)
+        StepPositionWithCP56Time2a_create(NULL, IOA_STEP_POSITION, stepPosition, false,
+            IEC60870_QUALITY_GOOD, &ts);
+    CS101_ASDU_addInformationObject(asdu, io);
+    InformationObject_destroy(io);
+    CS104_Slave_enqueueASDU(slave, asdu);
+    CS101_ASDU_destroy(asdu);
+}
+
+static void
 handleGeneralInterrogation(CS104_Slave slave)
 {
     Semaphore_wait(rtuLock);
@@ -193,7 +211,8 @@ handleGeneralInterrogation(CS104_Slave slave)
     {
         CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
         /* CA 1 answers with type 3 breaker position, type 1 trip status,
-         * then type 13 measurements (SQ=0, five objects incl. IOA edges).
+         * type 5 step position, then type 13 measurements (SQ=0, five
+         * objects incl. IOA edges).
          * CA 2 answers with one type 13 ASDU. */
         if (giProgress == 0 && giCa == CA_MAIN)
         {
@@ -233,6 +252,26 @@ handleGeneralInterrogation(CS104_Slave slave)
         }
         else if (giProgress == 2)
         {
+            if (giCa == CA_MAIN)
+            {
+                CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_INTERROGATED_BY_STATION,
+                    giOa, giCa, false, false);
+                InformationObject io = (InformationObject)
+                    StepPositionInformation_create(NULL, IOA_STEP_POSITION, stepPosition, false,
+                        IEC60870_QUALITY_GOOD);
+                CS101_ASDU_addInformationObject(asdu, io);
+                InformationObject_destroy(io);
+                if (IMasterConnection_sendASDUEx(giConn, asdu, true))
+                    giProgress++;
+                CS101_ASDU_destroy(asdu);
+            }
+            else
+            {
+                giProgress++;
+            }
+        }
+        else if (giProgress == 3)
+        {
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_INTERROGATED_BY_STATION,
                 giOa, giCa, false, false);
             if (giCa == CA_MAIN)
@@ -251,7 +290,7 @@ handleGeneralInterrogation(CS104_Slave slave)
                 giProgress++;
             CS101_ASDU_destroy(asdu);
         }
-        else if (giProgress == 3)
+        else if (giProgress == 4)
         {
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_ACTIVATION_TERMINATION,
                 giOa, giCa, false, false);
@@ -496,6 +535,7 @@ runRtu(void)
             tick++;
             CS101_AppLayerParameters alp = CS104_Slave_getAppLayerParameters(slave);
             sendTripSpontaneous(slave);
+            sendStepPositionSpontaneous(slave);
             /* feeder current drifts by +/-0.1 A so each update is a change */
             float current = nowBreaker == IEC60870_DOUBLE_POINT_ON ? 182.5f + (float)(tick % 3) * 0.1f : 0.0f;
             CS101_ASDU asdu = CS101_ASDU_create(alp, false, CS101_COT_SPONTANEOUS, 0, CA_MAIN, false, false);

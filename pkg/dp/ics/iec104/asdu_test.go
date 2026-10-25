@@ -4,6 +4,7 @@
 package iec104
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -83,12 +84,42 @@ func TestDescriptorTable(t *testing.T) {
 		{"3 M_DP_NA_1 DIQ", srv, asdu(3, 1, cotSpont, 0, 1, cat(ioa(0x123456), []byte{0x82})...), ClassMonitor, false,
 			objWant{eventfields.KeyIOA: uint32(0x123456), eventfields.KeyValue: uint8(2), eventfields.KeyQuality: uint8(0x80)},
 			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
+		{"5 M_ST_NA_1 VTI+QDS", srv, asdu(5, 1, cotSpont, 0, 1, cat(ioa(1301), []byte{0xC2, 0x90})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(1301), eventfields.KeyValue: int8(-62), keyTransient: true, eventfields.KeyQuality: uint8(0x90)},
+			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
+		{"7 M_BO_NA_1 BSI+QDS", srv, asdu(7, 1, cotSpont, 0, 1, cat(ioa(101), []byte{0xEF, 0xBE, 0xAD, 0xDE, 0x90})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(101), eventfields.KeyValue: uint32(0xDEADBEEF), eventfields.KeyQuality: uint8(0x90)},
+			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
+		{"9 M_ME_NA_1 normalized+QDS", srv, asdu(9, 1, cotSpont, 0, 1, cat(ioa(1001), []byte{0xFE, 0xFF, 0x10})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(1001), eventfields.KeyValue: int16(-2), eventfields.KeyQuality: uint8(0x10)},
+			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
+		{"11 M_ME_NB_1 scaled+QDS", srv, asdu(11, 1, cotSpont, 0, 1, cat(ioa(1002), []byte{0xD2, 0x04, 0x40})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(1002), eventfields.KeyValue: int16(1234), eventfields.KeyQuality: uint8(0x40)},
+			append(append([]string{eventfields.KeyQualifier}, noSelect...), noTime...)},
 		{"13 M_ME_NC_1 float+QDS", srv, asdu(13, 1, cotInrogen, 0, 1, cat(ioa(2001), f32(-12.5), []byte{0x01})...), ClassMonitor, false,
 			objWant{eventfields.KeyValue: float32(-12.5), eventfields.KeyQuality: uint8(0x01)}, append(noSelect, noTime...)},
+		{"15 M_IT_NA_1 BCR", srv, asdu(15, 1, cotSpont, 0, 1, cat(ioa(2001), []byte{0xFE, 0xFF, 0xFF, 0xFF, 0xE5})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(2001), eventfields.KeyValue: int32(-2), eventfields.KeyQualifier: uint8(5), eventfields.KeyQuality: uint8(0xE0)},
+			append(noSelect, noTime...)},
+		{"21 M_ME_ND_1 normalized without quality", srv, asdu(21, 1, cotSpont, 0, 1, cat(ioa(2002), []byte{0xFF, 0x7F})...), ClassMonitor, false,
+			objWant{eventfields.KeyIOA: uint32(2002), eventfields.KeyValue: int16(32767)},
+			append(append([]string{eventfields.KeyQualifier, eventfields.KeyQuality}, noSelect...), noTime...)},
 		{"30 M_SP_TB_1 SIQ+CP56", srv, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1002), []byte{0x81}, courseTime)...), ClassMonitor, false,
 			with(timeWant, objWant{eventfields.KeyValue: uint8(1), eventfields.KeyQuality: uint8(0x80)}), noSelect},
 		{"31 M_DP_TB_1 DIQ+CP56", srv, asdu(31, 1, cotSpont, 0, 1, cat(ioa(3001), []byte{0x01}, courseTime)...), ClassMonitor, false,
 			with(timeWant, objWant{eventfields.KeyValue: uint8(1), eventfields.KeyQuality: uint8(0)}), noSelect},
+		{"32 M_ST_TB_1 VTI+QDS+CP56", srv, asdu(32, 1, cotSpont, 0, 1, cat(ioa(1301), []byte{0xC2, 0x90}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: int8(-62), keyTransient: true, eventfields.KeyQuality: uint8(0x90)}), noSelect},
+		{"33 M_BO_TB_1 BSI+QDS+CP56", srv, asdu(33, 1, cotSpont, 0, 1, cat(ioa(3001), []byte{0xEF, 0xBE, 0xAD, 0xDE, 0x90}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: uint32(0xDEADBEEF), eventfields.KeyQuality: uint8(0x90)}), append([]string{eventfields.KeyQualifier}, noSelect...)},
+		{"34 M_ME_TD_1 normalized+QDS+CP56", srv, asdu(34, 1, cotSpont, 0, 1, cat(ioa(3002), []byte{0xFD, 0xFF, 0x90}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: int16(-3), eventfields.KeyQuality: uint8(0x90)}), append([]string{eventfields.KeyQualifier}, noSelect...)},
+		{"35 M_ME_TE_1 scaled+QDS+CP56", srv, asdu(35, 1, cotSpont, 0, 1, cat(ioa(3003), []byte{0xEA, 0x00, 0x00}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: int16(234), eventfields.KeyQuality: uint8(0)}), append([]string{eventfields.KeyQualifier}, noSelect...)},
+		{"36 M_ME_TF_1 float+QDS+CP56", srv, asdu(36, 1, cotSpont, 0, 1, cat(ioa(3004), f32(1.5), []byte{0x10}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: float32(1.5), eventfields.KeyQuality: uint8(0x10)}), append([]string{eventfields.KeyQualifier}, noSelect...)},
+		{"37 M_IT_TB_1 BCR+CP56", srv, asdu(37, 1, cotSpont, 0, 1, cat(ioa(3005), []byte{0x7B, 0, 0, 0, 0x05}, courseTime)...), ClassMonitor, false,
+			with(timeWant, objWant{eventfields.KeyValue: int32(123), eventfields.KeyQualifier: uint8(5), eventfields.KeyQuality: uint8(0)}), noSelect},
 		{"45 C_SC_NA_1 SCO select", cli, asdu(45, 1, cotAct, 0, 1, cat(ioa(5001), []byte{0x85})...), ClassControl, true,
 			objWant{eventfields.KeyValue: uint8(1), eventfields.KeySelect: true, eventfields.KeyQualifier: uint8(1)}, noTime},
 		{"46 C_DC_NA_1 DCO execute", cli, asdu(46, 1, cotAct, 3, 1, cat(ioa(2001), []byte{0x02})...), ClassControl, true,
@@ -216,6 +247,52 @@ func TestMultipleObjects(t *testing.T) {
 	}
 }
 
+func TestSQ1MonitorDescriptors(t *testing.T) {
+	cases := []struct {
+		typeID uint8
+		elem   []byte
+	}{
+		{1, []byte{1}},
+		{3, []byte{2}},
+		{5, []byte{0xC2, 0x90}},
+		{7, []byte{1, 2, 3, 4, 0x90}},
+		{9, []byte{0xFE, 0xFF, 0x10}},
+		{11, []byte{0xD2, 0x04, 0x40}},
+		{13, cat(f32(1.5), []byte{0x10})},
+		{15, []byte{0xFE, 0xFF, 0xFF, 0xFF, 0xE5}},
+		{21, []byte{0xFF, 0x7F}},
+		{30, cat([]byte{1}, courseTime)},
+		{31, cat([]byte{2}, courseTime)},
+		{32, cat([]byte{0xC2, 0x90}, courseTime)},
+		{33, cat([]byte{1, 2, 3, 4, 0x90}, courseTime)},
+		{34, cat([]byte{0xFE, 0xFF, 0x10}, courseTime)},
+		{35, cat([]byte{0xD2, 0x04, 0x40}, courseTime)},
+		{36, cat(f32(1.5), []byte{0x10}, courseTime)},
+		{37, cat([]byte{0xFE, 0xFF, 0xFF, 0xFF, 0xE5}, courseTime)},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprint(tc.typeID), func(t *testing.T) {
+			body := cat(ioa(200), tc.elem, tc.elem)
+			frame := iFrame(0, 0, asdu(tc.typeID, vsqSQ|2, cotSpont, 0, 1, body...))
+			evs := events(parseOne(t, srv, frame))
+			if len(evs) != 2 {
+				t.Fatalf("got %d objects, want 2", len(evs))
+			}
+			for i, ev := range evs {
+				if ev.Kind != eventfields.KindResponse {
+					t.Errorf("object %d kind %s (%v)", i, ev.Kind, ev.Attributes[eventfields.KeyError])
+				}
+				checkAttrs(t, "sequence object", ev.Attributes, objWant{
+					eventfields.KeySQ:          true,
+					eventfields.KeyObjectCount: uint8(2),
+					eventfields.KeyIOA:         uint32(200 + i),
+					eventfields.KeyObjectIndex: uint8(i),
+				})
+			}
+		})
+	}
+}
+
 func TestMalformedAndProfile(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -238,8 +315,6 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"DCO state 3", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "command state 3"},
 		{"RCO state 0", cli, iFrame(0, 0, asdu(60, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00}, courseTime)...)), eventfields.KindMalformed, "command state 0"},
 		{"bad CP56", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, cp56(25, 2, 29, 0, 0, 0))...)), eventfields.KindMalformed, "CP56Time2a day 29"},
-		{"profile: SQ=1 on 30", srv, iFrame(0, 0, asdu(30, vsqSQ|1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), eventfields.KindMalformed, "profile: SQ=1 is not accepted for type 30"},
-		{"profile: SQ=1 on 31", srv, iFrame(0, 0, asdu(31, vsqSQ|1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime)...)), eventfields.KindMalformed, "profile: SQ=1 is not accepted for type 31"},
 		{"profile: SQ=1 on 46", cli, iFrame(0, 0, asdu(46, vsqSQ|1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
 		{"profile: two commands", cli, iFrame(0, 0, asdu(46, 2, cotAct, 0, 1, cat(ioa(1), []byte{1}, ioa(2), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
 		{"profile: two GI", cli, iFrame(0, 0, asdu(100, 2, cotAct, 0, 1, cat(ioa(0), []byte{20}, ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: type 100 needs SQ=0"},
@@ -372,7 +447,9 @@ func TestCP56(t *testing.T) {
 
 func TestClassOf(t *testing.T) {
 	want := map[uint8]string{
-		1: ClassMonitor, 3: ClassMonitor, 13: ClassMonitor, 30: ClassMonitor, 31: ClassMonitor,
+		1: ClassMonitor, 3: ClassMonitor, 5: ClassMonitor, 7: ClassMonitor, 9: ClassMonitor, 11: ClassMonitor,
+		13: ClassMonitor, 15: ClassMonitor, 21: ClassMonitor, 30: ClassMonitor, 31: ClassMonitor,
+		32: ClassMonitor, 33: ClassMonitor, 34: ClassMonitor, 35: ClassMonitor, 36: ClassMonitor, 37: ClassMonitor,
 		45: ClassControl, 51: ClassControl, 58: ClassControl, 64: ClassControl,
 		70: ClassSystem, 100: ClassSystem, 102: ClassSystem, 103: ClassSystem, 105: ClassSystem, 107: ClassSystem,
 		0: ClassUnknown, 2: ClassUnknown, 52: ClassUnknown, 104: ClassUnknown, 106: ClassUnknown, 255: ClassUnknown,

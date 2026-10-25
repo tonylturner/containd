@@ -45,6 +45,13 @@ func TestNonFiniteShortFloat(t *testing.T) {
 			{"13 M_ME_NC_1", srv, asdu(13, 1, cotSpont, 0, 1, cat(ioa(1001), r32(nf.bits), []byte{0x90})...), eventfields.KindResponse,
 				objWant{eventfields.KeyIOA: uint32(1001), eventfields.KeyQuality: uint8(0x90), eventfields.KeyClass: ClassMonitor, eventfields.KeyIsWrite: false},
 				append([]string{eventfields.KeySelect, eventfields.KeyQualifier}, noTime...), true},
+			{"36 M_ME_TF_1", srv, asdu(36, 1, cotSpont, 0, 1, cat(ioa(1002), r32(nf.bits), []byte{0x90}, courseTime)...), eventfields.KindResponse,
+				objWant{
+					eventfields.KeyIOA: uint32(1002), eventfields.KeyQuality: uint8(0x90),
+					eventfields.KeyClass: ClassMonitor, eventfields.KeyIsWrite: false,
+					eventfields.KeySourceTime: "2026-11-07T09:15:02.345", eventfields.KeyTimeValid: true, eventfields.KeyTimeSummer: false,
+				},
+				[]string{eventfields.KeySelect, eventfields.KeyQualifier}, true},
 			{"50 C_SE_NC_1 select", cli, asdu(50, 1, cotAct, 0, 1, cat(ioa(7003), r32(nf.bits), []byte{0x85})...), eventfields.KindRequest,
 				objWant{eventfields.KeyIOA: uint32(7003), eventfields.KeySelect: true, eventfields.KeyQualifier: uint8(5), eventfields.KeyClass: ClassControl, eventfields.KeyIsWrite: true},
 				append([]string{eventfields.KeyQuality}, noTime...), false},
@@ -117,18 +124,5 @@ func TestNonFiniteShortFloatSiblings(t *testing.T) {
 			t.Errorf("object %d: kind %s", i, ev.Kind)
 		}
 		checkAttrs(t, "sibling", ev.Attributes, want[i].obj, want[i].absent)
-	}
-}
-
-// Type 36 (M_ME_TF_1, short float with CP56Time2a) has no B descriptor, so
-// it stays unsupported whatever its value bits are, and never carries
-// value_invalid.
-func TestNonFiniteShortFloatUnsupported36(t *testing.T) {
-	for _, nf := range nonFinite {
-		ev := events(parseOne(t, srv, iFrame(0, 0, asdu(36, 1, cotSpont, 0, 1, cat(ioa(1), r32(nf.bits), []byte{0}, courseTime)...))))[0]
-		if ev.Kind != eventfields.KindUnsupported {
-			t.Errorf("36 %s: kind %s", nf.name, ev.Kind)
-		}
-		checkAttrs(t, "36 "+nf.name, ev.Attributes, objWant{eventfields.KeyTypeID: uint8(36)}, eventfields.KeyValue, eventfields.KeyValueInvalid)
 	}
 }

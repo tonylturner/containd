@@ -83,7 +83,9 @@ change:
 For TypeID coverage, the smoke RTU also reports a single-point trip status at
 CA 1 / IOA 1002: Type 1 in the GI and Type 30 spontaneously. Its simulated
 trip state is false; the point exercises decoding and monitoring, not
-protection behavior.
+protection behavior. It reports a step position at CA 1 / IOA 1301 as Type 5
+in the GI and Type 32 spontaneously (position 12, not transient), matching the
+EU RTU's type pair and exercising the VTI/QDS/CP56Time2a layouts.
 
 A prevention assertion passes only if `commands_received` (or `gi_requests`)
 does not move: the RTU never decoded the forbidden bytes. The reset assertion

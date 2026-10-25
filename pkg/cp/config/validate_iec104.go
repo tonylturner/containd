@@ -22,7 +22,8 @@ var iec104Classes = []string{"monitor", "control", "system", "unknown"}
 // (spec §7.2). An enforce ALLOW rule may name only these; types without a
 // descriptor decode as unsupported and may appear in deny or learn rules.
 var iec104DescribedTypes = map[int]struct{}{
-	1: {}, 3: {}, 13: {}, 30: {}, 31: {},
+	1: {}, 3: {}, 5: {}, 7: {}, 9: {}, 11: {}, 13: {}, 15: {}, 21: {},
+	30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {},
 	45: {}, 46: {}, 47: {}, 48: {}, 49: {}, 50: {}, 51: {},
 	58: {}, 59: {}, 60: {}, 61: {}, 62: {}, 63: {}, 64: {},
 	70: {}, 100: {}, 101: {}, 102: {}, 103: {}, 105: {}, 107: {},

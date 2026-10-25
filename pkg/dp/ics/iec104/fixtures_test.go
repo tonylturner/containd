@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 type fixture struct {
@@ -94,5 +95,43 @@ func TestSyntheticFixtures(t *testing.T) {
 	res, err := NewDecoder().ParseStream(iecState(), view(dpi.ClientToServer, 0, stream))
 	if err != nil || res.Consumed != len(stream) {
 		t.Fatalf("coalesced client fixtures: err %v consumed %d of %d", err, res.Consumed, len(stream))
+	}
+}
+
+func TestNewMonitorTypesRejectBadLengths(t *testing.T) {
+	types := map[byte]bool{
+		5: true, 7: true, 9: true, 11: true, 15: true, 21: true,
+		32: true, 33: true, 34: true, 35: true, 36: true, 37: true,
+	}
+	seen := make(map[byte]bool, len(types))
+	for _, fx := range loadFixtures(t) {
+		if len(fx.bytes) < 7 || !types[fx.bytes[6]] {
+			continue
+		}
+		typeID := fx.bytes[6]
+		seen[typeID] = true
+		for _, delta := range []int{-1, 1} {
+			bad := append([]byte(nil), fx.bytes...)
+			if delta < 0 {
+				bad = bad[:len(bad)-1]
+			} else {
+				bad = append(bad, 0)
+			}
+			bad[1] = byte(len(bad) - 2)
+			res := parseOne(t, dpi.ServerToClient, bad)
+			evs := events(res)
+			if len(evs) != 1 || evs[0].Kind != eventfields.KindMalformed {
+				t.Errorf("type %d length delta %+d: got %d events, want malformed", typeID, delta, len(evs))
+				continue
+			}
+			if !strings.Contains(evs[0].Attributes[eventfields.KeyError].(string), "ASDU body is") {
+				t.Errorf("type %d length delta %+d: error = %v", typeID, delta, evs[0].Attributes[eventfields.KeyError])
+			}
+		}
+	}
+	for typeID := range types {
+		if !seen[typeID] {
+			t.Errorf("no synthetic decoder fixture for monitor type %d", typeID)
+		}
 	}
 }

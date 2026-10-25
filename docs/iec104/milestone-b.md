@@ -498,19 +498,28 @@ restriction**, not malformed wire.
   consecutive IOAs; reject 24-bit overflow. Apply the descriptor's
   element size to every object. Reject zero count, extra bytes and bad
   layouts.
-- **B profile SQ/count:** SQ = 1 is accepted only for types 1, 3 and 13.
-  Control and system types need SQ = 0 and count = 1. Timed monitoring
-  (30 and 31) needs SQ = 0. Anything else is `malformed` with an `error`
-  that says `profile:`. The standard allows SQ = 1 for other monitor
-  types (W6); B rejects it on purpose.
+- **B profile SQ/count:** every monitor descriptor in the table accepts
+  SQ = 1. SQ only elides the repeated IOAs; each object still carries its
+  own element, including its own CP56Time2a where timed. Control and system
+  types need SQ = 0 and count = 1. Anything else is `malformed` with an
+  `error` that says `profile:`.
 
 | Type IDs | Class | Element after IOA |
 |---|---|---|
 | 1 `M_SP_NA_1` | monitor | SIQ (1): SPI bit 0 and quality bits 4-7. Keep value and quality. SQ = 1 is accepted. |
 | 3 `M_DP_NA_1` | monitor | DIQ (1): DPI bits 0-1 and quality bits 4-7. Keep value and quality. SQ = 1 is accepted. |
+| 5 `M_ST_NA_1` | monitor | VTI + QDS (2): signed 7-bit value and bit-7 transient flag; keep QDS as quality. SQ = 1 is accepted. |
+| 7 `M_BO_NA_1` | monitor | BSI + QDS (5): bitstring32 and quality. SQ = 1 is accepted. |
+| 9 `M_ME_NA_1` / 11 `M_ME_NB_1` | monitor | normalized / scaled int16 + QDS (3). Keep value and quality. SQ = 1 is accepted. |
 | 13 `M_ME_NC_1` | monitor | float32 + QDS (5). Keep value and quality. SQ = 1 is accepted. |
-| 30 `M_SP_TB_1` | monitor | SIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 0 only. |
-| 31 `M_DP_TB_1` | monitor | DIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 0 only. |
+| 15 `M_IT_NA_1` | monitor | BCR (5): signed int32 value, sequence in qualifier bits 0-4 and counter flags in quality bits 5-7. SQ = 1 is accepted. |
+| 21 `M_ME_ND_1` | monitor | normalized int16 (2), without quality. SQ = 1 is accepted. |
+| 30 `M_SP_TB_1` / 31 `M_DP_TB_1` | monitor | SIQ / DIQ + CP56Time2a (8). Keep value, quality and time validity. SQ = 1 is accepted. |
+| 32 `M_ST_TB_1` | monitor | VTI + QDS + CP56Time2a (9). Keep signed 7-bit value, transient, quality and time validity. SQ = 1 is accepted. |
+| 33 `M_BO_TB_1` | monitor | BSI + QDS + CP56Time2a (12). Keep bitstring, quality and time validity. SQ = 1 is accepted. |
+| 34 `M_ME_TD_1` / 35 `M_ME_TE_1` | monitor | normalized / scaled int16 + QDS + CP56Time2a (10). Keep value, quality and time validity. SQ = 1 is accepted. |
+| 36 `M_ME_TF_1` | monitor | float32 + QDS + CP56Time2a (12). Keep value, quality and time validity. SQ = 1 is accepted. |
+| 37 `M_IT_TB_1` | monitor | BCR + CP56Time2a (12). Keep counter value, sequence, flags and time validity. SQ = 1 is accepted. |
 | 45/46/47, 58/59/60 | control | SCO/DCO/RCO (1); timed adds CP56Time2a (7). Bit 7 = S/E (select); bits 2-6 = QU qualifier. SCO: value = bit 0, bit 1 reserved (must be 0). DCO/RCO: value = bits 0-1; only 1 and 2 are legal commands, 0 and 3 are `malformed`. |
 | 48/49/50, 61/62/63 | control | normalized int16 / scaled int16 / float32, + QOS (1); timed adds 7. QOS: bits 0-6 = QL, bit 7 = S/E (select). |
 | 51, 64 | control | bitstring32 (4); timed adds 7. **No select bit and no qualifier**: omit `select`. |
@@ -519,9 +528,15 @@ restriction**, not malformed wire.
 | 104, 106 | unknown | IEC 101 test and delay commands, not used in IEC 104. Header-only `unsupported`. |
 | anything else | unknown | Header-only `unsupported` event. Never read-only. |
 
-The first course uses only 1, 3, 13, 30, 31, 100 and 46. The other control
-layouts are decoded so that a student cannot bypass the classifier with
-a different command type; decoding does not authorize them.
+The EU course uses monitor types 1, 3, 5, 13, 30, 31 and 32, plus GI 100
+and command 46. The other control layouts are decoded so that a student
+cannot bypass the classifier with a different command type; decoding does
+not authorize them.
+
+The common monitor layouts added for EU step-position and mixed RTU traffic
+are 5, 7, 9, 11, 15, 21 and 32-37. Other monitor-direction IDs not in this
+scope remain unsupported: CP24-time-tagged 2, 4, 6, 8, 10, 12, 14 and 16,
+protection/event layouts 17-20, and reserved IDs 22-29 and 38-44.
 
 ### 7.3 Role and cause
 
