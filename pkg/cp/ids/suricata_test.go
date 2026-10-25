@@ -86,10 +86,10 @@ func TestParseSuricataAlertHTTP(t *testing.T) {
 	if len(r.When.All) != 2 {
 		t.Fatalf("expected 2 When conditions, got %d: %+v", len(r.When.All), r.When)
 	}
-	if r.When.All[0].Field != "attr.http_method" || r.When.All[0].Value != "GET" {
+	if r.When.All[0].Field != "attr.method" || r.When.All[0].Value != "GET" {
 		t.Fatalf("unexpected first When condition: %+v", r.When.All[0])
 	}
-	if r.When.All[1].Field != "attr.http_uri" || r.When.All[1].Value != "/malware" {
+	if r.When.All[1].Field != "attr.path" || r.When.All[1].Value != "/malware" {
 		t.Fatalf("unexpected second When condition: %+v", r.When.All[1])
 	}
 }

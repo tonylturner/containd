@@ -85,16 +85,16 @@ func convertSuricataConditions(opts [][2]string, header suricataHeaderFields) (c
 func suricataBufferPredicate(keyword string) (string, string) {
 	switch keyword {
 	case "http_uri", "http.uri":
-		return "attr.http_uri", "contains"
-	case "http_header", "http.header":
-		return "attr.http_header", "contains"
+		return "attr.path", "contains"
 	case "http_method", "http.method":
-		return "attr.http_method", "equals"
+		return "attr.method", "contains"
 	case "dns_query", "dns.query":
-		return "attr.dns_query", "contains"
+		return "attr.qname", "contains"
 	case "tls_sni", "tls.sni":
-		return "attr.tls_sni", "contains"
+		return "attr.sni", "contains"
 	default:
+		// HTTP exposes selected header values, not the complete header
+		// buffer. Mapping http_header to host/user_agent would lose meaning.
 		return "", ""
 	}
 }
