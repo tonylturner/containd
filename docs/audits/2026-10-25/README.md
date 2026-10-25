@@ -12,6 +12,7 @@ The roadmap built from these reports is `docs/mkdocs/roadmap.md`.
 | `quality-security-ops.md` | CI, release, supply chain, deployment defaults, auth assurance, threat model | QS-Q1 … Q25 |
 | `ui-surface.md` | Pages, data truth, drafts, accessibility, responsive layout, UI tests | UI-U01 … U23 |
 | `research-benchmarks.md` | External products and guidance used as benchmarks | — |
+| `stubs/<area>.md` | Stub sweep at `564b086d`: capabilities that are a stub, a no-op, unwired, fake data, or an overclaim, each with what "real" means (dataplane, icsdpi, controlplane, ui, cli-ops) | DATAPLANE-S*, ICSDPI-S*, CONTROLPLANE-S*, UI-S*, CLI-OPS-S* |
 
 Evidence labels: **Verified** means the code or document was read (and, where
 stated, a targeted probe ran). **Inferred** means a consequence or

@@ -72,7 +72,7 @@ tests.
 | 1.7 | No silent data loss on writes: CLI and UI read-modify-write fail on a failed read and keep unrelated fields (NAT, proxies, syslog, IDS rules, service drafts); PCAP apply and template preview use the real API shapes. | SRA-H8, M8; DP-23; ICS-D05, D23; CP-F10, F20; UI-U01, U02, U04, U06–U08 |
 | 1.8 | Remote-access transports are configured safely: TLS without a certificate fails; daemon directives cannot be injected; OpenVPN restarts on change, finds its files, and can revoke a client; proxy controls that are not enforced are rejected. | SRA-H4–H6, H9, M2, M3; CP-F9 |
 | 1.9 | Evidence is complete and loss is visible: syslog forwards both engine and management events; audit records account, role, credential, and TLS changes; audit write failures are reported. | CP-F1, F2, F7, F21; SRA-M4, M5; QS-Q11 |
-| 1.10 | Docs match code. Until its track item lands, each capability shows its true current state in docs, API, and UI: eBPF (P.3), traffic graphs (O.1), IEC 62443 view (O.2), YARA (D.3), external rule imports (D.2). This is interim. The track items make each capability work. | DP-14, 24; QS-Q16, Q21; UI-U03, U09, U10; ICS-D02, D26 |
+| 1.10 | Docs match code. Until its track item lands, each capability shows its true current state in docs, API, and UI: eBPF (P.3), traffic graphs (O.1), IEC 62443 view (O.2), YARA (D.3), external rule imports (D.2), and every other D, F, S, and A item. This is interim. The track items make each capability work. | DP-14, 24; QS-Q16, Q21; UI-U03, U09, U10; ICS-D02, D26 |
 | 1.11 | Release gate: a tag moves `:latest` only from `main`, after CI, signing, and SBOM for the exact commit. Prereleases never move `:latest`. | QS-Q12, Q13 |
 
 ## Stage 2 — Secure Remote Access Lab
@@ -104,22 +104,35 @@ must not stop the PLC or the process.
 | 2.7 | Golden Compose topology and bypass matrix: same-network peers, alternate networks, published ports, direct addresses, IPv6, and crash/restart are tested and denied. | DP N5 |
 | 2.8 | RangerDanger SRA acceptance scenarios (owned by RangerDanger): stolen password cannot launch access; wrong asset and self-approval are denied; active sessions end on expiry, idle, and revoke; recordings link to the approval. | SRA §6 |
 
-## Capability Tracks — Industrial DPI and Performance
+## Capability Tracks
 
-Priority capabilities. These tracks run beside Stages 1 and 2 when their
-dependencies allow. They do not wait for Stage 3. Each item has its own
-ticket, and each item ends with the capability working and measured.
+Every capability that containd shows must work. Industrial DPI (D) and
+firewall performance (P) are the priority tracks. Firewall enforcement (F),
+services and management (S), operator views (O), and assurance (A) finish
+capabilities that exist today only as a stub, a no-op, unwired code, fake
+data, or a claim. The 2026-10-25 stub sweep (`docs/audits/2026-10-25/stubs/`)
+lists each one with its evidence. These tracks run beside Stages 1 and 2 when
+their dependencies allow. They do not wait for Stage 3. Each item has its own
+ticket, and each item ends with the capability working and tested on real
+traffic or real server state. Until then, the Stage 1 item named in the row
+rejects or labels it (Principle 3).
 
 ### Industrial DPI
 
 | # | Outcome | Findings / source |
 |---|---|---|
-| D.1 | ICS DPI wire conformance: an independent corpus derived from captures for every decoder (request, reply, error, split, coalesced, retransmitted). Fix OPC UA service IDs, CIP connected and response layouts, BACnet CreateObject, Modbus address scope and diagnostics, DNP3 fragments, and MMS attribution. S7 and RDP X.224 bytes ship in 0.1.33. | ICS-D03, D04, D07–D12; ICS N3, X1 |
-| D.2 | Imported Suricata, Snort, and Sigma rules execute with their full meaning (content, offsets, PCRE, flow, ports, addresses, modifiers) for a declared subset. The importer rejects constructs outside the subset, and the subset grows. Group disable is enforced. | ICS-D02, D06, D16, D17, D27; ICS N1, L2 |
+| D.1 | ICS DPI wire conformance: an independent corpus derived from captures for every decoder (request, reply, error, split, coalesced, retransmitted). Fix OPC UA service IDs, CIP connected and response layouts, CIP implicit I/O on UDP 2222, BACnet CreateObject, Modbus address scope and diagnostics, DNP3 fragments, MMS attribution, and decoding after TCP reassembly. S7 and RDP X.224 bytes ship in 0.1.33. | ICS-D03, D04, D07–D12; ICS N3, X1; ICSDPI-S25, S27–S33 |
+| D.2 | Imported Suricata, Snort, and Sigma rules execute with their full meaning (content, offsets, PCRE, flow, ports, addresses, modifiers) for a declared subset. The importer rejects constructs outside the subset, and the subset grows. Group disable is enforced. The IDS page converts pasted Sigma and exports in the chosen format. | ICS-D02, D06, D16, D17, D27; ICS N1, L2; ICSDPI-S2, S4, S44–S46 |
 | D.3 | YARA rules execute on reassembled payloads and on transferred files, through an embedded YARA engine. | ICS-D02 |
 | D.4 | Passive IEC 104 inventory: controlling and controlled stations by session direction, observed CA, IOA, and types, last seen, attempted versus accepted. Bounded, and separate from the learner. | IEC backlog 6; ICS-D15 |
 | D.5 | IEC 104 holdback pressure: held packets and bytes, pending age, timeout and bound aborts, verdict failures, in a diagnostics view. | IEC backlog 7 |
 | D.6 | IEC 104 APCI lifecycle anomalies: I-frames before STARTDT or after STOPDT, impossible sequence and ACK transitions, stalled TESTFR. Observational first. | IEC backlog 9 |
+| D.7 | ICS firewall predicates decide real packets: string addresses, DNP3 station addresses and object headers, CIP instance, attribute, and EPATH, S7 DB number, MMS service, variable, and domain, BACnet object type, property, and identifier, OPC UA service and Node ID pattern. An empty code list means any code, not code 0. The BACnet filters in the rule form are enabled. The setup wizard allows BACnet/IP over UDP. Predicate addresses never compile to ANY (was 3.2). | ICS-D01, D14; ICSDPI-S6–S12; UI-S11, S12, S15, S16 |
+| D.8 | ICS enforce mode prevents traffic: enforce requires an inline path (NFQUEUE) and fails validation without one; the first prohibited command is dropped; DPI exclusions and disabled decoders show as not enforcing. | DATAPLANE-S3 |
+| D.9 | ICS anomaly detectors fire as named: CIP Program Stop, Program Start, and Forward Open; ICS on a nonstandard port or tunnelled; DNP3 unsolicited responses without enable. Thresholds count per flow per minute as documented. Write Storm needs a real burst over a declared window. | ICSDPI-S16–S18, S50, S51 |
+| D.10 | Native IDS rules and custom signatures are exact and durable: tuple conditions (`srcIp`, `dstIp`, `srcPort`, `dstPort`) match the real flow; custom signatures and builtin disables are configuration that survives reconfigure, restart, and backup; unknown operators, bad patterns, and duplicate IDs fail validation. | ICSDPI-S5, S15, S49 |
+| D.11 | IT protocol visibility is standard: JA3 follows the reference algorithm; TLS 1.3 is reported from `supported_versions`; HTTP/2 is detected and decoded; HTTP content type, SMB dialect, and SNMP community and OIDs are emitted. | ICSDPI-S19–S24 |
+| D.12 | Offline PCAP analysis is complete: PCAPNG and both byte orders; truncation and errors are reported, not a partial success; `analyze pcap` in the CLI prints packets, protocols, and flows. | ICSDPI-S38, S39, S42 |
 
 ### Firewall performance and efficiency
 
@@ -129,6 +142,29 @@ ticket, and each item ends with the capability working and measured.
 | P.2 | Efficiency: bounded aggregate flow, stream, and stats state; precomputed zone and rule matching (no per-event syscalls, no linear scan); batched block updates; queue, NFLOG, and parser loss counters. | DP-9, 19; DP X3 |
 | P.3 | eBPF fast path, made real: XDP and TC programs that consult correct maps, atomic map sync with TTL expiry, counters, a tested attach matrix with fallback, and verdict parity with nft. P.1 measures its benefit. | DP-14; DP L3 |
 
+### Firewall enforcement
+
+| # | Outcome | Findings / source |
+|---|---|---|
+| F.1 | The reset, rate-limit, and tag rule actions work in nftables and the engine, with counters. 1.4 rejects them until then. | DATAPLANE-S9–S11 |
+| F.2 | Identity and schedule predicates are enforced: IP identity mappings reach the engine and kernel sets; maintenance windows activate and expire rules on time. 1.4 rejects them on kernel-only rules until then. | DATAPLANE-S1, S2; CONTROLPLANE-S1 |
+| F.3 | NAT and routing converge: port forwards and masquerade work with custom zone names and ignore disabled entries; a removed static route or policy rule leaves the kernel at commit, at every valid priority (today only 10000–19999 are removed). | DATAPLANE-S12, S16 |
+| F.4 | DPI domain exclusions select flows by observed DNS answers and TLS SNI, with expiry and a defined shared-IP behavior. | DATAPLANE-S8 |
+| F.5 | The connections view is real: sessions come from the kernel conntrack table (netlink where `/proc` has none); "unavailable" differs from "empty"; kill closes the flow. 2.3 builds lease revocation on it. | DATAPLANE-S13, S14 |
+| F.6 | The nftables ruleset preview uses the engine's compiler settings (table, NFQUEUE, NFLOG), so the preview is what applies. | DATAPLANE-S22 |
+
+### Services and management
+
+| # | Outcome | Findings / source |
+|---|---|---|
+| S.1 | Content scanning works: ClamAV over clamd INSTREAM and standard ICAP (REQMOD and RESPMOD, TLS, timeout, size limit, upload and download selection) scan the complete object; fail-closed blocks content that was not scanned, and the ICS fail-open exemption is the operator's choice; custom definitions load; settings apply without a restart. | CP-F3, F6, F19; CONTROLPLANE-S2, S4, S10–S14, S21–S23; UI-S1, S2, S4, S5 |
+| S.2 | Uploaded trusted CAs are used by every outbound TLS client: ICAP, syslog, proxy upstream, and OIDC. | CP-F13; QS-Q9; CONTROLPLANE-S3; UI-S3; CLI-OPS-S6 |
+| S.3 | Service scoping works: DNS listen zones; forward-proxy allowed clients, listen zones, and upstream chaining; reverse-proxy TLS termination and per-path routing. 1.8 rejects them until then. | CP-F9; CONTROLPLANE-S5–S9; UI-S6–S9, S41 |
+| S.4 | Service settings take effect: NTP poll interval with every supported daemon; DHCP authoritative mode. | CONTROLPLANE-S24, S25; UI-S10 |
+| S.5 | Reload and reset are real: SIGHUP applies the documented reloadable settings and names the ones that need a restart; factory reset, from the web or the SSH console, brings the engine and daemons to defaults and ends sessions. | CP-F18; CONTROLPLANE-S18, S20; CLI-OPS-S8, S10 |
+| S.6 | SSH management keeps its settings: an explicit password disable holds with an empty or unreadable key directory and in lab mode; the wizard really changes the password; host keys rotate on schedule on a long-running server. | CLI-OPS-S2, S4, S7 |
+| S.7 | Monitoring APIs tell "unavailable" from "empty": flows, stats, anomalies, learning, signatures, inventory, interface state, and simulation return engine data or an unavailable error, never a made-up empty or stopped state. The CLI and UI show which. | CONTROLPLANE-S29–S36; ICSDPI-S52; CLI-OPS-S9 |
+
 ### Honest operator views
 
 | # | Outcome | Findings / source |
@@ -136,12 +172,18 @@ ticket, and each item ends with the capability working and measured.
 | O.1 | Real telemetry in place of synthetic graphs: dashboard, services, and AV charts read stored time series of real counters; demo mode replays recorded captures through the real decoders. | UI-U03, U10; ICS-D20 |
 | O.2 | IEC 62443 zone and conduit assessment backed by evidence: target versus achieved security level per foundational requirement, each claim linked to config and test evidence. Teaching evidence, not certification. | UI-U09 |
 
+### Assurance
+
+| # | Outcome | Findings / source |
+|---|---|---|
+| A.1 | Tests prove what they claim: every deny probe in the smoke tests has a live listener and a control allow; NAT counter checks read the real counter; UI builds fail on missing or stale embedded docs; the SBOM includes the UI npm packages and ships as a signed attestation. | CLI-OPS-S13, S14, S18, S19, S21 |
+
 ## Stage 3 — Mature Training Platform
 
 | # | Outcome | Findings / source |
 |---|---|---|
 | 3.1 | Moved to track item D.1. | — |
-| 3.2 | Executable-rule contract: address predicates never compile to ANY. External formats are covered by D.2 and D.3. | ICS-D01, D14 |
+| 3.2 | Moved to track item D.7. External formats are D.2 and D.3. | — |
 | 3.3 | Canonical event contract across live, offline, demo, API, UI, and export; wire the configured SIEM export; bounded flow and stats state; correct packet and byte accounting. | ICS-D21, D24, D25; DP-9, 19; ICS X3, X5 |
 | 3.4 | Learn → review → enforce loop with passive inventory (including IEC 104), exact generated rules, and an explicit apply step. | ICS-D14, D15; ICS X2; UI X2 |
 | 3.5 | Transactional config revisions with compare-and-set, crash-safe commit-confirmed, and a complete versioned policy bundle (config plus IDS) with explicit secret handling. | CP-F4, F5, F15, F16; CP N3, N4 |
@@ -193,6 +235,7 @@ Still open (decide when the ticket starts):
 | CP | `control-plane.md` |
 | QS | `quality-security-ops.md` |
 | UI | `ui-surface.md` |
+| DATAPLANE-S, ICSDPI-S, CONTROLPLANE-S, UI-S, CLI-OPS-S | `stubs/<area>.md` (stub sweep at `564b086d`) |
 
 `research-benchmarks.md` in the same folder lists the external products and
 guidance used as benchmarks. Line references in the reports are for commit
