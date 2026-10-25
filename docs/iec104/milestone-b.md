@@ -15,9 +15,9 @@ frozen Go contracts are in `docs/iec104/contracts.md`.
 **Release rule (Tony, 2026-10-09).** Milestone B stays unreleased on
 `iec104`. Nothing from this branch goes to `main` or `:latest` before
 the US course on 2026-10-22. D11 then holds it until the US and EU
-gates pass (about 2026-11-02). `.github/workflows/release.yml:9-11,53-80`
-publishes `:latest` for **any** `v*` tag, prereleases included, so a
-candidate never gets a `v*` tag.
+gates pass (about 2026-11-02). At the time, `release.yml` published
+`:latest` for **any** `v*` tag, so a candidate got no `v*` tag. Since
+0.1.33 only signed stable tags on `main` move `:latest` (update-policy.md).
 
 **Decisions (Tony, 2026-10-09).**
 

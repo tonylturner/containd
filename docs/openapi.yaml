@@ -776,13 +776,13 @@ paths:
 
   /config/import:
     post:
-      summary: Import a configuration as running (admin)
+      summary: Import a configuration as the candidate (admin)
       description: >
-        Validates and saves the whole config as the running config. It does
-        not activate it: the data plane keeps its current policy until
-        POST /config/commit. After importing, commit and then check
-        GET /health iec104Enforcement. Validation is the same as for a
-        candidate.
+        Validates the whole config and replaces the candidate with it. It
+        never changes running or activates anything: the data plane keeps its
+        current policy until POST /config/commit. After importing, commit and
+        then check GET /health iec104Enforcement. Validation is the same as
+        for a candidate. Success sets `X-Containd-Config: staged`.
       tags: [Config]
       requestBody:
         required: true
@@ -790,13 +790,13 @@ paths:
           application/json: { schema: { type: object } }
       responses:
         "200":
-          description: Configuration saved, not activated
+          description: Candidate replaced, not activated
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status: { type: string, enum: [imported] }
+                  status: { type: string, enum: [staged] }
         "400":
           description: Invalid JSON or configuration
           content:
@@ -1218,11 +1218,11 @@ paths:
       requestBody:
         required: false
         description: >
-          An omitted or empty body starts the saved PCAP configuration. A
-          nonempty body replaces the PCAP configuration and is saved only
-          after the engine accepts the start. A rejected start leaves the saved
-          configuration unchanged. If no engine is connected, the start is queued
-          and the configuration is saved.
+          An omitted or empty body starts the committed (running) PCAP
+          configuration. A nonempty body is used for this capture only and is
+          never saved. Start and stop never write configuration; save PCAP
+          settings through the staged PCAP configuration endpoint and commit.
+          If no engine is connected, the response is "pcap start queued".
           Omitted fields use their normal defaults rather than saved values.
           The complete configuration must select at least one interface or
           zone; an empty selection is rejected. Logical interfaces resolve to
