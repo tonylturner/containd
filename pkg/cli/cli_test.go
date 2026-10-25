@@ -296,6 +296,7 @@ func TestSetZoneViaAPI(t *testing.T) {
 	client := &mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Containd-Config": []string{"staged"}},
 			Body:       io.NopCloser(bytes.NewBuffer(nil)),
 		},
 	}

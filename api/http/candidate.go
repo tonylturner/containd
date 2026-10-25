@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -56,10 +55,5 @@ func stageCandidate(c *gin.Context, store config.Store, edit func(*config.Config
 		return nil, false
 	}
 	configChangeResponse(c, "staged")
-	auditLog(c, audit.Record{
-		Action: "config.stage",
-		Target: c.Request.URL.Path,
-		Detail: "candidate",
-	})
 	return saved, true
 }

@@ -263,14 +263,8 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, jsonValue(t, editableValue(candidate, test.list))) {
 				t.Fatalf("list did not return candidate: status=%d body=%s err=%v", rec.Code, rec.Body, err)
 			}
-			foundAudit := false
-			for _, record := range audit.records {
-				if record.Action == "config.stage" && record.Detail == "candidate" && record.Actor == "stage-tester" {
-					foundAudit = true
-				}
-			}
-			if !foundAudit {
-				t.Fatal("missing actor/object/candidate stage audit")
+			if len(audit.records) != 1 || audit.records[0].Actor != "stage-tester" || audit.records[0].Detail != "candidate" {
+				t.Fatalf("want one actor/object/candidate audit, got %+v", audit.records)
 			}
 			rec = requestStage(t, server, "POST", "/config/commit", nil)
 			assertConfigResponseHeader(t, rec, "committed")

@@ -30,6 +30,13 @@ components:
         or via the token cookie set automatically on login.
 
   schemas:
+    IDSBankSummary:
+      type: object
+      required: [count, sha256]
+      properties:
+        count: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+
     LoginRequest:
       type: object
       required: [username, password]
@@ -708,18 +715,18 @@ paths:
       tags: [Config]
       responses:
         "200":
-          description: Full device configuration
+          description: Running configuration with secrets redacted and ids.rules omitted (use IDS endpoints for the bank).
           content:
             application/json: { schema: { type: object } }
     post:
-      summary: Replace running configuration (admin)
+      summary: Replace candidate configuration (admin)
       tags: [Config]
       requestBody:
         required: true
         content:
           application/json: { schema: { type: object } }
       responses:
-        "200": { description: Configuration saved }
+        "200": { description: Configuration staged, not activated }
         "403": { description: Admin role required }
 
   /config/candidate:
@@ -728,7 +735,7 @@ paths:
       tags: [Config]
       responses:
         "200":
-          description: Candidate configuration
+          description: Candidate configuration with secrets redacted and ids.rules omitted.
           content:
             application/json: { schema: { type: object } }
         "404": { description: No candidate configuration }
@@ -737,7 +744,9 @@ paths:
       description: >
         Validates and stages the whole config without activating it. ICS
         predicates decode strictly, and IEC104 enforce that cannot activate
-        is rejected (see ICSPredicate).
+        is rejected (see ICSPredicate). An omitted or null ids.rules means keep
+        the existing bank; an explicit empty array clears it. GET /config and
+        GET /config/candidate omit ids.rules; exports and backups include it.
       tags: [Config]
       requestBody:
         required: true
@@ -751,6 +760,36 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "403": { description: Admin role required }
+
+  /config/diff:
+    get:
+      summary: Review pending configuration changes
+      description: >
+        Server-authoritative comparison of unredacted state. Secret-only edits
+        appear in changedSections without exposing their values or digests.
+        running and candidate retain redacted config shapes but omit ids.rules;
+        idsBank contains counts and SHA-256 digests of the ordered JSON rule arrays.
+        Exports and backups, unlike config reads and diff, include the full bank.
+      tags: [Config]
+      responses:
+        "200":
+          description: Pending changes (an absent candidate is seeded from running)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changed, changedSections, running, candidate, idsBank]
+                properties:
+                  changed: { type: boolean }
+                  changedSections: { type: array, items: { type: string } }
+                  running: { type: object, nullable: true }
+                  candidate: { type: object, nullable: true }
+                  idsBank:
+                    type: object
+                    required: [running, candidate]
+                    properties:
+                      running: { $ref: "#/components/schemas/IDSBankSummary" }
+                      candidate: { $ref: "#/components/schemas/IDSBankSummary" }
 
   /config/commit:
     post:

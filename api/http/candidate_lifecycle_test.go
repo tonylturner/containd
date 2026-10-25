@@ -94,7 +94,11 @@ func TestRunningExportsAndDiffAuthority(t *testing.T) {
 	for _, path := range []string{"/config", "/config/export"} {
 		rec = requestStage(t, server, "GET", path, nil)
 		var got config.Config
-		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(&got, running.RedactedCopy()) {
+		want := running.RedactedCopy()
+		if path == "/config" {
+			want.IDS.Rules = nil
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(&got, want) {
 			t.Fatalf("%s did not read running: %s %v", path, rec.Body, err)
 		}
 	}
@@ -122,6 +126,10 @@ func TestRunningExportsAndDiffAuthority(t *testing.T) {
 	rec = requestStage(t, server, "GET", "/config/backups/"+backup.ID, nil)
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"hostname":"staged"`) || !strings.Contains(rec.Body.String(), `"hostname": "running"`) {
 		t.Fatalf("config backup did not read running: %d %s", rec.Code, rec.Body)
+	}
+	var complete config.Config
+	if err := json.Unmarshal(rec.Body.Bytes(), &complete); err != nil || !reflect.DeepEqual(complete.IDS.Rules, running.IDS.Rules) {
+		t.Fatalf("config backup lost deployed bank: %s %v", rec.Body, err)
 	}
 }
 

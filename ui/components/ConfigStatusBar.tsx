@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { api, isAdmin } from "../lib/api";
+import { CONFIG_COMMITTED } from "../lib/config-events";
 import { useConfigRefresh } from "../lib/use-config-refresh";
 import { ConfirmDialog, useConfirm } from "./ConfirmDialog";
 
@@ -22,7 +23,7 @@ export function ConfigStatusBar() {
     try {
       const diff = await api.diffConfig();
       if (id !== request.current) return;
-      setStatus(!diff ? "unknown" : JSON.stringify(diff.running ?? null) !== JSON.stringify(diff.candidate ?? null) ? "dirty" : "clean");
+      setStatus(typeof diff?.changed !== "boolean" ? "unknown" : diff.changed ? "dirty" : "clean");
     } catch {
       if (id === request.current) setStatus("unknown");
     }
@@ -30,6 +31,11 @@ export function ConfigStatusBar() {
 
   const invalidateCheck = React.useCallback(() => { ++request.current; }, []);
   useConfigRefresh(check);
+  React.useEffect(() => {
+    const clearNotice = () => { setConfirmedPending(false); setWarning(null); setError(null); };
+    window.addEventListener(CONFIG_COMMITTED, clearNotice);
+    return () => window.removeEventListener(CONFIG_COMMITTED, clearNotice);
+  }, []);
   React.useEffect(() => {
     void check();
     const timer = setInterval(check, 30_000);
@@ -77,6 +83,7 @@ export function ConfigStatusBar() {
           {error && <span className="ml-2 text-red-400">{error}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {(warning || error) && <button onClick={() => { setWarning(null); setError(null); }} className={buttonClass}>Dismiss notice</button>}
           <Link href="/config/?tab=diff" className={buttonClass}>Review diff</Link>
           {confirmedPending && <Link href="/config/?tab=diff" className={buttonClass}>Confirm / rollback</Link>}
           {status === "unknown" && <button onClick={check} className={buttonClass}>Retry</button>}

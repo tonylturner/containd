@@ -32,6 +32,12 @@ func patchSyslogHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		if patch.Forwarder != nil {
+			if err := cpservices.ValidateSyslogForwarder(*patch.Forwarder); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			cur := cfg.Services.Syslog
 			if patch.Format != "" {
@@ -45,10 +51,6 @@ func patchSyslogHandler(store config.Store) gin.HandlerFunc {
 			}
 			if patch.Forwarder != nil {
 				f := *patch.Forwarder
-				if err := cpservices.ValidateSyslogForwarder(f); err != nil {
-					apiError(c, http.StatusBadRequest, err.Error())
-					return false
-				}
 				switch strings.ToLower(strings.TrimSpace(patch.Action)) {
 				case "add":
 					cur.Forwarders = append(cur.Forwarders, f)
@@ -72,6 +74,7 @@ func patchSyslogHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
+		auditLog(c, audit.Record{Action: "services.syslog.patch", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
@@ -102,6 +105,7 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
+		auditLog(c, audit.Record{Action: "services.syslog.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
@@ -124,15 +128,20 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
-			if v, ok := services.(ServicesValidator); ok && v != nil {
-				next := cfg.Services
-				next.DNS = dnsCfg
-				if err := v.Validate(c.Request.Context(), next); err != nil {
-					apiError(c, http.StatusBadRequest, err.Error())
-					return false
-				}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			current, err := store.LoadCandidate(c.Request.Context())
+			if err != nil {
+				internalError(c, err)
+				return
 			}
+			next := current.Services
+			next.DNS = dnsCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			cfg.Services.DNS = dnsCfg
 			return true
 		})
@@ -192,15 +201,20 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
-			if v, ok := services.(ServicesValidator); ok && v != nil {
-				next := cfg.Services
-				next.AV = avCfg
-				if err := v.Validate(c.Request.Context(), next); err != nil {
-					apiError(c, http.StatusBadRequest, err.Error())
-					return false
-				}
+		if v, ok := services.(ServicesValidator); ok && v != nil {
+			current, err := store.LoadCandidate(c.Request.Context())
+			if err != nil {
+				internalError(c, err)
+				return
 			}
+			next := current.Services
+			next.AV = avCfg
+			if err := v.Validate(c.Request.Context(), next); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			cfg.Services.AV = avCfg
 			return true
 		})

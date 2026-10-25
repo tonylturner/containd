@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -322,7 +323,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.PATCH("/zones/:name", requireAdmin(), updateZoneHandler(store))
 		protected.DELETE("/zones/:name", requireAdmin(), deleteZoneHandler(store))
 		protected.GET("/interfaces", listInterfacesHandler(store))
-		protected.GET("/interfaces/state", interfaceStateHandler(store, engine))
+		protected.GET("/interfaces/state", interfaceStateHandler(engine))
 		protected.POST("/interfaces/assign", requireAdmin(), interfacesAssignHandler(store, engine))
 		protected.POST("/interfaces/reconcile", requireAdmin(), interfacesReconcileHandler(store, engine))
 		protected.POST("/interfaces", requireAdmin(), createInterfaceHandler(store))
@@ -402,7 +403,7 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 		// Always redact secrets from the runtime config read endpoint.
 		// Admins who need unredacted secrets should use the export endpoint
 		// with ?redacted=false.
-		c.JSON(http.StatusOK, cfg.RedactedCopy())
+		c.JSON(http.StatusOK, configReadCopy(cfg))
 	}
 }
 
@@ -449,7 +450,7 @@ func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.RedactedCopy())
+		c.JSON(http.StatusOK, configReadCopy(cfg))
 	}
 }
 
@@ -479,11 +480,16 @@ func commitConfigHandler(store config.Store, engine EngineClient, services Servi
 	return func(c *gin.Context) {
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
+		previous, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		if err := store.Commit(c.Request.Context()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -513,11 +519,16 @@ func commitConfirmedHandler(store config.Store, engine EngineClient, services Se
 		}
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
+		previous, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		if err := store.CommitConfirmed(c.Request.Context(), time.Duration(ttlSeconds)*time.Second); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -543,11 +554,16 @@ func rollbackConfigHandler(store config.Store, engine EngineClient, services Ser
 	return func(c *gin.Context) {
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
+		previous, err := loadOrInitConfig(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		if err := store.Rollback(c.Request.Context()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services)
+		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -574,12 +590,12 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 	// snapshot read before a newer commit's apply.
 	runningConfigApplyMu.Lock()
 	defer runningConfigApplyMu.Unlock()
-	return applyRunningConfigLocked(ctx, store, engine, services)
+	return applyRunningConfigLocked(ctx, store, engine, services, nil)
 }
 
 // applyRunningConfigLocked is the single apply sequence. Callers must hold
 // runningConfigApplyMu, including across any preceding store mutation.
-func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
+func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -621,16 +637,20 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 			warnings = append(warnings, fmt.Sprintf("dataplane: %v", err))
 		}
-		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-			warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
-		}
-		if cfg.PCAP.Enabled {
-			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-				warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
+		// Replay config on boot/reconnect, but preserve operational captures
+		// across promotions that do not change saved capture settings.
+		if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
+			if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
+				warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
 			}
-		} else {
-			if _, err := engine.StopPcap(ctx); err != nil {
-				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
+			if cfg.PCAP.Enabled {
+				if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
+					warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
+				}
+			} else {
+				if _, err := engine.StopPcap(ctx); err != nil {
+					warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
+				}
 			}
 		}
 		// Always compile and push rules regardless of infrastructure errors.
@@ -658,25 +678,6 @@ func isRuntimeApplyWarning(err error) bool {
 		strings.Contains(msg, "permission denied") ||
 		strings.Contains(msg, "not supported") ||
 		strings.Contains(msg, "nft apply failed")
-}
-
-func diffConfigHandler(store config.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		running, err := store.Load(c.Request.Context())
-		if err != nil && !errors.Is(err, config.ErrNotFound) {
-			internalError(c, err)
-			return
-		}
-		candidate, err := store.LoadCandidate(c.Request.Context())
-		if err != nil && !errors.Is(err, config.ErrNotFound) {
-			internalError(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"running":   running.RedactedCopy(),
-			"candidate": candidate.RedactedCopy(),
-		})
-	}
 }
 
 // loadOrInitConfig only supplies an in-memory default for an uninitialized

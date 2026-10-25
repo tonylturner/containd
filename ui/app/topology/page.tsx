@@ -41,6 +41,7 @@ import { Shell } from "../../components/Shell";
 import {
   type FlowSummary,
 } from "../../lib/api";
+import { CONFIG_COMMITTED } from "../../lib/config-events";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
@@ -92,6 +93,12 @@ function TopologyInner() {
       setTopoError("Failed to load topology data. Check API connectivity.");
     }
   }, []);
+
+  useEffect(() => {
+    const refresh = () => { void fetchData(); };
+    window.addEventListener(CONFIG_COMMITTED, refresh);
+    return () => window.removeEventListener(CONFIG_COMMITTED, refresh);
+  }, [fetchData]);
 
   const initialFitDone = useRef(false);
   useEffect(() => {

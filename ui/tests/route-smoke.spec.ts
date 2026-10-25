@@ -285,7 +285,7 @@ function responseFor(pathname: string) {
     return json(defaultConfig);
   }
   if (pathname === "/api/v1/config/diff") {
-    return json({ hasChanges: false, summary: [], diff: "" });
+    return json({ changed: false, changedSections: [], running: defaultConfig, candidate: defaultConfig, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } });
   }
   if (pathname === "/api/v1/config/backups") return json([]);
   if (pathname === "/api/v1/routing") {
@@ -518,4 +518,35 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await expect(pill).toContainText("192.168.242.2/24");
   await expect(pill.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+
+test("topology pairs live data with running config and refreshes both views on commit", async ({ page }) => {
+  let address = "192.0.2.1/24";
+  let configReads = 0;
+  const candidateReads: string[] = [];
+  await page.route("**/api/v1/config", (route) => {
+    configReads++;
+    return route.fulfill(json({ ...defaultConfig, interfaces: [{ ...interfaces[0], addresses: [address] }] }));
+  });
+  for (const endpoint of ["zones", "interfaces", "firewall/rules", "routing"]) {
+    await page.route(`**/api/v1/${endpoint}`, (route) => {
+      candidateReads.push(endpoint);
+      return route.fulfill(json([]));
+    });
+  }
+  await page.goto("/topology/");
+  const zone = page.locator('.react-flow__node[data-id="zone-wan"]');
+  await expect(zone).toContainText(address);
+  await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+  const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
+  await expect(pills).toContainText(address);
+  const before = configReads;
+  address = "198.51.100.1/24";
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
+  await expect(pills).toContainText(address);
+  await expect.poll(() => configReads).toBeGreaterThanOrEqual(before + 2);
+  await page.getByRole("button", { name: "LOGICAL", exact: true }).click();
+  await expect(zone).toContainText(address);
+  expect(candidateReads).toEqual([]);
 });
