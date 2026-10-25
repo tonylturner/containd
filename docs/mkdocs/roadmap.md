@@ -194,7 +194,7 @@ rejects or labels it (Principle 3).
 
 ## Stage 4 — Later, On Demand
 
-- OIDC federation, phishing-resistant MFA, and vendor lifecycle (SRA L1).
+- OIDC federation, phishing-resistant MFA (WebAuthn/passkeys; local TOTP MFA already ships), and vendor lifecycle (SRA L1).
 - Session and file-transfer governance (SRA L2).
 - Outbound site connectors and multi-site isolation (SRA L3).
 - Workload identity controller for Docker names and labels (DP X5).
