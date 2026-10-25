@@ -104,7 +104,7 @@ func buildLeafConditionsFromMap(m map[string]any) ([]config.IDSCondition, []stri
 			Value: v,
 		}
 		if cond.Field == "" {
-			notes = append(notes, `keyword "field" not fully mapped: empty name`)
+			notes = append(notes, fmt.Sprintf("field %q not fully mapped: no supported decoder attribute", field))
 		}
 		// List equality is executable as membership; other list operators
 		// need Sigma's OR/all semantics, which this converter does not map.
@@ -139,20 +139,6 @@ func splitFieldModifier(field string) (string, string, []string) {
 		// Includes startswith/endswith: unanchored regex is not equivalent.
 		return base, "equals", append(dropped, parts[1])
 	}
-}
-
-func normalizeField(f string) string {
-	f = strings.TrimSpace(f)
-	if f == "" {
-		return f
-	}
-	lf := strings.ToLower(f)
-	if strings.HasPrefix(lf, "attr.") ||
-		lf == "proto" || lf == "kind" || lf == "flowid" ||
-		lf == "srcip" || lf == "dstip" || lf == "srcport" || lf == "dstport" {
-		return lf
-	}
-	return "attr." + lf
 }
 
 // newConditionParser and helpers implement a tiny Sigma condition expression parser.

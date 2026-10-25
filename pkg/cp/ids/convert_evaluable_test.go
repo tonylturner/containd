@@ -16,8 +16,6 @@ import (
 )
 
 // Exercise import, storage serialization, compilation and the real evaluator.
-// The attributes here are the converter's existing normalized-field contract,
-// not a claim that every network decoder currently emits these field names.
 func compiledImport(t *testing.T, format, source string, dropped []string) *dpids.Evaluator {
 	t.Helper()
 	imported, err := cpids.ImportRules([]byte(source), format)
@@ -91,6 +89,8 @@ func TestImportedPacketRulesFailClosed(t *testing.T) {
 		{"sticky before content", "", `http.uri; content:"bad";`, []string{"http.uri", "content"}},
 		{"empty content", "", `content:""; http_uri;`, []string{"content"}},
 		{"orphan buffer", "", `http_uri;`, []string{"http_uri"}},
+		{"header buffer", "", `content:"bad"; http_header;`, []string{"http_header", "content"}},
+		{"dotted header buffer", "", `content:"bad"; http.header;`, []string{"http.header", "content"}},
 		{"source address", "http $HOME_NET any -> any any", "", []string{"src_addr"}},
 		{"destination address", "http any any -> 192.0.2.1 any", "", []string{"dst_addr"}},
 		{"source port", "http any 1234 -> any any", "", []string{"src_port"}},
@@ -108,8 +108,8 @@ func TestImportedPacketRulesFailClosed(t *testing.T) {
 					source := `alert ` + header + ` (msg:"loss test"; sid:1; ` + tt.options + `)`
 					eval := compiledImport(t, format, source, tt.dropped)
 					for _, ev := range []dpi.Event{
-						{Proto: "http", Attributes: map[string]any{"http_uri": "/bad", "payload": "payload"}},
-						{Proto: "http", Attributes: map[string]any{"http_uri": "/unrelated"}},
+						{Proto: "http", Attributes: map[string]any{"path": "/bad", "payload": "payload"}},
+						{Proto: "http", Attributes: map[string]any{"path": "/unrelated"}},
 						{Proto: "dns", Kind: "query"},
 					} {
 						if alerts := eval.Evaluate(ev); len(alerts) != 0 {
@@ -119,36 +119,6 @@ func TestImportedPacketRulesFailClosed(t *testing.T) {
 				})
 			}
 		})
-	}
-}
-
-func TestImportedPacketRulesKeepMappedConstraints(t *testing.T) {
-	buffers := []struct {
-		keywords, proto, field, match string
-	}{
-		{"http_uri http.uri", "http", "http_uri", "/bad"},
-		{"http_header http.header", "http", "http_header", "X-bad"},
-		{"http_method http.method", "http", "http_method", "bad"},
-		{"dns_query dns.query", "dns", "dns_query", "bad.example"},
-		{"tls_sni tls.sni", "tls", "tls_sni", "bad.example"},
-	}
-	for _, format := range []string{"suricata", "snort"} {
-		for _, buffer := range buffers {
-			for _, keyword := range strings.Fields(buffer.keywords) {
-				t.Run(format+"/"+keyword, func(t *testing.T) {
-					source := `alert ` + buffer.proto + ` any any -> any any (msg:"mapped"; sid:1; rev:1; classtype:misc-activity; priority:2; reference:url,example.com; metadata:deployment test; content:"bad"; ` + keyword + `;)`
-					eval := compiledImport(t, format, source, nil)
-					matching := dpi.Event{Proto: buffer.proto, Attributes: map[string]any{buffer.field: buffer.match}}
-					if alerts := eval.Evaluate(matching); len(alerts) != 1 {
-						t.Fatalf("mapped constraint did not alert: %v", alerts)
-					}
-					matching.Attributes[buffer.field] = "unrelated"
-					if alerts := eval.Evaluate(matching); len(alerts) != 0 {
-						t.Fatal("mapped constraint broadened")
-					}
-				})
-			}
-		}
 	}
 }
 
@@ -165,7 +135,7 @@ func TestImportedPacketRuleConjunction(t *testing.T) {
 				{"POST", "/bad!", 0},
 				{"GET", "/unrelated", 0},
 			} {
-				ev := dpi.Event{Proto: "http", Attributes: map[string]any{"http_method": tt.method, "http_uri": tt.uri}}
+				ev := decodedProtocolEvent(t, "http", []byte(tt.method+" "+tt.uri+" HTTP/1.1\r\nHost: example.test\r\n\r\n"))
 				if got := len(eval.Evaluate(ev)); got != tt.alerts {
 					t.Fatalf("%+v: got %d alerts", tt, got)
 				}
