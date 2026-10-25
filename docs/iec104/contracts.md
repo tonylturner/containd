@@ -226,12 +226,23 @@ single-point information (SIQ) state and quality; Type 30 also decodes
 CP56Time2a. SQ=1 is accepted for Type 1, alongside Types 3 and 13; Type 30
 requires SQ=0.
 
+**Amendment (Tony, 2026-10-25).** The monitor types 5 (`M_ST_NA_1`), 7
+(`M_BO_NA_1`), 9 (`M_ME_NA_1`), 11 (`M_ME_NB_1`), 15 (`M_IT_NA_1`), 21
+(`M_ME_ND_1`) and their time-tagged forms 32-37 (`M_ST_TB_1`, `M_BO_TB_1`,
+`M_ME_TD_1`, `M_ME_TE_1`, `M_ME_TF_1`, `M_IT_TB_1`) have B descriptors and
+class `monitor`. The untimed types accept SQ=1; every time-tagged monitor type
+(30-37) requires SQ=0. Step position (VTI) adds the `transient` (bool)
+attribute. A binary counter reading (BCR) puts the sequence number in
+`qualifier` and the CY/CA/IV flags in `quality`. Type 21 has no `quality`.
+
 - **Proto and kinds.** `Proto="iec104"`. Kinds: `request`, `response`, `apci`, `malformed`, `unsupported`. One event per information object, and one per S-frame, U-frame or error APDU.
 - **Attribute Go types** are as in §5.5. `value` is typed by descriptor:
 
   | Element | `value` type |
   |---|---|
   | SIQ, DIQ, SCO, DCO, RCO state | `uint8` |
+  | VTI step position | `int8` (-64..63) |
+  | binary counter reading | `int32` |
   | normalized (raw) | `int16` |
   | scaled | `int16` |
   | short float | `float32` |
@@ -360,7 +371,7 @@ These override the text above where they differ.
   - The integer accessors reject `float32`.
   - `DirClient`/`DirServer` are the `APDUID` direction bytes.
 - The DP `rules.ICSPredicate` keeps its existing untagged fields; only the four new fields carry JSON tags. Engine decoding is case-insensitive, so this is acceptable. Do not retag existing fields: that would change the snapshot wire format.
-- **K4 non-finite short floats (Tony, 2026-10-09).** A short float (R32) whose bits are NaN or ±Inf is not `malformed`. The object keeps its normal kind and attributes. `value` is omitted, because JSON cannot carry the number, and `value_invalid` (bool) is `true`. `value_invalid` is absent on every other object. This covers monitor type 13 and set-point commands 50 and 63 alike. Type 36 has no B-profile descriptor and stays `unsupported`. Policy never matches on `value`, so a command's decision is unchanged.
+- **K4 non-finite short floats (Tony, 2026-10-09).** A short float (R32) whose bits are NaN or ±Inf is not `malformed`. The object keeps its normal kind and attributes. `value` is omitted, because JSON cannot carry the number, and `value_invalid` (bool) is `true`. `value_invalid` is absent on every other object. This covers monitor type 13 and set-point commands 50 and 63 alike. Type 36 (2026-10-25 amendment) follows the same rule. Policy never matches on `value`, so a command's decision is unchanged.
 - **K1/K6 envelope steering fails closed until this engine owns the queue (E3, 2026-10-09).**
   - The no-bypass kernel drop covers only a queue with no consumer. When another process holds the queue number, the engine's bind fails and that process decides envelope traffic. The L6 harness showed this: commands reached the RTU while health was correctly unhealthy.
   - IEC104 envelope steering therefore queues to N only while this engine's queue is bound and registered (Start returned nil, no queue-bind fault stands). In every other state, nft drops envelope traffic.
