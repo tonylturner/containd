@@ -1,4 +1,5 @@
 import type { ConfigBundle } from "../../lib/api";
+import type { ConfigDiff } from "../../lib/api-config";
 import { effectiveICSDecoders } from "../firewall/firewall-utils";
 import type { BlockKey } from "./config-block-explorer";
 
@@ -7,11 +8,11 @@ export type Tab = "overview" | "running" | "candidate" | "diff";
 export type DiffLine = { type: "add" | "del" | "same"; line: string };
 
 export type DiffBlock = {
-  key: BlockKey;
+  key: string;
   label: string;
-  running: unknown;
-  candidate: unknown;
   diff: DiffLine[];
+  hiddenChanges: boolean;
+  idsBank?: ConfigDiff["idsBank"];
 };
 
 export type BlockItem = {
@@ -155,73 +156,46 @@ export function formatBytes(size: number) {
   return `${gb.toFixed(1)} GB`;
 }
 
-export function buildDiffBlocks(
-  running: ConfigBundle | null,
-  candidate: ConfigBundle | null,
-): DiffBlock[] {
-  if (!candidate) {
+// The API compares sections before redaction. JSON here supplies display lines
+// only: it must never decide whether a section changed.
+const SECTION_LABELS: Record<string, string> = {
+  system: "System",
+  zones: "Zones",
+  interfaces: "Interfaces",
+  routing: "Routing",
+  firewall: "Firewall",
+  assets: "Assets",
+  objects: "Objects",
+  ids: "IDS",
+  services: "Services",
+  dataplane: "Data plane",
+  export: "Export",
+  pcap: "PCAP",
+};
+
+export function buildDiffBlocks(response: ConfigDiff | null | undefined): DiffBlock[] {
+  if (!response?.changed || !response.candidate) {
     return [];
   }
-  const r = running ?? {};
-  const c = candidate;
-  const blocks: {
-    key: BlockKey;
-    label: string;
-    running: unknown;
-    candidate: unknown;
-  }[] = [
-    { key: "system", label: "System", running: (r as any).system, candidate: (c as any).system },
-    { key: "zones", label: "Zones", running: (r as any).zones, candidate: (c as any).zones },
-    { key: "interfaces", label: "Interfaces", running: (r as any).interfaces, candidate: (c as any).interfaces },
-    { key: "routing", label: "Routing", running: (r as any).routing, candidate: (c as any).routing },
-    { key: "firewall", label: "Firewall rules", running: (r as any).firewall?.rules, candidate: (c as any).firewall?.rules },
-    { key: "nat", label: "NAT", running: (r as any).firewall?.nat, candidate: (c as any).firewall?.nat },
-    { key: "portForwards", label: "Port forwards", running: (r as any).firewall?.portForwards, candidate: (c as any).firewall?.portForwards },
-    { key: "assets", label: "Assets", running: (r as any).assets, candidate: (c as any).assets },
-    { key: "objects", label: "Objects", running: (r as any).objects, candidate: (c as any).objects },
-    { key: "ids", label: "IDS", running: (r as any).ids, candidate: (c as any).ids },
-    { key: "services", label: "Services", running: (r as any).services, candidate: (c as any).services },
-    { key: "dataPlane", label: "Data plane", running: (r as any).dataplane, candidate: (c as any).dataplane },
-    // The DPI block shows effective decoder state (an unset decoder is on);
-    // the Data plane block above keeps the stored map.
-    {
-      key: "dpi",
-      label: "DPI",
-      running: {
-        dpiMode: (r as any).dataplane?.dpiMode,
-        dpiIcsProtocols: effectiveICSDecoders((r as any).dataplane?.dpiIcsProtocols),
-        dpiProtocols: (r as any).dataplane?.dpiProtocols,
-        dpiEnabled: (r as any).dataplane?.dpiEnabled,
-        dpiExclusions: (r as any).dataplane?.dpiExclusions,
-      },
-      candidate: {
-        dpiMode: (c as any).dataplane?.dpiMode,
-        dpiIcsProtocols: effectiveICSDecoders((c as any).dataplane?.dpiIcsProtocols),
-        dpiProtocols: (c as any).dataplane?.dpiProtocols,
-        dpiEnabled: (c as any).dataplane?.dpiEnabled,
-        dpiExclusions: (c as any).dataplane?.dpiExclusions,
-      },
-    },
-    { key: "export", label: "Export", running: (r as any).export, candidate: (c as any).export },
-    { key: "pcap", label: "PCAP", running: (r as any).pcap, candidate: (c as any).pcap },
-  ];
-
-  return blocks
-    .map((block) => {
-      const same =
-        JSON.stringify(block.running ?? null) ===
-        JSON.stringify(block.candidate ?? null);
-      if (same) {
-        return null;
-      }
-      const runningLines = JSON.stringify(block.running ?? null, null, 2).split("\n");
-      const candidateLines = JSON.stringify(block.candidate ?? null, null, 2).split("\n");
-      const diff = diffLines(runningLines, candidateLines).filter(
+  const running = response.running as Record<string, unknown> | null;
+  const candidate = response.candidate as Record<string, unknown>;
+  return response.changedSections.map((key) => {
+    const runningText = JSON.stringify(running?.[key] ?? null, null, 2);
+    const candidateText = JSON.stringify(candidate[key] ?? null, null, 2);
+    const bankChanged = key === "ids" && (
+      response.idsBank.running.count !== response.idsBank.candidate.count ||
+      response.idsBank.running.sha256 !== response.idsBank.candidate.sha256
+    );
+    return {
+      key,
+      label: Object.hasOwn(SECTION_LABELS, key) ? SECTION_LABELS[key] : key,
+      diff: diffLines(runningText.split("\n"), candidateText.split("\n")).filter(
         (line) => line.type !== "same",
-      );
-      return diff.length === 0 ? null : { ...block, diff };
-    })
-    .filter(Boolean) as DiffBlock[];
+      ),
+      hiddenChanges: runningText === candidateText && !bankChanged,
+      idsBank: bankChanged ? response.idsBank : undefined,
+    };
+  });
 }
 
 export function buildBlockItems(
