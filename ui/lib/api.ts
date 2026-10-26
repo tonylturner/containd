@@ -388,7 +388,8 @@ export type AVConfig = {
   blockTtlSeconds?: number;
   maxSizeBytes?: number;
   timeoutSec?: number;
-  cacheTtl?: string;
+  /** Verdict cache lifetime in nanoseconds; 0 selects 10 minutes. */
+  cacheTtl?: number;
   icap?: {
     servers?: { address: string; useTls?: boolean; service?: string }[];
   };
