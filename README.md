@@ -50,7 +50,7 @@ SSH does **not** enforce MFA or a forced password change, and its PTY can reach
 the appliance's Linux shell. Read the [authentication limits](SECURITY.md#authentication-limits).
 
 HTTPS uses a generated self-signed certificate unless you supply a replacement.
-See [hardening guidance](docs/mkdocs/secure-by-design.md) before remote access.
+See [hardening guidance](docs/mkdocs/secure-by-design.md#deployment-hardening) before remote access.
 
 After login, create zones, bind interfaces, and define firewall policy.
 Review the candidate diff and commit it to apply runtime changes. The
@@ -78,7 +78,7 @@ Documentation is available from the appliance's **Help** icon and in the
 - Deploy: [Docker Compose](docs/mkdocs/docker-compose.md), [custom labs](docs/mkdocs/lab-compose.md), [Windows / WSL](docs/mkdocs/windows-wsl.md).
 - Configure: [CLI](docs/mkdocs/cli.md), [configuration JSON](docs/mkdocs/config-format.md), [API reference](docs/mkdocs/api-reference.md), [OpenAPI contract](docs/openapi.yaml).
 - Inspect and enforce: [ICS DPI](docs/mkdocs/ics-dpi.md), [IDS rules](docs/mkdocs/ids-rules.md), [dataplane enforcement](docs/mkdocs/dataplane-enforcement.md).
-- Operate safely: [hardening](docs/mkdocs/secure-by-design.md), [threat model](docs/mkdocs/threat-model.md), [updates](docs/mkdocs/update-policy.md), [advisories](docs/mkdocs/advisories.md).
+- Operate safely: [hardening](docs/mkdocs/secure-by-design.md#deployment-hardening), [threat model](docs/mkdocs/threat-model.md), [updates](docs/mkdocs/update-policy.md), [advisories](docs/mkdocs/advisories.md).
 - Verify artifacts: [SBOM and image signatures](docs/mkdocs/sbom.md). CI includes vulnerability scanning; results depend on the image and scan date.
 
 ## Contributing and security reports

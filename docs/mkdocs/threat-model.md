@@ -113,7 +113,7 @@ Current mitigations:
 - web/API TOTP MFA and admin-required MFA with grace periods (not SSH)
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
-- audit/event logging for important auth and config actions
+- audit logging for logins, MFA changes, SSH sessions, and config saves and commits; user-account changes are not audited
 
 Residual risk:
 
