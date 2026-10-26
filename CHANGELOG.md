@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode and starter/dev Compose; explicit `CONTAIND_ENGINE_ADDR` overrides still
   apply, and split engine mode retains `:8081`. Management derives its local
   engine URL from the same listener setting, including with a reservation.
+- Update Next.js to 15.5.28 and PostCSS to 8.5.31, clearing the critical and
+  high npm advisories in the UI build.
 
 ### Changed
 
@@ -47,8 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nft failures as success.
 - Factory reset replaces configuration through the same restore/reapply path as
   commit. A failed runtime apply restores the prior configuration and leaves
-  users, sessions and audit history in place; they are wiped only after apply
-  succeeds.
+  users, sessions and audit history in place. After apply succeeds, users and
+  sessions are replaced by the default admin in one transaction.
 - Keep liveness responsive during commits and recovery with a deadline-bounded
   running metadata/fault snapshot and one shared observation timeout. Brief
   store contention does not hide real state; contention past the budget or
