@@ -14,6 +14,22 @@ test("guessGatewayAddress returns the address after the network address", () => 
   expect(guessGatewayAddress("192.0.2.7/24")).toBe("192.0.2.1");
   expect(guessGatewayAddress("10.20.30.40/8")).toBe("10.0.0.1");
   expect(guessGatewayAddress("172.16.5.9/0")).toBe("0.0.0.1");
+  expect(guessGatewayAddress("198.51.100.6/30")).toBe("198.51.100.5");
+  expect(guessGatewayAddress("255.255.255.254/30")).toBe("255.255.255.253");
+});
+
+test("guessGatewayAddress takes the other address of a /31 and refuses a /32", () => {
+  expect(guessGatewayAddress("198.51.100.6/31")).toBe("198.51.100.7");
+  expect(guessGatewayAddress("198.51.100.7/31")).toBe("198.51.100.6");
+  expect(guessGatewayAddress("255.255.255.255/31")).toBe("255.255.255.254");
+  expect(guessGatewayAddress("0.0.0.0/31")).toBe("0.0.0.1");
+  expect(guessGatewayAddress("198.51.100.7/32")).toBeNull();
+  expect(guessGatewayAddress("255.255.255.255/32")).toBeNull();
+});
+
+test("guessGatewayAddress refuses a first host that is the interface's own address", () => {
+  expect(guessGatewayAddress("192.0.2.1/24")).toBeNull();
+  expect(guessGatewayAddress("198.51.100.5/30")).toBeNull();
 });
 
 test("guessGatewayAddress refuses what isCIDR or isIPv4 refuses", () => {
@@ -52,9 +68,8 @@ test("inferWanGateway reads the state of the device the WAN interface is bound t
   expect(inferWanGateway([{ name: "wan", device: "eth1" }], [state(["169.254.1.1/16"])])).toEqual({
     ok: false, error: expect.stringMatching(/^Could not determine WAN IPv4 address for 'eth1'\./),
   });
-  expect(inferWanGateway([{ name: "wan", device: "eth1" }], [state(["192.0.2.2/0x18"])])).toEqual({
-    ok: false, error: expect.stringMatching(/^Could not determine WAN IPv4 address for 'eth1'\./),
-  });
+  expect(inferWanGateway([{ name: "wan", device: "eth1" }], [state(["192.0.2.2/32"])]))
+    .toEqual({ ok: false, error: "Could not infer a WAN gateway from '192.0.2.2/32'." });
 });
 
 test("withDefaultRoute replaces the named gateway and the main default route only", () => {
@@ -133,18 +148,26 @@ async function serveWan(page: Page, wanAddr: string) {
 }
 
 test("the routing page's Auto WAN setup stages the gateway inferred on the WAN device", async ({ page }) => {
-  const writes = await serveWan(page, "198.51.100.7/24");
+  const writes = await serveWan(page, "198.51.100.7/31");
   await page.goto("/routing/");
   await page.getByRole("button", { name: "Auto WAN default", exact: true }).click();
-  await expect(page.getByText(/Gateway and default route staged.*'wan-gw' \(198\.51\.100\.1 via eth1\)/)).toBeVisible();
-  expect(writes).toEqual([{ path: "/routing", body: stagedRouting("198.51.100.1") }]);
+  await expect(page.getByText(/Gateway and default route staged.*'wan-gw' \(198\.51\.100\.6 via eth1\)/)).toBeVisible();
+  expect(writes).toEqual([{ path: "/routing", body: stagedRouting("198.51.100.6") }]);
+});
+
+test("the routing page's Auto WAN setup stages nothing for a /32 WAN address", async ({ page }) => {
+  const writes = await serveWan(page, "198.51.100.6/32");
+  await page.goto("/routing/");
+  await page.getByRole("button", { name: "Auto WAN default", exact: true }).click();
+  await expect(page.getByText("Could not infer a WAN gateway from '198.51.100.6/32'.", { exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
 });
 
 test("the firewall quick start stages the same gateway and default route as the routing page", async ({ page }) => {
-  const writes = await serveWan(page, "198.51.100.7/24");
+  const writes = await serveWan(page, "198.51.100.7/31");
   await page.goto("/firewall/");
   await page.getByRole("button", { name: "Quick start (LAN→WAN)", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText(/Outbound quick start staged — commit to apply: default route via wan-gw/)).toBeVisible();
-  expect(writes[0]).toEqual({ path: "/routing", body: stagedRouting("198.51.100.1") });
+  expect(writes[0]).toEqual({ path: "/routing", body: stagedRouting("198.51.100.6") });
 });

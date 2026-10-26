@@ -28,16 +28,21 @@ function intToIP4(n: number): string {
 
 /**
  * The gateway guess for an interface that holds the IPv4 address cidr: the
- * first address after the network address. Null for anything that is not an
- * IPv4 CIDR.
+ * first address after the network address. On a /31 both addresses are
+ * hosts (RFC 3021), so the guess is the other one. Null for anything that is
+ * not an IPv4 CIDR, for a /32 (no other host shares the prefix), and when the
+ * first host is the interface's own address.
  */
 export function guessGatewayAddress(cidr: string): string | null {
   if (!isIPv4CIDR(cidr)) return null;
   const slash = cidr.lastIndexOf("/");
   const prefix = Number(cidr.slice(slash + 1));
+  const own = ip4ToInt(cidr.slice(0, slash));
+  if (prefix === 32) return null;
+  if (prefix === 31) return intToIP4(own ^ 1);
   const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  const net = (ip4ToInt(cidr.slice(0, slash)) & mask) >>> 0;
-  return intToIP4(net + 1);
+  const first = ((own & mask) + 1) >>> 0;
+  return first === own ? null : intToIP4(first);
 }
 
 /** The interface named "wan", else the first one in zone "wan". */
