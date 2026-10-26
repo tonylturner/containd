@@ -158,6 +158,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Correct Sigma field and port aliases.
 - Eliminate steady-state DPI accounting allocations and repeated decoder
   scans; keep protocol last-seen timestamps monotonic.
+- Native PCAP captures keep running after their start request returns, stop
+  cleanly on engine shutdown, and report worker exits in status. Before,
+  a capture ended with its request and wrote only the file header.
 - Preserve operational packet captures across unrelated configuration
   commits and rollbacks.
 - Config review shows secret-only, IDS-bank and newly introduced section
