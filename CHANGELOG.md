@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The SSH console no longer echoes new passwords. The menu reset and the
+  setup wizard ask twice and refuse a mismatch.
 - The web console's internal API calls over HTTPS verify the management
   certificate and pin it, instead of skipping verification. The console never
   falls back to the request's Host header and refuses redirects.
