@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-25
+
 ### Added
 
 - Product roadmap page (Docs → Roadmap) built from the 2026-10-25 maturity
@@ -45,6 +47,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unknown`). A commit with forwarding disabled returns a warning, and the
   engine logs a warning when a blocked sysctl write leaves it at 0.
 
+- Optional immutable management reservation with exact-peer HTTP/INPUT
+  access, priority-1 reply pinning and visible recovery from VPN
+  source-address takeovers.
+- Keep RangerDanger's reserved management available across NIC renumbering
+  and stored-config conflicts; expose recoverable boot faults, block unsafe
+  replay, and share reservation-aware bootstrap/factory-reset defaults.
+- Install fail-closed default-deny recovery enforcement for
+  reserved-management boot faults, with verified recovery status in the API
+  and Interfaces page.
+- Expose management reservation and guard health.
+- Add capture-backed IEC 104 decoder and fuzz regressions for segmented,
+  coalesced, malformed and incomplete traffic, plus isolated
+  management-access smoke coverage.
+- Gate `:latest` promotion on signed, SBOM-attached stable tags whose
+  commits are on `main`, with rebuild-free manual promotion after a later
+  merge.
+
 ### Changed (visible in API, events and logs)
 
 - **Unknown firewall rule keys are rejected with HTTP 400.** The error names
@@ -56,16 +75,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the newest 1024 `firewall.rule.hit` DENY events, so high-volume
   IEC 104 telemetry does not push them out. Event lists return retained
   DENYs first within `limit`, so they can displace newer telemetry rows.
-- **A non-empty PCAP start body replaces the saved PCAP configuration** and
-  is saved only after the engine accepts the start; a rejected start leaves
-  the saved configuration unchanged. With no engine connected, the start is
-  queued and saved. Omitted fields take their defaults. A body with no
-  interface and no zone is rejected. An empty body starts the saved
-  configuration.
+- **PCAP start no longer saves its body.** A non-empty start body is the
+  capture request for that start only; an empty body starts the committed
+  PCAP settings. Saved PCAP settings (`POST /pcap/config`) stage until
+  commit. With no engine connected, the start is queued. A body with no
+  interface and no zone is rejected.
 - Normal Modbus replies carry kind `response`; exceptions stay `exception`.
 - Merged 0.1.32 (persistent Modbus/DNP3 inspection, reply orientation,
   port-less rules, Go 1.26.9). IEC 104 keeps failing closed: an unmatched
   IEC 104 reply inside an enforce envelope is still denied.
+
+- **Configuration edits stage until commit.** Every persisted edit from the
+  UI, API and CLI writes the candidate; only Commit or Commit-confirmed
+  applies it. Commit and rollback cover the configuration and the IDS rule
+  bank in one transaction. Paths, methods, bodies and status codes are
+  unchanged; a success means "staged", not "active". Editable-object lists
+  read the candidate; `GET /config`, export, health and status read running.
+  Live operations (blocks, conntrack, capture start/stop, users, reset)
+  stay immediate. RangerDanger's candidate→commit import is unaffected.
+- **Mutation responses carry `X-Containd-Config: staged` or `committed`.**
+  The UI and CLI use this header as their only classifier. The global
+  commit bar refreshes on every staged edit; editors say "staged", and the
+  CLI prints `staged; run "commit" to apply`.
+- **IDS export is `GET`.** The `POST` route is removed.
+- **DPI transport counters count each captured packet once.** Protocol and
+  top-talker packet/byte counts are lower than before, where decoded objects
+  and flow-end events multiplied them.
+- **Re-import IDS rule files imported before 0.1.33.** Suricata/Snort and
+  Sigma rules with unmapped constraints, and imported rules without
+  executable content (including YARA), are kept as non-evaluable with notes
+  and no longer alert. Re-importing applies the corrected field mapping.
+- **Malformed management listener addresses are rejected** at validation.
+  A listener value must be `host:port` or `:port`.
 
 ### Fixed
 
@@ -102,6 +143,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policies read back without spurious empty predicates.
 - Data-plane rebuilds preserve the process event ring and increasing event
   IDs, including logged denies and events from rebuilt IEC104 sessions.
+- Restore S7 service decoding for standard COTP DT traffic and recognize
+  CR/CC credit bits.
+- Correct RDP X.224 Connection Confirm decoding and security negotiation
+  visibility.
+- Fix Suricata/Snort imports to match real HTTP, DNS and TLS decoder
+  attributes; reject unexposed header-buffer predicates.
+- Correct Sigma field and port aliases.
+- Eliminate steady-state DPI accounting allocations and repeated decoder
+  scans; keep protocol last-seen timestamps monotonic.
+- Preserve operational packet captures across unrelated configuration
+  commits and rollbacks.
+- Config review shows secret-only, IDS-bank and newly introduced section
+  changes from the authoritative diff; IDS bank bodies appear as summaries.
+- Config explorer shows correct IDS counts for running and staged banks.
+- Live topology views read the running configuration; stale commit notices
+  clear and staging writes one audit record.
+- Preserve reserved HTTP management when optional listeners cannot bind;
+  expose listener boot faults.
+- Refuse unsafe resets and rollback targets without discarding staged work.
+- Avoid SQLite-specific management boot-fault handling; a historical
+  reservation fault no longer blocks replay after the reservation is removed.
+- Correct ownership netlink subscriptions, watcher cancellation and
+  concurrent interface/routing state updates.
+- Preserve static, DHCP and WireGuard host addresses during CIDR conversion.
+- Reuse the management guard receive buffer.
+- Bind `:latest` signature verification to the exact release commit checked
+  for `main` ancestry; reject malformed and reserved release versions before
+  publishing images.
 
 ## [0.1.32] - 2026-10-09
 
