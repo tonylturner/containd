@@ -133,7 +133,9 @@ exactly `state` and `reason`:
 - `degraded`: a ruleset is in force, but the last apply failed and left the
   previous ruleset in force, or the schedule planner is degraded: a refill of
   the schedule time sets is failing, or their horizon ends within an hour.
-  `engineStatus.schedulePlanner` in `GET /api/v1/dataplane/ruleset` shows the
+  `schedulePlanner` in `GET /api/v1/dataplane/ruleset/status` (any
+  authenticated user) and `engineStatus.schedulePlanner` in the admin-only
+  `GET /api/v1/dataplane/ruleset` show the
   planner's last refill, horizon end and last error.
 - `disabled`: `dataplane.enforcement: false` intentionally selects the supported
   in-memory-only mode; a successful commit does not install nft rules.

@@ -146,7 +146,8 @@ rule ID, the predicate (`identity`, `zone` with the `zones` concerned, or
 - The firewall page's nftables ruleset preview, which lists the candidate's
   warnings.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
-  `engineStatus.warnings` for the last applied ruleset.
+  `engineStatus.warnings` for the last applied ruleset; any authenticated user
+  reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.
 - The rule editor's **Preview impact**, and `warnings` in the
   `POST /api/v1/firewall/rules/preview` response, for the previewed rule.
 

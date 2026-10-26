@@ -12,7 +12,11 @@ The engine defaults `CONTAIND_ENFORCE_ENABLED` to false at startup. Running
 configuration controls subsequent applies through `dataplane.enforcement`; set
 that field to true in candidate and commit for kernel rule application. Starting
 capture or seeing decoded events does not prove that firewall policy is installed. Review the ruleset preview and engine status
-through `GET /api/v1/dataplane/ruleset` and check for apply errors.
+through `GET /api/v1/dataplane/ruleset` and check for apply errors. Any
+authenticated user can read the installed ruleset's status, without the ruleset
+text, through `GET /api/v1/dataplane/ruleset/status`: `error` and `failedAt` for
+a failed apply, `schedulePlanner`, applied `warnings`, and `installed`, which is
+false before the first successful apply and while enforcement is disabled.
 
 The engine owns only its own nftables tables, named after `dataplane.enforceTable`
 (default `containd`). Each apply replaces the policy table

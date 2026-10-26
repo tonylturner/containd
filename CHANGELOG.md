@@ -138,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GET /api/v1/dataplane/ruleset/status` reports the installed ruleset's status (failed apply, schedule planner, applied rule warnings, ICS coverage) to any authenticated user, without compiling the candidate and without the ruleset text.
 - `show syslog status` shows audit record forwarding: totals, backlog and, per
   forwarder, cursor, backlog, last send and last error.
 - Syslog forwarders also send audit records, oldest first, as JSON
@@ -209,6 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Firewall and ICS pages show every role why firewall enforcement is degraded; the applied ruleset status no longer needs an admin ruleset preview.
 - `GET /api/v1/system/tls` returns cleaned certificate paths, the subject and expiry of the certificate the bound HTTPS listener serves (`servedCertSubject`, `servedCertNotAfter`), and the bound listener addresses (`boundHttpListenAddr`, `boundHttpsListenAddr`), with `httpListenChanges` and `httpsListenChanges` saying whether the next start binds another listener. Every wildcard spelling of a port is the same listener; a listener bound at a specific address in place of a configured wildcard shows its next-start row.
 - System Settings shows the listeners, certificate files and certificate served now, and adds a "(next start)" row only where the next start differs.
 - The UI shows the detail of API errors, such as why a certificate upload was rejected.
