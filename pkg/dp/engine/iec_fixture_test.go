@@ -242,6 +242,13 @@ func (h *iecHarness) waitResets(n int) []session.Reset {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if got := h.inj.Resets(); len(got) >= n {
+			// SendRST is recorded before reset_sent and conntrack deletion.
+			// Wait for the worker's barrier, not just the injector call.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if !h.e.hooks.blocks.flush(ctx.Done()) {
+				h.t.Fatal("reset worker did not reach its barrier")
+			}
 			return got
 		}
 		time.Sleep(5 * time.Millisecond)

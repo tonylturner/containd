@@ -286,6 +286,7 @@ func TestIECHealthQueueDownAndRecovery(t *testing.T) {
 	if len(v) != 1 || v[0].Attributes["outcome"] != "drop_failed" {
 		t.Fatalf("verdict after queue down = %+v", v)
 	}
+	h.waitResets(2)
 	h.e.hooks.onSource(capture.SourceEvent{Generation: 2, Ready: true})
 	if st := h.e.IEC104Enforcement(); !st.Healthy {
 		t.Fatalf("health after ready = %+v", st)
@@ -301,10 +302,18 @@ func TestIECPolicyChangeResetsSession(t *testing.T) {
 	h.handshake()
 	h.policy.mode = "learn"
 	h.e.LoadRules(iecSnapshot("learn"))
-	if got := h.outcomes(); len(got) != 1 || got[0] != "aborted" {
+	resets := h.waitResets(2)
+	if len(resets) != 2 || resets[0].Dst != netip.MustParseAddrPort("10.30.30.30:2404") ||
+		resets[1].Dst != netip.MustParseAddrPort("10.60.60.10:40000") {
+		t.Fatalf("policy change resets = %+v, want one per endpoint", resets)
+	}
+	if got := h.outcomes(); !reflect.DeepEqual(got, []string{"aborted", "reset_sent", "reset_sent"}) {
 		t.Fatalf("outcomes = %v", got)
 	}
-	h.waitResets(2)
+	ev := h.eventsOf("ics.session")[0]
+	if ev.Attributes["reason"] != "policy" {
+		t.Fatalf("abort reason = %v, want policy", ev.Attributes["reason"])
+	}
 }
 
 func TestIECUnframedStreamFailsClosed(t *testing.T) {
