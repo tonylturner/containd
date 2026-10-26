@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CONFIG_COMMITTED } from "../lib/config-events";
 
 // Exercise unavailable -> real empty -> unavailable after a successful read.
 // Each endpoint retains its HTTP failure rather than being mocked as empty.
@@ -22,7 +23,7 @@ test.beforeEach(async ({ page }) => {
       disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true },
       runtime: { uptime: "1m", goroutines: 1 },
     };
-    if (["/api/v1/flows", "/api/v1/interfaces/state", "/api/v1/simulation"].includes(path)) {
+    if (["/api/v1/flows", "/api/v1/interfaces/state", "/api/v1/simulation", "/api/v1/diagnostics/iec104"].includes(path)) {
       await route.fulfill({ status: 503, json: { error: "engine unavailable" } });
     } else {
       await route.fulfill({ json: body });
@@ -163,3 +164,77 @@ test("Auto WAN setup retries unavailable discovery without staging fabricated ro
   await expect(page.getByText(/Gateway and default route staged/)).toHaveCount(0);
   expect(staged).toHaveLength(1);
 });
+
+test("diagnostics keeps interface-state failure local and retries runtime address discovery", async ({ page }) => {
+  let phase: "unavailable" | "empty" | "populated" = "unavailable";
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [
+    { name: "lan", device: "eth0", zone: "lan" },
+  ] }));
+  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
+    ? { status: 503, json: { error: "engine interface state unavailable" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.10/24"] }] }));
+  await page.goto("/diagnostics/");
+  const connectivity = page.getByRole("region", { name: "Interface Connectivity", exact: true });
+  const unavailable = connectivity.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
+  await expect(unavailable).toBeVisible();
+  await expect(connectivity.getByText("No OS interfaces reported.", { exact: true })).toHaveCount(0);
+  await expect(connectivity.getByText("Quick pick:", { exact: true })).toHaveCount(0);
+  await expect(connectivity.getByRole("option", { name: "lan", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Ping", exact: true }).getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+  phase = "empty";
+  await unavailable.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(unavailable).toHaveCount(0);
+  await expect(connectivity.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "IEC 104 holdback pressure" }).getByRole("status")).toContainText("IEC 104 diagnostics unavailable");
+  phase = "populated";
+  await page.reload();
+  await expect(connectivity.getByTitle("Use lan OS/Docker IP: 192.0.2.10")).toBeVisible();
+  await connectivity.getByTitle("Use lan OS/Docker IP: 192.0.2.10").click();
+  await expect(connectivity.getByPlaceholder("host, IP, or interface name")).toHaveValue("192.0.2.10");
+  phase = "unavailable";
+  await page.reload();
+  await expect(unavailable).toBeVisible();
+  await expect(connectivity.getByTitle("Use lan OS/Docker IP: 192.0.2.10")).toHaveCount(0);
+});
+
+for (const failedEndpoint of ["interfaces", "flows"] as const) {
+  test(`physical topology retries unavailable ${failedEndpoint} without rendering empty or stale runtime data`, async ({ page }) => {
+    let phase: "unavailable" | "empty" | "populated" = "unavailable";
+    await page.route("**/api/v1/config", (route) => route.fulfill({ json: {
+      interfaces: [], zones: [], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
+    } }));
+    await page.route("**/api/v1/system/inspection", (route) => route.fulfill({
+      status: 503, json: { error: "inspection unavailable" },
+    }));
+    await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "interfaces"
+      ? { status: 503, json: { error: "engine interface state unavailable" } }
+      : { json: phase === "empty" ? [] : [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }] }));
+    await page.route("**/api/v1/flows?*", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "flows"
+      ? { status: 503, json: { error: "engine flows unavailable" } }
+      : { json: phase === "empty" ? [] : [{
+        flowId: "flow-1", firstSeen: "2026-01-01T00:00:00Z", lastSeen: "2026-01-01T00:01:00Z", eventCount: 1,
+      }] }));
+    await page.goto("/topology/");
+    await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+    const unavailable = page.getByRole("alert").filter({ hasText: "Physical topology unavailable" });
+    await expect(unavailable).toBeVisible();
+    await expect(page.getByText("HOST MACHINE", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("0 SESSIONS", { exact: true })).toHaveCount(0);
+    phase = "empty";
+    await unavailable.locator("..").getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(unavailable).toHaveCount(0);
+    await expect(page.getByText("HOST MACHINE", { exact: true })).toBeVisible();
+    await expect(page.getByText("0 SESSIONS", { exact: true })).toBeVisible();
+    await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
+    phase = "populated";
+    await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
+    await expect(page.getByText("1 SESSIONS", { exact: true })).toBeVisible();
+    await expect(page.getByText("eth9", { exact: true })).toBeVisible();
+    phase = "unavailable";
+    await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
+    await expect(unavailable).toBeVisible();
+    await expect(page.getByText("HOST MACHINE", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("1 SESSIONS", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
+  });
+}

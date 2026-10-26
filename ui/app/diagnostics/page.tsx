@@ -127,7 +127,8 @@ export default function DiagnosticsPage() {
   const canEdit = isAdmin();
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
-  const [state, setState] = useState<InterfaceState[]>([]);
+  const [state, setState] = useState<InterfaceState[] | null>(null);
+  const [interfaceStateLoading, setInterfaceStateLoading] = useState(true);
   const [enforcementEnabled, setEnforcementEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -163,6 +164,7 @@ export default function DiagnosticsPage() {
   const [blockErr, setBlockErr] = useState<string | null>(null);
 
   const dstInterfaceChoices = useMemo(() => {
+    if (state === null) return [];
     const byName = new Map(state.map((s) => [s.name, s] as const));
     return ifaces
       .slice()
@@ -180,11 +182,16 @@ export default function DiagnosticsPage() {
       });
   }, [ifaces, state]);
 
+  async function refreshInterfaceState() {
+    setState(await api.listInterfaceState());
+    setInterfaceStateLoading(false);
+  }
+
   useEffect(() => {
+    void refreshInterfaceState();
     (async () => {
-      const [i, s, dp] = await Promise.all([api.listInterfaces(), api.listInterfaceState(), fetchDataPlane()]);
+      const [i, dp] = await Promise.all([api.listInterfaces(), fetchDataPlane()]);
       setIfaces(i ?? []);
-      setState(s ?? []);
       setEnforcementEnabled(dp?.enforcement ?? null);
     })();
   }, []);
@@ -419,6 +426,13 @@ export default function DiagnosticsPage() {
           <div className="text-xs text-[var(--text-muted)]">
             Tests from a selected interface. Use this to validate routing and basic port reachability.
           </div>
+          {!interfaceStateLoading && state === null && (
+            <div role="status" className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <p>Interface runtime state unavailable — the engine could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
+              <button onClick={refreshInterfaceState} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+            </div>
+          )}
+          {state?.length === 0 && <p role="status" className="mt-3 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <div className="mb-1 text-xs text-[var(--text-muted)]">Source interface</div>
