@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { StatusIndicator } from "../../components/StatusBadge";
-import { fetchHealth, type HealthResponse, type IEC104EnforcementHealth } from "../../lib/api";
+import type { IEC104EnforcementHealth } from "../../lib/api";
 
 type Indicator = {
   status: "healthy" | "degraded" | "unknown";
@@ -29,32 +27,6 @@ export function iec104HealthIndicator(
     return { status: "healthy", label: "IEC 104 enforcement active" };
   }
   return { status: "unknown", label: "IEC 104 enforcement inactive", sublabel: "no enforce envelope loaded" };
-}
-
-/** Polls GET /api/v1/health every 10 s while the page is visible. */
-export function useHealth(): HealthResponse | undefined {
-  const [health, setHealth] = useState<HealthResponse | undefined>();
-
-  useEffect(() => {
-    const controller = new AbortController();
-    async function refresh() {
-      try {
-        const res = await fetchHealth(controller.signal);
-        setHealth(res ?? undefined);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setHealth(undefined);
-      }
-    }
-    refresh();
-    const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
-    return () => {
-      controller.abort();
-      clearInterval(id);
-    };
-  }, []);
-
-  return health;
 }
 
 export function IEC104HealthIndicator({ health }: { health: IEC104EnforcementHealth | undefined }) {

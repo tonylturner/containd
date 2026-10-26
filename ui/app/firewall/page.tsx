@@ -38,8 +38,7 @@ import { FirewallRuleTable } from "./firewall-rule-table";
 import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
-import { useHealth } from "../ics/iec104-health";
-import { ManagementRecoveryBanner } from "../../components/ManagementRecoveryBanner";
+import { useHealth } from "../../hooks/useHealth";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -351,7 +350,6 @@ export default function FirewallPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      <ManagementRecoveryBanner recovery={health?.managementRecovery} />
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
