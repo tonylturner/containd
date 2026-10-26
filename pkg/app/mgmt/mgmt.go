@@ -19,6 +19,7 @@ import (
 	httpapi "github.com/tonylturner/containd/api/http"
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -160,7 +161,7 @@ func Run(ctx context.Context, opts Options) error {
 
 func validateJWTSecret(logger *zap.SugaredLogger) error {
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
-	labMode := isLabMode()
+	labMode := labmode.Enabled()
 	switch {
 	case jwtSecret == "containd-dev-secret-change-me":
 		if !labMode {
@@ -426,8 +427,4 @@ func serveMgmtServer(server *http.Server, listener net.Listener, errCh chan<- er
 		return
 	}
 	errCh <- server.Serve(listener)
-}
-
-func isLabMode() bool {
-	return os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 }

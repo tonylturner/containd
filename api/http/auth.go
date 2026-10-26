@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -46,7 +47,7 @@ func jwtSecret() []byte {
 // If users store is nil, falls back to legacy env tokens for compatibility.
 func authMiddleware(userStore users.Store) gin.HandlerFunc {
 	cfg := authModeConfig{
-		lab:          os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true"),
+		lab:          labmode.Enabled(),
 		adminToken:   strings.TrimSpace(os.Getenv("CONTAIND_ADMIN_TOKEN")),
 		auditorToken: strings.TrimSpace(os.Getenv("CONTAIND_AUDITOR_TOKEN")),
 		secret:       jwtSecret(),

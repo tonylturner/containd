@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -67,7 +68,7 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 			return live.allowPassword, live.authKeysDir, nil
 		},
 		ShellMode:  rt.shellMode,
-		LabMode:    isLabMode(),
+		LabMode:    labmode.Enabled(),
 		JWTSecret:  []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
 		UserStore:  userStore,
 		AuditStore: auditStore,
@@ -194,7 +195,7 @@ func resolveSSHPasswordPolicy(cfg *config.Config, authKeysDir string) (bool, str
 	if cfg != nil && cfg.System.SSH.AllowPassword != nil {
 		return *cfg.System.SSH.AllowPassword, "config"
 	}
-	if isLabMode() {
+	if labmode.Enabled() {
 		return true, "lab default"
 	}
 	return authKeysDirNeedsBootstrap(authKeysDir), "bootstrap default"

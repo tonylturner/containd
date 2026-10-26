@@ -3864,7 +3864,7 @@ paths:
     post:
       summary: Change own password
       tags: [Auth]
-      description: Requires current password; disabled in lab mode.
+      description: Requires the current password. Lab mode refuses the change with 403 before checking the request.
       requestBody:
         required: true
         content:
@@ -3876,11 +3876,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
+        '403':
+          description: Lab mode (`CONTAIND_LAB_MODE`) refuses every password change.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /users/{id}/password:
     post:
       summary: Set user password (admin)
       tags: [Users]
-      description: Disabled in lab mode.
+      description: Lab mode refuses the change with 403.
       requestBody:
         required: true
         content:
@@ -3892,6 +3897,11 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
+        '403':
+          description: The caller is not an admin, or lab mode (`CONTAIND_LAB_MODE`) refuses every password change.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
       parameters:
       - name: id
         in: path
