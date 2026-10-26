@@ -37,6 +37,7 @@ export {
   downloadPcapURL,
   fetchDataPlane,
   getPcapConfig,
+  getICSCoverage,
   getPcapStatus,
   getRulesetPreview,
   listPcaps,
@@ -55,6 +56,7 @@ export type {
 } from "./api-dataplane";
 export type {
   ICSCoverageReason,
+  ICSCoverageReport,
   ICSCoverageRule,
   ICSCoverageState,
   ICSEnforcementHealth,
