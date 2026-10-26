@@ -135,6 +135,9 @@ type iecTable struct {
 	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
 	globalMode string
 
+	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
+	pressureOffline bool
+
 	policy     iecPolicy
 	snap       *rules.Snapshot
 	hasIEC     bool
@@ -322,6 +325,11 @@ func (t *iecTable) evictTombstoneLocked() {
 
 // run drives the timers until stop is closed.
 func (t *iecTable) run(stop <-chan struct{}) {
+	defer func() {
+		t.mu.Lock()
+		t.pressureOffline = true
+		t.mu.Unlock()
+	}()
 	ticker := time.NewTicker(iecExpireInterval)
 	defer ticker.Stop()
 	for {

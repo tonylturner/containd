@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -194,6 +196,9 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/protocols", protoStatsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/top-talkers", topTalkersHandler(dpEngine))
+	metrics.SetIEC104PressureReader(dpEngine.IEC104PressureMetrics)
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/internal/diagnostics/iec104", iec104PressureHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler())

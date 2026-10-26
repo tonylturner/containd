@@ -207,3 +207,34 @@ The stats module (`pkg/dp/stats`) tracks per-protocol traffic counters and ident
 ## ICS Policy Templates
 
 Seven ICS protocol templates are available via `GET /api/v1/templates/ics` and can be applied with `POST /api/v1/templates/ics/apply`. Templates provide baseline configurations for common ICS environments including Purdue model zones and maintenance window policies.
+
+## IEC 104 Holdback Diagnostics
+
+The Diagnostics page shows current IEC 104 held packets, held payload bytes,
+oldest pending age and active sessions beside the fixed limits. The engine holds
+incomplete APDUs until every byte is framed and allowed. Held bytes include
+retransmissions. An empty hold queue has zero packets, bytes and age.
+
+Limits are 256 held packets globally, 32 packets and 65,536 payload bytes per
+session, a one-second pending timeout, and 4,096 tracked tuple slots. Closed
+sessions and abort tombstones occupy slots; replacement handshakes reuse their
+slot. Capture shutdown makes active sessions zero, but retained tuple slots can
+remain until expiry or rebuild. The shared reset/block worker has 256 queue slots.
+There are no tuning controls.
+
+Totals distinguish denied-command aborts from timeouts, saturation, midstream
+traffic, stream/framing/transport errors, policy changes and queue closure.
+Fail-closed steering rejections and injector-unavailable admission rejections are
+also counted per occurrence, not as unique commands. Reset-worker rejections,
+inline verdict failures and failed reset-injection attempts are separate totals.
+Verdict failures cover the shared inline pipeline as well as rejected IEC holdback settlement requests; intentional
+queue-closure completions are excluded. Totals survive configuration rebuilds
+and reset only when the engine process restarts. These diagnostics do not change
+packet decisions or the `iec104Enforcement` health object.
+
+Authenticated clients read `GET /api/v1/diagnostics/iec104`. An unavailable engine
+returns HTTP 503, not an empty or zero snapshot. Scrape the **engine listener's**
+`/metrics` for `containd_dp_iec104_*` gauges and counters, not the separate
+management process's metrics. The engine listener is internal and unauthenticated;
+keep it on a trusted network. The series have no station/session/IP/CA/IOA labels;
+only the abort counter has a fixed `reason` label.
