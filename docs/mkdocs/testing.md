@@ -137,13 +137,15 @@ and IEC104 scenarios in
 
 `CONTAIND_NETNS_KERNEL_TEST=1` is the one gate of the dataplane kernel tests
 in `pkg/dp/engine`, `pkg/dp/enforce`, `pkg/dp/capture`, `pkg/dp/session`,
-`pkg/dp/conntrack` and `pkg/dp/dhcpd`. Most of them replace containd's nft
-tables or create network namespaces, so they run only with the variable set,
-in a disposable privileged Linux container. The `pkg/dp/capture` and
-`pkg/dp/session` tests also run whenever they run as root; with the variable
-set, a missing prerequisite fails them instead of skipping. Each test's
-comment gives its container command. The `pkg/dp/netcfg` routing and
-management kernel tests keep their own variables.
+`pkg/dp/conntrack`, `pkg/dp/dhcpd` and `pkg/dp/netcfg`. Most of them replace
+containd's nft tables, routes or links, or create network namespaces, so they
+run only with the variable set, in a disposable privileged Linux container.
+The `pkg/dp/capture` and `pkg/dp/session` tests also run whenever they run as
+root; with the variable set, a missing prerequisite fails them instead of
+skipping. Each test's comment gives its container command. The
+`pkg/dp/netcfg` management kernel test also needs a TUN device, OpenVPN and
+reverse-path filtering; `bash pkg/dp/netcfg/management-kernel.sh` builds that
+container and runs it.
 
 ## Kernel NFQUEUE Oracle
 
