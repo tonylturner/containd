@@ -6,6 +6,7 @@ package engine
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/netip"
 	"sync/atomic"
 	"time"
 
@@ -44,6 +45,7 @@ const (
 	outcomeReconnected      = "reconnected"
 	outcomeEnforceUnhealthy = "enforce_unhealthy"
 	outcomeEnforceHealthy   = "enforce_healthy"
+	outcomeUntracked        = "untracked"
 )
 
 // Abort reasons, carried as the reason of the ics.session aborted event.
@@ -139,5 +141,26 @@ func healthEvent(outcome, errText string, now time.Time) events.Event {
 		Kind:       eventfields.KindSession,
 		Attributes: attrs,
 		Timestamp:  now.UTC(),
+	}
+}
+
+// untrackedEvent reports a learn-mode SYN accepted without tracking. There
+// is no incarnation, so it deliberately carries no session_id or apdu_id.
+func untrackedEvent(client, server netip.AddrPort, now time.Time) events.Event {
+	return events.Event{
+		Proto: eventfields.ProtoIEC104,
+		Kind:  eventfields.KindSession,
+		Attributes: map[string]any{
+			eventfields.KeyOutcome: outcomeUntracked,
+			eventfields.KeyMode:    "learn",
+			eventfields.KeyReason:  "bound",
+			"limit":                iecMaxSessions,
+		},
+		Timestamp: now.UTC(),
+		SrcIP:     client.Addr().String(),
+		DstIP:     server.Addr().String(),
+		SrcPort:   client.Port(),
+		DstPort:   server.Port(),
+		Transport: "tcp",
 	}
 }

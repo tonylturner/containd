@@ -24,6 +24,7 @@ const (
 	reasonIECClosed    = "iec104_closed"
 	reasonIECFailClose = "iec104_fail_closed"
 	reasonIECInvalid   = "iec104_invalid"
+	reasonIECUntracked = "iec104_untracked"
 )
 
 // iecResult is the outcome of one IEC104 envelope packet. Its actions are
@@ -172,11 +173,21 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 // openLocked starts a new incarnation from its SYN. prev is the tombstone
 // or closed session of the same tuple, if any.
 func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, now time.Time) iecResult {
+	if len(t.sessions) >= iecMaxSessions {
+		if mode == "enforce" {
+			return dropped(reasonIECFailClose)
+		}
+		// Learn is fail open when observation capacity is exhausted. Do not
+		// allocate an incarnation or byte stream for this tuple.
+		res := accepted(reasonIECUntracked)
+		res.acts.events = append(res.acts.events, untrackedEvent(client, server, now))
+		return res
+	}
 	if len(pkt.Payload) > 0 {
 		return dropped(reasonIECInvalid) // SYN with data (no TCP Fast Open in B)
 	}
-	if mode == "enforce" && (!t.health.injectorReady() || len(t.sessions) >= iecMaxSessions) {
-		// No session can be reset, or none can be tracked: none may start.
+	if mode == "enforce" && !t.health.injectorReady() {
+		// No session can be reset: none may start.
 		return dropped(reasonIECFailClose)
 	}
 	n := &iecSession{id: t.newID(), client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
@@ -196,6 +207,10 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 // inside an enforce envelope and resets that session once (B5). The
 // tombstone then drops its later packets.
 func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, now time.Time) iecResult {
+	if len(t.sessions) >= iecMaxSessions {
+		// Unobserved enforce traffic must not bypass the shared table bound.
+		return dropped(reasonIECFailClose)
+	}
 	s := &iecSession{id: t.newID(), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
 	t.sessions[iecKey{client: client, server: server}] = s
 	dir := iecDirSrv
