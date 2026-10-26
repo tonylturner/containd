@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Allow IEC 104 reconnects on retained aborted or closed tuples when the
+  session table is full, without exceeding the tracking limit.
 - Bound IEC 104 learn-mode session tracking to the shared 4,096-entry
   table. Connections that cannot be tracked are accepted without stream
   inspection and reported as `ics.session` untracked/bound events.

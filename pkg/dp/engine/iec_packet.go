@@ -173,7 +173,8 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 // openLocked starts a new incarnation from its SYN. prev is the tombstone
 // or closed session of the same tuple, if any.
 func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, now time.Time) iecResult {
-	if len(t.sessions) >= iecMaxSessions {
+	// The bound counts tuple keys; a retained tuple reuses its existing key.
+	if prev == nil && len(t.sessions) >= iecMaxSessions {
 		if mode == "enforce" {
 			return dropped(reasonIECFailClose)
 		}
