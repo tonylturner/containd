@@ -244,11 +244,11 @@ commit
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="text-(--text)">{label}</span>
-      <span className="truncate text-(--text)">{value}</span>
+      <span className="truncate text-(--text)" title={value}>{value}</span>
     </div>
   );
 }

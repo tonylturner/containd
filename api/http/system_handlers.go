@@ -60,10 +60,12 @@ type tlsInfoResponse struct {
 	// listener serves now, and the ServedCert fields describe that
 	// certificate; all empty when no HTTPS listener is bound. All file
 	// paths are cleaned, so equal strings name the same file.
-	ServedCertFile     string `json:"servedCertFile,omitempty"`
-	ServedKeyFile      string `json:"servedKeyFile,omitempty"`
-	ServedCertSubject  string `json:"servedCertSubject,omitempty"`
-	ServedCertNotAfter string `json:"servedCertNotAfter,omitempty"`
+	ServedCertFile     string   `json:"servedCertFile,omitempty"`
+	ServedKeyFile      string   `json:"servedKeyFile,omitempty"`
+	ServedCertSubject  string   `json:"servedCertSubject,omitempty"`
+	ServedCertNotAfter string   `json:"servedCertNotAfter,omitempty"`
+	ServedCertDNSNames []string `json:"servedCertDnsNames,omitempty"`
+	ServedCertIPs      []string `json:"servedCertIps,omitempty"`
 }
 
 func getTLSHandler(store config.Store) gin.HandlerFunc {
@@ -104,18 +106,14 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertSubject = cert.Subject.String()
 			resp.CertIssuer = cert.Issuer.String()
 			resp.CertNotAfter = formatNotAfter(cert)
-			resp.CertDNSNames = append([]string(nil), cert.DNSNames...)
-			for _, ip := range cert.IPAddresses {
-				if ip != nil {
-					resp.CertIPs = append(resp.CertIPs, ip.String())
-				}
-			}
+			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
 		}
 		// The bound listener reloads its files at the next handshake after
 		// they change, so the file is what it serves.
 		if cert := readCertificate(resp.ServedCertFile); cert != nil {
 			resp.ServedCertSubject = cert.Subject.String()
 			resp.ServedCertNotAfter = formatNotAfter(cert)
+			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(cert)
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -195,6 +193,18 @@ func readCertificate(path string) *x509.Certificate {
 
 func formatNotAfter(cert *x509.Certificate) string {
 	return cert.NotAfter.UTC().Format(time.RFC3339Nano)
+}
+
+// certSANs are a certificate's DNS name and IP address subject alternative
+// names; nil when it has none of that kind.
+func certSANs(cert *x509.Certificate) (dnsNames, ips []string) {
+	dnsNames = append(dnsNames, cert.DNSNames...)
+	for _, ip := range cert.IPAddresses {
+		if ip != nil {
+			ips = append(ips, ip.String())
+		}
+	}
+	return dnsNames, ips
 }
 
 type setTLSCertRequest struct {

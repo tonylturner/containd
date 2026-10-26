@@ -4,15 +4,24 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -164,10 +173,34 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 	}
 }
 
+// sanTestCertPEM is a self-signed PEM certificate for commonName with the
+// given DNS and IP subject alternative names.
+func sanTestCertPEM(t *testing.T, commonName string, dnsNames []string, ips []net.IP) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: commonName},
+		DNSNames:     dnsNames,
+		IPAddresses:  ips,
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
 // The readout names the files and certificate the bound HTTPS listener
 // serves, and the listeners management has bound, next to the ones the
 // next start serves, which a listener fallback or a later save makes
-// differ. Paths are cleaned, so equal strings name the same file.
+// differ. Each certificate's subject alternative names come from its own
+// file. Paths are cleaned, so equal strings name the same file.
 func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
@@ -178,7 +211,8 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	savedPEM, _ := generateTestCertPEM(t)
-	_, servedPEM := consoleTestCertificate(t)
+	servedPEM := sanTestCertPEM(t, "appliance.example", []string{"appliance.example"},
+		[]net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::10")})
 	savedCert, servedCert := filepath.Join(dir, "tls", "saved.crt"), filepath.Join(dir, "tls", "server.crt")
 	if err := os.WriteFile(savedCert, []byte(savedPEM), 0o600); err != nil {
 		t.Fatal(err)
@@ -220,20 +254,26 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 		!strings.Contains(got.ServedCertSubject, "appliance.example") || got.ServedCertNotAfter == "" || got.ServedCertNotAfter == got.CertNotAfter {
 		t.Fatalf("certificates = %+v", got)
 	}
+	if !slices.Equal(got.CertDNSNames, []string{"containd.local", "lab.containd.local"}) || got.CertIPs != nil ||
+		!slices.Equal(got.ServedCertDNSNames, []string{"appliance.example"}) ||
+		!slices.Equal(got.ServedCertIPs, []string{"192.0.2.10", "2001:db8::10"}) {
+		t.Fatalf("subject alternative names = %+v", got)
+	}
 	if got.BoundHTTPListenAddr != ":8080" || got.BoundHTTPSListenAddr != ":8443" || got.HTTPSListenAddr != ":9443" {
 		t.Fatalf("listeners = %+v", got)
 	}
 
 	// The saved files served now name the same file however they are spelled.
 	SetServedManagement(ServedManagement{CertFile: savedCert, KeyFile: filepath.Join(dir, "tls", "saved.key")})
-	if got := read(); got.ServedCertFile != got.CertFile || got.ServedKeyFile != got.KeyFile || got.ServedCertSubject != got.CertSubject {
+	if got := read(); got.ServedCertFile != got.CertFile || got.ServedKeyFile != got.KeyFile || got.ServedCertSubject != got.CertSubject ||
+		!slices.Equal(got.ServedCertDNSNames, got.CertDNSNames) || got.ServedCertIPs != nil {
 		t.Fatalf("served saved files = %+v", got)
 	}
 
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: ":8080", Enabled: true}, HTTPS: config.ManagementListener{Addr: ":8443"}})
 	SetServedManagement(ServedManagement{})
 	if got := read(); got.ServedCertFile != "" || got.ServedKeyFile != "" || got.ServedCertSubject != "" || got.ServedCertNotAfter != "" ||
-		got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" {
+		got.ServedCertDNSNames != nil || got.ServedCertIPs != nil || got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" {
 		t.Fatalf("readout without HTTPS = %+v", got)
 	}
 }

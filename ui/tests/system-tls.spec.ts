@@ -8,11 +8,15 @@ const saved = {
   httpEnabled: true, httpsEnabled: true, httpListenAddr: ":8080", httpsListenAddr: ":8443",
   certFile: "/data/tls/server.crt", keyFile: "/data/tls/server.key",
   certSubject: "CN=saved", certNotAfter: "2027-01-01T00:00:00Z",
+  certDnsNames: ["saved.example"], certIps: ["192.0.2.20"],
 };
 // Bound listeners are named by their sockets' addresses: a wildcard listen
 // is [::]. The API says whether the next start binds another listener.
 const bound = { boundHttpListenAddr: "[::]:8080", boundHttpsListenAddr: "[::]:8443", httpListenChanges: false, httpsListenChanges: false };
-const served = { servedCertSubject: "CN=served", servedCertNotAfter: "2026-12-01T00:00:00Z" };
+const served = {
+  servedCertSubject: "CN=served", servedCertNotAfter: "2026-12-01T00:00:00Z",
+  servedCertDnsNames: ["served.example", "containd.local"], servedCertIps: ["192.0.2.10", "2001:db8::10"],
+};
 const iso = (v: string | undefined) => v ?? "—";
 const rows = (list: TLSRow[]) => Object.fromEntries(list.map((r) => [r.label, r.value]));
 
@@ -25,8 +29,23 @@ test("listeners and files served now equal to the next start show once", () => {
       { label: "Cert file", value: "/data/tls/server.crt" },
       { label: "Key file", value: "/data/tls/server.key" },
       { label: "Cert subject", value: "CN=served" },
+      { label: "Cert SANs", value: "served.example, containd.local, 192.0.2.10, 2001:db8::10" },
       { label: "Cert expires", value: "2026-12-01T00:00:00Z" },
     ],
+  });
+});
+
+test("each certificate shows its own subject alternative names", () => {
+  // A certificate without SANs says so; no certificate read shows nothing.
+  const none = tlsView({ ...saved, ...bound, ...served, servedCertDnsNames: [], servedCertIps: undefined, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
+  expect(rows(none.rows)["Cert SANs"]).toBe("none");
+  const unread = tlsView({ ...saved, ...bound, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
+  expect(rows(unread.rows)["Cert SANs"]).toBe("—");
+  // Saved and served certificates that differ keep their SANs apart.
+  const differ = tlsView({ ...saved, ...bound, ...served, servedCertFile: "/data/tls/default.crt", servedKeyFile: "/data/tls/default.key" }, iso);
+  expect(rows(differ.rows)).toMatchObject({
+    "Cert SANs": "served.example, containd.local, 192.0.2.10, 2001:db8::10",
+    "Cert SANs (next start)": "saved.example, 192.0.2.20",
   });
 });
 
@@ -76,6 +95,7 @@ test("without a bound HTTPS listener the saved files wait for the next start", (
     "Cert file (next start)": "/data/tls/server.crt",
     "Key file (next start)": "/data/tls/server.key",
     "Cert subject (next start)": "CN=saved",
+    "Cert SANs (next start)": "saved.example, 192.0.2.20",
     "Cert expires (next start)": "2027-01-01T00:00:00Z",
   });
   expect(view.note).toBe("No HTTPS listener is bound; the saved files are served from the next management start.");
@@ -149,6 +169,9 @@ test("settings page marks saved files that differ from the served ones", async (
   const card = await openSettings(page);
   await expect(card.getByText("/data/tls/default.crt")).toBeVisible();
   await expect(card.getByText("CN=served")).toBeVisible();
+  await expect(card.getByText("served.example, containd.local, 192.0.2.10, 2001:db8::10")).toBeVisible();
+  await expect(card.getByText("Cert SANs (next start)")).toBeVisible();
+  await expect(card.getByText("saved.example, 192.0.2.20")).toBeVisible();
   await expect(card.getByText("Cert file (next start)")).toBeVisible();
   await expect(card.getByText("/data/tls/server.crt")).toBeVisible();
   await expect(card.getByText("they are served from the next management start")).toBeVisible();
