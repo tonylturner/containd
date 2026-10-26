@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,19 +87,6 @@ func TestRenderChronyConfigSkipsEmptyServers(t *testing.T) {
 	}
 }
 
-func TestRenderOpenNTPDConfig(t *testing.T) {
-	m := &NTPManager{NTPDName: "openntpd"}
-	cfg := config.NTPConfig{
-		Enabled:         true,
-		Servers:         []string{"pool.ntp.org"},
-		IntervalSeconds: 60,
-	}
-	out := m.renderOpenNTPDConfig(cfg)
-	if !contains(out, "servers pool.ntp.org") {
-		t.Error("openntpd config missing server directive")
-	}
-}
-
 func TestApplyWritesConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	m := &NTPManager{
@@ -167,16 +155,12 @@ func TestStatusReflectsState(t *testing.T) {
 	if status["servers_count"] != 2 {
 		t.Errorf("status servers_count = %v, want 2", status["servers_count"])
 	}
-	// ntpd_name is present (may be empty string if no binary found).
-	if _, ok := status["ntpd_name"]; !ok {
-		t.Error("status should include ntpd_name field")
+	// The supported implementation is chrony even when the binary is missing.
+	if status["ntpd_name"] != "chrony" {
+		t.Error("status should identify chrony")
 	}
 	if status["running"] != false {
 		t.Error("status should show running=false when supervise is disabled")
-	}
-	// Backward compatibility field.
-	if _, ok := status["openntpd_path"]; !ok {
-		t.Error("status should include backward-compatible openntpd_path field")
 	}
 }
 
@@ -189,7 +173,6 @@ func TestDetectNTPDPrefersEnvVar(t *testing.T) {
 	}
 
 	t.Setenv("CONTAIND_NTPD_PATH", fakeBin)
-	t.Setenv("CONTAIND_OPENNTPD_PATH", "")
 
 	path, name := detectNTPD()
 	if path != fakeBin {
@@ -205,10 +188,6 @@ func TestConfigPath(t *testing.T) {
 	if got := m.configPath(); got != "/data/services/chrony.conf" {
 		t.Errorf("configPath() = %q, want /data/services/chrony.conf", got)
 	}
-	m.NTPDName = "openntpd"
-	if got := m.configPath(); got != "/data/services/openntpd.conf" {
-		t.Errorf("configPath() = %q, want /data/services/openntpd.conf", got)
-	}
 }
 
 func contains(s, substr string) bool {
@@ -222,4 +201,62 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestStatusUsesRenderedPollInterval(t *testing.T) {
+	for _, tc := range []struct {
+		requested int
+		interval  any
+		min, max  int
+	}{
+		{60, 64, 64, 64}, {3600, 4096, 4096, 4096}, {1, 16, 16, 16}, {200000, 131072, 131072, 131072}, {0, nil, 64, 1024},
+	} {
+		m := &NTPManager{BaseDir: t.TempDir()}
+		if err := m.Apply(context.Background(), config.NTPConfig{Enabled: true, Servers: []string{"pool.ntp.org"}, IntervalSeconds: tc.requested}); err != nil {
+			t.Fatal(err)
+		}
+		status := m.Status()
+		if status["interval_seconds"] != tc.interval || status["min_poll_seconds"] != tc.min || status["max_poll_seconds"] != tc.max {
+			t.Fatalf("request %d: status %v", tc.requested, status)
+		}
+		content, err := os.ReadFile(m.configPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.requested > 0 {
+			poll := 0
+			for seconds := tc.min; seconds > 1; seconds /= 2 {
+				poll++
+			}
+			if !contains(string(content), fmt.Sprintf("minpoll %d maxpoll %d", poll, poll)) {
+				t.Fatalf("status disagrees with rendered config: %s", content)
+			}
+		}
+	}
+}
+
+func TestFailedValidationPreservesAppliedStatus(t *testing.T) {
+	m := &NTPManager{BaseDir: t.TempDir()}
+	if err := m.Apply(context.Background(), config.NTPConfig{Enabled: true, IntervalSeconds: 60}); err != nil {
+		t.Fatal(err)
+	}
+	m.NTPDPath = "/nonexistent/chronyd"
+	if err := m.Apply(context.Background(), config.NTPConfig{Enabled: true, IntervalSeconds: 3600}); err == nil {
+		t.Fatal("expected validation failure")
+	}
+	if got := m.Status()["interval_seconds"]; got != 64 {
+		t.Fatalf("failed request leaked into status: %v", got)
+	}
+}
+
+func TestDetectNTPDRejectsOtherDaemon(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "openntpd")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTAIND_NTPD_PATH", p)
+	path, name := detectNTPD()
+	if path != "" || name != "chrony" {
+		t.Fatalf("unsupported daemon selected: %q %q", path, name)
+	}
 }

@@ -31,17 +31,23 @@ Check runtime status after commit, not just whether saving succeeded.
 ## NTP (chrony)
 
 - Config model: `services.ntp` with `enabled`, `servers`, `intervalSeconds`.
-- Uses chrony as the NTP implementation on Wolfi-based images. Falls back to openntpd if chrony is not available.
+- Uses chrony (`chronyd`), the only supported NTP daemon. `CONTAIND_NTPD_PATH`, if set, must name a `chronyd` binary.
+- Positive `intervalSeconds` pins minpoll/maxpoll to a power of two, rounded up and clamped to 16–131072 seconds. Zero or omitted uses chrony's adaptive 64–1024 second defaults; initial `iburst` requests can be faster.
+- Status `interval_seconds` reports the rendered fixed interval, not the requested value; it is null for adaptive polling or when disabled. `min_poll_seconds` and `max_poll_seconds` describe the configured range (null when disabled). These are configuration values, not measured synchronization cadence.
 - API:
   - `GET/POST /api/v1/services/ntp`
 - Status and runtime events surface in `/api/v1/services/status` and `/api/v1/events`.
 
 ## DHCP
 
-- Config model: `services.dhcp` with `enabled`, `listenIfaces`, `pools`, `reservations`, and lease settings.
+- Config model: `services.dhcp` with `enabled`, `authoritative`, `listenIfaces`, `pools`, `reservations`, and lease settings.
 - API:
   - `GET/POST /api/v1/services/dhcp`
   - `GET /api/v1/dhcp/leases`
+- `authoritative` defaults to false. INIT-REBOOT, RENEWING and REBINDING requests for eligible addresses receive DHCPACK and record a lease in either mode, even when no prior lease is stored. This adopts active clients after lease data is lost and keeps their addresses out of the free pool.
+- Eligible addresses must be inside the served interface's pool, must not be the server, network or broadcast address, and must not be leased or reserved for another MAC. A client's own fixed reservation, when configured, remains binding.
+- Requests for ineligible addresses receive DHCPNAK only in authoritative mode; otherwise the server stays silent. SELECTING requests naming this server use the same eligibility checks. DISCOVER never receives DHCPNAK, including when the pool is exhausted.
+- Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
 
 ## VPN

@@ -54,6 +54,10 @@ const (
 )
 
 type request struct {
+	ciaddr   net.IP
+	giaddr   net.IP
+	serverID net.IP
+	hops     byte
 	xid      uint32
 	flags    uint16
 	mac      string
@@ -64,17 +68,18 @@ type request struct {
 }
 
 type dhcpRuntime struct {
-	dev          string
-	pool         pool
-	serverIP     net.IP
-	mask         net.IPMask
-	routerIP     net.IP
-	dnsIPs       []net.IP
-	leaseSeconds int
-	domain       string
-	reservations map[string]string
-	manager      *Manager
-	fd           int
+	authoritative bool
+	dev           string
+	pool          pool
+	serverIP      net.IP
+	mask          net.IPMask
+	routerIP      net.IP
+	dnsIPs        []net.IP
+	leaseSeconds  int
+	domain        string
+	reservations  map[string]string
+	manager       *Manager
+	fd            int
 }
 
 func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool, reservations map[string]string, m *Manager) error {
@@ -92,6 +97,9 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 		}
 		if !ok {
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		emitDHCPRequestEvent(rt, req)
 		if err := handleDHCPRequest(rt, req); err != nil {
@@ -123,17 +131,18 @@ func newDHCPRuntime(dev string, cfg config.DHCPConfig, pl pool, reservations map
 		return dhcpRuntime{}, err
 	}
 	return dhcpRuntime{
-		dev:          dev,
-		pool:         pl,
-		serverIP:     serverIP,
-		mask:         mask,
-		routerIP:     routerIP,
-		dnsIPs:       dnsIPs,
-		leaseSeconds: parseLeaseSeconds(cfg.LeaseSeconds),
-		domain:       cfg.Domain,
-		reservations: reservations,
-		manager:      m,
-		fd:           fd,
+		authoritative: cfg.Authoritative,
+		dev:           dev,
+		pool:          pl,
+		serverIP:      serverIP,
+		mask:          mask,
+		routerIP:      routerIP,
+		dnsIPs:        dnsIPs,
+		leaseSeconds:  parseLeaseSeconds(cfg.LeaseSeconds),
+		domain:        cfg.Domain,
+		reservations:  reservations,
+		manager:       m,
+		fd:            fd,
 	}, nil
 }
 
@@ -145,7 +154,10 @@ func openDHCPListener(dev string) (int, error) {
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_BROADCAST, 1)
-	_ = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, dev)
+	if err := unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, dev); err != nil {
+		_ = unix.Close(fd)
+		return 0, fmt.Errorf("dhcp: bind to device %s: %w", dev, err)
+	}
 	if err := unix.Bind(fd, &unix.SockaddrInet4{Port: dhcpListenPort}); err != nil {
 		_ = unix.Close(fd)
 		return 0, fmt.Errorf("dhcp: bind %s:%d: %w", dev, dhcpListenPort, err)
@@ -194,35 +206,132 @@ func emitDHCPRequestEvent(rt dhcpRuntime, req request) {
 }
 
 func handleDHCPRequest(rt dhcpRuntime, req request) error {
-	assignedIP, err := selectAssignedIP(rt, req)
-	if err != nil {
-		emitDHCPNAK(rt, req, "no_free_ip")
-		_ = sendNAK(rt.fd, rt.dev, req, rt.serverIP)
-		return nil
+	pkt, err := replyToDHCPRequest(rt, req)
+	if err != nil || len(pkt) == 0 {
+		return err
 	}
-	switch req.msgType {
-	case dhcpMsgDiscover:
-		emitDHCPOffer(rt, req, assignedIP)
-		_ = sendOffer(rt.fd, rt.dev, req, assignedIP, rt.serverIP, rt.mask, rt.routerIP, rt.dnsIPs, rt.leaseSeconds, rt.domain)
-	case dhcpMsgRequest:
-		upsertDHCPLease(rt, req, assignedIP)
-		emitDHCPAck(rt, req, assignedIP)
-		_ = sendAck(rt.fd, rt.dev, req, assignedIP, rt.serverIP, rt.mask, rt.routerIP, rt.dnsIPs, rt.leaseSeconds, rt.domain)
-	}
-	return nil
+	var bcast [4]byte
+	copy(bcast[:], net.IPv4bcast.To4())
+	return unix.Sendto(rt.fd, pkt, 0, &unix.SockaddrInet4{Port: dhcpClientPort, Addr: bcast})
 }
 
-func selectAssignedIP(rt dhcpRuntime, req request) (net.IP, error) {
-	if ip := lookupExistingLease(rt, req); ip != nil {
-		return ip, nil
+// replyToDHCPRequest handles only directly attached clients on a served subnet.
+// Relays and requests selecting another server are deliberately left alone.
+func replyToDHCPRequest(rt dhcpRuntime, req request) ([]byte, error) {
+	if !rt.servesSubnet() || nonzeroIP(req.giaddr) || req.hops != 0 ||
+		(nonzeroIP(req.serverID) && !req.serverID.Equal(rt.serverIP)) {
+		return nil, nil
 	}
-	if ip := requestedLeaseIP(rt, req); ip != nil {
-		return ip, nil
+	var ip net.IP
+	var msgType byte
+	switch req.msgType {
+	case dhcpMsgDiscover:
+		ip = selectOfferIP(rt, req)
+		if ip == nil {
+			return nil, nil // Pool exhaustion never warrants a NAK to DISCOVER.
+		}
+		if ip.Equal(net.ParseIP(rt.reservations[strings.ToLower(req.mac)])) && rt.manager != nil {
+			go rt.manager.emit("service.dhcp.reservation.hit", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ip.String(), "count": 1})
+		}
+		msgType = dhcpMsgOffer
+		emitDHCPOffer(rt, req, ip)
+	case dhcpMsgRequest:
+		ip = req.reqIP.To4()
+		if nonzeroIP(req.ciaddr) {
+			if nonzeroIP(ip) || nonzeroIP(req.serverID) {
+				return nil, nil
+			}
+			ip = req.ciaddr.To4()
+		}
+		if !nonzeroIP(ip) {
+			return nil, nil
+		}
+		// Adopt eligible addresses even if the lease database was lost, so
+		// active clients' addresses cannot be offered to another client.
+		if !rt.leasable(req, ip) {
+			if !rt.authoritative {
+				return nil, nil
+			}
+			emitDHCPNAK(rt, req, "invalid_request")
+			return buildReply(req, dhcpMsgNak, net.IPv4zero, rt.serverIP, nil, nil, nil, 0, "")
+		}
+		msgType = dhcpMsgAck
+		upsertDHCPLease(rt, req, ip)
+		emitDHCPAck(rt, req, ip)
+	default:
+		return nil, nil
 	}
-	if ip := reservedLeaseIP(rt, req); ip != nil {
-		return ip, nil
+	return buildReply(req, msgType, ip, rt.serverIP, rt.mask, rt.routerIP, rt.dnsIPs, rt.leaseSeconds, rt.domain)
+}
+
+func nonzeroIP(ip net.IP) bool {
+	return ip.To4() != nil && !ip.Equal(net.IPv4zero)
+}
+
+func (rt dhcpRuntime) servesSubnet() bool {
+	if rt.dev == "" || rt.serverIP.To4() == nil || len(rt.mask) != net.IPv4len ||
+		rt.pool.Start.To4() == nil || rt.pool.End.To4() == nil {
+		return false
 	}
-	return nextFreeIP(rt.dev, rt.pool, rt.manager)
+	ones, bits := rt.mask.Size()
+	subnet := net.IPNet{IP: rt.serverIP.Mask(rt.mask), Mask: rt.mask}
+	return bits == 32 && ones > 0 && ones < 31 && subnet.Contains(rt.pool.Start) &&
+		subnet.Contains(rt.pool.End) && ipToU32(rt.pool.Start) <= ipToU32(rt.pool.End)
+}
+
+func (rt dhcpRuntime) leasable(req request, ip net.IP) bool {
+	if !ipInPool(ip, rt.pool) || ip.Equal(rt.serverIP) {
+		return false
+	}
+	v, network := ipToU32(ip), ipToU32(rt.serverIP.Mask(rt.mask))
+	broadcast := network | ^ipToU32(net.IP(rt.mask))
+	if v == network || v == broadcast {
+		return false
+	}
+	for mac, reserved := range rt.reservations {
+		if strings.EqualFold(mac, req.mac) {
+			if !ip.Equal(net.ParseIP(reserved)) {
+				return false
+			}
+		} else if ip.Equal(net.ParseIP(reserved)) {
+			return false
+		}
+	}
+	return !leaseIPInUse(rt.manager, rt.dev, req.mac, ip.String())
+}
+
+func selectOfferIP(rt dhcpRuntime, req request) net.IP {
+	if fixed, ok := rt.reservations[strings.ToLower(req.mac)]; ok && rt.manager != nil {
+		ip := net.ParseIP(fixed).To4()
+		if !rt.leasable(req, ip) {
+			reason := "invalid"
+			if ip != nil && leaseIPInUse(rt.manager, rt.dev, req.mac, fixed) {
+				reason = "in_use"
+			} else if ip != nil && !ipInPool(ip, rt.pool) {
+				reason = "out_of_pool"
+			}
+			go rt.manager.emit("service.dhcp.reservation.miss", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": fixed, "reason": reason, "error_count": 1})
+		}
+	}
+	for _, ip := range []net.IP{
+		lookupExistingLease(rt, req),
+		net.ParseIP(rt.reservations[strings.ToLower(req.mac)]).To4(),
+		req.reqIP.To4(),
+	} {
+		if ip != nil && rt.leasable(req, ip) {
+			return ip
+		}
+	}
+	for v, end := ipToU32(rt.pool.Start), ipToU32(rt.pool.End); v <= end; v++ {
+		ip := u32ToIP(v)
+		if rt.leasable(req, ip) {
+			return ip
+		}
+		if v == ^uint32(0) {
+			break
+		}
+	}
+	return nil
 }
 
 func lookupExistingLease(rt dhcpRuntime, req request) net.IP {
@@ -236,36 +345,11 @@ func lookupExistingLease(rt dhcpRuntime, req request) net.IP {
 	return net.ParseIP(existing).To4()
 }
 
-func requestedLeaseIP(rt dhcpRuntime, req request) net.IP {
-	ip := req.reqIP.To4()
-	if ip == nil || !ipInPool(ip, rt.pool) || leaseIPInUse(rt.manager, rt.dev, ip.String()) {
-		return nil
-	}
-	return ip
-}
-
-func reservedLeaseIP(rt dhcpRuntime, req request) net.IP {
-	if rt.reservations == nil {
-		return nil
-	}
-	ipStr, ok := rt.reservations[strings.ToLower(req.mac)]
-	if !ok {
-		return nil
-	}
-	ip := net.ParseIP(ipStr).To4()
-	if ip != nil && ipInPool(ip, rt.pool) && !leaseIPInUse(rt.manager, rt.dev, ip.String()) {
-		emitDHCPReservationHit(rt, req, ip)
-		return ip
-	}
-	emitDHCPReservationMiss(rt, req, ip, ipStr)
-	return nil
-}
-
-func leaseIPInUse(m *Manager, dev, ip string) bool {
+func leaseIPInUse(m *Manager, dev, mac, ip string) bool {
 	if m == nil {
 		return false
 	}
-	return m.isIPInUse(dev, ip)
+	return m.isIPInUseByOther(dev, mac, ip)
 }
 
 func upsertDHCPLease(rt dhcpRuntime, req request, ip net.IP) {
@@ -273,26 +357,6 @@ func upsertDHCPLease(rt dhcpRuntime, req request, ip net.IP) {
 		return
 	}
 	rt.manager.upsertLease(rt.dev, req.mac, ip.String(), req.hostname, rt.leaseSeconds)
-}
-
-func emitDHCPReservationHit(rt dhcpRuntime, req request, ip net.IP) {
-	if rt.manager == nil {
-		return
-	}
-	go rt.manager.emit("service.dhcp.reservation.hit", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ip.String(), "count": 1})
-}
-
-func emitDHCPReservationMiss(rt dhcpRuntime, req request, ip net.IP, ipStr string) {
-	if rt.manager == nil {
-		return
-	}
-	reason := "invalid"
-	if ip != nil && leaseIPInUse(rt.manager, rt.dev, ip.String()) {
-		reason = "in_use"
-	} else if ip != nil && !ipInPool(ip, rt.pool) {
-		reason = "out_of_pool"
-	}
-	go rt.manager.emit("service.dhcp.reservation.miss", map[string]any{"dev": rt.dev, "mac": req.mac, "ip": ipStr, "reason": reason, "error_count": 1})
 }
 
 func emitDHCPOffer(rt dhcpRuntime, req request, ip net.IP) {
@@ -369,11 +433,15 @@ func parseRequest(pkt []byte) (request, error) {
 	}
 	r.xid = binary.BigEndian.Uint32(pkt[4:8])
 	r.flags = binary.BigEndian.Uint16(pkt[10:12])
+	r.hops = pkt[3]
+	r.ciaddr = append(net.IP(nil), pkt[12:16]...)
+	r.giaddr = append(net.IP(nil), pkt[24:28]...)
 	mac := pkt[28:34]
 	r.mac = net.HardwareAddr(mac).String()
 	if binary.BigEndian.Uint32(pkt[236:240]) != dhcpMagicCookie {
 		return r, errors.New("no cookie")
 	}
+	seen := map[byte]bool{}
 	opts := pkt[240:]
 	for i := 0; i < len(opts); {
 		switch opts[i] {
@@ -385,18 +453,32 @@ func parseRequest(pkt []byte) (request, error) {
 			continue
 		}
 		if i+1 >= len(opts) {
-			break
+			return r, errors.New("truncated option")
 		}
 		l := int(opts[i+1])
 		if i+2+l > len(opts) {
-			break
+			return r, errors.New("truncated option value")
 		}
 		code := opts[i]
+		if code == dhcpOptMsgType || code == dhcpOptRequestIP || code == dhcpOptServerID {
+			want := 4
+			if code == dhcpOptMsgType {
+				want = 1
+			}
+			if l != want || seen[code] {
+				return r, errors.New("invalid or duplicate addressing option")
+			}
+			seen[code] = true
+		}
 		val := opts[i+2 : i+2+l]
 		switch code {
 		case dhcpOptMsgType:
 			if len(val) == 1 {
 				r.msgType = val[0]
+			}
+		case dhcpOptServerID:
+			if len(val) == 4 {
+				r.serverID = append(net.IP(nil), val...)
 			}
 		case dhcpOptRequestIP:
 			if len(val) == 4 {
@@ -416,24 +498,11 @@ func parseRequest(pkt []byte) (request, error) {
 	return r, nil
 }
 
-func sendOffer(fd int, dev string, req request, yiaddr net.IP, serverIP net.IP, mask net.IPMask, routerIP net.IP, dns []net.IP, leaseSeconds int, domain string) error {
-	return sendReply(fd, dev, req, dhcpMsgOffer, yiaddr, serverIP, mask, routerIP, dns, leaseSeconds, domain)
-}
-
-func sendAck(fd int, dev string, req request, yiaddr net.IP, serverIP net.IP, mask net.IPMask, routerIP net.IP, dns []net.IP, leaseSeconds int, domain string) error {
-	return sendReply(fd, dev, req, dhcpMsgAck, yiaddr, serverIP, mask, routerIP, dns, leaseSeconds, domain)
-}
-
-func sendNAK(fd int, dev string, req request, serverIP net.IP) error {
-	// yiaddr is zero.
-	return sendReply(fd, dev, req, dhcpMsgNak, net.IPv4zero, serverIP, nil, nil, nil, 0, "")
-}
-
-func sendReply(fd int, dev string, req request, msgType byte, yiaddr net.IP, serverIP net.IP, mask net.IPMask, routerIP net.IP, dns []net.IP, leaseSeconds int, domain string) error {
+func buildReply(req request, msgType byte, yiaddr net.IP, serverIP net.IP, mask net.IPMask, routerIP net.IP, dns []net.IP, leaseSeconds int, domain string) ([]byte, error) {
 	yi4 := yiaddr.To4()
 	si4 := serverIP.To4()
 	if yi4 == nil || si4 == nil {
-		return errors.New("ipv4 required")
+		return nil, errors.New("ipv4 required")
 	}
 
 	// BOOTP fixed header + cookie.
@@ -444,7 +513,11 @@ func sendReply(fd int, dev string, req request, msgType byte, yiaddr net.IP, ser
 	// xid
 	binary.BigEndian.PutUint32(p[4:8], req.xid)
 	// flags
-	binary.BigEndian.PutUint16(p[10:12], req.flags)
+	flags := req.flags
+	if msgType == dhcpMsgNak {
+		flags |= 0x8000 // NAKs are always broadcast on directly attached networks.
+	}
+	binary.BigEndian.PutUint16(p[10:12], flags)
 	// yiaddr
 	copy(p[16:20], yi4)
 	// siaddr (server)
@@ -491,10 +564,7 @@ func sendReply(fd int, dev string, req request, msgType byte, yiaddr net.IP, ser
 	}
 	opts = append(opts, dhcpOptEnd)
 
-	pkt := append(p, opts...)
-	var bcast [4]byte
-	copy(bcast[:], net.IPv4bcast.To4())
-	return unix.Sendto(fd, pkt, 0, &unix.SockaddrInet4{Port: dhcpClientPort, Addr: bcast})
+	return append(p, opts...), nil
 }
 
 func appendOpt(dst []byte, code byte, value []byte) []byte {

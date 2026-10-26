@@ -24,7 +24,7 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
     router: cfg?.router ?? "",
     dnsServers: cfg?.dnsServers ?? [],
     domain: cfg?.domain ?? "",
-    authoritative: cfg?.authoritative ?? true,
+    authoritative: cfg?.authoritative ?? false,
     pools: cfg?.pools ?? [],
     reservations: cfg?.reservations ?? [],
   };
@@ -272,13 +272,13 @@ export default function DHCPPage() {
           <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
               type="checkbox"
-              checked={cfg.authoritative ?? true}
+              checked={cfg.authoritative ?? false}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, authoritative: e.target.checked }))}
               className="h-4 w-4"
             />
             Authoritative
-            <InfoTip label="When enabled, this DHCP server takes full authority for the subnet (recommended in lab deployments)." />
+            <InfoTip label="Sends DHCPNAK for addresses this server cannot lease on served interfaces. Eligible addresses are adopted in either mode. Leave off when another DHCP server owns the subnet." />
           </label>
 
           <details className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
