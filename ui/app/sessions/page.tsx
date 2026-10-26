@@ -8,6 +8,7 @@ import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { TagList } from "../../components/TagList";
+import { formatEndpoint } from "../../lib/endpoint";
 
 type Filter = {
   q: string;
@@ -15,11 +16,6 @@ type Filter = {
 
 function normalizeProto(p: string | undefined): string {
   return (p ?? "").toLowerCase().trim();
-}
-
-function endpoint(ip: string | undefined, port: string | undefined): string {
-  const address = ip?.includes(":") ? `[${ip}]` : (ip ?? "?");
-  return `${address}:${port ?? "—"}`;
 }
 
 export default function SessionsPage() {
@@ -103,7 +99,7 @@ export default function SessionsPage() {
   function handleKill(e: ConntrackEntry) {
     confirm.open({
       title: scope === "connection" ? "Kill connection" : "Kill client-service connections",
-      message: `Revoke ${e.proto} ${endpoint(e.src, e.sport)} → ${endpoint(e.dst, e.dport)} for ${durationSecs} seconds? ${scope === "client-service" ? "This ends all of this client's connections to that service and prevents new ones during the interval." : "Only this exact connection is blocked. A fresh source port is allowed."} TCP closure is signalled on each endpoint's next packet, not confirmed.`,
+      message: `Revoke ${e.proto} ${formatEndpoint(e.src, e.sport)} → ${formatEndpoint(e.dst, e.dport)} for ${durationSecs} seconds? ${scope === "client-service" ? "This ends all of this client's connections to that service and prevents new ones during the interval." : "Only this exact connection is blocked. A fresh source port is allowed."} TCP closure is signalled on each endpoint's next packet, not confirmed.`,
       confirmLabel: "Kill",
       variant: "danger",
       onConfirm: () => kill(e),
@@ -221,7 +217,7 @@ export default function SessionsPage() {
                     </td>
                     <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
-                    <td className="px-4 py-3 text-(--text-muted)">{e.replySrc ? `${endpoint(e.replySrc, e.replySport)} → ${endpoint(e.replyDst, e.replyDport)}` : "—"}</td>
+                    <td className="px-4 py-3 text-(--text-muted)">{e.replySrc ? `${formatEndpoint(e.replySrc, e.replySport)} → ${formatEndpoint(e.replyDst, e.replyDport)}` : "—"}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         disabled={!canKill || killing || !["tcp", "udp"].includes(e.proto) || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}

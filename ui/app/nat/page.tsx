@@ -16,6 +16,7 @@ import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { formatEndpoint } from "../../lib/endpoint";
 
 /* ── helpers ───────────────────────────────────────────────────── */
 
@@ -544,8 +545,7 @@ function PortForwardsCard({
                     {pf.listenPort}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                    {pf.destIp}
-                    {pf.destPort ? `:${pf.destPort}` : ""}
+                    {formatEndpoint(pf.destIp, pf.destPort)}
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     {(pf.allowedSources ?? []).join(", ") || "any"}
@@ -581,7 +581,7 @@ function PortForwardsCard({
                           onClick={() =>
                             confirm.open({
                               title: "Delete port forward?",
-                              message: `Remove the ${pf.proto}/${pf.listenPort} forward to ${pf.destIp}${pf.destPort ? `:${pf.destPort}` : ""}? This change is not saved until you click Save.`,
+                              message: `Remove the ${pf.proto}/${pf.listenPort} forward to ${formatEndpoint(pf.destIp, pf.destPort)}? This change is not saved until you click Save.`,
                               confirmLabel: "Delete",
                               variant: "danger",
                               onConfirm: () => remove(pf.id),
