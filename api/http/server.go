@@ -170,7 +170,11 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
+	var resetSessions FactoryResetSessions
 	for _, opt := range opts {
+		if provider, ok := opt.(FactoryResetSessions); ok {
+			resetSessions = provider
+		}
 		if provider, ok := opt.(ManagementGuardHealth); ok {
 			guardHealth = provider
 		}
@@ -241,7 +245,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
-		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler(store))

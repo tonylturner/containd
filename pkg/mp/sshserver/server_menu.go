@@ -12,16 +12,16 @@ import (
 	"github.com/tonylturner/containd/pkg/cli"
 )
 
-func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter, reader *bufio.Reader, reg *cli.Registry) {
+func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter, reader *bufio.Reader, reg *cli.Registry) bool {
 	session := newInteractiveSession(s, ctx, username, rw, reader, reg)
 	for {
 		session.renderMainMenu()
 		choice, ok := session.ask("Select option (0-10): ")
 		if !ok {
-			return
+			return false
 		}
 		if !session.handleMainMenuChoice(strings.TrimSpace(choice)) {
-			return
+			return true
 		}
 	}
 }
@@ -184,7 +184,14 @@ func (s *interactiveSession) menuFactoryReset() bool {
 	}
 	if !s.exec("factory reset NUCLEAR") {
 		s.writeLn("Factory reset failed. Review the error before retrying.")
+		if conn := connectionFromContext(s.ctx); conn != nil && conn.reset.Load() {
+			s.writeLn("Authentication was revoked. You will be logged out.")
+			return true
+		}
 		return false
+	}
+	if s.server.writeResetResult(s.ctx, s.rw) {
+		return true
 	}
 	s.writeLn("Factory reset complete. You will be logged out.")
 	return true

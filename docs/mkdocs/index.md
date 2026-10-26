@@ -17,6 +17,9 @@ Welcome to the containd documentation. This content is rendered in-app (Help ico
 - **Supply chain**: [SBOM](sbom.md) -- software bill of materials, image signing, vulnerability scanning.
 - **Licensing**: [Third-Party Licenses](SPDX.md) -- component-level SPDX license tracking.
 - **Apply configuration**: Review and commit the candidate configuration; see the [configuration lifecycle](config-format.md).
+- **Repair runtime drift**: Send `SIGHUP` to management or combined mode to
+  [reapply running configuration](api-reference.md#reload-running-configuration-sighup).
+  Environment variables, flags and startup listeners require a restart.
 
 ## Release history
 

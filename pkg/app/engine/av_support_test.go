@@ -5,13 +5,30 @@ package engineapp
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	"go.uber.org/zap"
 )
+
+func TestServicesApplyReportsAVFailure(t *testing.T) {
+	dp, err := dpengine.New(dpengine.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dp.SetAVSink(&avSinkAdapter{})
+	rec := httptest.NewRecorder()
+	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "AV service apply failed") {
+		t.Fatalf("AV failure was hidden: %d %s", rec.Code, rec.Body)
+	}
+}
 
 func TestAVSinkAdapterHelpers(t *testing.T) {
 	t.Parallel()

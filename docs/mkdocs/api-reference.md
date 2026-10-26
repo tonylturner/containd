@@ -199,6 +199,46 @@ transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`;
 reauthenticate with the default credentials. Configuration history, pending
 rollback and the old IDS bank are replaced, not retained for rollback.
 
+The response includes `warnings` and the `X-Containd-Warnings` header when an
+auxiliary apply fails, including engine-side service configuration. HTTP 200
+means the reset was applied, not that every subsystem converged. With warnings,
+`message` reports incomplete convergence rather than completion; inspect the
+warnings and runtime health before continuing. Mandatory daemon, dataplane or
+ruleset failures still use the failure/recovery response above.
+
+With a JWT secret configured, all old web/API sessions are revoked, including
+in lab mode. Without a secret, lab mode accepts any nonempty token by design;
+those bearer tokens cannot be revoked by reset. SSH connections are closed.
+An initiating appliance-console session prints its result and warnings before
+disconnecting; Linux-shell connections are closed along with other sessions.
+The reserved management path is retained, and lab mode keeps the documented
+`containd` / `containd` credential.
+
+### Reload running configuration (SIGHUP)
+
+Send `SIGHUP` to `containd mgmt` or `containd all` to load **running**, not
+candidate, from the configuration store and replay the existing apply sequence:
+
+- Control-plane services: syslog, DNS, NTP, proxies, VPN and AV/ICAP settings.
+- Engine interfaces, routing and service settings, including DHCP and WireGuard.
+- Dataplane capture/inspection/enforcement settings, compiled firewall/NAT/IDS
+  policy and saved PCAP configuration.
+
+This repairs runtime drift; it does not commit candidate edits or change
+configuration history. Invalid configuration fails preflight. A failed replay
+retains the stored running configuration and records a runtime-health fault;
+already-replayed subsystems are not transactionally rolled back. The process
+logs the result and warnings and writes a `config.reload` audit record. Retry
+after resolving the reported failure. Auxiliary apply failures remain warnings,
+as with commit.
+
+Environment variables and command-line flags are never reloaded. Management
+HTTP/HTTPS listeners, TLS files, HTTP middleware, SSH listen address/banner/shell
+mode and other startup-only system settings require a restart. SSH authentication
+policy and host-key rotation already read their live running settings.
+Engine-only mode logs that configuration reload is performed through management;
+signal the management process to replay into a split engine.
+
 ## Events: Filtered Queries and Legacy Lists
 
 Use `GET /api/v1/events?query=1` for an `EventPage` envelope containing `events`,
@@ -291,7 +331,9 @@ engine listener's `/metrics` instead.
 ## Binary Runtime Environment
 
 These are binary environment names, not Compose interpolation inputs.
-Set them before starting the process; `SIGHUP` does not reload configuration.
+Set them before starting the process; changing environment variables or flags
+requires a restart. `SIGHUP` only reapplies the stored running configuration
+described [above](#reload-running-configuration-sighup).
 Listener defaults below apply when neither an environment override nor a saved
 listener setting supplies a value.
 

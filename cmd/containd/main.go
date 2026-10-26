@@ -63,18 +63,16 @@ func main() {
 	// Handle SIGHUP for config reload (runs in background).
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
-	go func() {
-		for range sighupCh {
-			slog.Info("received SIGHUP, config reload not yet fully implemented")
-		}
-	}()
+	defer signal.Stop(sighupCh)
+	reloads := make(chan struct{}, 1)
+	go handleReloadSignals(ctx, mode, sighupCh, reloads)
 
 	var err error
 	switch mode {
 	case "all":
-		err = runAll(ctx, reservation)
+		err = runAll(ctx, reservation, reloads)
 	case "mgmt":
-		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation})
+		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation, Reload: reloads})
 	case "engine":
 		err = engineapp.Run(ctx, engineapp.Options{Reservation: reservation})
 	case "version":
@@ -264,7 +262,7 @@ func cliLogin(baseURL string) (string, error) {
 	return result.Token, nil
 }
 
-func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
+func runAll(ctx context.Context, reservation *mgmtpath.Reservation, reloads <-chan struct{}) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -285,7 +283,9 @@ func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
 			return ctx.Err()
 		}
 	}
-	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true, Reservation: reservation}) }()
+	go func() {
+		errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true, Reservation: reservation, Reload: reloads})
+	}()
 
 	// If either plane exits, cancel the other and drain both results.
 	var firstErr error

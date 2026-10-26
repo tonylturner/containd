@@ -6,6 +6,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -19,7 +20,11 @@ type factoryResetRequest struct {
 	Confirm string `json:"confirm"`
 }
 
-func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+// FactoryResetSessions terminates management transports after a successful reset.
+// sessionID identifies the initiating API session, if it belongs to a transport.
+type FactoryResetSessions func(ctx context.Context, sessionID string)
+
+func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier, revoke ...FactoryResetSessions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req factoryResetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -74,8 +79,6 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			factoryResetApplyError(c, err)
 			return
 		}
-		setWarningHeader(c, warnings)
-
 		// Wiping sessions also revokes the current token. No authentication
 		// state changes until the configuration has been successfully applied.
 		if err := us.ResetToDefaultAdmin(ctx); err != nil {
@@ -87,19 +90,41 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		if storeVal, ok := c.Get("auditStore"); ok && storeVal != nil {
 			if a, ok := storeVal.(audit.Store); ok && a != nil {
 				if sqlite, ok := a.(*audit.SQLiteStore); ok {
-					_ = sqlite.WipeAll(ctx)
+					if err := sqlite.WipeAll(ctx); err != nil {
+						warnings = append(warnings, fmt.Sprintf("audit reset: %v", err))
+					}
 				}
 			}
 		}
-		auditLog(c, audit.Record{Action: "system.factory_reset.completed", Target: "all", Result: "success"})
+		if len(warnings) == 0 {
+			auditLog(c, audit.Record{Action: "system.factory_reset.completed", Target: "all", Result: "success"})
+		} else {
+			auditLog(c, audit.Record{Action: "system.factory_reset.applied", Target: "all", Result: "warning", Detail: strings.Join(warnings, "; ")})
+		}
+		setWarningHeader(c, warnings)
 
 		// Clear cookies on the response so browser sessions immediately drop auth.
 		clearAuthCookie(c)
 
+		for _, closeSessions := range revoke {
+			if closeSessions != nil {
+				sessionID := c.GetString(ctxSessionKey)
+				// Secretless lab authentication cannot establish a JWT session.
+				if len(jwtSecret()) == 0 {
+					sessionID = c.GetHeader("X-Containd-SSH-Connection")
+				}
+				closeSessions(ctx, sessionID)
+			}
+		}
+		message := "Factory reset completed. Log in with the default credentials."
+		if len(warnings) > 0 {
+			message = "Factory reset applied with warnings; runtime convergence is incomplete. " + strings.Join(warnings, "; ") + ". Log in with the default credentials."
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "reset",
 			"loggedOut": true,
-			"message":   "Factory reset completed. Log in with the default credentials and change the password immediately.",
+			"message":   message,
+			"warnings":  append([]string{}, warnings...),
 		})
 	}
 }
