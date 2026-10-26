@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their common addresses, IOAs and type IDs, first and last seen, and command
   attempt and acceptance counts. Fixed caps, LRU eviction, 24-hour idle expiry
   and overflow counters bound it. It never feeds the learner or auto-ALLOW.
+- Observational IEC 104 APCI alerts: I-frames outside STARTDT/STOPDT (one per
+  stopped period), N(S)/N(R) gaps, backward steps or ACKs of unsent frames,
+  and TESTFR act without con within t1. Alerts carry the session ID and show
+  their evidence in Events and Alerts. They never change firewall decisions.
 
 ### Changed
 
