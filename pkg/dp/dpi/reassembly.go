@@ -64,6 +64,12 @@ type stream struct {
 
 	retransmits uint64 // segments that repeated bytes already held or consumed
 	failed      error  // session stream failure, until the caller ends it
+
+	// closed marks a fail-closed stream that an in-window FIN or RST ended.
+	// It holds no bytes; closeNext is the sequence number a later RST of
+	// this direction carries in window.
+	closed    bool
+	closeNext uint32
 }
 
 func (s *stream) end() int64 { return s.base + int64(len(s.buf)) }
@@ -81,11 +87,12 @@ func (s *stream) held() int { return s.stored() + len(s.hist) }
 
 // feedResult is the stream state after one segment.
 type feedResult struct {
-	buf    []byte // copy of the contiguous bytes from base
-	base   int64
-	gap    bool // bytes are buffered beyond a hole
-	err    *StreamError
-	failed error // the stream failed earlier; nothing was fed
+	buf      []byte // copy of the contiguous bytes from base
+	base     int64
+	gap      bool // bytes are buffered beyond a hole
+	anchored bool // the stream began at an observed SYN, not mid-connection
+	err      *StreamError
+	failed   error // the stream failed earlier; nothing was fed
 }
 
 // reassembler collects TCP payloads per stream direction so that decoders
@@ -123,23 +130,35 @@ func seqDiff(a, b uint32) int32 {
 
 // open anchors a legacy stream at a handshake. A late second capture of the
 // same SYN must not reset bytes already parsed on the first interface.
-func (r *reassembler) open(key string, seq uint32, now time.Time) {
+//
+// A SYN with a new sequence number re-anchors the stream unless the stream
+// fails closed: a live fail-closed stream (one that no in-window FIN or RST
+// ended) does not resynchronize, and open returns its StreamResync error
+// for the caller to fail it. A failed fail-closed stream stays failed.
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed bool) *StreamError {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if s, ok := r.streams[key]; ok {
-		if s.synSeen && s.synSeq == seq {
+		switch {
+		case s.synSeen && s.synSeq == seq && !s.closed:
 			s.lastUpdate = now
-			return
+			return nil
+		case failClosed && s.failed != nil:
+			return nil
+		case failClosed && !s.closed:
+			return &StreamError{Kind: StreamResync, Offset: s.end()}
 		}
 		r.bytesBuffered -= s.held()
 	} else {
 		r.activeStreams++
 	}
-	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, lastUpdate: now}
+	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, verify: failClosed, lastUpdate: now}
+	return nil
 }
 
 // feed adds one segment. A new stream starts at offset 0 in the given
-// position mode; strict and keep are fixed at creation.
+// position mode; strict and keep are fixed at creation. A closed stream's
+// direction starts a new stream the same way.
 //
 // Bytes the stream still holds are compared byte for byte; a difference is
 // a conflict. Bytes below the consumed watermark are duplicates; with
@@ -152,10 +171,12 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 	defer r.mu.Unlock()
 
 	s, ok := r.streams[key]
-	if !ok {
+	if !ok || s.closed { // a closed stream holds no bytes
+		if !ok {
+			r.activeStreams++
+		}
 		s = &stream{strict: strict, mode: pos.kind, seq0: pos.seq, keep: keep}
 		r.streams[key] = s
-		r.activeStreams++
 	}
 	if s.failed != nil {
 		return feedResult{failed: s.failed}
@@ -169,10 +190,11 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 	err := s.add(s.resolve(pos), payload, r.maxSize)
 	r.bytesBuffered += s.held() - before
 	return feedResult{
-		buf:  append([]byte(nil), s.buf...),
-		base: s.base,
-		gap:  len(s.ooo) > 0,
-		err:  err,
+		buf:      append([]byte(nil), s.buf...),
+		base:     s.base,
+		gap:      len(s.ooo) > 0,
+		anchored: s.synSeen,
+		err:      err,
 	}
 }
 
@@ -387,16 +409,35 @@ func (r *reassembler) trim(key string, base int64, n int) {
 	r.bytesBuffered += s.held() - before
 }
 
-// fail discards a stream's bytes and marks it failed until complete;
-// later feeds return err.
+// fail discards a stream's bytes and marks it failed until complete,
+// creating the stream when there is none; later feeds return err. A failed
+// stream keeps its first error.
 func (r *reassembler) fail(key string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if s, ok := r.streams[key]; ok {
-		r.bytesBuffered -= s.held()
-		s.buf, s.ooo, s.hist = nil, nil, nil
-		s.failed = err
+	s, ok := r.streams[key]
+	if !ok {
+		s = &stream{strict: true}
+		r.streams[key] = s
+		r.activeStreams++
 	}
+	if s.failed != nil {
+		return
+	}
+	r.bytesBuffered -= s.held()
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.closed = false
+	s.failed = err
+}
+
+// watermark returns a stream's consumed watermark, 0 without a stream.
+func (r *reassembler) watermark(key string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.streams[key]; ok {
+		return s.base
+	}
+	return 0
 }
 
 // failure returns the error a stream failed with, or nil.
@@ -413,6 +454,10 @@ func (r *reassembler) failure(key string) error {
 func (r *reassembler) complete(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.completeLocked(key)
+}
+
+func (r *reassembler) completeLocked(key string) {
 	if s, ok := r.streams[key]; ok {
 		r.bytesBuffered -= s.held()
 		delete(r.streams, key)

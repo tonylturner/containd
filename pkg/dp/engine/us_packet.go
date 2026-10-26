@@ -40,8 +40,9 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow. An
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
-// error or decoder panic the same way (failClosedRule).
-func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture.Decision {
+// error, a SYN that would resynchronize its stream, or a decoder panic the
+// same way (failClosedRule).
+func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
 		Payload:     pkt.Payload,
@@ -51,11 +52,13 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 		TCPSeq:      pkt.TCP.Seq,
 		TCPSeqValid: pkt.TCP.Valid,
 		TCPSyn:      pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+		TCPFin:      pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagFIN != 0,
+		TCPRst:      pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagRST != 0,
 	}
 	if parsed.TCPSyn {
 		parsed.TCPSeq++
 	}
-	defer e.endStreamsOnClose(state, &parsed, pkt.TCP)
+	defer func() { e.endStreamsOnClose(state, &parsed, d.Action == capture.Accept) }()
 
 	flowHash := state.Key.Hash()
 	e.observeDomainExclusions(state, &parsed)
@@ -87,6 +90,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 	parsed.FailClosed = scope != nil
 	res, panicErr := e.inspectFlow(state, &parsed)
 	if panicErr != nil {
+		e.dpiMgr.FailStream(state, &parsed)
 		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
 	// Events come before the error: a stream error's malformed event is
@@ -99,8 +103,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
 	}
 	if scope != nil && isStreamFailure(res) {
-		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedStream, res.Proto, res.Err)
+		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedReason(res.Err), res.Proto, res.Err)
 	}
+	// A stream picked up mid-connection (res.MidStream) is inspected from
+	// its first seen segment like any other.
 	return acceptDecision
 }
 
@@ -135,14 +141,18 @@ func (e *Engine) afterDrop(tok capture.Token, job func()) {
 	}
 }
 
-// endStreamsOnClose drops the stream buffers of a flow that sent FIN or RST;
-// a RST also ends the reverse direction.
-func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, tcp capture.TCPMeta) {
-	if !tcp.Valid || tcp.Flags&(capture.TCPFlagFIN|capture.TCPFlagRST) == 0 {
+// endStreamsOnClose ends the stream of a flow direction that sent FIN or
+// RST; a RST also ends the reverse direction. A fail-closed packet ends
+// streams only when it was accepted, since a dropped segment never reaches
+// the receiver, and only when it is in window (dpi.Manager.CloseStream).
+// No close ends a failed stream.
+func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, accepted bool) {
+	if !pkt.TCPFin && !pkt.TCPRst || pkt.FailClosed && !accepted {
 		return
 	}
-	e.endFlowStream(state, pkt)
-	if tcp.Flags&capture.TCPFlagRST == 0 {
+	ended, evs, _ := e.dpiMgr.CloseStream(state, pkt)
+	e.recordFlowEndEvents(state, pkt, evs)
+	if !ended || !pkt.TCPRst {
 		return
 	}
 	rev := state.Key.Reversed()
@@ -150,14 +160,19 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, tcp
 	revState := e.flows[rev.Hash()]
 	e.flowMu.Unlock()
 	if revState != nil {
-		e.endFlowStream(revState, pkt)
+		evs, _ := e.dpiMgr.ResetStream(revState, pkt)
+		e.recordFlowEndEvents(revState, pkt, evs)
 	}
 }
 
-// endFlowStream ends one directional legacy stream and records any events
-// the decoders emit at flow end.
+// endFlowStream ends one directional legacy stream at its flow's end and
+// records any events the decoders emit.
 func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	evs, _ := e.dpiMgr.OnFlowEnd(state)
+	e.recordFlowEndEvents(state, pkt, evs)
+}
+
+func (e *Engine) recordFlowEndEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
 	if len(evs) > 0 {
 		e.RecordDPIEvents(state, pkt, evs)
 	}

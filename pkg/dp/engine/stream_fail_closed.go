@@ -20,11 +20,13 @@ import (
 
 // An inline flow in the scope of an enforce ICS rule fails closed when its
 // stream cannot be inspected: a conflicting overlap, a rewritten
-// retransmission, framing the decoder rejects, or a recovered decoder
-// panic drops the packet and denies the flow like a decoded denial. The
-// flow's stream stays failed instead of restarting at a later segment, so
-// a sender cannot choose where framing resumes. Learn-only flows, packets
-// that are not inline and the IEC104 path keep passing such packets.
+// retransmission, framing the decoder rejects, a SYN with a new sequence
+// number on its live stream, or a recovered decoder panic drops the packet
+// and denies the flow like a decoded denial. The flow's stream stays
+// failed instead of restarting at a later segment, so a sender cannot
+// choose where framing resumes; only a FIN or RST in window ends it
+// before the flow does. Learn-only flows, packets that are not inline and
+// the IEC104 path keep passing such packets.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).
@@ -32,6 +34,7 @@ const (
 
 	// ics.decision reasons of a fail-closed denial.
 	failClosedStream = "stream_error"
+	failClosedResync = "stream_resync"
 	failClosedPanic  = "decoder_panic"
 )
 
@@ -99,6 +102,21 @@ func isStreamFailure(res dpi.InspectResult) bool {
 	var se *dpi.StreamError
 	var fe *dpi.FrameError
 	return res.Framed && (errors.As(res.Err, &se) || errors.As(res.Err, &fe))
+}
+
+// failClosedReason is the ics.decision reason of a stream failure; a
+// failed stream keeps the reason it failed with.
+func failClosedReason(err error) string {
+	var se *dpi.StreamError
+	if errors.As(err, &se) {
+		switch se.Kind {
+		case dpi.StreamResync:
+			return failClosedResync
+		case dpi.StreamDecoderPanic:
+			return failClosedPanic
+		}
+	}
+	return failClosedStream
 }
 
 // failClosed drops the packet and denies its flow as a decoded denial does:
