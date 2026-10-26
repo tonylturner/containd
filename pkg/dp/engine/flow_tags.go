@@ -13,8 +13,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// TAG labels are a function of the applied snapshot and a connection's
-// opener-oriented tuple (opener, server, layer-4 protocol, server port).
+// TAG labels are a function of the applied snapshot, its identity bindings
+// included, and a connection's opener-oriented tuple (opener, server,
+// layer-4 protocol, server port).
 // The engine stamps them on a flow's state when the state is created and
 // adds them to the flow's events; the connection list derives them the
 // same way from the running snapshot.
@@ -30,7 +31,7 @@ func (e *Engine) flowTags(key flow.Key) []string {
 	if key.Dir == flow.DirReverse {
 		port = key.SrcPort
 	}
-	ctx := tagContext(key.OpenerIP(), key.ServerIP(), protocolName(key.Proto), port)
+	ctx := tagContext(p.snapshot, key.OpenerIP(), key.ServerIP(), protocolName(key.Proto), port)
 	if p.evaluator.TagsUseZones() {
 		ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(p.snapshot, ctx.SrcIP, ctx.DstIP)
 	}
@@ -38,9 +39,10 @@ func (e *Engine) flowTags(key flow.Key) []string {
 }
 
 // tagContext is the evaluation context of a connection tuple for TAG
-// rules. Only TCP and UDP carry a server port.
-func tagContext(opener, server net.IP, proto string, serverPort uint16) rules.EvalContext {
-	ctx := rules.EvalContext{SrcIP: opener, DstIP: server, Proto: proto}
+// rules, with the identities snap binds to the opener. Only TCP and UDP
+// carry a server port.
+func tagContext(snap *rules.Snapshot, opener, server net.IP, proto string, serverPort uint16) rules.EvalContext {
+	ctx := rules.EvalContext{SrcIP: opener, DstIP: server, Proto: proto, Identities: snap.IdentitiesOf(opener)}
 	if proto == "tcp" || proto == "udp" {
 		ctx.Port = strconv.Itoa(int(serverPort))
 	}
@@ -88,7 +90,7 @@ func (t *iecTable) withSessionTags(evs []events.Event) []events.Event {
 		if client == nil || server == nil {
 			continue
 		}
-		ctx := tagContext(client, server, strings.ToLower(ev.Transport), ev.DstPort)
+		ctx := tagContext(snap, client, server, strings.ToLower(ev.Transport), ev.DstPort)
 		if tp.TagsUseZones() {
 			ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(snap, client, server)
 		}
@@ -128,7 +130,7 @@ func (e *Engine) TagConnections(entries []conntrack.Entry) []TaggedConnection {
 			continue
 		}
 		port, _ := strconv.ParseUint(c.Dport, 10, 16)
-		ctx := tagContext(opener, server, strings.ToLower(c.Proto), uint16(port))
+		ctx := tagContext(p.snapshot, opener, server, strings.ToLower(c.Proto), uint16(port))
 		ctx.SrcZone, ctx.DstZone = zones.zoneFor(opener), zones.zoneFor(server)
 		out[i].Tags = p.evaluator.Tags(ctx)
 	}

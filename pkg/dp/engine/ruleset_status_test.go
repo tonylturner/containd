@@ -15,7 +15,7 @@ import (
 func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 	snap := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
 		{ID: "maint", Protocols: []rules.Protocol{{Name: "tcp", Port: "22"}}, Action: rules.ActionAllow,
-			Schedule: rules.SchedulePredicate{DaysOfWeek: []string{"Saturday"}}},
+			Identities: []string{"operator"}},
 		{ID: "plain", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Action: rules.ActionAllow},
 	}}
 	applier := &recordingApplier{}
@@ -26,8 +26,8 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatal(err)
 	}
-	want := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow,
-		Message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive"}}
+	want := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
+		Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}}
 	if st := e.RulesetStatus(); st.Error != "" || !reflect.DeepEqual(st.Warnings, want) {
 		t.Fatalf("status after apply = %+v", st)
 	}

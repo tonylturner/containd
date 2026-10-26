@@ -81,20 +81,53 @@ at zero, and the response says when (`since`).
 
 ### Identity and schedule predicates
 
-containd does not yet enforce every identity or schedule predicate. A predicate
-the deciding component cannot evaluate resolves toward denial:
+A rule's `identities` and `schedule` are conditions that change without a new
+connection: an identity binding is removed, or a window opens or ends.
 
-- An `ALLOW` rule never matches on it, so the rule is inactive.
-- A `DENY` rule matches as if the predicate always held.
+**Identities** are admin-set tags on source addresses,
+`firewall.identityBindings` (see [Config Format](config-format.md)). They are
+part of the configuration: staged in the candidate, applied on commit, and
+backed up, exported and rolled back with it. A rule with `identities` matches a
+connection whose opener address is bound to any listed label, compared exactly
+and case-sensitively. An opener without a matching binding matches no identity
+rule, `ALLOW` or `DENY`.
 
-Identity predicates are never evaluated: the dataplane does not attach
-identities to flows. Schedules are evaluated only for ICS rules that NFQUEUE
-steers to the engine (a nonzero `nfqueueGroup`). nftables decides every other
-rule, so a scheduled `ALLOW` admits nothing and a scheduled `DENY` drops at all
-times.
+**Schedules** are recurring windows in the rule's `timezone`, UTC when blank:
 
-Each affected rule produces a warning with its rule ID, the predicate
-(`identity` or `schedule`), the action and the effect. Operators see them in:
+- A window opens on each listed day, or every day when `daysOfWeek` is empty,
+  at `startTime` and closes at `endTime`. The end is exclusive: a 09:00–17:00
+  window does not match at 17:00.
+- A window whose end is not after its start is overnight and ends on the next
+  day. It belongs to its start day: a Monday 22:00–02:00 window matches Monday
+  night and early Tuesday, not early Monday.
+- A blank `startTime` is 00:00 and a blank `endTime` is the end of the day.
+  Equal start and end times are invalid.
+- On a daylight-saving change, a skipped local time is the moment the gap
+  ends, and a repeated local time is its first occurrence.
+
+nftables evaluates both predicates on every rule it handles, `RATE_LIMIT` and
+`TAG` included: a `RATE_LIMIT` rule with identities meters, in both
+directions, only connections a bound address opened, and a `TAG` rule with
+identities labels only those connections. Identity bindings
+become per-label address sets. Schedules become sets of absolute times that the
+kernel opens and closes itself. The engine plans 24 hours of windows ahead and
+refills them as they run out, and again after a wall-clock step. If the engine
+stops planning, the windows fail closed when the plan runs out: a scheduled
+`ALLOW` stops matching and a scheduled `DENY` applies at all times. For ICS
+rules that NFQUEUE steers to the engine, the engine evaluates both predicates on
+each message.
+
+The conditions also apply to established connections, in both directions.
+When a binding is removed or a window ends, a connection that only a
+conditional `ALLOW` admitted stops passing. A connection that an unconditional
+`ALLOW` also admits keeps passing. When a scheduled `DENY` window opens, it
+stops the established connections it covers. The current policy decides those
+connections again by their original tuple, and connections outside the scope of
+any conditional rule keep the established fast path.
+
+A rule whose identities no bound address satisfies matches nothing. It is
+reported as a warning with its rule ID, the predicate `identity`, the action
+and the effect, in:
 
 - The firewall page's nftables ruleset preview, which lists the candidate's
   warnings.
@@ -103,9 +136,9 @@ Each affected rule produces a warning with its rule ID, the predicate
 - The rule editor's **Preview impact**, and `warnings` in the
   `POST /api/v1/firewall/rules/preview` response, for the previewed rule.
 
-The rule impact preview resolves these predicates the same way under the
-running engine's NFQUEUE setting, so an affected `ALLOW` rule previews no
-matches and an affected `DENY` rule matches regardless of the predicate.
+The rule impact preview evaluates a schedule at each event's time. It takes
+identities from the running bindings, so it shows what the rule would match if
+today's bindings had applied to the retained events.
 
 DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
 global bypass: enforce-mode rules and independent kernel decisions can still
@@ -125,9 +158,9 @@ and DNP3, S7comm, CIP, BACnet, and OPC UA examples, not one per supported protoc
 `POST /api/v1/templates/ics/apply` stages their rules. Purdue and maintenance
 window templates belong to the general `/api/v1/templates` registry and its
 `/apply` endpoint. The maintenance window template stages scheduled L4 `ALLOW`
-rules, which are inactive (see
-[Identity and schedule predicates](#identity-and-schedule-predicates)); its
-maintenance access stays closed at all times.
+rules that open Operations (L3) access to the L1, L0 and L2 zones on Saturdays
+and Sundays from 02:00 to 06:00 America/New_York (see
+[Identity and schedule predicates](#identity-and-schedule-predicates)).
 
 Applying a template with `mode: "enforce"` is refused while
 `dataplane.nfqueueGroup` is 0, as for any ICS rule in enforce mode.

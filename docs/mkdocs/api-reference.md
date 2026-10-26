@@ -32,8 +32,8 @@ A machine-readable OpenAPI 3.0 specification is maintained at [`docs/openapi.yam
 
 The specification is the canonical endpoint and schema reference.
 `TestOpenAPIRoutes` compares every registered `/api/v1` method and path against
-it in both directions, including optional identity routes and delegated audit
-registration. Optional routes require their corresponding server integration.
+it in both directions, including delegated audit registration. Optional
+routes require their corresponding server integration.
 The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 
 ## Monitoring Availability
@@ -51,8 +51,8 @@ Retry unavailable requests rather than interpreting them as empty or stopped.
 ## Staged Configuration
 
 All persisted configuration edits stage into one shared candidate, including
-object CRUD, service settings, IDS rules, saved PCAP settings, `POST /config`
-and `POST /config/import`. Import replaces the candidate, never running.
+object CRUD, identity bindings (`/identities`), service settings, IDS rules,
+saved PCAP settings, `POST /config` and `POST /config/import`. Import replaces the candidate, never running.
 Editable lists and settings read candidate desired state. Staging does not apply
 anything to the engine or services; read-only discovery/validation is permitted.
 Use `GET /config/diff` to review, then `POST /config/commit` or

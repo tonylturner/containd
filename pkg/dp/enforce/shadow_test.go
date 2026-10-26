@@ -64,26 +64,3 @@ func entryByID(snap *rules.Snapshot, id string) rules.Entry {
 	}
 	return rules.Entry{}
 }
-
-// A TAG rule with a predicate nftables cannot evaluate is inactive, like
-// an ALLOW; a RESET or RATE_LIMIT rule applies without the predicate.
-func TestUnenforcedPredicateOnActions(t *testing.T) {
-	for _, tc := range []struct {
-		action rules.Action
-		line   string
-		effect string
-	}{
-		{rules.ActionTag, "", "TAG rule inactive"},
-		{rules.ActionReset, "tcp dport 23 reject with tcp reset", "RESET rule applies as if the identity always matched"},
-	} {
-		e := rules.Entry{ID: "r", Action: tc.action, Tag: "x", Identities: []string{"guest"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}}
-		lines, err := compileEntryWithoutCounters(e, nil, 0, 0)
-		if err != nil || (tc.line == "") != (len(lines) == 0) || (tc.line != "" && lines[0] != tc.line) {
-			t.Fatalf("%s lines = %q, %v", tc.action, lines, err)
-		}
-		w := NewCompiler().RuleWarnings(&rules.Snapshot{Firewall: []rules.Entry{e}})
-		if len(w) != 1 || w[0].Message != "identity predicates are not enforced yet; "+tc.effect {
-			t.Fatalf("%s warnings = %+v", tc.action, w)
-		}
-	}
-}

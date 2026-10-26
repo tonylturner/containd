@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
@@ -38,14 +37,12 @@ func newRouteInventoryServer(t *testing.T) *gin.Engine {
 	store := &mockStore{cfg: cfg}
 	engine := newRuntimeMockEngine()
 	userStore := newMockUserStore()
-	resolver := identity.NewResolver()
 	return NewServerWithEngineAndServices(
 		store,
 		nil,
 		engine,
 		routeInventoryServices{},
 		userStore,
-		resolver,
 	)
 }
 

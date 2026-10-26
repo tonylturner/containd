@@ -39,7 +39,7 @@ func TestPreviewFirewallRuleDelegates(t *testing.T) {
 		SampleMatches: []events.Event{{ID: 99, SrcIP: "10.30.30.30"}},
 		TimeRange:     &dpengine.PreviewTimeRange{Start: time.Unix(1, 0).UTC(), End: time.Unix(20, 0).UTC()},
 		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
-			Message: "identity predicates are not enforced yet; ALLOW rule inactive"}}}
+			Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}}}
 	eng := &previewMockEngine{result: result}
 	body := `{"id":"candidate","sourceZones":["control"],"destZones":["plant"],
 		"sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],"action":"ALLOW",

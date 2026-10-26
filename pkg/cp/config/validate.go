@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -386,6 +385,9 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 	if err := validateNAT(f.NAT, zoneSet, zoneIfaces); err != nil {
 		return err
 	}
+	if err := validateIdentityBindings(f.IdentityBindings); err != nil {
+		return err
+	}
 	ruleIDs := map[string]struct{}{}
 	tagLabels := map[string]struct{}{}
 	for _, r := range f.Rules {
@@ -433,53 +435,6 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 		if err := validateSchedule(r.Schedule, r.ID); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-var validDays = map[string]struct{}{
-	"Sunday": {}, "Monday": {}, "Tuesday": {}, "Wednesday": {},
-	"Thursday": {}, "Friday": {}, "Saturday": {},
-}
-
-func validateSchedule(s *ScheduleConfig, ruleID string) error {
-	if s == nil {
-		return nil
-	}
-	for _, d := range s.DaysOfWeek {
-		if _, ok := validDays[d]; !ok {
-			return fmt.Errorf("rule %s schedule has invalid day %q", ruleID, d)
-		}
-	}
-	if s.StartTime != "" {
-		if err := validateHHMM(s.StartTime); err != nil {
-			return fmt.Errorf("rule %s schedule startTime: %w", ruleID, err)
-		}
-	}
-	if s.EndTime != "" {
-		if err := validateHHMM(s.EndTime); err != nil {
-			return fmt.Errorf("rule %s schedule endTime: %w", ruleID, err)
-		}
-	}
-	if s.Timezone != "" {
-		if _, err := time.LoadLocation(s.Timezone); err != nil {
-			return fmt.Errorf("rule %s schedule timezone %q: %w", ruleID, s.Timezone, err)
-		}
-	}
-	return nil
-}
-
-func validateHHMM(s string) error {
-	if len(s) != 5 || s[2] != ':' {
-		return fmt.Errorf("invalid time format %q, expected HH:MM", s)
-	}
-	h, err := strconv.Atoi(s[:2])
-	if err != nil || h < 0 || h > 23 {
-		return fmt.Errorf("invalid hour in %q", s)
-	}
-	m, err := strconv.Atoi(s[3:])
-	if err != nil || m < 0 || m > 59 {
-		return fmt.Errorf("invalid minute in %q", s)
 	}
 	return nil
 }

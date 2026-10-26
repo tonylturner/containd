@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -47,6 +48,8 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.gate.own(tc.owned)
+			planned := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+			e.gate.clock = func() time.Time { return planned }
 			before := *e.compiler
 			preview, err := e.PreviewRuleset(snap, settings)
 			if err != nil {
@@ -65,18 +68,21 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatalf("preview differs from apply:\n%s\napply:\n%s", preview.Ruleset, applier.ruleset)
 			}
 			applied := e.RulesetStatus().Warnings
-			// maint is inactive; modbus-guests has an unenforced identity
-			// and the modbus ALLOW shadows it.
-			if len(preview.Warnings) != 3 || !reflect.DeepEqual(preview.Warnings, applied) {
+			// modbus-guests: no address is bound to its identity, and the
+			// modbus ALLOW shadows it.
+			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
-			if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 207;`).MatchString(preview.Ruleset) {
-				t.Fatalf("modbus rule not queued:\n%s", preview.Ruleset)
+			for _, re := range []string{
+				`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 207;`,
+				`meta time @schedule_allow_40_0120_0360_555443 tcp dport 22 counter name "rule_[0-9a-f]{16}" accept;`,
+			} {
+				if !regexp.MustCompile(re).MatchString(preview.Ruleset) {
+					t.Fatalf("missing %s:\n%s", re, preview.Ruleset)
+				}
 			}
-			if strings.Contains(preview.Ruleset, "tcp dport 22") {
-				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
-			}
-			for _, want := range []string{"table inet candidate_table", "group 203", "ip daddr 10.99.99.2 tcp dport 8080 accept",
+			for _, want := range []string{"table inet candidate_table",
+				"elements = { 1793412000-1793426400 }", "group 203", "ip daddr 10.99.99.2 tcp dport 8080 accept",
 				`iifname "eth6" ip daddr 10.98.0.2 tcp dport 9091 accept`} {
 				if !strings.Contains(preview.Ruleset, want) {
 					t.Fatalf("missing %q:\n%s", want, preview.Ruleset)

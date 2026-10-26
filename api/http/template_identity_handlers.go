@@ -5,66 +5,100 @@ package httpapi
 
 import (
 	"fmt"
-	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
 	"github.com/tonylturner/containd/pkg/cp/templates"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func listIdentitiesHandler(resolver *identity.Resolver) gin.HandlerFunc {
+// The /identities routes edit firewall.identityBindings in the candidate
+// configuration: changes are staged like rules and take effect on commit.
+
+func listIdentitiesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"mappings": resolver.All()})
+		cfg, err := store.LoadCandidate(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		mappings := cfg.Firewall.IdentityBindings
+		if mappings == nil {
+			mappings = []config.IdentityBinding{}
+		}
+		c.JSON(http.StatusOK, gin.H{"mappings": mappings})
 	}
 }
 
-func setIdentityHandler(resolver *identity.Resolver) gin.HandlerFunc {
-	type req struct {
-		IP         string   `json:"ip"`
-		Identities []string `json:"identities"`
-	}
+// setIdentityHandler binds an address to identities, replacing any binding
+// it has. Validation is the configuration's.
+func setIdentityHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var body req
+		var body config.IdentityBinding
 		if err := c.ShouldBindJSON(&body); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		ip := net.ParseIP(strings.TrimSpace(body.IP))
-		if ip == nil {
+		addr, ok := rules.BindingAddr(strings.TrimSpace(body.IP))
+		if !ok {
 			apiError(c, http.StatusBadRequest, "invalid IP address")
 			return
 		}
-		if len(body.Identities) == 0 {
-			apiError(c, http.StatusBadRequest, "identities must not be empty")
+		binding := config.IdentityBinding{IP: addr.String(), Identities: body.Identities}
+		_, staged := stageCandidate(c, store, func(cfg *config.Config) bool {
+			if i := identityBindingIndex(cfg.Firewall.IdentityBindings, addr); i >= 0 {
+				cfg.Firewall.IdentityBindings[i] = binding
+			} else {
+				cfg.Firewall.IdentityBindings = append(cfg.Firewall.IdentityBindings, binding)
+			}
+			return true
+		})
+		if !staged {
 			return
 		}
-		for _, id := range body.Identities {
-			if strings.TrimSpace(id) == "" {
-				apiError(c, http.StatusBadRequest, "identity must not be empty")
-				return
-			}
-		}
-		resolver.Register(ip, body.Identities)
-		c.JSON(http.StatusOK, gin.H{"ip": ip.String(), "identities": body.Identities})
+		auditLog(c, audit.Record{Action: "identities.set", Target: binding.IP, Detail: "candidate"})
+		c.JSON(http.StatusOK, binding)
 	}
 }
 
-func deleteIdentityHandler(resolver *identity.Resolver) gin.HandlerFunc {
+func deleteIdentityHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		raw := c.Param("ip")
-		ip := net.ParseIP(strings.TrimSpace(raw))
-		if ip == nil {
+		addr, ok := rules.BindingAddr(strings.TrimSpace(c.Param("ip")))
+		if !ok {
 			apiError(c, http.StatusBadRequest, "invalid IP address")
 			return
 		}
-		resolver.Remove(ip)
-		c.JSON(http.StatusOK, gin.H{"deleted": ip.String()})
+		_, staged := stageCandidate(c, store, func(cfg *config.Config) bool {
+			i := identityBindingIndex(cfg.Firewall.IdentityBindings, addr)
+			if i < 0 {
+				apiError(c, http.StatusNotFound, "no identity binding for "+addr.String())
+				return false
+			}
+			cfg.Firewall.IdentityBindings = append(cfg.Firewall.IdentityBindings[:i], cfg.Firewall.IdentityBindings[i+1:]...)
+			return true
+		})
+		if !staged {
+			return
+		}
+		auditLog(c, audit.Record{Action: "identities.delete", Target: addr.String(), Detail: "candidate"})
+		c.JSON(http.StatusOK, gin.H{"deleted": addr.String()})
 	}
+}
+
+// identityBindingIndex finds the binding of addr, comparing canonical
+// addresses; -1 when there is none.
+func identityBindingIndex(bindings []config.IdentityBinding, addr netip.Addr) int {
+	for i, b := range bindings {
+		if got, ok := rules.BindingAddr(b.IP); ok && got == addr {
+			return i
+		}
+	}
+	return -1
 }
 
 func listTemplatesHandler() gin.HandlerFunc {

@@ -27,9 +27,10 @@ the tables the running engine installed. Renaming the table replaces the old
 tables with the new ones on the next apply. A table name starts with a letter
 or underscore, followed by letters, digits, underscores and hyphens.
 
-nftables cannot evaluate identity or schedule predicates. On a rule it decides,
-an `ALLOW` with either predicate is not installed, and a `DENY` drops without
-the predicate's condition. See
+nftables enforces identity and schedule predicates on the rules it handles,
+with per-label address sets and absolute-time interval sets in the policy
+table, and decides established connections in their scope again before the
+conntrack accept. See
 [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
 
 ## Capture is not inline enforcement

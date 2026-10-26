@@ -22,7 +22,7 @@ func TestClientRulesetPreview(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
 	want := engine.RulesetPreview{Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"},
-		Warnings: []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow, Message: "inactive"}}}
+		Warnings: []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow, Message: "matches nothing"}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var got config.Config
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {

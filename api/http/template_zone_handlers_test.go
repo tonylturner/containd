@@ -11,13 +11,11 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
 )
 
-func TestIdentityAndTemplateHandlers(t *testing.T) {
+func TestTemplateHandlers(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
-	resolver := identity.NewResolver()
-	s := NewServerWithEngineAndServices(store, nil, nil, nil, nil, resolver)
+	s := NewServerWithEngineAndServices(store, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/templates", nil)
@@ -35,43 +33,6 @@ func TestIdentityAndTemplateHandlers(t *testing.T) {
 	}
 	if len(store.cfg.Firewall.Rules) == 0 {
 		t.Fatalf("template apply did not persist rules")
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodPost, "/api/v1/identities", bytes.NewBufferString(`{"ip":"bad","identities":["operator"]}`))
-	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("identity invalid ip: expected 400, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodPost, "/api/v1/identities", bytes.NewBufferString(`{"ip":"10.0.0.10","identities":["operator","engineer"]}`))
-	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"10.0.0.10"`) {
-		t.Fatalf("identity set: expected success payload, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodGet, "/api/v1/identities", nil)
-	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"operator"`) {
-		t.Fatalf("identity list: expected mapping payload, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodDelete, "/api/v1/identities/not-an-ip", nil)
-	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("identity delete invalid ip: expected 400, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodDelete, "/api/v1/identities/10.0.0.10", nil)
-	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deleted":"10.0.0.10"`) {
-		t.Fatalf("identity delete: expected success payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
