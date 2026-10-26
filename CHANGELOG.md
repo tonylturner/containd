@@ -43,6 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   high npm advisories in the UI build.
 - Upgrade the UI to Tailwind CSS 4.3.3 with no visual change. `npm audit`
   now reports no vulnerabilities.
+- A firewall rule scoped to `vpn:*`, `vpn:wireguard` or `vpn:openvpn` no
+  longer matches every address when that VPN is not configured. A source or
+  destination that resolves to no address now matches nothing, so the rule has
+  no effect until the VPN is configured.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule is
+  dropped and blocked for 10 minutes when its TCP stream cannot be inspected:
+  conflicting or rewritten retransmitted bytes, framing the decoder rejects,
+  reassembly limits, or a decoder fault. Before, inspection restarted at a
+  later segment and a prohibited command could pass. An `ics.decision` event
+  with reason `stream_error` or `decoder_panic` names the rule. Learn mode and
+  IEC 104 are unchanged.
+- Validation refuses a firewall rule that names an ICS protocol and is in
+  effective enforce mode while `dataplane.nfqueueGroup` is 0. Without an
+  inline path the first prohibited command reached the device while the UI
+  showed "enforce". Set a queue, or set the rule's `ics.mode` to `learn`.
+  Rules without an ICS protocol and a global `dpiMode: enforce` alone stay
+  valid. `dataplane.dpiMode` accepts only `learn` or `enforce`.
 
 ### Added
 
@@ -85,6 +102,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SIGHUP reapplies the running configuration in management and combined mode,
   repairing runtime drift. Failures are logged, audited and shown in health.
   Environment variables and flags still need a restart.
+- ICS rule coverage: each rule that names an ICS protocol reports `enforcing`,
+  `partial`, `not_enforcing` or `monitoring`, with reasons (no inline path,
+  enforcement off, DPI or decoder off, an unbound queue, overlapping or domain
+  exclusions with their match counts). Any signed-in user can read it at
+  `GET /api/v1/dataplane/ics-coverage`. The ruleset preview, the engine ruleset
+  status and the rule preview carry it, and `/api/v1/health` gains a count-only
+  `icsEnforcement` summary. The ICS page, the firewall rules table and the rule
+  preview show coverage instead of a badge based on mode alone.
 
 ### Changed
 
@@ -288,6 +313,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document working log sinks and unwired SIEM export, the unauthenticated engine
   API boundary, authentication limits, and published CSAF advisories; align runtime
   package provenance and image-verification examples with the release workflow.
+- The dashboard shows only reported activity: no generated packets or made-up
+  baselines. NTP, proxy, DHCP, VPN and DNS service status show "never" instead
+  of a zero timestamp, and the DHCP error meter counts real failures.
 
 ### Removed
 

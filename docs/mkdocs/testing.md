@@ -133,6 +133,20 @@ other. Smoke fixture setup and isolation are documented in
 and IEC104 scenarios in
 [`test/iec104/README.md`](https://github.com/tonylturner/containd/blob/main/test/iec104/README.md).
 
+## Kernel NFQUEUE Oracle
+
+`TestFirstCommandKernelOracle` in `pkg/dp/engine` routes a client network
+namespace through the engine on NFQUEUE to a recording Modbus server. It
+requires that the first prohibited command never reaches the server. It needs
+a privileged Linux container:
+
+```sh
+GOOS=linux CGO_ENABLED=0 go test -c -o build/engine.test ./pkg/dp/engine
+docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 \
+  -v "$PWD/build:/w" alpine:3.21 sh -c \
+  "apk add -q nftables iproute2 && /w/engine.test -test.run FirstCommandKernel -test.v"
+```
+
 ## What Coverage Does Not Replace
 
 Coverage is only one signal.

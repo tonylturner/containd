@@ -58,6 +58,13 @@ accepts new connections without inspection. These are protocol-specific limits,
 not a universal fail-open/fail-closed guarantee. AV has separate failure settings;
 see [Config Format](config-format.md).
 
+With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
+closed when its stream cannot be inspected: a conflicting overlap, a
+retransmission that differs from or predates the bytes the engine kept,
+malformed framing, reassembly limits, or a decoder fault. The packet is dropped
+and the connection blocked like a decoded denial, without restarting
+inspection. Learn-mode flows and packets without an inline verdict still pass.
+
 ## ICS rule coverage
 
 Every firewall rule that names an ICS protocol reports its coverage: whether a

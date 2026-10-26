@@ -108,3 +108,8 @@ first Modbus FC 6 write (fresh connection and after a read), the first
 Modbus FC 8, and the first complete DNP3 FC 5 and FC 6 never reach the
 server. Each probe has its own source address, so the 10-minute dynamic
 block from an earlier deny cannot stand in for the inline drop.
+
+The default `afpacket` variant has no inline path. It asserts that saving the
+ICS rules in enforce mode is refused, then runs the traffic in learn mode,
+where denied writes reach the server and no dynamic block is installed. Both
+variants check the ICS coverage that `/dataplane/ruleset` and `/health` report.

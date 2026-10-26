@@ -191,9 +191,9 @@ func isRuleEvaluableICSEvent(proto string) bool {
 }
 
 // isStreamErrorEvent reports a malformed or unsupported event. Such events
-// are evidence only: on US protocols the packet passes, so they
 // never reach rule evaluation, where a missing function code would read as
-// FC 0.
+// FC 0. The packet passes, except on an inline flow in the scope of an
+// enforce ICS rule, which fails closed (failClosedRule).
 func isStreamErrorEvent(ev dpi.Event) bool {
 	return ev.Kind == "malformed" || ev.Kind == "unsupported"
 }
