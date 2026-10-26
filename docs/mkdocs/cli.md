@@ -162,6 +162,35 @@ new connections; existing sessions are unaffected. Rotation errors retain the
 active key and are logged. Clients with a pinned host key must verify the new
 fingerprint through a trusted channel before updating their known-hosts entry.
 
+### Account checks at SSH login
+
+Outside lab mode, SSH applies the web login's account checks after the password
+or key:
+
+- An account marked for a password change, such as the bootstrap `containd`
+  admin, must change it before the CLI, menu or shell opens. SSH asks for the new
+  password twice without echo and applies the web password rules; the new
+  password must differ from the current one. A key login also asks for the
+  current password. The change is audited.
+- A password login of an account with TOTP MFA asks for an authentication code.
+  A wrong code counts against the login rate limit, which is per client address
+  and account. A key login does not ask: the key is the possession factor.
+- An account whose required MFA enrollment grace period has ended cannot log in
+  over SSH. The server's banner says to enroll through the web UI.
+
+These steps use keyboard-interactive authentication, which OpenSSH enables by
+default. Clients limited to the `password` method, such as `sshpass`, cannot
+complete them.
+
+A password or MFA change from the web UI, the API or the SSH menu ends the
+account's other sessions and closes their SSH connections, including Linux
+shells. The session or SSH connection that made the change stays open. Deleting
+an account also closes its SSH connections.
+
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these checks. Password login with
+`containd` / `containd` opens the CLI directly, and an MFA change or account
+deletion leaves SSH connections open.
+
 ## ICS firewall rules
 
 `set firewall ics-rule <id> <action> <protocol> [options...]` accepts the

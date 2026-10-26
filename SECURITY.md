@@ -141,8 +141,8 @@ your environment rather than relying only on appliance-local data.
   password rotation. Use it only in disposable, isolated labs.
 - Prefer HTTPS, replace the generated self-signed certificate for trusted remote
   access, and restrict management ports to authorized operators.
-- Enable TOTP MFA for web/API administrative access where practical. This does
-  not protect SSH; see the authentication limits below.
+- Enable TOTP MFA for administrative accounts. SSH password login then asks for
+  the code; see the authentication limits below.
 - Prefer SSH keys and disable SSH password authentication when feasible.
 - Review policy exceptions and apply supported security releases promptly.
 
@@ -152,15 +152,22 @@ Canonical operational guidance: [Secure by Design](docs/mkdocs/secure-by-design.
 ## Authentication Limits
 
 Fresh local-account installs use the predictable bootstrap credential
-`containd` / `containd`. Outside lab mode, web/API access enforces the required
-password-change flow and supports optional TOTP MFA for local accounts.
+`containd` / `containd`. Outside lab mode, web/API and SSH enforce the required
+password-change flow, and both support optional TOTP MFA for local accounts:
 
-**SSH enforces neither MFA nor a forced password change**, for password or
-public-key authentication. SSH requires an admin account, but a valid bootstrap
-password can authenticate before it is rotated. An authenticated SSH PTY can
-reach the appliance's Linux shell, not just a restricted configuration CLI.
-The supplied appliance runs as root inside its container; treat SSH access as
-privileged appliance access. Keep it unreachable from untrusted networks.
+- SSH requires an admin account. The bootstrap admin must change its password at
+  SSH login before the CLI, menu or shell opens.
+- SSH password login of an MFA account asks for a TOTP code. SSH public-key login
+  does not: the key is treated as the possession factor, so a key alone signs in.
+- An account whose MFA enrollment grace period has ended cannot log in over SSH
+  until it enrolls through the web UI.
+- A password or MFA change ends the account's other sessions and SSH connections.
+
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks and pins the bootstrap
+credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
+just a restricted configuration CLI. The supplied appliance runs as root inside
+its container; treat SSH access as privileged appliance access. Keep it
+unreachable from untrusted networks.
 
 ## Engine API Trust Boundary
 

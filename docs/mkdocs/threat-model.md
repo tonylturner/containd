@@ -109,17 +109,19 @@ Examples:
 
 Current mitigations:
 
-- web/API session auth with forced password change on first login (standard deployments only; SSH does not enforce it)
-- web/API TOTP MFA and admin-required MFA with grace periods (not SSH)
+- session auth with forced password change on first login, on web/API and SSH (standard deployments only)
+- TOTP MFA and admin-required MFA with grace periods; SSH password login asks for the TOTP code, and SSH key login counts the key as the possession factor
+- a password or MFA change ends the account's other sessions and SSH connections
+- SSH login attempts are rate-limited per client address and account, including wrong TOTP codes
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
-- audit logging for logins, MFA changes, SSH sessions, and config saves and commits; user-account changes are not audited
+- audit logging for logins, account, password, MFA and certificate changes, SSH sessions and key enrollment, and config saves and commits
 
 Residual risk:
 
 - RBAC provides admin/view roles, not resource-scoped authorization
 - the bootstrap password remains a conscious lab-usability tradeoff
-- when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and every password change is refused (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403, and the SSH menu and setup wizard refuse their password steps). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag; standard deployments retain the web/API forced first-login change, not SSH enforcement. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
+- when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and every password change is refused (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403, and the SSH menu and setup wizard refuse their password steps). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag that also skips the SSH account checks; standard deployments enforce the forced first-login change and MFA on web/API and SSH. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
 
 ### 3. Configuration Tampering
 
