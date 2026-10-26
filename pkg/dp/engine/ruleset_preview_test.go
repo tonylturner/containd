@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,7 +22,11 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 	snap := iecSnapshot("enforce")
 	snap.Firewall = append(snap.Firewall,
 		rules.Entry{ID: "logged", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Log: true, Action: rules.ActionAllow},
-		rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus"}, Action: rules.ActionAllow})
+		rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus"}, Action: rules.ActionAllow},
+		rules.Entry{ID: "maint", Protocols: []rules.Protocol{{Name: "tcp", Port: "22"}}, Action: rules.ActionAllow,
+			Schedule: rules.SchedulePredicate{DaysOfWeek: []string{"Saturday"}, StartTime: "02:00", EndTime: "06:00"}},
+		rules.Entry{ID: "modbus-guests", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus"},
+			Identities: []string{"guest"}, Action: rules.ActionDeny})
 	for _, tc := range []struct {
 		name  string
 		owned uint16
@@ -56,6 +61,13 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			}
 			if preview.Ruleset != applier.ruleset {
 				t.Fatalf("preview differs from apply:\n%s\napply:\n%s", preview.Ruleset, applier.ruleset)
+			}
+			applied := e.compiler.RuleWarnings(e.CurrentRules())
+			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
+				t.Fatalf("preview warnings %+v differ from apply warnings %+v", preview.Warnings, applied)
+			}
+			if strings.Contains(preview.Ruleset, "tcp dport 22") {
+				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
 			}
 			for _, want := range []string{"table inet candidate_table", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept"} {
 				if !strings.Contains(preview.Ruleset, want) {

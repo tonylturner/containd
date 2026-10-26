@@ -18,6 +18,9 @@ type RulesetPreview struct {
 	Snapshot rules.Snapshot        `json:"snapshot"`
 	Ruleset  string                `json:"ruleset,omitempty"`
 	Runtime  RulesetPreviewRuntime `json:"runtime"`
+	// Warnings lists the rules whose predicates resolve toward denial in
+	// Ruleset; omitted when there are none.
+	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 }
 
 // PreviewRuleset compiles an isolated candidate with the queue ownership sampled
@@ -41,5 +44,5 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 	if err != nil {
 		return RulesetPreview{}, err
 	}
-	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime}, nil
+	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime, Warnings: comp.RuleWarnings(&snap)}, nil
 }

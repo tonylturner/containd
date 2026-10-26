@@ -203,12 +203,16 @@ func matchProtoCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	return false
 }
 
+// matchIdentities matches an entry's identity predicate. The dataplane does
+// not attach identities to flows, so a context without identities cannot
+// decide the predicate and it resolves toward denial: a DENY rule matches as
+// if the predicate held, and an ALLOW rule does not match.
 func matchIdentities(entry Entry, ctx EvalContext) bool {
-	if len(entry.Identities) == 0 {
+	if !entry.HasIdentityPredicate() {
 		return true
 	}
 	if len(ctx.Identities) == 0 {
-		return false
+		return entry.Action == ActionDeny
 	}
 	for _, id := range entry.Identities {
 		if id == "" {
@@ -397,7 +401,7 @@ func schedulePredicateEmpty(s SchedulePredicate) bool {
 }
 
 func matchSchedule(entry Entry, ctx EvalContext) bool {
-	if schedulePredicateEmpty(entry.Schedule) {
+	if !entry.HasSchedulePredicate() {
 		return true
 	}
 	now, ok := scheduleNow(entry.Schedule, ctx.Now)
