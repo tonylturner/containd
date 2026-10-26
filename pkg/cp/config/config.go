@@ -159,7 +159,7 @@ type DNSConfig struct {
 	CacheSizeMB     int      `json:"cacheSizeMB,omitempty"`     // optional cache size
 }
 
-// NTPConfig defines NTP client settings managed by containd (chrony or openntpd).
+// NTPConfig defines NTP client settings managed by containd (chrony).
 type NTPConfig struct {
 	Enabled         bool     `json:"enabled"`
 	Servers         []string `json:"servers,omitempty"`         // NTP servers/pools
@@ -202,14 +202,15 @@ type ReverseProxySite struct {
 // DHCPConfig defines an embedded DHCPv4 server (LAN-side) managed by containd.
 // Runtime integration is phased; this is the persisted configuration model.
 type DHCPConfig struct {
-	Enabled      bool              `json:"enabled"`
-	ListenIfaces []string          `json:"listenIfaces,omitempty"` // logical interface names (e.g. "lan2")
-	Pools        []DHCPPool        `json:"pools,omitempty"`        // address pools per interface (optional)
-	Reservations []DHCPReservation `json:"reservations,omitempty"` // MAC -> fixed IP per interface
-	LeaseSeconds int               `json:"leaseSeconds,omitempty"` // default lease time
-	Router       string            `json:"router,omitempty"`       // default gateway handed to clients
-	DNSServers   []string          `json:"dnsServers,omitempty"`   // DNS servers handed to clients
-	Domain       string            `json:"domain,omitempty"`       // optional domain
+	Authoritative bool              `json:"authoritative"` // send NAKs for invalid requests on served networks
+	Enabled       bool              `json:"enabled"`
+	ListenIfaces  []string          `json:"listenIfaces,omitempty"` // logical interface names (e.g. "lan2")
+	Pools         []DHCPPool        `json:"pools,omitempty"`        // address pools per interface (optional)
+	Reservations  []DHCPReservation `json:"reservations,omitempty"` // MAC -> fixed IP per interface
+	LeaseSeconds  int               `json:"leaseSeconds,omitempty"` // default lease time
+	Router        string            `json:"router,omitempty"`       // default gateway handed to clients
+	DNSServers    []string          `json:"dnsServers,omitempty"`   // DNS servers handed to clients
+	Domain        string            `json:"domain,omitempty"`       // optional domain
 }
 
 type DHCPPool struct {

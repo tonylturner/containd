@@ -196,7 +196,8 @@ Notes:
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
 - `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (omitted access settings use the default grants; localhost is always allowed).
-- `services.dhcp` configures the built-in DHCP server.
+- `services.dhcp` configures the built-in DHCP server. `authoritative` is a persisted boolean, default false when omitted. When true, invalid or unknown lease requests receive DHCPNAK only on directly attached served subnets. When false, these requests receive no reply. Valid requests receive DHCPACK in both modes; relayed requests and requests selecting another server are ignored.
+- `services.ntp.intervalSeconds` pins chrony polling when positive: round up to a power of two and clamp to 16–131072 seconds. Omitted or zero retains adaptive 64–1024 second polling. Runtime status reports the configured fixed interval (or null for adaptive polling) and min/max seconds; initial bursts may be faster.
 - `services.vpn.wireguard` configures WireGuard. `services.vpn.openvpn` supports managed client/server modes.
 - `services.vpn.openvpn.server.tunnelCIDR` is the client address pool allocated by the OpenVPN server. WireGuard uses static peer `AllowedIPs` and `addressCIDR` for policy targeting.
 - Config backups are stored beside the config DB in `config-backups/` (normally `/data/config-backups/` in Compose) and can be created redacted or full (admin-only for unredacted).

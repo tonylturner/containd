@@ -31,17 +31,21 @@ Check runtime status after commit, not just whether saving succeeded.
 ## NTP (chrony)
 
 - Config model: `services.ntp` with `enabled`, `servers`, `intervalSeconds`.
-- Uses chrony as the NTP implementation on Wolfi-based images. Falls back to openntpd if chrony is not available.
+- Uses chrony (`chronyd`), the only supported NTP daemon. `CONTAIND_NTPD_PATH`, if set, must name a `chronyd` binary.
+- Positive `intervalSeconds` pins minpoll/maxpoll to a power of two, rounded up and clamped to 16–131072 seconds. Zero or omitted uses chrony's adaptive 64–1024 second defaults; initial `iburst` requests can be faster.
+- Status `interval_seconds` reports the rendered fixed interval, not the requested value; it is null for adaptive polling or when disabled. `min_poll_seconds` and `max_poll_seconds` describe the configured range (null when disabled). These are configuration values, not measured synchronization cadence.
 - API:
   - `GET/POST /api/v1/services/ntp`
 - Status and runtime events surface in `/api/v1/services/status` and `/api/v1/events`.
 
 ## DHCP
 
-- Config model: `services.dhcp` with `enabled`, `listenIfaces`, `pools`, `reservations`, and lease settings.
+- Config model: `services.dhcp` with `enabled`, `authoritative`, `listenIfaces`, `pools`, `reservations`, and lease settings.
 - API:
   - `GET/POST /api/v1/services/dhcp`
   - `GET /api/v1/dhcp/leases`
+- `authoritative` defaults to false. Invalid address requests and unknown INIT-REBOOT or renewal requests receive no reply by default; enabling authority sends DHCPNAK so clients restart discovery. Valid requests receive DHCPACK in either mode.
+- Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
 
 ## VPN
