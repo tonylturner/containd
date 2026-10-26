@@ -290,6 +290,9 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		s.next = nil
 		return accepted(reasonIECClosed), true
 	}
+	if dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagRST != 0 {
+		return dropped(reasonIECInvalid), true // never the next incarnation's SYN-ACK
+	}
 	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
 		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
 		n.dirs[iecDirSrv] = newIECDir(pkt.TCP.Seq)
@@ -352,11 +355,13 @@ func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, now 
 // client that lost its connection and reconnects from the same port
 // sends, passes and changes nothing: the server answers it with a
 // challenge ACK, and the RST the client sends in reply closes the
-// incarnation (rstLocked).
+// incarnation (rstLocked). A SYN with payload or RST is dropped: a SYN-ACK
+// that also carries RST resets the client, so it must not establish the
+// incarnation.
 func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
-	if len(pkt.Payload) > 0 {
-		return dropped(reasonIECInvalid)
+	if len(pkt.Payload) > 0 || f&capture.TCPFlagRST != 0 {
+		return dropped(reasonIECInvalid) // a SYN with RST is no handshake segment
 	}
 	c2s := s.dirs[iecDirClient]
 	switch {

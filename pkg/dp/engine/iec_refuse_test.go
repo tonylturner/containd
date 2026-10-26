@@ -124,3 +124,50 @@ func TestIECRefusingRSTOnTombstone(t *testing.T) {
 		t.Fatalf("session state %d, want established", st)
 	}
 }
+
+// TestIECSYNACKWithRSTDrops sends a SYN-ACK that also carries RST, which
+// resets the client instead of completing its handshake: it drops and
+// neither the incarnation nor the tombstone's next incarnation is
+// established. The real SYN-ACK still establishes it.
+func TestIECSYNACKWithRSTDrops(t *testing.T) {
+	const synAckRST = capture.TCPFlagSYN | capture.TCPFlagACK | capture.TCPFlagRST
+	h := newIECHarness(t, "enforce")
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 100, 0, nil)); d.Action != capture.Accept {
+		t.Fatalf("SYN = %+v, want Accept", d)
+	}
+	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 101, nil)); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+		t.Fatalf("SYN-ACK with RST = %+v, want Drop by %s", d, reasonIECInvalid)
+	}
+	if st, _ := h.sessionState(); st != iecSynSent {
+		t.Fatalf("session state %d, want awaiting its SYN-ACK", st)
+	}
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 101, nil)); d.Action != capture.Accept {
+		t.Fatalf("SYN-ACK = %+v, want Accept", d)
+	}
+	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 101, nil)); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+		t.Fatalf("retransmitted SYN-ACK with RST = %+v, want Drop by %s", d, reasonIECInvalid)
+	}
+	if st, _ := h.sessionState(); st != iecEstablished {
+		t.Fatalf("session state %d, want established", st)
+	}
+
+	h = newIECHarness(t, "enforce")
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagACK, 2000, 1000, nil)); d.Action != capture.Drop || d.Reason != reasonIECAbort {
+		t.Fatalf("packet not observed from its SYN = %+v, want Drop by %s", d, reasonIECAbort)
+	}
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != capture.Accept {
+		t.Fatalf("SYN on the tombstone = %+v, want Accept", d)
+	}
+	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 778, nil)); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+		t.Fatalf("SYN-ACK with RST on the tombstone = %+v, want Drop by %s", d, reasonIECInvalid)
+	}
+	if st, _ := h.sessionState(); st != iecAborted {
+		t.Fatalf("session state %d, want the tombstone", st)
+	}
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != capture.Accept {
+		t.Fatalf("SYN-ACK on the tombstone = %+v, want Accept", d)
+	}
+	if st, _ := h.sessionState(); st != iecEstablished {
+		t.Fatalf("session state %d, want established", st)
+	}
+}
