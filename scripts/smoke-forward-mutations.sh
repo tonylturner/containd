@@ -8,7 +8,7 @@ set -euo pipefail
 # failed checks fails this script.
 #
 # Takes the same environment as smoke-forward.sh (COMPOSE_FILE,
-# SMOKE_PROJECT, SMOKE_WAN_NET, SMOKE_LAN_NET, BASE, ENGINE, SMOKE_SKIP_UP,
+# SMOKE_PROJECT, SMOKE_WAN_NET, SMOKE_LAN_NET, BASE, SMOKE_SKIP_UP,
 # SMOKE_BUILD). The runs leave the mutated policy in the stack's candidate
 # config; the next smoke-forward.sh run replaces it.
 

@@ -3,12 +3,13 @@
 # Two endpoint containers (the lib60870 RTU server and control-centre client,
 # GPLv3, in the harness-only endpoint image) sit on two disposable networks
 # with the branch-built containd firewall routing between them. Management is
-# loopback-only: the mgmt and engine ports publish to 127.0.0.1 with an
-# ephemeral host port, and there is no host networking.
+# loopback-only: the mgmt port publishes to 127.0.0.1 with an ephemeral host
+# port, and there is no host networking. The engine API stays on the
+# container's loopback; the script reaches it with `docker compose exec`.
 #
 # scripts/smoke-iec104.sh drives this file; it sets IEC104_FIREWALL_IMAGE to
 # the branch image it built, a unique project name, and reads the published
-# ports back with `docker compose port`. Nothing here binds a fixed host port,
+# port back with `docker compose port`. Nothing here binds a fixed host port,
 # so two harness runs (or a concurrent US smoke stack) do not collide. The two
 # disposable /24 subnets default to 10.233.0.0/24 and 10.234.0.0/24; override
 # IEC104_CC_SUBNET and IEC104_RTU_SUBNET (first three octets) for a parallel run
@@ -27,9 +28,8 @@ services:
       net.ipv4.ip_forward: "1"
     environment:
       - CONTAIND_MODE=all
-      # Engine and mgmt listen on all container interfaces but are published
-      # only to 127.0.0.1 (below), so management stays loopback-only on the host.
-      - CONTAIND_ENGINE_ADDR=:8081
+      # Mgmt listens on all container interfaces but is published only to
+      # 127.0.0.1 (below), so management stays loopback-only on the host.
       - CONTAIND_MGMT_ADDR=:18080
       - CONTAIND_MGMT_HTTPS_ADDR=:18443
       - CONTAIND_ENGINE_URL=http://127.0.0.1:8081
@@ -46,7 +46,6 @@ services:
       rtu_net:
         ipv4_address: ${IEC104_RTU_SUBNET:-10.234.0}.2
     ports:
-      - "127.0.0.1::8081"
       - "127.0.0.1::18080"
     tmpfs:
       - /data

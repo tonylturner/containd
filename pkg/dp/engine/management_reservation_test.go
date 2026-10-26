@@ -8,15 +8,17 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestManagementReservationSurvivesReconfigure(t *testing.T) {
+func TestProcessAuthoritySurvivesReconfigure(t *testing.T) {
 	r := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
 	if _, err := New(Config{Enforce: EnforceConfig{ManagementReservation: r}}); err == nil {
 		t.Fatal("accepted disabled enforcement")
 	}
-	cfg := Config{Enforce: EnforceConfig{Enabled: true, ManagementReservation: r}}
+	api := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}
+	cfg := Config{Enforce: EnforceConfig{Enabled: true, ManagementReservation: r, EngineAPI: api}}
 	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +30,8 @@ func TestManagementReservationSurvivesReconfigure(t *testing.T) {
 	}
 	e.Reconfigure(fresh)
 	text, err := e.compiler.CompileFirewall(&rules.Snapshot{})
-	if err != nil || !strings.Contains(text, "ip daddr 10.99.99.2 tcp dport 8080 accept") {
+	if err != nil || !strings.Contains(text, "ip daddr 10.99.99.2 tcp dport 8080 accept") ||
+		!strings.Contains(text, `iifname "eth6" ip daddr 10.98.0.2 tcp dport 9091 accept`) {
 		t.Fatal(text, err)
 	}
 	before := e.CurrentRules()

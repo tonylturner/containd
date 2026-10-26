@@ -142,7 +142,8 @@ observe_final() {
   done
   observe_check "diagnostics: held packets, bytes and oldest pending settle to zero" "diagnostics.json" \
     test "$settled" = 1
-  $CURL "${ENGINE}/metrics" -o "$RESULTS_DIR/iec104-metrics.txt"
+  [[ "$(engine_get firewall /metrics "$RESULTS_DIR/iec104-metrics.txt")" == 200 ]] ||
+    fatal "could not read the engine metrics"
   observe_check "diagnostics: provoked abort counters match metrics and pressure gauges are zero" \
     "diagnostics.json; iec104-metrics.txt" python3 - "$RESULTS_DIR" <<'PY'
 import json

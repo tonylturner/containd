@@ -55,16 +55,21 @@ control interface**, not protected by the management `/api/v1` authentication or
 RBAC middleware. Access permits runtime policy/configuration mutation.
 
 In combined mode (`containd all`), its default bind is `127.0.0.1:8081`. Split
-mode (`containd engine`) defaults to `:8081` so management in another container
-can reach it. `CONTAIND_ENGINE_ADDR` overrides either default. Only the management
-process or a trusted private network may reach this listener: never publish or
-route it to an untrusted network. Not publishing Docker host port 8081 does not
-prevent access from other containers on attached networks.
+mode (`containd engine`) has no default: `CONTAIND_ENGINE_ADDR` must name the
+engine's address on the management network, and the engine refuses to start
+with a loopback or wildcard listener. The
+[reserved management profile](management-reservation.md) is the exception: it
+runs both processes in one network namespace and requires a loopback engine
+bind.
 
-The [reserved management profile](management-reservation.md) additionally
-requires a loopback engine bind. That profile-specific validation does not
-protect arbitrary split-mode deployments. Container-network isolation and bind
-configuration are part of the security boundary.
+While enforcing, the input chain admits the engine API from loopback and, for a
+listener bound to one address, only on that address's own interface; no other
+zone reaches it, not even by routing to that address, and revocations never cut
+that path. Without enforcement nothing filters it, so every network that can
+route to the listener reaches it. Only the management process or a trusted
+private network may reach this listener: never publish or route it to an
+untrusted network. Container-network isolation and bind configuration remain
+part of the security boundary.
 
 ### Dataplane to Traffic
 

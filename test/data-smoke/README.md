@@ -24,7 +24,7 @@ bash test/data-smoke/generate.sh
 
 `scripts/smoke-forward.sh` and `scripts/smoke-dpi.sh` default to compose
 project `deploy`, subnets `172.30.0.0/24` (wan) and `172.31.0.0/24` (lan),
-host ports 18080 (HTTP), 18081 (engine), 18443 (HTTPS) and 12222 (SSH),
+host ports 18080 (HTTP), 18443 (HTTPS) and 12222 (SSH),
 the shared `test/data-smoke` data directory, and the
 `containd/containd:dev` image. Two runs on one Docker host can collide on
 these resources. For an isolated run, write an
@@ -35,25 +35,30 @@ override that moves them and point the scripts at it:
 | `SMOKE_PROJECT` | compose project name (default `deploy`) |
 | `COMPOSE_FILE` | colon-separated compose files, base first (as in `docker compose`) |
 | `SMOKE_WAN_NET`, `SMOKE_LAN_NET` | first three octets of the moved subnets |
-| `BASE`, `ENGINE` | management and engine URLs for the moved host ports |
+| `BASE` | management URL for the moved host port |
 | `TOKEN` | management bearer token (default `devtoken`) |
 | `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports); without it, `smoke-dpi.sh` recreates the containers, because a reused stack keeps the earlier run's dynamic blocks |
 
 The override replaces the engine image, networks, addresses, ports and the
 `/data` bind with `!override` ([Docker Compose 2.24.4 or later](https://github.com/compose-spec/compose-spec/blob/main/13-merge.md#replace-value)), for example
-`image: containd/containd:<run-tag>`, `ports: !override ["127.0.0.1::8081",
-"127.0.0.1::18080"]`, one `ipv4_address` per service in the new subnets,
+`image: containd/containd:<run-tag>`, `ports: !override ["127.0.0.1::18080"]`,
+one `ipv4_address` per service in the new subnets,
 and `networks.<name>.ipam: !override` with the new subnet. Replace the
-**entire** ports list (the example publishes only HTTP and engine) and set a
+**entire** ports list (the example publishes only HTTP) and set a
 non-empty `CONTAIND_JWT_SECRET` in the override's engine environment, for
 example a value generated with `openssl rand -hex 32`. With that secret set,
 lab mode accepts only bearer tokens signed with it, so set `TOKEN` to an
 HS256 JWT signed with the secret and carrying a future `exp`. Use a separate
 data directory for the `/data` bind. Bring the stack
 up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
--f <override> up -d`, read the ports with `docker compose ... port engine
-18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then
-`down --volumes` the project you created.
+-f <override> up -d`, read the port with `docker compose ... port engine
+18080`, run the script with `SMOKE_SKIP_UP=1`, then `down --volumes` the
+project you created.
+
+The scripts never reach the engine API through a published port. While
+enforcing, the engine admits its unauthenticated API only from loopback, so
+the scripts call it inside the `engine` container with `docker compose exec`
+(`scripts/smoke-engine-api.sh`).
 
 ## Forwarding fixtures
 

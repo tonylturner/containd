@@ -82,7 +82,12 @@ func Run(ctx context.Context, opts Options) error {
 	if addr == "" {
 		addr = ListenAddr(opts.Combined)
 	}
-	if err := opts.Reservation.ValidateEngineBind(addr); err != nil {
+	nics, err := interfaceAddrs()
+	if err != nil {
+		return fmt.Errorf("engine listener: %w", err)
+	}
+	apiPath, err := engineListener(addr, opts.Combined, opts.Reservation, nics)
+	if err != nil {
 		return err
 	}
 	logger := logging.NewService("engine")
@@ -105,6 +110,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	engineCfg := initialEngineConfig(ifaces, enforceEnabled, enforceTable)
 	engineCfg.Enforce.ManagementReservation = opts.Reservation
+	engineCfg.Enforce.EngineAPI = apiPath
 	engineCfg.Events = dpevents.NewStore(4096)
 	engineCfg.OnError = func(err error) {
 		logger.Errorf("data plane capture error: %v", err)

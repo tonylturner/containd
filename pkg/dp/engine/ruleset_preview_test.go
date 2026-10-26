@@ -18,6 +18,7 @@ import (
 func TestRulesetPreviewEqualsApply(t *testing.T) {
 	reservation := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"),
 		Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
+	engineAPI := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}
 	settings := enforce.CompilerSettings{TableName: "candidate_table", NFLogGroup: 203, NFQueueGroup: 207}
 	snap := iecSnapshot("enforce")
 	snap.Firewall = append(snap.Firewall,
@@ -39,7 +40,7 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			applier := &recordingApplier{}
 			e, err := New(Config{Enforce: EnforceConfig{Enabled: true, TableName: settings.TableName,
-				ManagementReservation: reservation, Applier: applier},
+				ManagementReservation: reservation, EngineAPI: engineAPI, Applier: applier},
 				NFLogGroup: settings.NFLogGroup, NFQueueGroup: settings.NFQueueGroup, ResetInjector: &session.Fake{}})
 			if err != nil {
 				t.Fatal(err)
@@ -69,7 +70,8 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			if strings.Contains(preview.Ruleset, "tcp dport 22") {
 				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
 			}
-			for _, want := range []string{"table inet candidate_table", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept"} {
+			for _, want := range []string{"table inet candidate_table", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept",
+				`iifname "eth6" ip daddr 10.98.0.2 tcp dport 9091 accept`} {
 				if !strings.Contains(preview.Ruleset, want) {
 					t.Fatalf("missing %q:\n%s", want, preview.Ruleset)
 				}

@@ -30,6 +30,7 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 		return RulesetPreview{}, err
 	}
 	comp := enforce.NewCompilerWithSettings(settings, e.managementReservation)
+	comp.EngineAPI = e.engineAPI
 	comp.IEC104EnvelopeOpen = e.gate.sampleOpen(comp.QueueID)
 	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen}
 	switch {

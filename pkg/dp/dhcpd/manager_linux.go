@@ -23,9 +23,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
-// redirectTable is the nft table holding the UDP/67 redirect.
-const redirectTable = "containd_dhcp"
-
 // Lease represents a DHCPv4 lease handed out by the embedded DHCP server.
 type Lease struct {
 	Iface     string `json:"iface"`
@@ -625,7 +622,7 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 		return nil
 	}
 
-	script := enforce.DeleteTable(redirectTable)
+	script := enforce.DeleteTable(enforce.DHCPRedirectTable)
 	if enabled {
 		script = redirectScript(devs)
 	}
@@ -642,8 +639,8 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 // exists, with one UDP/67 redirect to the listener port per device.
 func redirectScript(devs []string) string {
 	var b strings.Builder
-	b.WriteString(enforce.DeleteTable(redirectTable))
-	b.WriteString("table inet " + redirectTable + " {\n")
+	b.WriteString(enforce.DeleteTable(enforce.DHCPRedirectTable))
+	b.WriteString("table inet " + enforce.DHCPRedirectTable + " {\n")
 	b.WriteString("  chain prerouting {\n")
 	b.WriteString("    type nat hook prerouting priority -100; policy accept;\n")
 	for _, dev := range devs {
