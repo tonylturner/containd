@@ -57,10 +57,13 @@ func TestKernelRedirectScriptAppliesWithTableAbsentAndPresent(t *testing.T) {
 			t.Fatalf("redirect table after applying %v (%v):\n%s", devs, err, table)
 		}
 	}
-	if err := ensureRedirect(ctx, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := nft("list", "table", "inet", redirectTable); err == nil {
-		t.Fatal("disabling kept the redirect table")
+	// Disabling removes the table and succeeds again once it is absent.
+	for i := 0; i < 2; i++ {
+		if err := ensureRedirect(ctx, nil, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nft("list", "table", "inet", redirectTable); err == nil {
+			t.Fatal("disabling kept the redirect table")
+		}
 	}
 }

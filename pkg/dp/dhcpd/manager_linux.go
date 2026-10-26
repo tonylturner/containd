@@ -217,7 +217,11 @@ func (m *Manager) disableLocked(ctx context.Context) error {
 		l.cancel()
 		delete(m.listeners, dev)
 	}
-	_ = ensureRedirect(ctx, nil, false)
+	if err := ensureRedirect(ctx, nil, false); err != nil {
+		m.lastErr = err.Error()
+		go m.emit("service.dhcp.redirect_failed", map[string]any{"error": err.Error()})
+		return err
+	}
 	m.lastErr = ""
 	go m.emit("service.dhcp.disabled", map[string]any{"enabled": false})
 	return nil
@@ -621,14 +625,12 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 		return nil
 	}
 
-	if !enabled {
-		cmd := exec.CommandContext(ctx, "nft", "delete", "table", "inet", redirectTable)
-		_ = cmd.Run()
-		return nil
+	script := enforce.DeleteTable(redirectTable)
+	if enabled {
+		script = redirectScript(devs)
 	}
-
 	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(redirectScript(devs))
+	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("dhcp: nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
