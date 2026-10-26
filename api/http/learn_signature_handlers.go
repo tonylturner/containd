@@ -82,9 +82,6 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 				cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 				added++
 			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
-			}
 			return true
 		})
 		if !staged {

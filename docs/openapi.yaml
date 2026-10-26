@@ -811,7 +811,7 @@ components:
       description: Stored configuration fields only; no runtime DPI event exporter consumes these settings.
     FirewallConfig:
       properties:
-        defaultAction: {type: string}
+        defaultAction: {type: string, enum: ['', ALLOW, DENY], description: Omitted or empty means DENY.}
         nat: {$ref: '#/components/schemas/NATConfig'}
         rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
       type: object

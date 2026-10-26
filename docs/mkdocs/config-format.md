@@ -216,6 +216,7 @@ Notes:
     TOS and metric but a different next hop is journaled, replaced, and restored
     when that route leaves intent. Unsupported collisions fail with route details.
     See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
+- `firewall.defaultAction` applies to forwarded traffic that no rule matches. It is `ALLOW` or `DENY`; omitted or empty means `DENY`, and any other value is rejected.
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out

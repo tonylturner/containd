@@ -47,9 +47,6 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 					return false
 				}
 			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
-			}
 			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 			return true
 		})
@@ -291,9 +288,6 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 					apiError(c, http.StatusBadRequest, "rule already exists")
 					return false
 				}
-			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
 			}
 			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 			return true

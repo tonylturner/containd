@@ -28,7 +28,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		Version:    cfg.Version,
 		Firewall:   make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		LocalInput: make([]dprules.LocalServiceRule, 0, 8),
-		Default:    dprules.Action(cfg.Firewall.DefaultAction),
+		Default:    dprules.Action(cfg.Firewall.EffectiveDefaultAction()),
 		NAT: dprules.NATConfig{
 			Enabled:      cfg.Firewall.NAT.Enabled,
 			EgressZone:   cfg.Firewall.NAT.EgressZone,
