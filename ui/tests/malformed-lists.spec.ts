@@ -58,3 +58,22 @@ for (const [path, endpoint, message] of [
     expect(pageErrors).toEqual([]);
   });
 }
+
+for (const [name, body] of [["object", { unexpected: true }], ["string", "unexpected"]] as const) {
+  for (const view of ["PHYSICAL", "SECURITY"]) {
+    test(`topology ${view} view survives ${name} bodies`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      page.on("pageerror", (err) => pageErrors.push(String(err)));
+      await page.route("**/api/v1/**", async (route) => {
+        const p = new URL(route.request().url()).pathname;
+        const json = p === "/api/v1/auth/me" || p === "/api/v1/auth/session" ? user : body;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+      });
+      await page.goto("/topology/");
+      await page.getByRole("button", { name: view, exact: true }).click();
+      await page.waitForLoadState("networkidle");
+      expect(pageErrors).toEqual([]);
+      await expect(page.getByText("Application error")).toHaveCount(0);
+    });
+  }
+}

@@ -52,7 +52,9 @@ export const servicesAPI = {
       objects: ["cpu", "memory", "disk", "ruleEval", "container", "runtime"],
     }, signal),
   getSystemInspection: (signal?: AbortSignal) =>
-    getJSON<SystemInspection>("/api/v1/system/inspection", signal),
+    getJSONShaped<SystemInspection>("/api/v1/system/inspection", {
+      objects: ["host", "runtime", "container", "process", "security"],
+    }, signal),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg),
