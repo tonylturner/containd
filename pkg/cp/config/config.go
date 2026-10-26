@@ -20,7 +20,6 @@ type Config struct {
 	Objects       []Object        `json:"objects,omitempty"`
 	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
-	Export        ExportConfig    `json:"export,omitempty"`
 	PCAP          PCAPConfig      `json:"pcap,omitempty"`
 	Firewall      FirewallConfig  `json:"firewall"`
 	IDS           IDSConfig       `json:"ids,omitempty"`
@@ -500,14 +499,6 @@ type DPIExclusion struct {
 	Value  string `json:"value"`            // IP, CIDR, or domain
 	Type   string `json:"type"`             // "ip", "cidr", "domain"
 	Reason string `json:"reason,omitempty"` // optional user note
-}
-
-// ExportConfig controls DPI event export to SIEM systems.
-type ExportConfig struct {
-	Enabled bool   `json:"enabled,omitempty"` // enable DPI event export
-	Format  string `json:"format,omitempty"`  // cef, json, syslog
-	Target  string `json:"target,omitempty"`  // file:///path, udp://host:514, tcp://host:514
-	Filter  string `json:"filter,omitempty"`  // all, ics-only, alerts-only
 }
 
 // PCAPConfig controls packet capture storage and forwarding.

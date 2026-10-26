@@ -288,8 +288,7 @@ endpoints are not the public policy-generation interface. See
 Live telemetry includes inventory, anomalies, signatures, and protocol statistics.
 The passive IEC 104 inventory is separate from the learner. Native IDS rules and the built-in signature engine
 are separate consumers. See [Logging and Evidence](logging-evidence.md) for
-bounded retention, queries, and the distinction between working syslog sinks and
-the unwired SIEM export configuration.
+bounded retention, queries, and syslog forwarding.
 
 Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
 BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to

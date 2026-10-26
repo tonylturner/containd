@@ -26,8 +26,8 @@ and `containd engine` separately. See [Docker Compose](docker-compose.md).
    statistics. Generic ICS inventory and automatic learning exclude IEC 104.
    See [Data Plane](dataplane.md) and [ICS DPI](ics-dpi.md).
 4. Operators query bounded event history and persistent audit records through
-   the management API. Service syslog forwarding and application-log syslog sinks
-   are separate from the unwired DPI SIEM exporter; see
+   the management API. Service syslog forwarding and application-log syslog
+   sinks send records to external collectors; see
    [Logging and Evidence](logging-evidence.md).
 
 The engine API is an **unauthenticated privileged control interface**. Keep it

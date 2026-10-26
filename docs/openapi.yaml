@@ -756,7 +756,6 @@ components:
         assets: {items: {$ref: '#/components/schemas/Asset'}, type: array, nullable: true}
         dataplane: {$ref: '#/components/schemas/DataPlaneConfig'}
         description: {type: string}
-        export: {$ref: '#/components/schemas/ExportConfig'}
         firewall: {$ref: '#/components/schemas/FirewallConfig'}
         ids: {$ref: '#/components/schemas/IDSConfig'}
         interfaces: {items: {$ref: '#/components/schemas/Interface'}, type: array, nullable: true}
@@ -914,14 +913,6 @@ components:
       properties:
         running: {type: boolean}
       type: object
-    ExportConfig:
-      properties:
-        enabled: {type: boolean}
-        filter: {type: string}
-        format: {type: string}
-        target: {type: string}
-      type: object
-      description: Stored configuration fields only; no runtime DPI event exporter consumes these settings.
     FirewallConfig:
       properties:
         defaultAction: {type: string, enum: ['', ALLOW, DENY], description: Omitted or empty means DENY.}

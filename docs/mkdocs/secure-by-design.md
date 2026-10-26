@@ -209,8 +209,6 @@ Caveats:
 
 - Event history is bounded and in memory, and event forwarding over syslog is
   best-effort: events produced during a collector outage are not resent.
-- The top-level `export` setting is not used at runtime. Use the syslog
-  forwarder.
 
 See [Logging and Evidence](logging-evidence.md).
 
