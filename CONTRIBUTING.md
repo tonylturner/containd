@@ -112,8 +112,9 @@ The baseline uses non-race Go tests and is not the complete CI gate.
 
 [CI](.github/workflows/ci.yml) also checks module tidiness, runs the full Go race
 suite, scans with curated Semgrep rules, builds the UI and appliance image,
-smokes the public Compose quickstart and scans the image with Trivy. To run the
-module/race/security checks explicitly from the repository root:
+smokes the public Compose quickstart (`bash scripts/smoke-quickstart.sh`) and
+scans the image with Trivy. To run the module/race/security checks explicitly
+from the repository root:
 
 ```bash
 go mod tidy && git diff --exit-code go.mod go.sum
