@@ -4,8 +4,10 @@ import type {
   IEC104Class,
   IOARange,
   Protocol,
+  RateLimit,
+  RuleAction,
   RuleSchedule,
-} from "./api";
+} from "./api-firewall";
 
 function asList(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -153,7 +155,7 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
       typeof record.id === "string" && record.id.trim() !== ""
         ? record.id.trim()
         : "unknown-rule",
-    action: record.action === "DENY" ? "DENY" : "ALLOW",
+    action: normalizeRuleAction(record.action),
     sourceZones: toStringList(record.sourceZones),
     destZones: toStringList(record.destZones),
     sources: toStringList(record.sources),
@@ -168,6 +170,9 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
     normalized.description = record.description;
   }
   if (typeof record.log === "boolean") normalized.log = record.log;
+  const rateLimit = normalizeRateLimit(record.rateLimit);
+  if (rateLimit) normalized.rateLimit = rateLimit;
+  if (typeof record.tag === "string" && record.tag !== "") normalized.tag = record.tag;
   const identities = toStringList(record.identities);
   if (identities.length > 0) normalized.identities = identities;
   const schedule = normalizeSchedule(record.schedule);
@@ -181,6 +186,35 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
   if (!normalized.ics) delete normalized.ics;
 
   return normalized;
+}
+
+const RULE_ACTIONS: ReadonlySet<string> = new Set<RuleAction>([
+  "ALLOW",
+  "DENY",
+  "RESET",
+  "RATE_LIMIT",
+  "TAG",
+]);
+
+// The server rejects any other action, so an unknown value is a malformed
+// response; DENY is the conservative reading.
+export function normalizeRuleAction(value: unknown): RuleAction {
+  return typeof value === "string" && RULE_ACTIONS.has(value)
+    ? (value as RuleAction)
+    : "DENY";
+}
+
+function normalizeRateLimit(value: unknown): RateLimit | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { packetsPerSecond, burst } = value as Record<string, unknown>;
+  if (typeof packetsPerSecond !== "number" || !Number.isInteger(packetsPerSecond)) {
+    return undefined;
+  }
+  const rateLimit: RateLimit = { packetsPerSecond };
+  if (typeof burst === "number" && Number.isInteger(burst) && burst > 0) {
+    rateLimit.burst = burst;
+  }
+  return rateLimit;
 }
 
 function normalizeSchedule(value: unknown): RuleSchedule | undefined {

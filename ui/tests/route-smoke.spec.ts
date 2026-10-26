@@ -18,6 +18,7 @@ const routes = [
   "/flows",
   "/forbidden",
   "/ics",
+  "/identities",
   "/ids",
   "/interfaces",
   "/login",
@@ -121,10 +122,10 @@ const rulesetPreview = {
   runtime: { iec104EnvelopeOpen: false, reason: "IEC 104 envelope not used by this candidate" },
   warnings: [
     {
-      ruleId: "maint-l3-to-l1",
-      predicate: "schedule",
-      action: "ALLOW",
-      message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive",
+      ruleId: "tpl-modbus-deny-writes",
+      shadowedBy: "tpl-modbus-allow-reads",
+      action: "DENY",
+      message: "shadowed by ALLOW rule tpl-modbus-allow-reads, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
     },
   ],
 };
@@ -295,6 +296,13 @@ function responseFor(pathname: string) {
   ) {
     return json(malformedFirewallRules);
   }
+  if (pathname === "/api/v1/firewall/counters") {
+    return json({
+      snapshotVersion: "v1",
+      since: "2026-03-14T00:00:00Z",
+      rules: malformedFirewallRules.map((r) => ({ ruleId: r.id, action: r.action, packets: 10, bytes: 600 })),
+    });
+  }
   if (pathname === "/api/v1/audit") return json(auditRecords);
   if (pathname === "/api/v1/firewall/nat") {
     return json({ enabled: false, sourceZones: [], portForwards: [] });
@@ -343,7 +351,7 @@ function responseFor(pathname: string) {
   ) {
     return json([]);
   }
-  if (pathname === "/api/v1/identities") return json({ mappings: {} });
+  if (pathname === "/api/v1/identities") return json({ mappings: [] });
   if (pathname === "/api/v1/security/conduits") return json({});
   if (pathname === "/api/v1/services/status") return json({ av: { available: false, error: "engine unavailable" } });
   if (
@@ -432,7 +440,7 @@ for (const path of routes) {
   });
 }
 
-test("firewall ruleset preview lists rules whose predicates resolve toward denial", async ({ page }) => {
+test("firewall ruleset preview lists rules that do not act as written", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
   await page.goto("/firewall");
   const button = page.getByRole("button", { name: "Preview", exact: true });
@@ -440,14 +448,15 @@ test("firewall ruleset preview lists rules whose predicates resolve toward denia
   const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/v1/dataplane/ruleset");
   await button.click();
   await response;
-  const warning = page.getByRole("status").filter({ hasText: "Rule predicates resolved toward denial" });
-  await expect(warning).toContainText("maint-l3-to-l1");
-  await expect(warning).toContainText("ALLOW rule inactive");
+  const warning = page.getByRole("status").filter({ hasText: "Rules that do not act as written" });
+  await expect(warning).toContainText("shadowed");
+  await expect(warning).toContainText("tpl-modbus-deny-writes: shadowed by ALLOW rule tpl-modbus-allow-reads");
 });
 
-test("templates note that maintenance window allows are inactive", async ({ page }) => {
+test("templates describe maintenance windows as scheduled allows", async ({ page }) => {
   await page.goto("/templates");
-  await expect(page.getByText("Maintenance window allows are inactive")).toBeVisible();
+  await expect(page.getByText("Maintenance window rules are scheduled ALLOW rules")).toBeVisible();
+  await expect(page.getByText("inactive", { exact: false })).toHaveCount(0);
 });
 
 test("dashboard health keeps twelve pixels between uptime and gauges", async ({ page }) => {

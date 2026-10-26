@@ -10,8 +10,9 @@ import {
   setDataPlane,
   type DataPlaneConfig,
   type DPIExclusion,
+  type HealthResponse,
 } from "../../lib/api";
-import { IEC104HealthStatus } from "../ics/iec104-health";
+import { IEC104HealthIndicator } from "../ics/iec104-health";
 import {
   ICS_DPI_PROTOCOLS,
   ICS_PROTOCOL_OPTIONS,
@@ -20,9 +21,12 @@ import {
 
 export function DPIConfigSection({
   config: cfg,
+  health,
   onChange,
 }: {
   config: DataPlaneConfig;
+  /** Runtime health; undefined while unknown. */
+  health: HealthResponse | undefined;
   onChange: (c: DataPlaneConfig) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -217,7 +221,7 @@ export function DPIConfigSection({
                 })}
               </div>
               <div className="mt-2">
-                <IEC104HealthStatus />
+                <IEC104HealthIndicator health={health?.iec104Enforcement} />
               </div>
             </div>
 

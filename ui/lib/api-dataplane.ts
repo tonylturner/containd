@@ -19,6 +19,7 @@ import {
   type ICSCoverageReport,
   type ICSCoverageRule,
 } from "./api-ics-coverage";
+import type { RuleWarning } from "./api-firewall";
 
 import type {
   ApiResult,
@@ -29,15 +30,6 @@ import type {
   PcapStatus,
   PcapTagRequest,
 } from "./api";
-
-// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
-// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
-export type RuleWarning = {
-  ruleId: string;
-  predicate: "identity" | "schedule";
-  action: "ALLOW" | "DENY";
-  message: string;
-};
 
 export type RulesetPreview = {
   ruleset?: string;

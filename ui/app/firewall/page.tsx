@@ -9,15 +9,11 @@ import {
   api,
   isAdmin,
   fetchDataPlane,
-  setDataPlane,
   getRulesetPreview,
   type DataPlaneConfig,
-  type DPIExclusion,
   type FirewallRule,
   type FirewallRulePatch,
   type Gateway,
-  type Interface,
-  type InterfaceState,
   type RoutingConfig,
   type StaticRoute,
   type Zone,
@@ -26,7 +22,6 @@ import {
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
-import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
@@ -34,15 +29,17 @@ import {
   firstHostInCIDR,
   pickWanCIDR,
   pickWanIface,
-  zoneName,
 } from "./firewall-utils";
 import { DPIConfigSection } from "./firewall-dpi-config";
-import { summarizeIEC104 } from "../ics/iec104";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
-import { formatICSMode } from "../ics/ics-shared";
-import { ICSCoverageCell, ICSCoverageNotice } from "../ics/ics-coverage";
+import { ICSCoverageNotice } from "../ics/ics-coverage";
+import { FirewallRuleTable } from "./firewall-rule-table";
+import { tagsInUse } from "./firewall-rule-policy";
+import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
+import { useHealth } from "../ics/iec104-health";
+import { ManagementRecoveryBanner } from "../../components/ManagementRecoveryBanner";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -56,10 +53,12 @@ export default function FirewallPage() {
   const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [counters, setCounters] = useState<CountersState>(null);
   const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [rulesetError, setRulesetError] = useState("");
   const coverage = useICSCoverage();
+  const health = useHealth();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const confirm = useConfirm();
@@ -107,14 +106,16 @@ export default function FirewallPage() {
   ];
 
   async function refresh() {
-    const [r, z, n, rt, dp] = await Promise.all([
+    const [r, z, n, rt, dp, c] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
       api.getNAT(),
       api.getRouting(),
       fetchDataPlane(),
+      api.getRuleCounters(),
     ]);
     setRules(r ?? []);
+    setCounters(c);
     setZones(z ?? []);
     setNat(n ?? { enabled: false });
     setRouting(rt);
@@ -350,6 +351,7 @@ export default function FirewallPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <ManagementRecoveryBanner recovery={health?.managementRecovery} />
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -440,109 +442,44 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
+      <DPIConfigSection config={dpiConfig} health={health} onChange={setDpiConfig} />
 
-      {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
+      {isAdmin() && (
+        <CreateRuleForm
+          zones={zones}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules)}
+          onCreate={onCreate}
+        />
+      )}
 
       <div className="mt-6">
         {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
       </div>
-      <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
-        <table className="w-full text-sm">
-          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-            <tr>
-              <th className="px-4 py-3">ID</th>
-              <th className="px-4 py-3">Description</th>
-              <th className="px-4 py-3">Zones</th>
-              <th className="px-4 py-3">Protocols</th>
-              <th className="px-4 py-3">ICS Filter</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Log</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 && (
-              <tr>
-                <td className="px-4 py-4" colSpan={8}>
-                  <EmptyState
-                    title="No firewall rules configured"
-                    description="Create rules below to control traffic between zones."
-                  />
-                </td>
-              </tr>
-            )}
-            {rules.map((r) => (
-              <tr key={r.id} className="border-t table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-(--text)">{r.id}</td>
-                <td className="px-4 py-3 text-(--text)">{r.description || "\u2014"}</td>
-                <td className="px-4 py-3 text-(--text)">
-                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
-                  {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
-                </td>
-                <td className="px-4 py-3 text-(--text)">
-                  {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
-                </td>
-                <td className="px-4 py-3 text-(--text)">
-                  {r.ics?.protocol ? (
-                    <div className="space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge variant="neutral">
-                          {formatICSMode(r.ics.mode, dpiConfig.dpiMode).label}
-                        </StatusBadge>
-                        <span className="text-xs text-(--text)">
-                          {r.ics.protocol === "iec104"
-                            ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
-                            : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
-                        </span>
-                      </div>
-                      <ICSCoverageCell view={coverage.view} ruleId={r.id} />
-                    </div>
-                  ) : "\u2014"}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge variant={r.action === "ALLOW" ? "success" : "error"}>
-                    {r.action}
-                  </StatusBadge>
-                </td>
-                <td className="px-4 py-3">
-                  {r.log ? (
-                    <StatusBadge variant="info">log</StatusBadge>
-                  ) : (
-                    <span className="text-xs text-(--text-muted)">&mdash;</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {isAdmin() && (
-                    <>
-                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
-                      <button
-                        onClick={() => {
-                          confirm.open({
-                            title: "Delete rule?",
-                            message: `Are you sure you want to delete rule "${r.id}"? This action cannot be undone.`,
-                            confirmLabel: "Delete",
-                            variant: "danger",
-                            onConfirm: () => onDelete(r.id),
-                          });
-                        }}
-                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <FirewallRuleTable
+        rules={rules}
+        zones={zones}
+        dpiMode={dpiConfig.dpiMode}
+        coverage={coverage.view}
+        counters={counters}
+        onEdit={setEditing}
+        onDelete={(id) => {
+          confirm.open({
+            title: "Delete rule?",
+            message: `Are you sure you want to delete rule "${id}"? This action cannot be undone.`,
+            confirmLabel: "Delete",
+            variant: "danger",
+            onConfirm: () => onDelete(id),
+          });
+        }}
+      />
 
       {editing && isAdmin() && (
         <EditRuleModal
           zones={zones}
           rule={editing}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules, editing.id)}
           onClose={() => setEditing(null)}
           onSave={(patch) => onUpdate(editing.id, patch)}
         />

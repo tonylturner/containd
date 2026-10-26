@@ -6,7 +6,7 @@ const entry = {
   replySport: "8443", replyDport: "51001",
 };
 
-async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boolean; role?: string; partial?: boolean } = {}) {
+async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boolean; role?: string; partial?: boolean; entries?: unknown[] } = {}) {
   const writes: unknown[] = [];
   await page.addInitScript((role) => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -23,7 +23,7 @@ async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boo
         await route.fulfill({ status: 502, json: { error: "ctnetlink: operation not permitted" } });
         return;
       }
-      body = options.empty ? [] : [entry];
+      body = options.empty ? [] : options.entries ?? [entry];
     } else if (path === "/api/v1/conntrack/kill") {
       const data = request.postDataJSON();
       writes.push(data);
@@ -91,4 +91,19 @@ test("view-only users cannot revoke connections", async ({ page }) => {
   await open(page);
   await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
   await expect(page.getByLabel("Kill scope")).toHaveCount(0);
+});
+
+test("connections show the TAG labels that match them and filter by tag", async ({ page }) => {
+  const tagged = { ...entry, sport: "41002", tags: ["eng-access", "ot.vendor"] };
+  await mockAPI(page, { entries: [entry, tagged] });
+  await open(page);
+  const header = page.getByRole("columnheader", { name: "Tags" });
+  await expect(header).toBeVisible();
+  const row = (sport: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: sport, exact: true }) });
+  await expect(row("41002")).toContainText("eng-access");
+  await expect(row("41002")).toContainText("ot.vendor");
+  await expect(row("41001").getByRole("cell").nth(7)).toHaveText("—");
+  await page.getByPlaceholder("Filter (ip, port, proto, state, tag)…").fill("ot.vendor");
+  await expect(page.getByText("1 shown / 2 total")).toBeVisible();
+  await expect(row("41001")).toHaveCount(0);
 });

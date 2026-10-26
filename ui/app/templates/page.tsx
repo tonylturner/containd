@@ -165,9 +165,9 @@ export default function TemplatesPage() {
           maintenance window policies.
         </p>
         <p className="mt-2 text-xs text-(--text-muted)">
-          Maintenance window allows are inactive: schedules apply only to ICS
-          rules inspected through NFQUEUE. The firewall ruleset preview lists
-          the affected rules.
+          Maintenance window rules are scheduled ALLOW rules: they admit
+          traffic only inside their window, and connections they alone
+          admitted stop when it ends.
         </p>
       </Card>
 

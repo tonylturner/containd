@@ -105,3 +105,43 @@ export function validatePortOrRange(input: string): string | null {
   }
   return null;
 }
+
+/** Most labels one identity binding may carry. */
+export const MAX_BINDING_IDENTITIES = 16;
+
+const MAX_IDENTITY_LABEL_BYTES = 64;
+
+/**
+ * Validates one identity label as the server does: 1 to 64 bytes of
+ * printable characters without surrounding spaces. Returns null if valid.
+ */
+export function validateIdentityLabel(label: string): string | null {
+  const bytes = new TextEncoder().encode(label).length;
+  if (bytes === 0 || bytes > MAX_IDENTITY_LABEL_BYTES) {
+    return `identity "${label}" must be 1 to ${MAX_IDENTITY_LABEL_BYTES} bytes`;
+  }
+  if (label.trim() !== label) return `identity "${label}" has surrounding spaces`;
+  // Go's unicode.IsPrint: letters, marks, numbers, punctuation, symbols and
+  // the ASCII space.
+  if (!/^[\p{L}\p{M}\p{N}\p{P}\p{S} ]*$/u.test(label)) {
+    return `identity "${label}" has a non-printable character`;
+  }
+  return null;
+}
+
+/**
+ * Parses comma-separated identity labels into distinct, valid labels.
+ * Commas separate labels, so a label cannot contain one.
+ */
+export function parseIdentityLabels(
+  input: string,
+): { ok: true; labels: string[] } | { ok: false; error: string } {
+  const labels: string[] = [];
+  for (const item of input.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const err = validateIdentityLabel(item);
+    if (err) return { ok: false, error: err };
+    if (labels.includes(item)) return { ok: false, error: `identity "${item}" is listed twice` };
+    labels.push(item);
+  }
+  return { ok: true, labels };
+}

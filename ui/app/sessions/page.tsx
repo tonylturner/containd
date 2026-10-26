@@ -67,6 +67,7 @@ export default function SessionsPage() {
         e.dst ?? "",
         e.dport ?? "",
         e.mark ?? "",
+        ...(e.tags ?? []),
       ]
         .join(" ")
         .toLowerCase();
@@ -116,7 +117,7 @@ export default function SessionsPage() {
           <input
             value={filter.q}
             onChange={(e) => setFilter({ q: e.target.value })}
-            placeholder="Filter (ip, port, proto, state)…"
+            placeholder="Filter (ip, port, proto, state, tag)…"
             className="input-industrial w-64"
           />
           <select
@@ -182,7 +183,7 @@ export default function SessionsPage() {
                 {loading ? "Loading…" : `${filtered.length} shown / ${entries.length} total`}
               </div>
               <div className="text-xs text-(--text-muted)">
-                Kernel conntrack, IPv4 and IPv6. Kill supports TCP and UDP; TCP resets are sent in response to matching packets.
+                Kernel conntrack, IPv4 and IPv6. Tags are the labels of the running TAG rules that match each connection as opened. Kill supports TCP and UDP; TCP resets are sent in response to matching packets.
               </div>
             </div>
           </div>
@@ -197,6 +198,7 @@ export default function SessionsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dst</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dport</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Mark</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Tags</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Assured</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">TTL</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Reply tuple (NAT)</th>
@@ -213,6 +215,15 @@ export default function SessionsPage() {
                     <td className="px-4 py-3 text-(--text)">{e.dst || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.dport || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">
+                      {e.tags?.length ? (
+                        <div className="flex flex-wrap gap-1">
+                          {e.tags.map((t) => (
+                            <span key={t} className="rounded-xs bg-[rgba(6,182,212,0.15)] px-1.5 py-0.5 font-mono text-[11px] text-(--cyan)">{t}</span>
+                          ))}
+                        </div>
+                      ) : "—"}
+                    </td>
                     <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
                     <td className="px-4 py-3 text-(--text-muted)">{e.replySrc ? `${endpoint(e.replySrc, e.replySport)} → ${endpoint(e.replyDst, e.replyDport)}` : "—"}</td>

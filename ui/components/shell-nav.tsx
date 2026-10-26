@@ -124,6 +124,7 @@ export const NAV_ICONS: Record<string, () => ReactNode> = {
 export function docsHrefForPath(pathname: string): string {
   const mappings: Array<{ prefix: string; href: string }> = [
     { prefix: "/firewall/", href: "/docs/policy-model/" },
+    { prefix: "/identities/", href: "/docs/policy-model/" },
     { prefix: "/wizard/", href: "/docs/policy-model/" },
     { prefix: "/ics/", href: "/docs/ics-dpi/" },
     { prefix: "/ids/", href: "/docs/ids-rules/" },
@@ -177,6 +178,7 @@ export function buildNavGroups(isAdmin: boolean): NavGroup[] {
       label: "Policy & Rules",
       items: [
         { href: "/firewall/", label: "Firewall Rules" },
+        { href: "/identities/", label: "Identity Bindings" },
         { href: "/ics/", label: "ICS Rules" },
         { href: "/ids/", label: "IDS Rules" },
         { href: "/templates/", label: "Policy Templates" },

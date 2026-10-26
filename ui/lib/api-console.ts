@@ -32,6 +32,28 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
+/**
+ * Boot recovery from GET /health, with or without a reservation. Active means
+ * the fail-closed recovery ruleset is applied (new transit dropped); pending
+ * and failed mean it is not. The refusal itself is in the reservation view.
+ */
+export type ManagementRecoveryHealth = {
+  state: "inactive" | "active" | "pending" | "failed" | "unknown";
+  reason: string;
+};
+
+const RECOVERY_STATES: ReadonlySet<string> = new Set(["inactive", "active", "pending", "failed", "unknown"]);
+
+/** An unrecognised state reads as unknown; a missing object as none. */
+export function normalizeManagementRecovery(value: unknown): ManagementRecoveryHealth | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { state, reason } = value as Record<string, unknown>;
+  return {
+    state: typeof state === "string" && RECOVERY_STATES.has(state) ? (state as ManagementRecoveryHealth["state"]) : "unknown",
+    reason: typeof reason === "string" ? reason : "",
+  };
+}
+
 export type ConntrackKillRequest = {
   proto: string; src: string; dst: string; sport: number; dport: number;
   scope: "connection" | "client-service"; durationSecs: number;

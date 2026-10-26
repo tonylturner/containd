@@ -331,12 +331,12 @@ test("firewall without ICS protocol rules shows no coverage notice", async ({ pa
   await expect(page.getByText("ICS coverage unavailable", { exact: false })).toHaveCount(0);
 });
 
-test("rule preview shows coverage in its own section, apart from denial warnings", async ({ page }) => {
+test("rule preview shows coverage in its own section, apart from rule warnings", async ({ page }) => {
   const warning = {
     ruleId: "plc-read",
-    predicate: "schedule",
+    predicate: "identity",
     action: "ALLOW",
-    message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive",
+    message: "no bound address can match identities [historian]; the rule matches nothing until one is bound",
   };
   await mockAPI(page, {
     rules: [rules[0]],
@@ -359,9 +359,9 @@ test("rule preview shows coverage in its own section, apart from denial warnings
   await expect(section).toContainText("effective mode: enforce");
   await expect(section).toContainText(dpiOff.message);
   await expect(section).toContainText(`Running engine: ${queueDown.message}`);
-  const denial = summary.getByRole("status").filter({ hasText: "Rule predicates resolved toward denial" });
-  await expect(denial).toContainText(warning.message);
-  await expect(denial).not.toContainText(dpiOff.message);
+  const warnings = summary.getByRole("status").filter({ hasText: "Rules that do not act as written" });
+  await expect(warnings).toContainText(warning.message);
+  await expect(warnings).not.toContainText(dpiOff.message);
 });
 
 test("rule preview without coverage shows no coverage section", async ({ page }) => {
