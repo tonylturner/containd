@@ -138,6 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- System Settings shows the subject alternative names (DNS names and IP addresses) of the certificate the HTTPS listener serves, and of the saved certificate where the next management start serves other files. GET /system/tls adds `servedCertDnsNames` and `servedCertIps`.
+- The topology security view summarizes how many zones fall below their SL target, counting every zone and not only those in the matrix, and names each with its achieved and target level.
 - `GET /api/v1/dataplane/ruleset/status` reports the installed ruleset's status (failed apply, schedule planner, applied rule warnings, ICS coverage) to any authenticated user, without compiling the candidate and without the ruleset text.
 - `show syslog status` shows audit record forwarding: totals, backlog and, per
   forwarder, cursor, backlog, last send and last error.
@@ -333,6 +335,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The topology status chip no longer reads ALL NOMINAL while firewall enforcement is degraded or unavailable. It shows the firewall enforcement state from health and, unless enforcing, why: a failed ruleset apply, a degraded schedule planner or health's reason.
 - The sessions, NAT, policy wizard, diagnostics (block flow) and dataplane (forward targets) pages format endpoints like the events and flows pages: a missing or zero port shows the address alone, and an IPv6 address with a port is bracketed (`[2001:db8::5]:502`).
 - Syslog RFC 5424 events and the web UI (events, flows, alerts, dashboard) show an endpoint without a port when the event has none, as for ICMP and ICMPv6 rule hits, and bracket an IPv6 address that has a port (`[2001:db8::1]:2404`). Before, syslog printed `addr:0` and the UI printed `addr:`.
 - Firewall rule hits logged through NFLOG for ICMP and ICMPv6 packets now carry their source and destination addresses and transport `icmp` or `icmpv6`, without ports.
