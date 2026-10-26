@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Smoke-test live ICS DPI with deterministic Modbus/TCP and DNP3 traffic
-# (milestone B §10.3 US non-regression). Requirements: docker compose, jq,
-# curl.
+# to check non-regression of US protocols. Requirements: docker compose, jq, curl.
 #
 # Both capture modes assert: Modbus FC 3 reads pass, including a read split
 # across two TCP segments and two reads coalesced into one; DNP3 FC 1 reads
@@ -16,7 +15,7 @@ set -euo pipefail
 # the first denied write reaches the server and only later writes are
 # blocked. SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
 # (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) and also asserts US
-# first-actuation prevention (§4.1 item 1, §10.3), from server state: the
+# first-actuation prevention, from server state: the
 # first Modbus FC 6 write on a fresh connection and after a read on a
 # persistent connection, the first Modbus FC 8, and the first complete DNP3
 # FC 5 and FC 6 never reach the server. Each probe uses its own client

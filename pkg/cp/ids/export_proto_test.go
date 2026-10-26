@@ -12,7 +12,7 @@ import (
 )
 
 // IEC104 rules are skipped instead of being rendered as "ip" rules that
-// would fire on any traffic (spec §7.4, W4).
+// would fire on any traffic.
 func TestExportSkipsIEC104Rules(t *testing.T) {
 	rules := []config.IDSRule{
 		{ID: "1", Title: "Modbus write", Proto: "modbus"},

@@ -294,11 +294,11 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.epoch.Add(1)
 	e.started.Store(false)
 	// The old queue is closed and the new one is not bound yet: the
-	// envelope drops until the new run binds (contracts K8).
+	// envelope drops until the new run binds.
 	e.bindGate()
 	e.gate.own(0)
 	// The fresh table enforces the loaded rules at once; sessions of the
-	// old run are unknown to it and are reset once (spec §8.3).
+	// old run are unknown to it and are reset once.
 	if snap := e.ruleSnap.Load(); snap != nil {
 		e.iec.setPolicy(snap)
 	}

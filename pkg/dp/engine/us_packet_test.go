@@ -79,7 +79,7 @@ func records(e *Engine) []string {
 	return out
 }
 
-// TestFlowPathPassesTCPSequence pins contracts K8: with the sequence number
+// TestFlowPathPassesTCPSequence verifies that with the sequence number
 // filled in, a second message on a persistent connection is parsed and a
 // retransmission is not parsed again.
 func TestFlowPathPassesTCPSequence(t *testing.T) {

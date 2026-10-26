@@ -49,7 +49,7 @@ type FlowSummary struct {
 	AvDetected  bool      `json:"avDetected,omitempty"`
 	AvBlocked   bool      `json:"avBlocked,omitempty"`
 	// SessionID is set for an IEC104 session incarnation: its events from
-	// both wire directions form one group (contracts K6).
+	// both wire directions form one group.
 	SessionID string `json:"session_id,omitempty"`
 }
 
@@ -407,7 +407,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 }
 
 // MarkAborted hides the flow group of an aborted IEC104 incarnation. Its
-// events stay in List (spec E4).
+// events stay in List.
 func (s *Store) MarkAborted(sessionID string) {
 	if s == nil || sessionID == "" {
 		return

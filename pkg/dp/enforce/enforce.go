@@ -31,7 +31,7 @@ type Compiler struct {
 	// IEC104EnvelopeOpen is the state CompileFirewall writes into
 	// IEC104EnvelopeChain: true queues envelope traffic to QueueID, false
 	// (the zero value) drops it. Only the engine that owns the queue sets
-	// it, and only while that queue is bound (contracts K8).
+	// it, and only while that queue is bound.
 	IEC104EnvelopeOpen bool
 	// NFLogGroup, when non-zero, causes rules with Log:true to emit a
 	// "log prefix ... group <NFLogGroup>" statement before their verdict.

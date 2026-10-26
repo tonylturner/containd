@@ -129,7 +129,7 @@ func TestManagerSplitAtEveryByte(t *testing.T) {
 }
 
 // A read followed by a write on one connection: the write is inspected and
-// a retransmission of the read emits nothing (spec §4.1 item 7).
+// a retransmission of the read emits nothing.
 func TestManagerPersistentConnection(t *testing.T) {
 	mgr := dpi.NewManager(NewDecoder())
 	st := modbusState()

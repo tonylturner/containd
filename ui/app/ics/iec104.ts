@@ -6,9 +6,9 @@ import type {
 } from "../../lib/api";
 import type { ICSMode, ICSModeSelection } from "./ics-shared";
 
-// IEC 60870-5-104 rule model for the editors (spec §6.1, contracts K5).
-// The client-side checks mirror the K5 ranges so operators see mistakes before
-// saving; the server stays authoritative and runs the full validation.
+// IEC 60870-5-104 rule model for the editors.
+// The client-side checks mirror the server validation ranges so operators see
+// mistakes before saving; the server stays authoritative and runs full validation.
 
 export const IEC104_PORT = "2404";
 export const IEC104_CLASSES: IEC104Class[] = [
@@ -27,11 +27,11 @@ const IOA_MAX = 16777215;
 export type IEC104TypeInfo = {
   name: string;
   cls: IEC104Class;
-  /** True when containd decodes the type (a B descriptor, spec §7.2). */
+  /** True when containd decodes the type. */
   descriptor: boolean;
 };
 
-/** Type IDs named in spec §7.2. Every other Type ID is class `unknown`. */
+/** Supported decoder Type IDs. Every other Type ID is class `unknown`. */
 export const IEC104_TYPES: Record<number, IEC104TypeInfo> = {
   1: { name: "M_SP_NA_1 single point", cls: "monitor", descriptor: true },
   3: { name: "M_DP_NA_1 double point", cls: "monitor", descriptor: true },
@@ -239,7 +239,8 @@ const CLEARABLE_FIELDS = ["typeIds", "classes", "direction", "ca", "ioa"] as con
  * Builds the predicate for a rule save. `existing` is the stored predicate
  * when the save is an update. Rule updates are deep JSON merges
  * (api/http/firewall_rule_handlers.go mergeJSONObject), so a field left out
- * of the patch keeps its stored value, and K5 rejects null on the IEC fields:
+ * of the patch keeps its stored value. Strict server validation rejects null
+ * on the IEC fields:
  * an update that would remove a stored IEC field is refused instead of
  * silently keeping the old filter.
  */

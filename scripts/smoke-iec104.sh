@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# containd milestone B IEC 60870-5-104 Linux truth harness (spec §10.2).
+# containd IEC 60870-5-104 Linux truth harness.
 #
 # Brings up the two-endpoint compose (lib60870 RTU + control centre on two
 # disposable networks, branch-built containd firewall routing between them,
 # loopback-only management), routes the endpoints through the firewall, and
-# runs every §10.2 hard assertion. The proof of plant state is the RTU's own
+# runs every enforcement assertion. The proof of plant state is the RTU's own
 # state file and command confirmations, never a timeout.
 #
 # Every assertion is a real check; nothing is hard-coded to pass or fail.
@@ -16,16 +16,16 @@ set -euo pipefail
 #                    routing or monitoring defect that is independent of IEC
 #                    enforcement.
 #   GATE-FAIL        an assertion that needs IEC104 enforcement failed. In
-#                    the integrated milestone B engine, these indicate a
+#                    the integrated engine, these indicate a
 #                    regression: forbidden commands or malformed traffic were
 #                    not prevented as required.
-#   NOT-IMPLEMENTED  a §10.2 hard assertion this harness cannot drive yet.
+#   NOT-IMPLEMENTED  an enforcement assertion this harness cannot drive yet.
 # Exit status: 0 every assertion passed (acceptance); 1 a FAIL (or a fatal
 # setup error); 3 the baseline passed but GATE-FAIL or NOT-IMPLEMENTED remain.
-# "Passed with skips" is not acceptance (spec B6).
+# "Passed with skips" is not acceptance.
 #
 # The telemetry freshness check runs for IEC104_FRESHNESS_SECONDS (default
-# 660, the spec's "> 10 minutes"); a shorter value records NOT-IMPLEMENTED.
+# 660, more than 10 minutes); a shorter value records NOT-IMPLEMENTED.
 #
 # Requirements: docker compose, jq, curl, python3. Builds the branch firewall
 # image and the GPLv3 endpoint image if they are absent. The default endpoint
@@ -151,7 +151,7 @@ gate_pass() {
   record "$name" PASS "$detail" true
 }
 
-# not_implemented records a §10.2 assertion the harness cannot drive yet.
+# not_implemented records an enforcement assertion the harness cannot drive yet.
 not_implemented() {
   local name=$1 detail=${2:-}
   NOT_IMPL_COUNT=$((NOT_IMPL_COUNT + 1))
@@ -398,9 +398,8 @@ fi
 
 # ---- EU enforce policy probe ------------------------------------------------
 
-# §12.4 EU policy, with the harness addresses. Before lane L2 merges, the IEC
-# fields (typeIds/classes/ca/ioa) are not in the schema and are silently
-# dropped (spec §6.2), so the policy loads but enforces nothing semantic.
+# EU policy with the harness addresses. Strict ICS decoding preserves the
+# typeIds/classes/ca/ioa predicates for semantic enforcement.
 EU_POLICY=$(echo "$BASELINE" | jq \
   --arg ccIp "$CC_IP" --arg rtuIp "$RTU_IP" --argjson ca "$ALLOWED_CA" --argjson ioa "$ALLOWED_IOA" '
   .dataPlane.dpiEnabled = true
@@ -546,7 +545,7 @@ fi
 
 CC_SPONT_START=$(cc_count 'cot=3 ' cc.log)
 
-# ---- §10.2 hard assertions --------------------------------------------------
+# ---- Enforcement assertions --------------------------------------------------
 
 # 1. First forbidden select and first forbidden execute are dropped; RTU point
 #    state unchanged. IOA 2002 is a real RTU command point the policy forbids.
@@ -612,7 +611,7 @@ else
   gate_fail "both endpoint sockets are reset after a denied command" "$RESET_DETAIL"
 fi
 
-# 6. The same client reconnects and completes GI within the B1 budget (new
+# 6. The same client reconnects and completes GI within the 5 s budget (new
 #    session + GI complete <= 5 s), with no IEC entry in block_flows.
 rc=0
 GI_START=$(now_s)
@@ -720,7 +719,7 @@ else
   fail "could not apply the EU learn policy"
 fi
 
-# 10. Decoder off or capture not NFQUEUE: enforce is refused before save (E3).
+# 10. Decoder off or capture not NFQUEUE: enforce is refused before save.
 #     Queue failure at start: enforcement health reports unhealthy.
 reject_check() {
   local name=$1 cfg=$2 code
@@ -742,7 +741,7 @@ apply_config "$EU_POLICY" "EU enforce policy (restore after rejection checks)" |
 
 # Capture policy-reset recoveries before the deliberately held queue starts.
 # While the holder owns NFQUEUE, the expected fail-closed outage can delay a
-# reconnect beyond B1's 5 s budget; the post-check liveness check below proves
+# reconnect beyond the 5 s budget; the post-check liveness check below proves
 # that telemetry resumes once the queue is restored.
 PRE_QUEUE_SETTLED=0
 if wait_cc_settled; then PRE_QUEUE_SETTLED=1; else log "control centre not settled before queue-bind check"; fi
@@ -755,7 +754,7 @@ PRE_QUEUE_GAPS=$(awk '
 PRE_QUEUE_RESETS=$(grep -c . <<<"$PRE_QUEUE_GAPS" || true)
 PRE_QUEUE_BAD=$(awk '$1 < 0 || $1 > 5000' <<<"$PRE_QUEUE_GAPS" | grep -c . || true)
 
-# Queue bind failure at start (E3, §8.3, K6): a second binder holds NFQUEUE 101
+# Queue bind failure at start: a second binder holds NFQUEUE 101
 # before the engine binds it, so the engine's bind fails. The config is kept,
 # enforce envelopes fail closed, and health reports unhealthy with a queue-bind
 # reason. Drop the engine's binding first (L4 baseline), take the queue, then

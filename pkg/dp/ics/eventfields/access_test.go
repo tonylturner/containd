@@ -32,7 +32,7 @@ func forms(t *testing.T, attrs map[string]any) map[string]map[string]any {
 	return map[string]map[string]any{"memory": attrs, "json": plain, "json.Number": numbers}
 }
 
-// A decoded IEC104 event as a parser emits it (§5.5 Go types).
+// A decoded IEC104 event as a parser emits it.
 func iecEvent() map[string]any {
 	return map[string]any{
 		KeyAPCIType:        "I",

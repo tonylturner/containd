@@ -22,13 +22,12 @@ const (
 	EnvelopeMark     uint32 = 0x01000000
 )
 
-// iec104Port is the only IEC104 server port in milestone B.
+// iec104Port is the only supported IEC104 server port.
 const iec104Port = 2404
 
 // IEC104EnvelopeChain is the regular chain every IEC104 envelope steering
 // rule jumps to. It holds one rule: the marked queue verdict while the
-// engine owns its queue, and drop otherwise (contracts K8, "envelope
-// steering fails closed until this engine owns the queue"). Switching
+// engine owns its queue, and drop otherwise. Switching
 // replaces that one rule in a single nft transaction, so the ruleset never
 // passes through a state where envelope traffic is neither queued to the
 // engine nor dropped, and no other rule changes.

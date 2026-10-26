@@ -1,7 +1,7 @@
 import { parseICSEvidence, type TelemetryEvent } from "../../lib/api";
 import { iec104TypeInfo } from "../ics/iec104";
 
-// Presentation of IEC 104 enforcement evidence (spec §8.4) for Events,
+// Presentation of IEC 104 enforcement evidence for Events,
 // Alerts and Flows. A decision says what a rule decided; only the absence of
 // an ics.verdict listing an APDU means it was delivered.
 
@@ -138,7 +138,7 @@ export function describeICSEvidence(ev: TelemetryEvent): EvidenceView | null {
   };
 }
 
-/** Readable rows for a decoded IEC 104 event (spec §5.5), e.g. in an alert. */
+/** Readable rows for a decoded IEC 104 event, e.g. in an alert. */
 export function iec104AttributeRows(attrs: Record<string, unknown>): EvidenceRow[] {
   const typeId = attrs["type_id"];
   const scalar = (k: string) => {

@@ -191,7 +191,7 @@ func localIPv4For(dst netip.AddrPort) (netip.Addr, error) {
 	return c.LocalAddr().(*net.UDPAddr).AddrPort().Addr().Unmap(), nil
 }
 
-// staleRetransmit drives the §10.2 stale-retransmit case. Incarnation 1 (from
+// staleRetransmit drives the stale-retransmit case. Incarnation 1 (from
 // port lport) handshakes, STARTDTs and sends a forbidden command to -ioa. Then
 // a second raw session (port lport+1) handshakes and STARTDTs — the "new
 // handshake". Finally a lone segment of incarnation 1, at its next sequence

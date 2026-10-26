@@ -10,16 +10,16 @@ import (
 	"strings"
 )
 
-// IEC 60870-5-104 predicate limits (spec §6.1).
+// IEC 60870-5-104 predicate limits.
 const (
-	iec104MaxCA  = 65534    // 65535 is the broadcast address; B never allows it
+	iec104MaxCA  = 65534    // 65535 is the broadcast address; never allowed by policy
 	iec104MaxIOA = 16777215 // 24-bit information object address
 )
 
 var iec104Classes = []string{"monitor", "control", "system", "unknown"}
 
-// iec104DescribedTypes are the Type IDs with a milestone B descriptor
-// (spec §7.2). An enforce ALLOW rule may name only these; types without a
+// iec104DescribedTypes are the Type IDs with a decoder descriptor.
+// An enforce ALLOW rule may name only these; types without a
 // descriptor decode as unsupported and may appear in deny or learn rules.
 var iec104DescribedTypes = map[int]struct{}{
 	1: {}, 3: {}, 5: {}, 7: {}, 9: {}, 11: {}, 13: {}, 15: {}, 21: {},
@@ -130,7 +130,7 @@ func effectiveICSMode(ruleMode, globalMode string) string {
 
 // validateIEC104Policy checks what needs the whole config: which types an
 // ALLOW rule may name, and the static causes that keep an IEC104 enforce
-// envelope from activating (decision E3). Commit, candidate and import all
+// envelope from activating. Commit, candidate and import all
 // validate, so these reject the config before it is saved.
 func validateIEC104Policy(c *Config) error {
 	var enforce []Rule

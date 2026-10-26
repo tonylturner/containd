@@ -1,6 +1,6 @@
 # RangerDanger US firewall policies (pinned copies)
 
-Spec §6.2 requires that both shipped RangerDanger US policies still load
+Both shipped RangerDanger US policies must still load
 under strict ICS decoding. These are byte-for-byte copies, used only as
 test data.
 

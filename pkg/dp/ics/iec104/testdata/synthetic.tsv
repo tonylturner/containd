@@ -6,8 +6,8 @@
 # information elements) and 7.3 (ASDUs). "104 time-tagged" marks the command
 # ASDUs with CP56Time2a that IEC 104 adds (58-64, 107); monitor types 30-37
 # also carry CP56Time2a. Clause numbers are to be verified against the
-# licensed text (spec §7.2). Captures from the RangerDanger lib60870 spike,
-# when they exist, go in a separate file and are labelled as captures.
+# licensed text. Reference captures are documented in test/iec104/testdata/README.md
+# and are labelled separately from synthetic vectors.
 #
 # Format: one APDU stream per line, tab-separated:
 #   name  direction(c=client to server, s=server to client)  kinds  hex  reference

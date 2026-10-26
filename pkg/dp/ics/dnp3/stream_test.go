@@ -127,7 +127,7 @@ func TestParseStreamFrameErrors(t *testing.T) {
 }
 
 // A read then a direct operate on one connection: the operate is inspected
-// and a retransmitted read emits nothing (spec §4.1 item 7).
+// and a retransmitted read emits nothing.
 func TestManagerPersistentConnection(t *testing.T) {
 	mgr := dpi.NewManager(NewDecoder())
 	st := dnp3State()

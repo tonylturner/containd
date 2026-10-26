@@ -22,7 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// euPolicyJSON is the spec §12.4 policy shape: dataplane and the four
+// euPolicyJSON configures the dataplane and the four
 // IEC104 rules, as literal JSON.
 const euPolicyJSON = `{
   "schema_version": "0.1.7",
@@ -55,7 +55,7 @@ const euPolicyJSON = `{
   ]}
 }`
 
-// Spec §10.1 schema bullet: literal JSON → strict decode → validate →
+// The schema pipeline is literal JSON → strict decode → validate →
 // marshal → compile → engine snapshot JSON → evaluate and preview.
 func TestIEC104SchemaPipeline(t *testing.T) {
 	var cfg config.Config
@@ -148,7 +148,7 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 	}
 }
 
-// Both shipped RangerDanger US policies still compile (spec §6.2).
+// Both shipped RangerDanger US policies still compile.
 func TestRangerDangerUSPoliciesCompile(t *testing.T) {
 	for _, name := range []string{"substation-weak.json", "substation-improved.json"} {
 		raw, err := os.ReadFile(filepath.Join("..", "config", "testdata", "rangerdanger", name))

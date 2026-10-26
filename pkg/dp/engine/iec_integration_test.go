@@ -23,7 +23,7 @@ var (
 	stopdtAct  = []byte{0x68, 0x04, 0x13, 0, 0, 0}
 )
 
-// euSnapshot is the spec §12.4 EU rule block.
+// euSnapshot allows station interrogation and breaker control in a scoped IEC104 envelope.
 func euSnapshot() rules.Snapshot {
 	scope := func(e rules.Entry) rules.Entry {
 		e.Sources, e.Destinations = []string{"10.60.60.10/32"}, []string{"10.30.30.30/32"}

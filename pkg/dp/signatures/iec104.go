@@ -3,7 +3,7 @@
 
 package signatures
 
-// iec104Signatures are the IEC 60870-5-104 built-ins (spec §7.4). They
+// iec104Signatures are the IEC 60870-5-104 built-ins. They
 // alert; they never reset. The command signatures match client control
 // requests only, not their confirmations (direction response).
 func iec104Signatures() []Signature {

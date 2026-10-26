@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// IEC104Enforcement is the iec104Enforcement health object (contracts K6).
+// IEC104Enforcement is the iec104Enforcement health object.
 type IEC104Enforcement struct {
 	Active  bool   `json:"active"`
 	Healthy bool   `json:"healthy"`
@@ -47,7 +47,7 @@ func newIECHealth(emit func(outcome, errText string)) *iecHealth {
 	return &iecHealth{faults: make(map[string]string), emit: emit}
 }
 
-// status returns the K6 object.
+// status returns the current enforcement health.
 func (h *iecHealth) status() IEC104Enforcement {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -107,7 +107,7 @@ func (h *iecHealth) clear(cause string) {
 }
 
 // sourceReady clears the transient faults: the inline queue is bound and
-// delivering again (contracts K6: recovery only after readiness).
+// delivering again. Recovery occurs only after readiness.
 func (h *iecHealth) sourceReady() {
 	h.mu.Lock()
 	for _, c := range transientFaults {

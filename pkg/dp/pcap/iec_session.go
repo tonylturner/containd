@@ -19,7 +19,7 @@ const iec104Port = 2404
 
 // offlineSessions tracks IEC104 sessions from their SYN in one offline
 // analysis run, as the live engine does, so IEC104 is parsed only with
-// absolute offsets and incarnation IDs (contracts K2, K4). A session not
+// absolute offsets and incarnation IDs. A session not
 // captured from its SYN is not parsed.
 type offlineSessions struct {
 	runID string

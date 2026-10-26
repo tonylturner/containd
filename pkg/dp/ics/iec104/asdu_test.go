@@ -53,7 +53,7 @@ func checkAttrs(t *testing.T, label string, got map[string]any, want objWant, ab
 	}
 }
 
-// One table row per Type ID with a B descriptor (spec §7.2): element sizes,
+// One table row per Type ID with a decoder descriptor: element sizes,
 // little-endian values, flag bits, select placement and timestamps.
 func TestDescriptorTable(t *testing.T) {
 	noSelect := []string{eventfields.KeySelect}
@@ -376,7 +376,7 @@ func TestErrorEventEvidence(t *testing.T) {
 	checkAttrs(t, "layout", layout.Attributes, objWant{eventfields.KeyIsWrite: true, eventfields.KeyTypeID: uint8(46)}, eventfields.KeyIOA, eventfields.KeySelect)
 }
 
-// Role is the TCP role; cause is evidence only (spec §7.3).
+// Role is the TCP role; cause is evidence only.
 func TestRoleAndCause(t *testing.T) {
 	cases := []struct {
 		name string

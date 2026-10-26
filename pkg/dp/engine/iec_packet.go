@@ -129,7 +129,7 @@ func orient(src, dst netip.AddrPort) (client, server netip.AddrPort) {
 	return src, dst
 }
 
-// nonIPv4Locked drops IPv6 traffic inside an enforce envelope (B5).
+// nonIPv4Locked drops IPv6 traffic inside an enforce envelope.
 func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 	ctx := rules.EvalContext{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, Proto: "tcp", Port: "2404"}
 	if pkt.DstPort != iec104Port {
@@ -193,7 +193,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 }
 
 // midstreamLocked drops a packet of a session not observed from its SYN
-// inside an enforce envelope and resets that session once (B5). The
+// inside an enforce envelope and resets that session once. The
 // tombstone then drops its later packets.
 func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, now time.Time) iecResult {
 	s := &iecSession{id: t.newID(), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
@@ -298,7 +298,7 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 	return dropped(reasonIECInvalid)
 }
 
-// livePacketLocked decides a packet of a live incarnation (spec §8.1).
+// livePacketLocked decides a packet of a live incarnation.
 func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
 	s.lastSeen = now
 	f := pkt.TCP.Flags
@@ -426,7 +426,7 @@ func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.
 
 // dataLocked judges a payload: its bytes are checked against what was
 // received, newly contiguous bytes are framed and judged, and the packet is
-// released only when every byte belongs to complete allowed APDUs (K2).
+// released only when every byte belongs to complete allowed APDUs.
 func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
 	d := s.dirs[dir]
 	enforce := s.mode == "enforce"
@@ -544,7 +544,7 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 	s.held = kept
 	if finReleased {
 		// A released packet ended the stream with its FIN: the FIN was
-		// forwarded, so it counts in the RST sequence (spec §8.2 step 2).
+		// forwarded, so it counts in the RST sequence.
 		t.finForwardedLocked(s, dir, &res)
 	}
 	if cur.end <= d.framedEnd || !pkt.Token.Inline() {

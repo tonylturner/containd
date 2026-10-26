@@ -1,4 +1,4 @@
-/** Runtime IEC 104 enforcement health (K6). `active` describes the loaded
+/** Runtime IEC 104 enforcement health. `active` describes the loaded
  * runtime envelope, not the saved config. */
 export type IEC104EnforcementHealth = {
   active: boolean;
@@ -621,7 +621,7 @@ export type FlowSummary = {
   session_id?: string;
 };
 
-/** Event kinds of IEC 104 enforcement evidence (spec §8.4). */
+/** Event kinds of IEC 104 enforcement evidence. */
 export type ICSEvidenceKind = "ics.decision" | "ics.verdict" | "ics.session";
 
 /** `ics.decision` attributes: a rule decision, not a delivery outcome. */

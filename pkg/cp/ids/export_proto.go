@@ -17,7 +17,7 @@ import (
 var ErrUnexportableProto = errors.New("protocol cannot be exported")
 
 // checkExportableProto rejects IEC 60870-5-104 rules: neither engine has
-// an iec104 keyword, and containd does not translate IEC rules (spec §7.4).
+// an iec104 keyword, and containd does not translate IEC rules.
 func checkExportableProto(rule config.IDSRule) error {
 	if strings.EqualFold(strings.TrimSpace(rule.Proto), config.ICSProtocolIEC104) {
 		return fmt.Errorf("rule %s: %w: %s", rule.ID, ErrUnexportableProto, rule.Proto)

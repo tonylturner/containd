@@ -44,7 +44,7 @@ func wantMalformedLast(t *testing.T, res InspectResult, proto string) Event {
 	return ev
 }
 
-// The K8 regression: without sequence numbers every message on a
+// Without sequence numbers every message on a
 // persistent connection is decoded once, in arrival order.
 func TestInspectAppendModeDecodesEveryMessage(t *testing.T) {
 	mgr, _, st := framedFixture()

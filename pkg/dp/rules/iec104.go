@@ -10,7 +10,7 @@ import "strings"
 const ProtocolIEC104 = "iec104"
 
 // iec104BroadcastCA is the broadcast common address. Object-bearing
-// traffic to or from it never matches an ALLOW (spec §3 B3).
+// traffic to or from it never matches an ALLOW.
 const iec104BroadcastCA = 65535
 
 // IEC104Context is the decoded IEC 60870-5-104 metadata of one object (or
@@ -29,7 +29,7 @@ type IEC104Context struct {
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >
-// learn (spec §6.3).
+// learn.
 func EffectiveMode(ruleMode, globalMode string) string {
 	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
 		return m
@@ -41,7 +41,7 @@ func EffectiveMode(ruleMode, globalMode string) string {
 }
 
 // IEC104Envelope reports whether a session falls inside the IEC104
-// inspection envelope and the envelope's mode (spec §6.5). ctx carries the
+// inspection envelope and the envelope's mode. ctx carries the
 // opener-oriented session tuple: source = client, destination = server,
 // port 2404. The envelope is the L3/L4 scope (zones, CIDRs, protocol and
 // port) of the rules with ics.protocol iec104; ASDU predicates, identities
@@ -67,7 +67,7 @@ func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched 
 }
 
 // EvaluateIEC104 evaluates one IEC104 object (or S/U/error APDU) against
-// the IEC104 rules only, in order (spec §6.5). Other rules, including a
+// the IEC104 rules only, in order. Other rules, including a
 // broad tcp/2404 ALLOW, do not take part. No match is DENY whatever
 // firewall.defaultAction says. ctx carries the session tuple, as for
 // IEC104Envelope, and ICS.IEC104 must be set.

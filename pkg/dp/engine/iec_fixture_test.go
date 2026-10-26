@@ -20,9 +20,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-// stubIEC is a minimal framed decoder with the K2/K4 shape: APDUs are
+// stubIEC is a minimal framed decoder: APDUs are
 // 0x68, L, then L octets; an I-frame carries Type ID and a 2-octet CA at
-// octets 6 and 10..11. It stands in for the L1 decoder.
+// octets 6 and 10..11. It stands in for the production IEC104 decoder.
 type stubIEC struct{}
 
 func (stubIEC) Supports(s *flow.State) bool {

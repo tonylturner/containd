@@ -44,7 +44,7 @@ func iecEntry(id string, action Action, ics ICSPredicate) Entry {
 	}
 }
 
-// euPolicy is the spec §12.4 rule block behind a broad L4 ALLOW on 2404
+// euPolicy scopes interrogation and breaker control behind a broad L4 ALLOW on 2404
 // and an ALLOW default, neither of which may take part in IEC evaluation.
 func euPolicy() *Snapshot {
 	return &Snapshot{
