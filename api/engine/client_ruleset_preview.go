@@ -8,14 +8,29 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// PreviewRuleset compiles the candidate using the engine's runtime authority.
+// rulesetPreviewRequest is the body of POST /internal/ruleset/preview: the
+// candidate and its snapshot compiled by this (management) process.
+type rulesetPreviewRequest struct {
+	Config   *config.Config `json:"config"`
+	Snapshot rules.Snapshot `json:"snapshot"`
+}
+
+// PreviewRuleset compiles the candidate's snapshot here, as an apply does,
+// so its management INPUT admits the listeners this process resolves and
+// has bound; the engine compiles the ruleset under its runtime authority.
 func (c *HTTPClient) PreviewRuleset(ctx context.Context, cfg *config.Config) (engine.RulesetPreview, error) {
 	var out engine.RulesetPreview
-	body, err := json.Marshal(cfg)
+	snap, err := compile.CompileSnapshot(cfg)
+	if err != nil {
+		return out, err
+	}
+	body, err := json.Marshal(rulesetPreviewRequest{Config: cfg, Snapshot: snap})
 	if err != nil {
 		return out, err
 	}

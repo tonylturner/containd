@@ -6,12 +6,22 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// previewRulesetHandler compiles a candidate without configuring or applying it.
+// rulesetPreviewRequest carries a candidate and the snapshot management
+// compiled from it. Management compiles, as for an apply, so the snapshot's
+// management INPUT admits the listeners management resolves and has bound,
+// which a separate engine process cannot see.
+type rulesetPreviewRequest struct {
+	Config   *config.Config `json:"config"`
+	Snapshot rules.Snapshot `json:"snapshot"`
+}
+
+// previewRulesetHandler compiles a candidate's ruleset without configuring
+// or applying it.
 func previewRulesetHandler(dp *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -22,28 +32,27 @@ func previewRulesetHandler(dp *engine.Engine) http.HandlerFunc {
 			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		var cfg config.Config
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		var req rulesetPreviewRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := config.ValidateManagementReservation(&cfg, dp.ManagementReservation()); err != nil {
+		if req.Config == nil {
+			http.Error(w, "config is required", http.StatusBadRequest)
+			return
+		}
+		if err := config.ValidateManagementReservation(req.Config, dp.ManagementReservation()); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		snap, err := compile.CompileSnapshot(&cfg)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !cfg.DataPlane.Enforcement {
+		if !req.Config.DataPlane.Enforcement {
 			writeJSON(w, engine.RulesetPreview{
-				Snapshot: snap,
+				Snapshot: req.Snapshot,
 				Runtime:  engine.RulesetPreviewRuntime{Reason: "Enforcement is disabled; nothing would be applied"},
 			})
 			return
 		}
-		preview, err := dp.PreviewRuleset(snap, compilerSettings(cfg.DataPlane))
+		preview, err := dp.PreviewRuleset(req.Snapshot, compilerSettings(req.Config.DataPlane))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
