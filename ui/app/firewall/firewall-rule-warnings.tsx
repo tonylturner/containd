@@ -7,16 +7,40 @@ function warningKind(w: RuleWarning): string {
   return "warning";
 }
 
+const SCOPES = {
+  candidate: { label: "Candidate", detail: "staged, not yet applied" },
+  applied: { label: "Applied", detail: "the running ruleset" },
+} as const;
+
 /**
  * Rules that do not act as written: an identity rule no bound address
  * satisfies matches nothing, and a DENY or RESET rule an ALLOW fully covers
- * never decides.
+ * never decides. `scope` names the ruleset the warnings describe; a single
+ * previewed rule has none.
  */
-export function RuleWarningList({ warnings }: { warnings?: RuleWarning[] }) {
+export function RuleWarningList({
+  warnings,
+  scope,
+}: {
+  warnings?: RuleWarning[];
+  scope?: keyof typeof SCOPES;
+}) {
   if (!warnings || warnings.length === 0) return null;
   return (
-    <div role="status" className="mt-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
-      <p className="font-semibold">Rules that do not act as written</p>
+    <div
+      role="status"
+      aria-label={scope ? `${SCOPES[scope].label} rule warnings` : undefined}
+      className="mt-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber"
+    >
+      <p className="font-semibold">
+        {scope && (
+          <span className="mr-2 rounded-xs bg-amber/20 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider">
+            {SCOPES[scope].label}
+          </span>
+        )}
+        Rules that do not act as written
+        {scope && <span className="ml-1 font-normal opacity-80">({SCOPES[scope].detail})</span>}
+      </p>
       <ul className="mt-1 space-y-0.5">
         {warnings.map((w) => (
           <li key={`${w.ruleId}:${w.predicate ?? ""}:${w.shadowedBy ?? ""}`}>

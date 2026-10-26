@@ -15,7 +15,7 @@ const shadowed = {
   message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
 };
 
-async function openFirewall(page: Page, previews: unknown[]) {
+async function openFirewall(page: Page, previews: unknown[], engineStatus?: unknown) {
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -30,7 +30,7 @@ async function openFirewall(page: Page, previews: unknown[]) {
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
     if (path === "/api/v1/dataplane/ruleset") {
-      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [unbound, shadowed] };
+      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [unbound, shadowed], engineStatus };
     }
     if (path === "/api/v1/firewall/rules/preview") {
       previews.push(request.postDataJSON());
@@ -61,7 +61,8 @@ test("rule impact preview explains an identity rule that matches nothing", async
 test("ruleset preview lists unbound identities and shadowed rules", async ({ page }) => {
   await openFirewall(page, []);
   await page.getByRole("button", { name: "Preview", exact: true }).click();
-  const list = page.getByRole("status").filter({ hasText: "Rules that do not act as written" });
+  const list = page.getByRole("status", { name: "Candidate rule warnings" });
+  await expect(list).toContainText("staged, not yet applied");
   const items = list.getByRole("listitem");
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toContainText("unbound identity");
@@ -69,4 +70,23 @@ test("ruleset preview lists unbound identities and shadowed rules", async ({ pag
   await expect(items.nth(1)).toContainText("shadowed");
   await expect(items.nth(1)).toContainText(`block-ssh: ${shadowed.message}`);
   await expect(page.getByText("resolved toward denial")).toHaveCount(0);
+});
+
+test("applied warnings are listed apart from the candidate's", async ({ page }) => {
+  await openFirewall(page, [], { appliedAt: "2026-10-26T06:00:00Z", warnings: [shadowed] });
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const candidate = page.getByRole("status", { name: "Candidate rule warnings" });
+  const applied = page.getByRole("status", { name: "Applied rule warnings" });
+  await expect(candidate.getByRole("listitem")).toHaveCount(2);
+  await expect(applied).toContainText("the running ruleset");
+  await expect(applied.getByRole("listitem")).toHaveCount(1);
+  await expect(applied).toContainText(`block-ssh: ${shadowed.message}`);
+  await expect(applied).not.toContainText("contractor-ssh");
+});
+
+test("no applied warnings shows no applied list", async ({ page }) => {
+  await openFirewall(page, [], { appliedAt: "2026-10-26T06:00:00Z" });
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Candidate rule warnings" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Applied rule warnings" })).toHaveCount(0);
 });

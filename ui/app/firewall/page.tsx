@@ -432,7 +432,8 @@ export default function FirewallPage() {
             {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
           </p>
         )}
-        <RuleWarningList warnings={rulesetPreview?.warnings} />
+        <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
+        <RuleWarningList scope="applied" warnings={rulesetPreview?.engineStatus?.warnings} />
         {rulesetPreview?.ruleset && (
           <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {rulesetPreview.ruleset}
