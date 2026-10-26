@@ -243,6 +243,11 @@ or APDU ID. Midstream traffic stays untracked; existing sessions remain inspecte
 New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
 at capacity.
 
+In an enforce envelope a session starts only at a SYN of a handshake that
+connection tracking has not seen complete. A SYN sent into an established
+connection starts no session. A connection the engine did not see from its SYN
+is dropped and reset at both endpoints, so the client reconnects at once.
+
 ## Live IEC 104 APCI anomalies
 
 Tracked IEC 104 sessions produce observational `ids` / `anomaly` events in

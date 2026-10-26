@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- In an IEC 104 enforce envelope a session starts only at a SYN of a handshake
+  that connection tracking has not seen complete; a SYN sent into an
+  established connection no longer opens one. The `iec104_envelope` nft chain
+  now has three rules and sets the handshake mark bit `0x02000000` alongside
+  `0x01000000`.
 - With NFQUEUE, a SYN sent into an established Modbus or DNP3 connection
   covered by an enforce ICS rule no longer restarts inspection. After an
   engine restart, or once the engine forgot an idle connection, such a SYN
@@ -199,6 +204,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A client of a fail-closed ICS connection (Modbus, DNP3 and the other
+  non-IEC 104 ICS rules in enforce mode with NFQUEUE) that loses its
+  connection, for example by restarting, can reconnect at once from the same
+  source port. A SYN without payload sent into an established connection no
+  longer blocks the client for 10 minutes; it passes without restarting
+  inspection. A SYN with payload that does not start the connection's stream
+  is still dropped and blocked (`stream_resync`).
+- A fail-closed ICS connection the engine picks up mid-stream (after an engine
+  restart, an idle timeout or a new handshake on its tuple) is reset once at
+  both endpoints (reason `stream_midstream`, no flow block), so clients
+  reconnect at once instead of waiting for their TCP timeout. IPv6 connections
+  and engines without the reset injector still only drop.
+- ICS firewall rule `addresses` entries are validated where they are saved. An
+  entry is one value or an inclusive `low-high` range, each unsigned decimal or
+  `0x` hex, with low <= high. Modbus entries end at 65535; other protocols at
+  4294967295. Entries such as `0x01G0`, `-5` or `0x200-0x100` are refused with
+  an error naming the rule and the entry. A stored configuration with such an
+  entry starts in management recovery until a valid configuration is
+  committed. Before, the engine skipped such entries, so a rule matched only
+  its valid entries.
+- With the HTTP listener disabled, SSH stays off and logs why. Before, it
+  started with CLI sessions that called an HTTP port management never bound.
 - Firewall rules with a schedule no longer re-read the schedule or its
   timezone for each packet: schedules are parsed once per applied ruleset.
 - Rule matching parses addresses once per applied ruleset, and the engine
@@ -280,6 +307,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The in-app console pins the certificate the HTTPS listener serves. Before,
+  it pinned the saved setting, which a listener fallback or a certificate path
+  saved after boot can make differ.
 - Management listener readouts agree with what is served. The TLS settings
   show the effective listeners, including environment overrides. The console
   calls the bound HTTP listener. SSH no longer falls back to port 8080: with no
