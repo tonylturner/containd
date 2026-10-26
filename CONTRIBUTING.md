@@ -42,6 +42,11 @@ go build -o containd ./cmd/containd
 (cd ui && npm run build)
 ```
 
+UI source builds require MkDocs on `PATH` and fail if documentation cannot be
+generated. `CONTAIND_SKIP_DOCS=1` skips documentation without updating its build
+stamp; use it only when a separate build supplies the documentation. The
+management Dockerfile builds docs separately and checks the exported docs index.
+
 Running the appliance requires writable runtime storage under `/data` and
 external service binaries for enabled services. Use the dev image below for
 the packaged Linux runtime, including on Docker Desktop; a native macOS build

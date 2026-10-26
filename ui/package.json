@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0",
+    "test": "node --test scripts/build-docs.test.js",
     "test:routes": "playwright test"
   },
   "dependencies": {

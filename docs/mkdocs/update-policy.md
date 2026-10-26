@@ -23,8 +23,9 @@ disclosure and reporting.
 2. Export config and securely preserve the persistent `/data` volume, including
    users, audit/event data, and service files needed for rollback. See
    [Compose data locations](docker-compose.md#persistent-data-paths-inside-container).
-3. Choose a version tag or digest. Verify image signatures and inspect the
-   [SBOM](sbom.md) according to your deployment policy.
+3. Choose a version tag or digest. Verify image signatures and signed
+   [SBOM attestations](sbom.md#verifying-image-signatures-and-sbom-attestations)
+   according to your deployment policy.
 4. Update deployment image references, pull the images, and recreate the appliance.
    For split mode, update the affected processes together as required by release notes.
 5. Verify `/api/v1/health`, `/metrics`, login, cross-zone enforcement, and key
@@ -32,11 +33,16 @@ disclosure and reporting.
 
 ### When `:latest` moves
 
-`:latest` points to signed, SBOM-attached **stable** images whose tagged commit
+`:latest` points to signed, SBOM-attested **stable** images whose tagged commit
 is in main's history. Version-tagged images can exist before they are eligible
 for that channel. Prereleases and commits outside main's history do not move it.
+The release tag must be at least the highest stable semantic-version `v*` tag
+reachable from `origin/main`. Promotion refuses older tags, including manual
+requests, and records the reason in the workflow summary.
 Both management and engine tags are promoted to their signed digests only after
-signature and SBOM checks succeed.
+image signature and CycloneDX attestation verification succeed with the exact
+release-tag workflow identity, GitHub OIDC issuer, and peeled release commit.
+Missing or unsigned SBOM evidence cannot pass these checks.
 
 Pin a version tag or digest for repeatable deployments rather than relying on the
 moving `:latest` channel. Pin digests when you require an exact image identity.
