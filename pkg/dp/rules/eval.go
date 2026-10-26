@@ -56,10 +56,11 @@ type compiledPort struct {
 // every packet.
 type compiledEntry struct {
 	Entry
-	src, dst  networks        // pre-parsed Sources and Destinations
-	addresses addrSet         // pre-parsed ICS addresses
-	ports     []compiledPort  // pre-parsed protocol port ranges (one per Protocol)
-	iec       *compiledIEC104 // set for ics.protocol iec104 entries only
+	src, dst  networks         // pre-parsed Sources and Destinations
+	schedule  compiledSchedule // pre-parsed Schedule
+	addresses addrSet          // pre-parsed ICS addresses
+	ports     []compiledPort   // pre-parsed protocol port ranges (one per Protocol)
+	iec       *compiledIEC104  // set for ics.protocol iec104 entries only
 }
 
 // networks is one side's parsed CIDRs. listed records that the entry names
@@ -123,7 +124,8 @@ func (e *Evaluator) compile() {
 
 // compileEntry pre-parses a single Entry.
 func compileEntry(entry Entry) compiledEntry {
-	ce := compiledEntry{Entry: entry, src: compileNetworks(entry.Sources), dst: compileNetworks(entry.Destinations)}
+	ce := compiledEntry{Entry: entry, src: compileNetworks(entry.Sources), dst: compileNetworks(entry.Destinations),
+		schedule: compileSchedule(entry)}
 	if entry.ICS.Protocol == ProtocolIEC104 {
 		ce.iec = compileIEC104(entry.ICS)
 	}
