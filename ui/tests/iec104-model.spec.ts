@@ -15,6 +15,7 @@ import {
   buildICSRuleUpdate,
   formatICSMode,
 } from "../app/ics/ics-shared";
+import { iec104HealthIndicator } from "../app/ics/iec104-health";
 
 // Pure model tests: no page, no server.
 
@@ -242,4 +243,19 @@ test("evidence events decode with typed attributes", () => {
     ev("ics.decision", { session_id: "ab-1", decision: "allow", ruleId: "r", reason: "rule" }),
   );
   expect(allowed?.alert).toBe(false);
+});
+
+test("health indicator names IEC 104 only while an IEC 104 envelope is active", () => {
+  expect(iec104HealthIndicator({ active: true, healthy: false, reason: "queue bind failed" })).toEqual({
+    status: "degraded", label: "IEC 104 enforcement unhealthy", sublabel: "queue bind failed",
+  });
+  // Without an IEC 104 envelope only a failed reset of a picked-up Modbus
+  // or DNP3 connection makes the object unhealthy.
+  expect(iec104HealthIndicator({ active: false, healthy: false, reason: "picked-up connection 10.0.0.2:40000 > 10.0.0.3:502: send failed" })).toEqual({
+    status: "degraded", label: "ICS connection reset unhealthy", sublabel: "picked-up connection 10.0.0.2:40000 > 10.0.0.3:502: send failed",
+  });
+  expect(iec104HealthIndicator({ active: false, healthy: false, reason: "" }).sublabel).toBe("no reason reported");
+  expect(iec104HealthIndicator({ active: true, healthy: true, reason: "" }).label).toBe("IEC 104 enforcement active");
+  expect(iec104HealthIndicator({ active: false, healthy: true, reason: "" }).label).toBe("IEC 104 enforcement inactive");
+  expect(iec104HealthIndicator(undefined)).toEqual({ status: "unknown", label: "IEC 104 enforcement", sublabel: "status unavailable" });
 });
