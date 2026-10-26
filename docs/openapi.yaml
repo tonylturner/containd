@@ -692,8 +692,9 @@ components:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
           description: >-
-            Reports a rule that matches nothing under the running identity bindings, which
-            explains its zero matches. Omitted when there are none.
+            Reports a rule that matches nothing under the running identity bindings and zone
+            interfaces, or whose addresses share no family, which explains its zero matches.
+            Omitted when there are none.
     AVConfig:
       properties:
         blockTtlSeconds: {type: integer, minimum: 0, description: Seconds a detected malware flow stays blocked; 0 selects 600}
@@ -1844,15 +1845,21 @@ components:
       type: object
       required: [ruleId, action, message]
       description: >-
-        A firewall rule that does not act as written. Either a rule whose identities no bound
-        address satisfies (predicate), so it matches nothing. Or a DENY or RESET rule that an
-        ALLOW shadows (shadowedBy): the ALLOW matches all of its traffic, so it never decides
-        anything.
+        A firewall rule that does not act as written. Either a rule that matches nothing
+        because of the part predicate names: identities no bound address satisfies
+        (identity), source or destination zones none of which has an interface (zone, listed
+        in zones), or sources and destinations that share no address family
+        (addressFamily). Or a DENY or RESET rule that an ALLOW shadows (shadowedBy): the
+        ALLOW matches all of its traffic, so it never decides anything.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity]
+          enum: [identity, zone, addressFamily]
+        zones:
+          type: array
+          items: {type: string}
+          description: For predicate zone, the rule's zones that have no interfaces, sorted.
         shadowedBy: {type: string, description: ID of the ALLOW rule that shadows this DENY or RESET rule.}
         action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
         message: {type: string}

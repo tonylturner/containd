@@ -30,8 +30,18 @@ or underscore, followed by letters, digits, underscores and hyphens.
 nftables enforces identity and schedule predicates on the rules it handles,
 with per-label address sets and absolute-time interval sets in the policy
 table, and decides established connections in their scope again before the
-conntrack accept. See
+conntrack accept. For a conditional ICS `ALLOW` queued to the engine, that
+recheck covers the replies and server packets the queue does not see. See
 [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+
+Rule addresses are written per address family (`ip` or `ip6`), one line per
+family for a rule with both. Interface names are written as quoted nftables
+strings; the apply refuses a name that is not a valid Linux interface name
+(1–15 bytes, no `/`, `:`, whitespace or control characters, not `.` or `..`)
+or that nftables cannot match exactly (`"`, `*`, `\`). A rule line whose zones
+have no interfaces, or whose addresses share no family, is left out, and the
+rule is reported in the ruleset warnings
+([Rules that match nothing](policy-model.md#rules-that-match-nothing)).
 
 ## Capture is not inline enforcement
 
@@ -129,7 +139,10 @@ decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
 `ALLOW` is shadowed. The forward chain of the policy table runs in this order:
 
 1. `RATE_LIMIT` meters, by rule ID: every packet of a matching flow, established
-   or not, is counted against its 5-tuple's bucket and dropped over the limit.
+   or not and in both directions, is counted against its directional 5-tuple's
+   bucket and dropped over the limit. Tracked packets match by their
+   connection's original tuple (`ct original`, `ct reply`), packets without
+   usable connection tracking state by their header.
 2. IEC 104 envelope steering and the NFQUEUE lines of ICS rules.
 3. The established/related accept and the DNAT accepts.
 4. `TAG` lines, by rule ID, which count matching connection openers and
