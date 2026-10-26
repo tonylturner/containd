@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
+import type { ConntrackKillResult, ConntrackKillRequest } from "../../lib/api-console";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -15,26 +16,38 @@ function normalizeProto(p: string | undefined): string {
   return (p ?? "").toLowerCase().trim();
 }
 
+function endpoint(ip: string | undefined, port: string | undefined): string {
+  const address = ip?.includes(":") ? `[${ip}]` : (ip ?? "?");
+  return `${address}:${port ?? "—"}`;
+}
+
 export default function SessionsPage() {
   const canKill = isAdmin();
   const confirm = useConfirm();
   const [entries, setEntries] = useState<ConntrackEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [available, setAvailable] = useState(false);
   const [filter, setFilter] = useState<Filter>({ q: "" });
   const [limit, setLimit] = useState(500);
+  const [scope, setScope] = useState<ConntrackKillRequest["scope"]>("connection");
+  const [durationSecs, setDurationSecs] = useState(60);
+  const [killResult, setKillResult] = useState<ConntrackKillResult | null>(null);
+  const [killing, setKilling] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     const data = await api.listConntrack(limit);
-    if (!data) {
-      setError("Failed to load conntrack table (engine unreachable or conntrack unavailable).");
+    if (!data.ok) {
+      setError(`Connections unavailable: ${data.error}`);
       setEntries([]);
+      setAvailable(false);
       setLoading(false);
       return;
     }
-    setEntries(data);
+    setEntries(data.data);
+    setAvailable(true);
     setLoading(false);
   }, [limit]);
 
@@ -67,24 +80,28 @@ export default function SessionsPage() {
     const proto = normalizeProto(e.proto);
     const src = (e.src ?? "").trim();
     const dst = (e.dst ?? "").trim();
-    const sport = e.sport ? Number(e.sport) : undefined;
-    const dport = e.dport ? Number(e.dport) : undefined;
-    if (!proto || !src || !dst) {
+    const sport = Number(e.sport);
+    const dport = Number(e.dport);
+    if (!proto || !src || !dst || !sport || !dport) {
       setError("Cannot kill: missing tuple fields.");
       return;
     }
-    const res = await api.killConntrack({ proto, src, dst, sport, dport });
-    if (!res) {
-      setError("Kill failed (not supported, not found, or permission denied).");
+    setKilling(true);
+    setKillResult(null);
+    const res = await api.killConntrack({ proto, src, dst, sport, dport, scope, durationSecs });
+    setKilling(false);
+    if (!res.ok) {
+      setError(`Kill failed: ${res.error}`);
       return;
     }
+    setKillResult(res.data);
     await refresh();
   }
 
   function handleKill(e: ConntrackEntry) {
     confirm.open({
-      title: "Kill Session",
-      message: `Terminate ${e.proto ?? "?"} session ${e.src ?? "?"}:${e.sport ?? "?"} → ${e.dst ?? "?"}:${e.dport ?? "?"}? This is best-effort and cannot be undone.`,
+      title: scope === "connection" ? "Kill connection" : "Kill client-service connections",
+      message: `Revoke ${e.proto} ${endpoint(e.src, e.sport)} → ${endpoint(e.dst, e.dport)} for ${durationSecs} seconds? ${scope === "client-service" ? "This ends all of this client's connections to that service and prevents new ones during the interval." : "Only this exact connection is blocked. A fresh source port is allowed."} TCP closure is signalled on each endpoint's next packet, not confirmed.`,
       confirmLabel: "Kill",
       variant: "danger",
       onConfirm: () => kill(e),
@@ -125,16 +142,37 @@ export default function SessionsPage() {
           View-only mode: session kill requires admin.
         </div>
       )}
+      {canKill && (
+        <div className="mb-4 flex flex-wrap items-end gap-4 rounded-xs border bg-(--surface2) px-4 py-3 text-sm">
+          <label className="flex flex-col gap-1">Kill scope
+            <select aria-label="Kill scope" value={scope} onChange={(e) => setScope(e.target.value as ConntrackKillRequest["scope"])} className="input-industrial">
+              <option value="connection">Exact connection</option>
+              <option value="client-service">Client-service (all connections)</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">Revocation seconds (1–3600)
+            <input aria-label="Revocation seconds" type="number" min={1} max={3600} value={durationSecs} onChange={(e) => setDurationSecs(Number(e.target.value))} className="input-industrial w-40" />
+          </label>
+          <p className="text-(--text-muted)">{scope === "connection" ? "A fresh source port is a new connection and is allowed." : "Ends all this client's connections to the service, including reconnects."}</p>
+        </div>
+      )}
+      {killResult && (
+        <div role="status" aria-label="Connection revocation result" className="mb-4 rounded-xs border bg-(--surface2) px-4 py-3 text-sm">
+          <p>Conntrack deleted: {killResult.conntrackDeleted ? "yes" : "no"} ({killResult.deleted}/{killResult.matched}){killResult.deleteError ? ` — ${killResult.deleteError}` : ""}</p>
+          <p>Revocation installed: {killResult.revocationInstalled ? `yes, until ${killResult.blockedUntil}` : `no — ${killResult.revocationError}`}</p>
+          <p>{killResult.closure}</p>
+        </div>
+      )}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div role="alert" aria-label="Connections error" className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      {!loading && filtered.length === 0 ? (
+      {!loading && !available ? null : !loading && filtered.length === 0 ? (
         <EmptyState
-          title="No sessions to display"
-          description={entries.length === 0 ? "No conntrack entries found. The engine may be unreachable or conntrack unavailable." : "No sessions match the current filter."}
+          title="No connections to display"
+          description={entries.length === 0 ? "Verified empty: the kernel returned no connections." : "No sessions match the current filter."}
         />
       ) : (
         <div className="rounded-xs border bg-(--surface) overflow-hidden shadow-card">
@@ -144,7 +182,7 @@ export default function SessionsPage() {
                 {loading ? "Loading…" : `${filtered.length} shown / ${entries.length} total`}
               </div>
               <div className="text-xs text-(--text-muted)">
-                Conntrack is kernel state. Kill is best-effort (IPv4 tcp/udp/icmp only for now).
+                Kernel conntrack, IPv4 and IPv6. Kill supports TCP and UDP; TCP resets are sent in response to matching packets.
               </div>
             </div>
           </div>
@@ -161,6 +199,7 @@ export default function SessionsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Mark</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Assured</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">TTL</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Reply tuple (NAT)</th>
                   <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-(--text-dim)">Actions</th>
                 </tr>
               </thead>
@@ -176,16 +215,17 @@ export default function SessionsPage() {
                     <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
+                    <td className="px-4 py-3 text-(--text-muted)">{e.replySrc ? `${endpoint(e.replySrc, e.replySport)} → ${endpoint(e.replyDst, e.replyDport)}` : "—"}</td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        disabled={!canKill}
+                        disabled={!canKill || killing || !["tcp", "udp"].includes(e.proto) || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
                         onClick={() => handleKill(e)}
                         className={
                           canKill
                             ? "rounded-xs px-3 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                             : "rounded-xs border bg-(--surface2) px-3 py-1 text-xs text-(--text-dim)"
                         }
-                        title={canKill ? "Delete conntrack entry (best-effort)" : "Admin only"}
+                        title={canKill ? "Revoke connection for the selected interval" : "Admin only"}
                       >
                         Kill
                       </button>

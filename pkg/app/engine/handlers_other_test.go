@@ -81,14 +81,14 @@ func TestUnsupportedPlatformHandlers(t *testing.T) {
 	t.Run("conntrack", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/internal/conntrack?limit=5", nil)
-		conntrackHandler().ServeHTTP(rec, req)
+		conntrackHandler(nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("conntrack list status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/conntrack", bytes.NewBufferString(`{"src":"10.0.0.1","dst":"10.0.0.2","proto":"tcp","srcPort":1234,"dstPort":80}`))
-		conntrackHandler().ServeHTTP(rec, req)
+		conntrackHandler(nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("conntrack delete status = %d", rec.Code)
 		}
