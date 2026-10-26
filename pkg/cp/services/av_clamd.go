@@ -78,7 +78,7 @@ func (m *AVManager) applyClamAV(ctx context.Context, cfg config.AVConfig) error 
 	if m.opts.ClamdPath == "" {
 		return errors.New("clamav mode: clamd is not installed in this engine image")
 	}
-	if _, err := parseFreshclamSchedule(cfg.ClamAV.UpdateSchedule); err != nil {
+	if _, err := freshclamInterval(cfg.ClamAV); err != nil {
 		return err
 	}
 	if cfg.ClamAV.FreshclamEnabled && m.opts.FreshclamPath == "" {

@@ -60,3 +60,16 @@ func TestValidateAV(t *testing.T) {
 		})
 	}
 }
+
+func TestClamAVUpdateInterval(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 0, " \t": 0, "90m": 90 * time.Minute, " 4h ": 4 * time.Hour} {
+		if got, err := (ClamAVConfig{UpdateSchedule: in}).UpdateInterval(); err != nil || got != want {
+			t.Fatalf("UpdateInterval(%q) = %s, %v; want %s", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"0 */6 * * *", "6", "0s", "-1h", "daily"} {
+		if _, err := (ClamAVConfig{UpdateSchedule: in}).UpdateInterval(); err == nil || !strings.Contains(err.Error(), "updateSchedule") {
+			t.Fatalf("UpdateInterval(%q) = %v, want an updateSchedule error", in, err)
+		}
+	}
+}

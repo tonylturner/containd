@@ -40,24 +40,15 @@ type freshclamState struct {
 	err      string
 }
 
-// freshclamInterval parses updateSchedule, a Go duration such as "4h".
-// Empty selects the six-hour default.
-func freshclamInterval(s string) time.Duration {
-	d, err := parseFreshclamSchedule(s)
+// freshclamInterval is the FreshClam schedule cfg selects: its validated
+// updateSchedule, or the six-hour default when that is blank.
+func freshclamInterval(cfg config.ClamAVConfig) (time.Duration, error) {
+	d, err := cfg.UpdateInterval()
 	if err != nil {
-		return defaultFreshclamInterval
+		return 0, fmt.Errorf("%w: %v", ErrAVInvalid, err)
 	}
-	return d
-}
-
-func parseFreshclamSchedule(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if d == 0 {
 		return defaultFreshclamInterval, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("%w: clamav.updateSchedule %q must be a positive duration such as 4h", ErrAVInvalid, s)
 	}
 	return d, nil
 }
@@ -91,7 +82,7 @@ func (m *AVManager) ensureFreshclam(cfg config.AVConfig) error {
 		m.stopFreshclam()
 		return nil
 	}
-	interval, err := parseFreshclamSchedule(cfg.ClamAV.UpdateSchedule)
+	interval, err := freshclamInterval(cfg.ClamAV)
 	if err != nil {
 		return err
 	}

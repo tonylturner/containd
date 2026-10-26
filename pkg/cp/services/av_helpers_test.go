@@ -78,13 +78,15 @@ func TestAVManagerICAPApplyStatusAndFreshclamGuards(t *testing.T) {
 		t.Fatalf("unknown mode = %v, want ErrAVInvalid", err)
 	}
 
-	for in, want := range map[string]time.Duration{"": 6 * time.Hour, "90m": 90 * time.Minute, "invalid": 6 * time.Hour} {
-		if got := freshclamInterval(in); got != want {
-			t.Fatalf("freshclamInterval(%q) = %s, want %s", in, got, want)
+	for in, want := range map[string]time.Duration{"": 6 * time.Hour, " ": 6 * time.Hour, "90m": 90 * time.Minute} {
+		if got, err := freshclamInterval(config.ClamAVConfig{UpdateSchedule: in}); err != nil || got != want {
+			t.Fatalf("freshclamInterval(%q) = %s, %v; want %s", in, got, err, want)
 		}
 	}
-	if _, err := parseFreshclamSchedule("0 */4 * * *"); !errors.Is(err, ErrAVInvalid) {
-		t.Fatalf("cron schedule accepted: %v", err)
+	for _, in := range []string{"0 */4 * * *", "invalid", "0s", "-1h"} {
+		if _, err := freshclamInterval(config.ClamAVConfig{UpdateSchedule: in}); !errors.Is(err, ErrAVInvalid) {
+			t.Fatalf("freshclamInterval(%q) = %v, want ErrAVInvalid", in, err)
+		}
 	}
 }
 
