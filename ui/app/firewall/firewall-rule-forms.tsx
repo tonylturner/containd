@@ -18,7 +18,7 @@ import {
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { iec104DraftFrom, type IEC104Draft } from "../ics/iec104";
 import type { ICSMode, ICSModeSelection } from "../ics/ics-shared";
-import { zoneLabel } from "./firewall-utils";
+import { zoneLabel } from "../../lib/zones";
 import { ICSPredicateFields, buildRuleICS } from "./firewall-ics-fields";
 import {
   actionTakesICS,

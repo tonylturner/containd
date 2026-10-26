@@ -1,4 +1,4 @@
-import type { Interface, InterfaceState, Zone } from "../../lib/api";
+import type { Interface, InterfaceState } from "../../lib/api";
 import { isCIDR, isIPv4 } from "../../lib/validate";
 
 export type ICSProtoMeta = {
@@ -155,15 +155,6 @@ export function icsProtoMeta(name: string): ICSProtoMeta {
       addrHelp: "",
     }
   );
-}
-
-export function zoneLabel(zone: Zone): string {
-  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
-}
-
-export function zoneName(zones: Zone[], name: string): string {
-  const match = zones.find((z) => z.name === name);
-  return match ? zoneLabel(match) : name;
 }
 
 /** True if s is an IPv4 CIDR as isCIDR and isIPv4 read one (192.0.2.7/24). */

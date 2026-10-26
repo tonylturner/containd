@@ -7,7 +7,7 @@ import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
 import { formatICSMode } from "../ics/ics-shared";
-import { zoneName } from "./firewall-utils";
+import { zoneName } from "../../lib/zones";
 import { RuleCountersCell, RuleCountersNote, type CountersState } from "./firewall-rule-counters";
 import {
   actionInfo,
