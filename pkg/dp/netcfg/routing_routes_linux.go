@@ -47,10 +47,10 @@ func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway) (ker
 	if r.Table != 0 {
 		table = uint8(r.Table)
 	}
-	return kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: table, metric: uint32(r.Metric), proto: routeProtoContaind}, nil
+	return kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: uint32(table), metric: uint32(r.Metric), proto: routeProtoContaind}, nil
 }
 
-func addRoute(r kernelRoute) error {
+func putRoute(r kernelRoute, replace bool) error {
 	fd, err := openRouteNetlinkSocket()
 	if err != nil {
 		return err
@@ -58,7 +58,10 @@ func addRoute(r kernelRoute) error {
 	defer unix.Close(fd)
 	seq := atomic.AddUint32(&nlSeq, 1)
 	ipnet := &net.IPNet{IP: r.dst}
-	b := buildAddRouteRequest(seq, ipnet, r.dstLen, r.table, r.ifIndex, r.gateway, int(r.metric))
+	b := buildAddRouteRequest(seq, ipnet, r.dstLen, uint8(r.table), r.ifIndex, r.gateway, int(r.metric))
+	if replace {
+		(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_REPLACE
+	}
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return err
 	}
@@ -168,12 +171,14 @@ type kernelRoute struct {
 	dstLen  int
 	gateway net.IP
 	ifIndex int
-	table   uint8
+	table   uint32
 	metric  uint32
 	proto   uint8
+	tos     uint8
+	raw     []byte
 }
 
-func managedRoutes(ctx context.Context) ([]kernelRoute, error) {
+func kernelRoutes(ctx context.Context) ([]kernelRoute, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
@@ -200,10 +205,10 @@ func managedRoutes(ctx context.Context) ([]kernelRoute, error) {
 		return nil, err
 	}
 
-	return listManagedRoutes(ctx, fd, seq)
+	return listKernelRoutes(ctx, fd, seq)
 }
 
-func listManagedRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, error) {
+func listKernelRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, error) {
 	var managed []kernelRoute
 	buf := make([]byte, 1<<16)
 	for {
@@ -211,7 +216,7 @@ func listManagedRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, 
 		if err != nil {
 			return nil, err
 		}
-		done, routes, err := extractManagedRoutes(msgs, seq)
+		done, routes, err := extractKernelRoutes(msgs, seq)
 		if err != nil {
 			return nil, err
 		}
@@ -235,11 +240,14 @@ func recvRouteMessages(ctx context.Context, fd int, buf []byte) ([]syscall.Netli
 	return syscall.ParseNetlinkMessage(buf[:n])
 }
 
-func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []kernelRoute, error) {
+func extractKernelRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []kernelRoute, error) {
 	var managed []kernelRoute
 	for _, m := range msgs {
 		if m.Header.Seq != seq {
 			continue
+		}
+		if err := routeDumpError(m); err != nil {
+			return false, nil, err
 		}
 		switch m.Header.Type {
 		case unix.NLMSG_DONE:
@@ -254,7 +262,7 @@ func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []ke
 			}
 			return false, nil, unix.Errno(-code)
 		case unix.RTM_NEWROUTE:
-			if kr, ok := decodeManagedRoute(m.Data); ok {
+			if kr, ok := decodeKernelRoute(m.Data); ok {
 				managed = append(managed, kr)
 			}
 		}
@@ -262,17 +270,19 @@ func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []ke
 	return false, managed, nil
 }
 
-func decodeManagedRoute(data []byte) (kernelRoute, bool) {
+func decodeKernelRoute(data []byte) (kernelRoute, bool) {
 	if len(data) < unix.SizeofRtMsg {
 		return kernelRoute{}, false
 	}
 	rm := (*unix.RtMsg)(unsafe.Pointer(&data[0]))
-	if rm.Family != unix.AF_INET || rm.Protocol != routeProtoContaind {
+	if rm.Family != unix.AF_INET {
 		return kernelRoute{}, false
 	}
 	kr := kernelRoute{
 		dstLen: int(rm.Dst_len),
-		table:  rm.Table,
+		table:  uint32(rm.Table),
+		tos:    rm.Tos,
+		raw:    append([]byte(nil), data...),
 		proto:  rm.Protocol,
 	}
 	for _, a := range parseNetlinkAttrs(data[unix.SizeofRtMsg:]) {
@@ -284,6 +294,10 @@ func decodeManagedRoute(data []byte) (kernelRoute, bool) {
 		case unix.RTA_OIF:
 			if len(a.Value) >= 4 {
 				kr.ifIndex = int(binary.LittleEndian.Uint32(a.Value[:4]))
+			}
+		case unix.RTA_TABLE:
+			if len(a.Value) >= 4 {
+				kr.table = binary.LittleEndian.Uint32(a.Value[:4])
 			}
 		case unix.RTA_PRIORITY:
 			if len(a.Value) >= 4 {
@@ -337,7 +351,7 @@ func delRoute(r kernelRoute) error {
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  uint8(r.dstLen),
-		Table:    r.table,
+		Table:    uint8(r.table),
 		Protocol: routeProtoContaind,
 		Scope:    unix.RT_SCOPE_UNIVERSE,
 		Type:     unix.RTN_UNICAST,

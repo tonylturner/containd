@@ -22,8 +22,8 @@ func TestRuleOwnershipIsProtocolNotPriority(t *testing.T) {
 			binary.LittleEndian.PutUint32(p, priority)
 			addRtAttr(&data, fraPriority, p)
 			addRtAttr(&data, fraProtocol, []byte{protocol})
-			r, ok := decodeManagedRule(data.Bytes(), int(unsafe.Sizeof(fibRuleHdr{})))
-			if ok != (protocol == routeProtoContaind) {
+			r, ok := decodeKernelRule(data.Bytes(), int(unsafe.Sizeof(fibRuleHdr{})))
+			if !ok || (r.proto == routeProtoContaind) != (protocol == routeProtoContaind) {
 				t.Fatalf("priority %d protocol %d ownership=%v", priority, protocol, ok)
 			}
 			if ok && (r.priority != priority || r.proto != protocol) {

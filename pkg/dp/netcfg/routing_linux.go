@@ -9,8 +9,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -26,7 +28,11 @@ const (
 	managedRulePriorityBase = 10000
 )
 
+var routingApplyMu sync.Mutex
+
 func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
+	routingApplyMu.Lock()
+	defer routingApplyMu.Unlock()
 	// Resolve the whole intent before changing the kernel. Recovery of a partial
 	// kernel failure remains the caller's running-config rollback responsibility.
 	gwByName := map[string]config.Gateway{}
@@ -49,23 +55,27 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 		}
 		rules = append(rules, kr)
 	}
-	oldRoutes, err := managedRoutes(ctx)
+	state, err := loadDisplacedRoutes()
 	if err != nil {
 		return err
 	}
-	oldRules, err := managedRules(ctx)
+	oldRoutes, err := kernelRoutes(ctx)
+	if err != nil {
+		return err
+	}
+	oldRules, err := kernelRules(ctx)
 	if err != nil {
 		return err
 	}
 	for _, r := range oldRoutes {
-		if !slices.ContainsFunc(routes, func(w kernelRoute) bool { return routeMatchesIntent(r, w) }) {
+		if r.proto == routeProtoContaind && !slices.ContainsFunc(routes, func(w kernelRoute) bool { return routeMatchesIntent(r, w) }) {
 			if err := deleteKernelRoutes(ctx, []kernelRoute{r}); err != nil {
 				return err
 			}
 		}
 	}
 	for _, r := range oldRules {
-		if !slices.ContainsFunc(rules, func(w kernelRule) bool { return ownedRulesEqual(r, w) }) {
+		if r.proto == routeProtoContaind && !slices.ContainsFunc(rules, func(w kernelRule) bool { return ownedRulesEqual(r, w) }) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -74,26 +84,56 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 			}
 		}
 	}
+	if err := state.restoreRemoved(ctx, routes); err != nil {
+		return err
+	}
 	for _, r := range routes {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if slices.ContainsFunc(oldRoutes, func(w kernelRoute) bool { return routeMatchesIntent(w, r) }) {
-			continue
-		}
-		if err := addRoute(r); err != nil {
+		// Refresh after stale deletions/restorations and earlier intent entries.
+		current, err := kernelRoutes(ctx)
+		if err != nil {
 			return err
 		}
+		var collisions []kernelRoute
+		satisfied := false
+		for _, got := range current {
+			if !sameRouteKey(got, r) {
+				continue
+			}
+			if routeMatchesIntent(got, r) && restorableRoute(got) {
+				satisfied = true
+				break
+			}
+			collisions = append(collisions, got)
+		}
+		if satisfied {
+			continue
+		}
+		if len(collisions) > 1 || (len(collisions) == 1 && !restorableRoute(collisions[0])) {
+			return fmt.Errorf("apply %s: unsupported or ambiguous foreign route collision", routeDescription(r))
+		}
+		replace := len(collisions) == 1
+		if replace && collisions[0].proto != routeProtoContaind {
+			if err := state.remember(collisions[0]); err != nil {
+				return fmt.Errorf("journal displaced %s: %w", routeDescription(r), err)
+			}
+		}
+		if err := putRoute(r, replace); err != nil {
+			return fmt.Errorf("apply %s: %w", routeDescription(r), err)
+		}
 	}
+
 	for _, r := range rules {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if slices.ContainsFunc(oldRules, func(w kernelRule) bool { return ownedRulesEqual(r, w) }) {
+		if slices.ContainsFunc(oldRules, func(w kernelRule) bool { return ruleMatchesIntent(w, r) }) {
 			continue
 		}
 		if err := addRule(r); err != nil {
-			return err
+			return fmt.Errorf("apply rule priority %d table %d src %s/%d dst %s/%d: %w", r.priority, r.table, r.src, r.srcLen, r.dst, r.dstLen, err)
 		}
 	}
 	return nil
@@ -102,7 +142,11 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 func routeMatchesIntent(got, want kernelRoute) bool {
 	// A gateway-only route lets the kernel select its output interface. Its
 	// resolved OIF must not cause deletion/re-addition on every reconcile.
-	return got.dst.Equal(want.dst) && got.dstLen == want.dstLen && got.gateway.Equal(want.gateway) && (want.ifIndex == 0 || got.ifIndex == want.ifIndex) && got.table == want.table && got.metric == want.metric && got.proto == want.proto
+	return got.dst.Equal(want.dst) && got.dstLen == want.dstLen && got.gateway.Equal(want.gateway) && (want.ifIndex == 0 || got.ifIndex == want.ifIndex) && got.table == want.table && got.metric == want.metric && got.tos == want.tos
+}
+
+func ruleMatchesIntent(a, b kernelRule) bool {
+	return a.simple && a.priority == b.priority && a.table == b.table && a.src.Equal(b.src) && a.srcLen == b.srcLen && a.dst.Equal(b.dst) && a.dstLen == b.dstLen
 }
 
 func ownedRulesEqual(a, b kernelRule) bool {
@@ -113,7 +157,7 @@ func readNetlinkAck(fd int, seq uint32) error {
 	return readAck(fd, seq, true)
 }
 
-// Routing must report collisions instead of replacing or adopting foreign entries.
+// Unresolved routing collisions must be reported, never silently adopted.
 func readRoutingAck(fd int, seq uint32) error {
 	return readAck(fd, seq, false)
 }
@@ -146,6 +190,20 @@ func readAck(fd int, seq uint32, allowExists bool) error {
 			return nil
 		}
 		return unix.Errno(-code)
+	}
+	return nil
+}
+
+// Verify a route dump completed rather than accepting a partial snapshot.
+func routeDumpError(m syscall.NetlinkMessage) error {
+	if m.Header.Flags&unix.NLM_F_DUMP_INTR != 0 {
+		return fmt.Errorf("interrupted routing dump")
+	}
+	if m.Header.Type == unix.NLMSG_DONE && len(m.Data) >= 4 {
+		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		if code != 0 {
+			return unix.Errno(-code)
+		}
 	}
 	return nil
 }

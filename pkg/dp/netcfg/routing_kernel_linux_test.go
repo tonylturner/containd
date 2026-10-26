@@ -106,11 +106,7 @@ func TestRoutingKernelConvergence(t *testing.T) {
 	}
 	apply(intent)
 	// A fresh process has no in-memory ownership history, as at engine restart.
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	restart := exec.CommandContext(ctx, binary, "-test.run=^TestRoutingRestartHelper$", "-test.v")
+	restart := exec.CommandContext(ctx, "/proc/self/exe", "-test.run=^TestRoutingRestartHelper$", "-test.v")
 	restart.Env = append(os.Environ(), "CONTAIND_ROUTING_RESTART_HELPER=1")
 	if out, err := restart.CombinedOutput(); err != nil {
 		t.Fatalf("restart: %v: %s", err, out)
@@ -122,12 +118,13 @@ func TestRoutingKernelConvergence(t *testing.T) {
 		t.Fatalf("rule cleanup affected foreign entries:\n%s\nwant:\n%s", got, baselineRules)
 	}
 	apply(config.RoutingConfig{})
-	// A desired route colliding with a foreign entry must fail, not steal it.
-	if err := ApplyRouting(ctx, config.RoutingConfig{Routes: []config.StaticRoute{{Dst: "198.18.1.0/24", Iface: "routeprobe"}}}); err == nil {
-		t.Fatal("foreign route collision was silently accepted")
+	// An identical foreign route satisfies intent without being adopted.
+	if err := ApplyRouting(ctx, config.RoutingConfig{Routes: []config.StaticRoute{{Dst: "198.18.1.0/24", Iface: "routeprobe"}}}); err != nil {
+		t.Fatalf("identical foreign route rejected: %v", err)
 	}
+	apply(config.RoutingConfig{})
 	if cmd("-4", "route", "show", "table", "all") != baselineRoutes {
-		t.Fatal("foreign route overwritten")
+		t.Fatal("identical foreign route changed or adopted")
 	}
 }
 

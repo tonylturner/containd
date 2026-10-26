@@ -210,8 +210,10 @@ Notes:
     priority 0 selects automatic priority starting at 10000. The reserved
     management path can reject overlapping rules at priority 1.
   - Every running-config apply converges entries marked with protocol 98,
-    including deletion and empty intent. Foreign routes and rules are preserved;
-    a conflicting foreign route causes apply to fail rather than being replaced.
+    including deletion and empty intent. Identical foreign entries satisfy intent
+    without taking ownership. A foreign route with the same destination, table,
+    TOS and metric but a different next hop is journaled, replaced, and restored
+    when that route leaves intent. Unsupported collisions fail with route details.
     See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.

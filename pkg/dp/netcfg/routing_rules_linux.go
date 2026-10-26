@@ -92,7 +92,7 @@ func resolveRule(r config.PolicyRule, idx int) (kernelRule, error) {
 	if dstLen == 0 {
 		dstIP = nil
 	}
-	return kernelRule{priority: uint32(priority), table: uint32(r.Table), src: srcIP, srcLen: srcLen, dst: dstIP, dstLen: dstLen, proto: routeProtoContaind}, nil
+	return kernelRule{priority: uint32(priority), table: uint32(r.Table), src: srcIP, srcLen: srcLen, dst: dstIP, dstLen: dstLen, proto: routeProtoContaind, simple: true}, nil
 }
 
 func addRule(r kernelRule) error {
@@ -150,6 +150,7 @@ func addRule(r kernelRule) error {
 
 type kernelRule struct {
 	proto    uint8
+	simple   bool
 	priority uint32
 	table    uint32
 	src      net.IP
@@ -158,7 +159,7 @@ type kernelRule struct {
 	dstLen   int
 }
 
-func managedRules(ctx context.Context) ([]kernelRule, error) {
+func kernelRules(ctx context.Context) ([]kernelRule, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
@@ -186,10 +187,10 @@ func managedRules(ctx context.Context) ([]kernelRule, error) {
 		return nil, err
 	}
 
-	return listManagedRules(ctx, fd, seq)
+	return listKernelRules(ctx, fd, seq)
 }
 
-func listManagedRules(ctx context.Context, fd int, seq uint32) ([]kernelRule, error) {
+func listKernelRules(ctx context.Context, fd int, seq uint32) ([]kernelRule, error) {
 	var managed []kernelRule
 	buf := make([]byte, 1<<16)
 	hdrSize := int(unsafe.Sizeof(fibRuleHdr{}))
@@ -198,7 +199,7 @@ func listManagedRules(ctx context.Context, fd int, seq uint32) ([]kernelRule, er
 		if err != nil {
 			return nil, err
 		}
-		done, rules, err := extractManagedRules(msgs, seq, hdrSize)
+		done, rules, err := extractKernelRules(msgs, seq, hdrSize)
 		if err != nil {
 			return nil, err
 		}
@@ -209,11 +210,14 @@ func listManagedRules(ctx context.Context, fd int, seq uint32) ([]kernelRule, er
 	}
 }
 
-func extractManagedRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int) (bool, []kernelRule, error) {
+func extractKernelRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int) (bool, []kernelRule, error) {
 	var managed []kernelRule
 	for _, m := range msgs {
 		if m.Header.Seq != seq {
 			continue
+		}
+		if err := routeDumpError(m); err != nil {
+			return false, nil, err
 		}
 		switch m.Header.Type {
 		case unix.NLMSG_DONE:
@@ -228,7 +232,7 @@ func extractManagedRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int)
 			}
 			return false, nil, unix.Errno(-code)
 		case unix.RTM_NEWRULE:
-			if kr, ok := decodeManagedRule(m.Data, hdrSize); ok {
+			if kr, ok := decodeKernelRule(m.Data, hdrSize); ok {
 				managed = append(managed, kr)
 			}
 		}
@@ -236,7 +240,7 @@ func extractManagedRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int)
 	return false, managed, nil
 }
 
-func decodeManagedRule(data []byte, hdrSize int) (kernelRule, bool) {
+func decodeKernelRule(data []byte, hdrSize int) (kernelRule, bool) {
 	if len(data) < hdrSize {
 		return kernelRule{}, false
 	}
@@ -244,7 +248,7 @@ func decodeManagedRule(data []byte, hdrSize int) (kernelRule, bool) {
 	if fr.Family != unix.AF_INET {
 		return kernelRule{}, false
 	}
-	kr := kernelRule{srcLen: int(fr.SrcLen), dstLen: int(fr.DstLen), table: uint32(fr.Table)}
+	kr := kernelRule{srcLen: int(fr.SrcLen), dstLen: int(fr.DstLen), table: uint32(fr.Table), simple: fr.Action == frActToTbl && fr.Tos == 0 && fr.Flags == 0}
 	for _, a := range parseNetlinkAttrs(data[hdrSize:]) {
 		switch a.Type {
 		case fraProtocol:
@@ -263,10 +267,12 @@ func decodeManagedRule(data []byte, hdrSize int) (kernelRule, bool) {
 			kr.src = net.IP(append([]byte(nil), a.Value...)).To4()
 		case fraDst:
 			kr.dst = net.IP(append([]byte(nil), a.Value...)).To4()
+		default:
+			// Kernel dumps include default suppress-prefixlen and padding attributes.
+			if a.Type != unix.FRA_PAD && !(a.Type == unix.FRA_SUPPRESS_PREFIXLEN && len(a.Value) == 4 && binary.LittleEndian.Uint32(a.Value) == ^uint32(0)) {
+				kr.simple = false
+			}
 		}
-	}
-	if kr.proto != routeProtoContaind {
-		return kernelRule{}, false
 	}
 	return kr, true
 }

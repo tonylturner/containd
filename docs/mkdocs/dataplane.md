@@ -56,11 +56,31 @@ priority are removed when absent from running config, while foreign rules even
 at priorities 10000–19999 remain. Empty routing intent clears all marked entries.
 Unchanged entries are retained without deleting and re-adding them.
 
-Docker-created connected/default routes and reserved management routes/rules
-are not routing-owned entries. A configured route colliding with a foreign route
-fails apply instead of replacing it. Resolve that conflict explicitly outside
-containd or choose a different route metric/table. A failed commit uses the
-existing running-config recovery path to restore the previous routing intent.
+An existing foreign route with the same table, destination, TOS, metric and
+next hop satisfies intent without being adopted; an explicitly configured
+output interface must also match. Identical foreign policy rules likewise
+satisfy intent without being adopted or duplicated. Removing such intent leaves
+those entries unchanged. This includes a Docker-created default route that
+already matches the outbound quickstart configuration.
+
+If a simple foreign unicast route has the same table, destination, TOS and metric
+but a different next hop, containd saves its complete payload before replacing
+it with a protocol-98 route. Removing that route from intent restores the original
+foreign route, including its protocol, scope, preferred source and route metrics.
+Unsupported or ambiguous collisions (for example multipath or blackhole routes)
+fail with route details rather than replacing entries that cannot be represented
+by static-route intent. Unrelated Docker and reserved management entries remain
+untouched. A failed commit uses the existing running-config recovery path.
+
+The displaced-route journal is `/data/routing-displaced.json` in the engine data
+directory. `CONTAIND_ROUTING_STATE_PATH` overrides its location. Keep that path
+writable and persistent; failure to save the journal prevents replacement. The
+journal is scoped to the current kernel boot and network namespace, so it
+survives an engine process restart in that namespace but is not replayed into a
+new container namespace. Run only one engine per namespace, and use a separate
+journal path for each namespace. Do not delete the journal while routes are
+displaced. If an external actor installs a conflicting route before restoration,
+reconcile reports a conflict and retains the journal instead of overwriting it.
 
 Earlier versions already marked static routes with protocol 98, so those routes
 converge automatically on upgrade. Earlier policy rules have no reliable

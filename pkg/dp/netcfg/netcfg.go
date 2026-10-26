@@ -27,7 +27,8 @@ func ApplyInterfacesReplace(ctx context.Context, ifaces []config.Interface) erro
 }
 
 // ApplyRouting converges static routes and policy rules marked with protocol 98.
-// Entries with other protocols are never removed or replaced.
+// Identical foreign entries satisfy intent without being adopted. A displaced
+// foreign route is journaled before replacement and restored on intent removal.
 func ApplyRouting(ctx context.Context, routing config.RoutingConfig) error {
 	return applyRouting(ctx, routing)
 }
