@@ -58,7 +58,12 @@ What the design delivers by default:
   the signed-in account's password, so a session opened with a key cannot set it.
 - Web/API login and SSH login, including TOTP codes, are rate-limited. SSH
   password, key and TOTP failures share one limit per client address and account.
-- Lab mode skips the SSH account checks and accepts a reused TOTP code.
+- Five wrong TOTP codes, or ten wrong current passwords at a password or MFA
+  change, lock that check for the account for 15 minutes, from every client
+  address on web/API and SSH. Each lock is audited once. Password login is never
+  locked, so someone without the password cannot lock an account out.
+- Lab mode skips the SSH account checks and the per-account limits, and accepts
+  a reused TOTP code.
 
 Caveats:
 
