@@ -6,23 +6,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, isAdmin, type NTPConfig, type NTPStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
-import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-
 export default function NTPPage() {
   const canEdit = isAdmin();
-  const toast = useToast();
   const [status, setStatus] = useState<NTPStatus | null>(null);
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -64,18 +62,13 @@ export default function NTPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setNTP(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save NTP settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(saved.data);
-      toast(saved.warning ? `NTP settings staged — commit to apply. Warning: ${saved.warning}` : "NTP settings staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setNTP(cfg), {
+      success: "NTP settings staged — commit to apply.",
+      failure: "Failed to save NTP settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(saved.data);
+    else setError(saved.error);
   }
 
   return (
@@ -92,9 +85,10 @@ export default function NTPPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
           <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
@@ -234,16 +228,7 @@ export default function NTPPage() {
           </div>
         </div>
 
-        <p className="mt-3 text-xs text-(--text-muted)">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
     </Shell>
   );

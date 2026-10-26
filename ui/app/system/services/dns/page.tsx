@@ -7,17 +7,15 @@ import Link from "next/link";
 
 import { api, isAdmin, type DNSConfig, type DNSStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
-import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { InfoTip } from "../../../../components/InfoTip";
 import { Card } from "../../../../components/Card";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-
 export default function DNSPage() {
   const canEdit = isAdmin();
-  const toast = useToast();
   const [status, setStatus] = useState<DNSStatus | null>(null);
   const [cfg, setCfg] = useState<DNSConfig>({
     enabled: false,
@@ -25,7 +23,7 @@ export default function DNSPage() {
     upstreamServers: [],
     cacheSizeMB: 0,
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -69,18 +67,13 @@ export default function DNSPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setDNS(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save DNS settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(saved.data);
-      toast(saved.warning ? `DNS settings staged — commit to apply. Warning: ${saved.warning}` : "DNS settings staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setDNS(cfg), {
+      success: "DNS settings staged — commit to apply.",
+      failure: "Failed to save DNS settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(saved.data);
+    else setError(saved.error);
     await refresh();
   }
 
@@ -98,9 +91,10 @@ export default function DNSPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
           <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
@@ -268,16 +262,7 @@ export default function DNSPage() {
           </details>
         </div>
 
-        <p className="mt-3 text-xs text-(--text-muted)">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
     </Shell>
   );

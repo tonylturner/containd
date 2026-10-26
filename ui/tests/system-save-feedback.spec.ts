@@ -7,6 +7,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const admin = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 const alice = { id: "u-alice", username: "alice", firstName: "Alice", lastName: "Ng", email: "alice@example.com", role: "view" };
+// Carol must set up MFA within her grace period; Dave has MFA enabled.
+const carol = { id: "u-carol", username: "carol", role: "view", mfaRequired: true, mfaEnabled: false, mfaGraceUntil: "2099-01-01T00:00:00Z" };
+const dave = { id: "u-dave", username: "dave", role: "admin", mfaEnabled: true };
 
 type Gate = { release: () => void; requests: { method: string; path: string; body: unknown }[] };
 
@@ -19,7 +22,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
   let release!: () => void;
   const released = new Promise<void>((resolve) => { release = resolve; });
   const gate: Gate = { release, requests: [] };
-  let users = [admin, alice];
+  let users: Record<string, unknown>[] = [admin, alice, carol, dave];
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -36,6 +39,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
       const body = path === "/api/v1/users" ? users
         : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] }
           : path === "/api/v1/services/av" ? { enabled: true, mode: "clamav", failPolicy: "open" }
+            : path === "/api/v1/services/dns" ? { enabled: true, listenPort: 53, upstreamServers: ["192.0.2.53"] }
             : path === "/api/v1/services/av/defs" ? { path: "/data/clamav", files: [], definitions: [] }
               : path === "/api/v1/services/status" ? { av: { available: false, error: "engine unavailable" } }
                 : {};
@@ -49,7 +53,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
       return;
     }
     if (path === "/api/v1/users" && method === "POST") {
-      const created = { ...(request.postDataJSON() as object), id: "u-bob" } as typeof alice;
+      const created = { ...(request.postDataJSON() as object), id: "u-bob" };
       users = [...users, created];
       await route.fulfill({ json: created });
       return;
@@ -59,7 +63,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
       await route.fulfill({ status: 204, body: "" });
       return;
     }
-    if (path === "/api/v1/services/av") {
+    if (path === "/api/v1/services/av" || path === "/api/v1/services/dns") {
       await route.fulfill({ json: request.postDataJSON() });
       return;
     }
@@ -200,4 +204,49 @@ test("a refused AV save shows the server's error", async ({ page }) => {
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(toast(page)).toContainText("services.av.mode must be icap or clamav");
   await expect(page.getByText("State: error")).toBeVisible();
+});
+
+for (const [label, confirmLabel, busy, username, path, success] of [
+  ["Require MFA", "Require MFA", "Requiring\u2026", "alice", "/api/v1/users/u-alice/mfa/require", "MFA required for alice."],
+  ["Extend grace", "Extend grace", "Extending\u2026", "carol", "/api/v1/users/u-carol/mfa/grace", "MFA grace extended for carol."],
+  ["Clear MFA req", "Clear requirement", "Clearing\u2026", "carol", "/api/v1/users/u-carol/mfa/clear", "MFA requirement cleared for carol."],
+  ["Disable MFA", "Disable MFA", "Disabling\u2026", "dave", "/api/v1/users/u-dave/mfa/disable", "MFA disabled for dave."],
+] as const) {
+  test(`${label} disables its button while it saves, then confirms`, async ({ page }) => {
+    const gate = await mockAPI(page, { held: [path] });
+    await openUsers(page);
+    await row(page, username).getByRole("button", { name: label, exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: confirmLabel, exact: true }).click();
+    await expect(row(page, username).getByRole("button", { name: busy })).toBeDisabled();
+    await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: saving\u2026");
+    gate.release();
+    await expect(toast(page)).toContainText(success);
+    await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: saved.");
+    expect(gate.requests).toEqual([{ method: "POST", path, body: {} }]);
+  });
+}
+
+test("a refused MFA action shows the server's error and re-enables its button", async ({ page }) => {
+  await mockAPI(page, { fail: { "/api/v1/users/u-alice/mfa/require": "user has no email for MFA notices" } });
+  await openUsers(page);
+  await row(page, "alice").getByRole("button", { name: "Require MFA", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Require MFA", exact: true }).click();
+  await expect(toast(page)).toContainText("user has no email for MFA notices");
+  await expect(page.getByText("user has no email for MFA notices").first()).toBeVisible();
+  await expect(row(page, "alice").getByRole("button", { name: "Require MFA", exact: true })).toBeEnabled();
+});
+
+test("a service page's Save is disabled in flight and a double click saves once", async ({ page }) => {
+  const gate = await mockAPI(page, { held: ["/api/v1/services/dns"] });
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/dns");
+  await page.goto("/system/services/dns/");
+  await loaded;
+  await page.getByRole("button", { name: "Save", exact: true }).dblclick();
+  const busy = page.getByRole("button", { name: "Saving\u2026" });
+  await expect(busy).toBeDisabled();
+  await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: saving\u2026");
+  gate.release();
+  await expect(toast(page)).toContainText("DNS settings staged \u2014 commit to apply.");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  expect(gate.requests.filter((r) => r.path === "/api/v1/services/dns")).toHaveLength(1);
 });
