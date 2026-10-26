@@ -22,8 +22,9 @@ import (
 )
 
 type ownershipState struct {
-	ifaces  []config.Interface
-	routing config.RoutingConfig
+	ifaces     []config.Interface
+	routing    config.RoutingConfig
+	routingSet bool
 }
 
 type ownershipManager struct {
@@ -65,6 +66,7 @@ func (m *ownershipManager) setRouting(routing config.RoutingConfig) {
 	defer m.stateMu.Unlock()
 	st := m.state.Load().(ownershipState)
 	st.routing = routing
+	st.routingSet = true
 	m.state.Store(st)
 	m.triggerReconcile()
 }
@@ -125,7 +127,7 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 			return
 		}
 		st := m.state.Load().(ownershipState)
-		if len(st.ifaces) == 0 && len(st.routing.Routes) == 0 && len(st.routing.Rules) == 0 {
+		if len(st.ifaces) == 0 && !st.routingSet {
 			return
 		}
 		applyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -148,9 +150,9 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 			}
 		}
 
-		// Routing: additive apply. We resolve logical iface names to kernel devices
+		// Routing: converge owned entries, including empty intent. Resolve logical names
 		// using the current interface bindings before applying.
-		if len(st.routing.Routes) > 0 || len(st.routing.Rules) > 0 {
+		if st.routingSet {
 			resolved := resolveRoutingIfaces(st.routing, st.ifaces)
 			if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
 				m.setLastError(err)

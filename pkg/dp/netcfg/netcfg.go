@@ -15,11 +15,6 @@ type ApplyOptions struct {
 	Replace bool
 }
 
-type ApplyRoutingOptions struct {
-	// Replace, when true, replaces managed routes/rules (best-effort).
-	Replace bool
-}
-
 // ApplyInterfaces applies interface addressing intent to the OS.
 // Platform-specific implementations may be a no-op on unsupported systems.
 func ApplyInterfaces(ctx context.Context, ifaces []config.Interface) error {
@@ -31,12 +26,14 @@ func ApplyInterfacesReplace(ctx context.Context, ifaces []config.Interface) erro
 	return applyInterfaces(ctx, ifaces, ApplyOptions{Replace: true})
 }
 
-// ApplyRouting applies routing configuration (static routes and policy rules).
+// ApplyRouting converges static routes and policy rules marked with protocol 98.
+// Entries with other protocols are never removed or replaced.
 func ApplyRouting(ctx context.Context, routing config.RoutingConfig) error {
-	return applyRouting(ctx, routing, ApplyRoutingOptions{})
+	return applyRouting(ctx, routing)
 }
 
-// ApplyRoutingReplace performs a reconcile pass for routing rules (best-effort).
+// ApplyRoutingReplace is the explicit reconcile entry point; ordinary applies
+// have the same ownership-scoped convergence semantics.
 func ApplyRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
-	return applyRouting(ctx, routing, ApplyRoutingOptions{Replace: true})
+	return applyRouting(ctx, routing)
 }

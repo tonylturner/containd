@@ -206,7 +206,13 @@ Notes:
   - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
     selects main; explicit tables use IDs 1–252.
   - `rules` are installed via netlink as basic policy-based routing (Linux only;
-    src/dst CIDR selection, table IDs 1–252). Priority 0 selects automatic priority.
+    src/dst CIDR selection, table IDs 1–252). Explicit priorities use 1–65535;
+    priority 0 selects automatic priority starting at 10000. The reserved
+    management path can reject overlapping rules at priority 1.
+  - Every running-config apply converges entries marked with protocol 98,
+    including deletion and empty intent. Foreign routes and rules are preserved;
+    a conflicting foreign route causes apply to fail rather than being replaced.
+    See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
@@ -224,7 +230,8 @@ Notes:
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
 Limitations:
-- Routing/PBR supports additive updates plus an explicit replace/reconcile mode; IPv6 routing is not supported.
+- Routing/PBR supports IPv4 only. Unmarked rules installed before protocol-based
+  ownership require manual upgrade cleanup; see the routing ownership guide.
 - NAT supports postrouting masquerade and DNAT/port-forwarding.
 
 ## Configuration lifecycle

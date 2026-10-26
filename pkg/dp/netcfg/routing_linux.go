@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -21,55 +22,103 @@ const (
 	// This is a local netns concern (container/appliance); it avoids deleting host/system routes.
 	routeProtoContaind = 98
 
-	// managedRulePriorityBase is the default priority base used for auto-assigned rules.
-	// We treat this range as "managed by containd" for safe reconcile.
+	// Automatic priorities are defaults, not ownership evidence.
 	managedRulePriorityBase = 10000
-	managedRulePriorityMax  = 19999
 )
 
-func applyRouting(ctx context.Context, routing config.RoutingConfig, opts ApplyRoutingOptions) error {
-	if opts.Replace {
-		if err := deleteManagedRoutes(ctx); err != nil {
-			return err
-		}
-		if err := deleteManagedRules(ctx); err != nil {
-			return err
-		}
-	}
-
+func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
+	// Resolve the whole intent before changing the kernel. Recovery of a partial
+	// kernel failure remains the caller's running-config rollback responsibility.
 	gwByName := map[string]config.Gateway{}
 	for _, gw := range routing.Gateways {
-		name := strings.TrimSpace(gw.Name)
-		if name == "" {
+		gwByName[strings.TrimSpace(gw.Name)] = gw
+	}
+	var routes []kernelRoute
+	for _, r := range routing.Routes {
+		kr, err := resolveRoute(r, gwByName)
+		if err != nil {
+			return err
+		}
+		routes = append(routes, kr)
+	}
+	var rules []kernelRule
+	for i, r := range routing.Rules {
+		kr, err := resolveRule(r, i)
+		if err != nil {
+			return err
+		}
+		rules = append(rules, kr)
+	}
+	oldRoutes, err := managedRoutes(ctx)
+	if err != nil {
+		return err
+	}
+	oldRules, err := managedRules(ctx)
+	if err != nil {
+		return err
+	}
+	for _, r := range oldRoutes {
+		if !slices.ContainsFunc(routes, func(w kernelRoute) bool { return routeMatchesIntent(r, w) }) {
+			if err := deleteKernelRoutes(ctx, []kernelRoute{r}); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range oldRules {
+		if !slices.ContainsFunc(rules, func(w kernelRule) bool { return ownedRulesEqual(r, w) }) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := delRule(r); err != nil && !errors.Is(err, unix.ENOENT) && !errors.Is(err, unix.ESRCH) {
+				return err
+			}
+		}
+	}
+	for _, r := range routes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if slices.ContainsFunc(oldRoutes, func(w kernelRoute) bool { return routeMatchesIntent(w, r) }) {
 			continue
 		}
-		gwByName[name] = gw
-	}
-
-	for _, r := range routing.Routes {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := addRoute(r, gwByName); err != nil {
+		if err := addRoute(r); err != nil {
 			return err
 		}
 	}
-	for i, rule := range routing.Rules {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	for _, r := range rules {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if err := addRule(rule, i); err != nil {
+		if slices.ContainsFunc(oldRules, func(w kernelRule) bool { return ownedRulesEqual(r, w) }) {
+			continue
+		}
+		if err := addRule(r); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func routeMatchesIntent(got, want kernelRoute) bool {
+	// A gateway-only route lets the kernel select its output interface. Its
+	// resolved OIF must not cause deletion/re-addition on every reconcile.
+	return got.dst.Equal(want.dst) && got.dstLen == want.dstLen && got.gateway.Equal(want.gateway) && (want.ifIndex == 0 || got.ifIndex == want.ifIndex) && got.table == want.table && got.metric == want.metric && got.proto == want.proto
+}
+
+func ownedRulesEqual(a, b kernelRule) bool {
+	return a.priority == b.priority && a.table == b.table && a.src.Equal(b.src) && a.srcLen == b.srcLen && a.dst.Equal(b.dst) && a.dstLen == b.dstLen && a.proto == b.proto
+}
+
 func readNetlinkAck(fd int, seq uint32) error {
+	return readAck(fd, seq, true)
+}
+
+// Routing must report collisions instead of replacing or adopting foreign entries.
+func readRoutingAck(fd int, seq uint32) error {
+	return readAck(fd, seq, false)
+}
+
+func readAck(fd int, seq uint32, allowExists bool) error {
 	buf := make([]byte, 8192)
 	n, _, err := unix.Recvfrom(fd, buf, 0)
 	if err != nil {
@@ -93,7 +142,7 @@ func readNetlinkAck(fd int, seq uint32) error {
 		if code == 0 {
 			return nil
 		}
-		if -code == int32(unix.EEXIST) {
+		if allowExists && -code == int32(unix.EEXIST) {
 			return nil
 		}
 		return unix.Errno(-code)
