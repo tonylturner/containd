@@ -23,7 +23,11 @@ for (const stored of [undefined, false, true]) {
             : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
       await route.fulfill({ json: data });
     });
-    await page.goto("/dhcp/");
+    // The dev server compiles the page on first visit, which can outlast the
+    // default assertion timeout; wait for the page to read its config instead.
+    const loaded = (r: { url(): string; request(): { method(): string } }) =>
+      r.url().endsWith("/services/dhcp") && r.request().method() === "GET";
+    await Promise.all([page.waitForResponse(loaded), page.goto("/dhcp/")]);
     const authority = page.getByRole("checkbox", { name: /^Authoritative/ });
     await expect(authority).toBeEnabled();
     if (stored === true) await expect(authority).toBeChecked();
@@ -36,7 +40,7 @@ for (const stored of [undefined, false, true]) {
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect.poll(() => writes.length).toBe(2);
     expect(writes[1].authoritative).toBe(!(stored ?? false));
-    await page.reload();
+    await Promise.all([page.waitForResponse(loaded), page.reload()]);
     if (stored === true) await expect(authority).not.toBeChecked();
     else await expect(authority).toBeChecked();
   });
