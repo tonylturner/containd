@@ -182,7 +182,10 @@ func (s *interactiveSession) menuFactoryReset() bool {
 		s.writeLn("Cancelled.")
 		return false
 	}
-	_ = s.exec("factory reset NUCLEAR")
+	if !s.exec("factory reset NUCLEAR") {
+		s.writeLn("Factory reset failed. Review the error before retrying.")
+		return false
+	}
 	s.writeLn("Factory reset complete. You will be logged out.")
 	return true
 }

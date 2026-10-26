@@ -112,6 +112,11 @@ Interactive commands:
 - `wizard` - guided setup that writes to candidate config and optionally commits
 - `diagnostics` / `diag` - diagnostics submenu
 
+The menu's factory reset requires `NUCLEAR`. If the management API rejects the
+reset or cannot be reached, the console displays the error and keeps the menu
+open; it does not report completion. See [factory reset](api-reference.md#factory-reset)
+for configuration recovery and credential-reset behavior.
+
 Notes:
 - The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
