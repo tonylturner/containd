@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always-on rules. A predicate that cannot be evaluated resolves toward denial:
   such an ALLOW rule is inactive and such a DENY rule always applies. Schedules
   still apply to ICS rules inspected through NFQUEUE. The maintenance-window
-  template's scheduled allows are inactive until schedule enforcement ships.
+  template's scheduled allows are inactive. Affected rules are listed as
+  warnings in the engine ruleset status, in `GET /api/v1/dataplane/ruleset`
+  (`warnings` and `engineStatus.warnings`) and in the firewall page's ruleset
+  preview. The rule impact preview and the userspace evaluator decide these
+  rules the same way, and the evaluator admits by default only when the
+  firewall default action is exactly `ALLOW`.
 - New and factory-reset configurations no longer include the `allow-mgmt-ui`
   firewall rule. It never governed management access, but it allowed any
   forwarded traffic to tcp/8080. Existing configurations keep it; delete it
