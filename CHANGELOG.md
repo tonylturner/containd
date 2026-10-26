@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- New and factory-reset configurations no longer include the `allow-mgmt-ui`
+  firewall rule. It never governed management access, but it allowed any
+  forwarded traffic to tcp/8080. Existing configurations keep it; delete it
+  unless you need forwarded tcp/8080 from every zone.
 - The SSH console no longer echoes new passwords. The menu reset and the
   setup wizard ask twice and refuse a mismatch.
 - The web console's internal API calls over HTTPS verify the management

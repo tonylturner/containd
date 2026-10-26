@@ -426,12 +426,6 @@ func DefaultConfig() *Config {
 		}
 		ifaces = append(ifaces, iface)
 	}
-	allowMgmt := Rule{
-		ID:          "allow-mgmt-ui",
-		Description: "Allow access to management UI/API",
-		Protocols:   []Protocol{{Name: "tcp", Port: "8080"}},
-		Action:      ActionAllow,
-	}
 	return &Config{
 		Zones: []Zone{
 			{Name: "wan", Description: "Default WAN zone"},
@@ -441,8 +435,11 @@ func DefaultConfig() *Config {
 		},
 		Interfaces: ifaces,
 		Firewall: FirewallConfig{
+			// Firewall rules govern forwarded traffic only. Management access
+			// is an input-chain service rule, so the default forward policy
+			// starts empty.
 			DefaultAction: ActionDeny,
-			Rules:         []Rule{allowMgmt},
+			Rules:         []Rule{},
 		},
 		Services: ServicesConfig{
 			Syslog: SyslogConfig{
