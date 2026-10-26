@@ -13,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
@@ -147,15 +148,20 @@ func loginMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "MFA is not enabled for this account")
 			return
 		}
-		if !users.ValidateTOTP(u.TOTPSecret, req.Code, time.Now()) {
+		if err := userStore.AcceptTOTP(c.Request.Context(), u.ID, req.Code, time.Now()); err != nil {
+			detail, refused := users.TOTPRefusal(err)
+			if !refused {
+				internalError(c, err)
+				return
+			}
 			auditLog(c, audit.Record{
 				Actor:  u.Username,
 				Action: "auth.login",
 				Target: u.Username,
 				Result: "denied",
-				Detail: "invalid totp code",
+				Detail: detail,
 			})
-			apiError(c, http.StatusUnauthorized, "invalid authentication code")
+			apiError(c, http.StatusUnauthorized, err.Error())
 			return
 		}
 		issueLoginResponse(c, userStore, u)
@@ -197,6 +203,7 @@ func enrollMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 func enableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
+	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		if userStore == nil {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
@@ -225,8 +232,10 @@ func enableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusConflict, "MFA is already enabled for this account")
 			return
 		}
+		// The secret is not stored yet, so there is no accepted step to track.
 		if !users.ValidateTOTP(claims.Secret, req.Code, time.Now()) {
-			apiError(c, http.StatusUnauthorized, "invalid authentication code")
+			auditMFADenied(c, lab, "auth.mfa.enable", u.Username, "invalid totp code")
+			apiError(c, http.StatusUnauthorized, users.ErrInvalidTOTP.Error())
 			return
 		}
 		if err := userStore.SetTOTP(c.Request.Context(), u.ID, claims.Secret); err != nil {
@@ -243,6 +252,7 @@ func enableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 func disableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
+	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		if userStore == nil {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
@@ -267,11 +277,18 @@ func disableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
+			auditMFADenied(c, lab, "auth.mfa.disable", u.Username, "current password invalid")
 			apiError(c, http.StatusUnauthorized, "current password invalid")
 			return
 		}
-		if !users.ValidateTOTP(u.TOTPSecret, req.Code, time.Now()) {
-			apiError(c, http.StatusUnauthorized, "invalid authentication code")
+		if err := userStore.AcceptTOTP(c.Request.Context(), u.ID, req.Code, time.Now()); err != nil {
+			detail, refused := users.TOTPRefusal(err)
+			if !refused {
+				internalError(c, err)
+				return
+			}
+			auditMFADenied(c, lab, "auth.mfa.disable", u.Username, detail)
+			apiError(c, http.StatusUnauthorized, err.Error())
 			return
 		}
 		if err := userStore.DisableTOTP(c.Request.Context(), u.ID); err != nil {
@@ -285,6 +302,15 @@ func disableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 		})
 		c.JSON(http.StatusOK, gin.H{"status": "mfa_disabled"})
 	}
+}
+
+// auditMFADenied records a refused self-service MFA change. Lab mode keeps
+// its audit trail as it was and writes none.
+func auditMFADenied(c *gin.Context, lab bool, action, username, detail string) {
+	if lab {
+		return
+	}
+	auditLog(c, audit.Record{Action: action, Target: username, Result: "denied", Detail: detail})
 }
 
 func disableUserMFAHandler(userStore users.Store) gin.HandlerFunc {

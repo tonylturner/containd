@@ -428,7 +428,7 @@ func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
 	}
 
 	resetPassword := sshTestValue("wizard-reset")
-	resetSession, _ := newTestSession(srv, reg, resetPassword+"\n"+resetPassword+"\n")
+	resetSession, _ := newTestSession(srv, reg, "containd\n"+resetPassword+"\n"+resetPassword+"\n")
 	resetSession.menuResetPassword()
 	admin, err := userStore.GetByUsername(context.Background(), "containd")
 	if err != nil || admin == nil {
@@ -518,7 +518,7 @@ func TestWizardPasswordFailureStops(t *testing.T) {
 				password = sshTestValue("write-failure")
 				srv.opts.UserStore = passwordWriteFailure{store}
 			}
-			session, output := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n"+password+"\n")
+			session, output := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+password+"\n"+password+"\n")
 			if session.wizardPromptPassword() {
 				t.Fatal("wizard continued after failed password write")
 			}
@@ -543,7 +543,7 @@ func TestWizardPasswordSuccessAuthenticates(t *testing.T) {
 	t.Setenv("CONTAIND_LAB_MODE", "")
 	srv, _, audits := newTestSSHServer(t)
 	password := sshTestValue("wizard-success")
-	session, output := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n"+password+"\n")
+	session, output := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+password+"\n"+password+"\n")
 	if !session.wizardPromptPassword() || !strings.Contains(output.String(), "password updated") {
 		t.Fatal(output.String())
 	}

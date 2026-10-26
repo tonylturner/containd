@@ -468,7 +468,7 @@ func TestSSHCredentialChangeClosesOtherConnections(t *testing.T) {
 	other := dial()
 	acting := dial()
 	fresh := sshTestValue("menu-change")
-	out := runShell(t, acting, "menu\n3\n"+fresh+"\n"+fresh+"\n0\n")
+	out := runShell(t, acting, "menu\n3\n"+password+"\n"+fresh+"\n"+fresh+"\n0\n")
 	if !strings.Contains(out, "Password updated.") {
 		t.Fatalf("menu change failed: %q", out)
 	}

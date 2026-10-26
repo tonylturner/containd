@@ -27,22 +27,19 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 		if err != nil || !allow {
 			return nil, errors.New("password auth disabled")
 		}
-		key := limiterKey(conn)
+		key := limiterKey(conn.RemoteAddr(), conn.User())
 		if ok, _ := s.pwLimiter.Allow(key); !ok {
 			return nil, errTooManyAttempts
 		}
 		u, err := s.opts.UserStore.GetByUsername(context.Background(), conn.User())
 		if err != nil || u == nil {
-			s.pwLimiter.Fail(key)
-			return nil, errInvalidCredentials
+			return nil, s.refuseLogin(conn, "unknown user", errInvalidCredentials)
 		}
 		if strings.ToLower(strings.TrimSpace(u.Role)) != "admin" {
-			s.pwLimiter.Fail(key)
-			return nil, errors.New("ssh requires admin role")
+			return nil, s.refuseLogin(conn, "not an admin", errAdminRequired)
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), password) != nil {
-			s.pwLimiter.Fail(key)
-			return nil, errInvalidCredentials
+			return nil, s.refuseLogin(conn, "invalid password", errInvalidCredentials)
 		}
 		// A pending second step keeps the failure count until it succeeds.
 		perms, err := s.assureAccount(conn, u, factorPassword)
@@ -55,22 +52,31 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 
 // limiterKey counts attempts per client host and user. The source port is
 // excluded: every connection has a new one.
-func limiterKey(conn ssh.ConnMetadata) string {
-	host := conn.RemoteAddr().String()
+func limiterKey(remote net.Addr, user string) string {
+	host := remote.String()
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	return host + "|" + strings.ToLower(conn.User())
+	return host + "|" + strings.ToLower(user)
 }
 
-func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+// publicKeyCallback checks one offered key and collects refusals for the
+// connection. Outside lab mode, key logins share the password login limit.
+func (s *Server) publicKeyCallback(refusals *keyRefusals) func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	return func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		if !s.opts.LabMode {
+			if ok, _ := s.pwLimiter.Allow(limiterKey(conn.RemoteAddr(), conn.User())); !ok {
+				return nil, errTooManyAttempts
+			}
+		}
 		u, err := s.opts.UserStore.GetByUsername(context.Background(), conn.User())
 		if err != nil || u == nil {
+			refusals.add(conn, "unknown user", key)
 			return nil, errors.New("invalid user")
 		}
 		if strings.ToLower(strings.TrimSpace(u.Role)) != "admin" {
-			return nil, errors.New("ssh requires admin role")
+			refusals.add(conn, "not an admin", key)
+			return nil, errAdminRequired
 		}
 		_, dir, err := s.authPolicy(context.Background())
 		if err != nil {
@@ -81,6 +87,7 @@ func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicK
 			return nil, err
 		}
 		if !ok {
+			refusals.add(conn, "public key not authorized", key)
 			return nil, errors.New("unauthorized key")
 		}
 		return userPermissions(u), nil
@@ -99,7 +106,11 @@ func (s *Server) verifiedPublicKeyCallback() func(conn ssh.ConnMetadata, key ssh
 		if err != nil || u == nil {
 			return nil, errors.New("invalid user")
 		}
-		return s.assureAccount(conn, u, factorPublicKey)
+		perms, err = s.assureAccount(conn, u, factorPublicKey)
+		if err == nil {
+			s.pwLimiter.Success(limiterKey(conn.RemoteAddr(), conn.User()))
+		}
+		return perms, err
 	}
 }
 

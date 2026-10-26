@@ -33,6 +33,7 @@ var (
 	errMFASetupRequired   = errors.New("mfa setup required")
 	errInvalidCredentials = errors.New("invalid credentials")
 	errTooManyAttempts    = errors.New("too many login attempts; retry later")
+	errAdminRequired      = errors.New("ssh requires admin role")
 )
 
 type firstFactor int
@@ -62,7 +63,7 @@ func (s *Server) assureAccount(conn ssh.ConnMetadata, u *users.StoredUser, facto
 	step := &assuranceStep{
 		server:         s,
 		userID:         u.ID,
-		key:            limiterKey(conn),
+		key:            limiterKey(conn.RemoteAddr(), conn.User()),
 		requireTOTP:    factor == factorPassword,
 		confirmCurrent: factor == factorPublicKey,
 	}
@@ -92,6 +93,8 @@ type assuranceStep struct {
 	confirmCurrent  bool
 	totpDone        bool
 	currentVerified bool
+	// totpRefused is the previous code's refusal, shown on the next prompt.
+	totpRefused error
 }
 
 func (a *assuranceStep) pending(u *users.StoredUser) bool {
@@ -130,14 +133,24 @@ func (a *assuranceStep) challenge(conn ssh.ConnMetadata, client ssh.KeyboardInte
 }
 
 func (a *assuranceStep) verifyTOTP(conn ssh.ConnMetadata, u *users.StoredUser, client ssh.KeyboardInteractiveChallenge) error {
-	answers, err := client("", "Two-factor authentication is enabled for this account.", []string{"Authentication code: "}, []bool{false})
+	instruction := "Two-factor authentication is enabled for this account."
+	if a.totpRefused != nil {
+		instruction = "The previous code was refused: " + a.totpRefused.Error() + "."
+	}
+	answers, err := client("", instruction, []string{"Authentication code: "}, []bool{false})
 	if err != nil {
 		return err
 	}
-	if len(answers) != 1 || !users.ValidateTOTP(u.TOTPSecret, answers[0], time.Now()) {
-		a.server.pwLimiter.Fail(a.key)
-		a.server.auditLogin(conn, "denied", "invalid totp code")
-		return errors.New("invalid authentication code")
+	if len(answers) != 1 {
+		return a.server.refuseLogin(conn, "invalid totp code", users.ErrInvalidTOTP)
+	}
+	if err := a.server.opts.UserStore.AcceptTOTP(context.Background(), u.ID, answers[0], time.Now()); err != nil {
+		detail, refused := users.TOTPRefusal(err)
+		if !refused {
+			return err
+		}
+		a.totpRefused = err
+		return a.server.refuseLogin(conn, detail, err)
 	}
 	a.totpDone = true
 	return nil
@@ -165,8 +178,7 @@ func (a *assuranceStep) changePassword(conn ssh.ConnMetadata, u *users.StoredUse
 		}
 		if confirm {
 			if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(answers[0])) != nil {
-				a.server.pwLimiter.Fail(a.key)
-				return errInvalidCredentials
+				return a.server.refuseLogin(conn, "current password invalid", errInvalidCredentials)
 			}
 			a.currentVerified = true
 			answers = answers[1:]

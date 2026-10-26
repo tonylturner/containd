@@ -262,7 +262,7 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	if err := srv.SeedAuthorizedKey("containd", line); err != nil {
 		t.Fatalf("SeedAuthorizedKey: %v", err)
 	}
-	pkcb := srv.publicKeyCallback()
+	pkcb := srv.publicKeyCallback(&keyRefusals{})
 	perms, err = pkcb(testConnMetadata{user: "containd"}, pub)
 	if err != nil || perms == nil {
 		t.Fatalf("publicKeyCallback admin error=%v perms=%#v", err, perms)
@@ -325,14 +325,14 @@ func TestRunningSSHAuthPolicy(t *testing.T) {
 	if err := auth(); err == nil {
 		t.Fatal("running disable did not take effect")
 	}
-	if _, err := srv.publicKeyCallback()(testConnMetadata{user: "containd"}, pub); err != nil {
+	if _, err := srv.publicKeyCallback(&keyRefusals{})(testConnMetadata{user: "containd"}, pub); err != nil {
 		t.Fatalf("key in running directory was not usable: %v", err)
 	}
 	readErr = errors.New("config unavailable")
 	if err := auth(); err == nil {
 		t.Fatal("unavailable policy allowed password auth")
 	}
-	if _, err := srv.publicKeyCallback()(testConnMetadata{user: "containd"}, pub); err == nil {
+	if _, err := srv.publicKeyCallback(&keyRefusals{})(testConnMetadata{user: "containd"}, pub); err == nil {
 		t.Fatal("unavailable policy allowed key auth")
 	}
 }

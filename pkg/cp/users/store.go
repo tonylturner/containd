@@ -58,6 +58,7 @@ type Store interface {
 	SetPassword(ctx context.Context, id string, password string) error
 	SetTOTP(ctx context.Context, id string, secret string) error
 	DisableTOTP(ctx context.Context, id string) error
+	AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error
 	SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error
 	EnsureDefaultAdmin(ctx context.Context) error
 	CreateSession(ctx context.Context, userID string, idleTTL time.Duration, maxTTL time.Duration) (*Session, error)
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS users (
   mfa_totp_enabled INTEGER NOT NULL DEFAULT 0,
   mfa_required INTEGER NOT NULL DEFAULT 0,
   mfa_grace_until INTEGER NOT NULL DEFAULT 0,
+  mfa_totp_last_step INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -175,6 +177,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_grace_until INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_last_step INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -509,19 +512,20 @@ func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password strin
 }
 
 // SetTOTP enables TOTP with secret and revokes the account's other sessions.
+// The new secret starts with no accepted time step.
 func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) error {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return errors.New("totp secret required")
 	}
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "set totp", id, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
+	return s.updateCredential(ctx, "set totp", id, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
 }
 
 // DisableTOTP removes TOTP and revokes the account's other sessions.
 func (s *SQLiteStore) DisableTOTP(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "disable totp", id, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
+	return s.updateCredential(ctx, "disable totp", id, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
 }
 
 // updateCredential applies one credential update and revokes the account's

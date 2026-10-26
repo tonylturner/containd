@@ -5,6 +5,7 @@ package users
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"image/png"
@@ -72,19 +73,39 @@ func NormalizeOTP(code string) string {
 	return b.String()
 }
 
+var totpOpts = totp.ValidateOpts{
+	Period:    TOTPPeriod,
+	Digits:    otp.DigitsSix,
+	Algorithm: otp.AlgorithmSHA1,
+}
+
+// ValidateTOTP reports whether code is valid for secret within the accepted
+// clock skew. It does not track use; stored secrets go through
+// Store.AcceptTOTP, which also refuses a reused code.
 func ValidateTOTP(secret string, code string, now time.Time) bool {
+	_, ok := matchTOTPStep(secret, code, now)
+	return ok
+}
+
+// matchTOTPStep returns the earliest time step within TOTPSkew of now whose
+// code equals code.
+func matchTOTPStep(secret string, code string, now time.Time) (int64, bool) {
 	secret = strings.TrimSpace(secret)
 	code = NormalizeOTP(code)
 	if secret == "" || len(code) != 6 {
-		return false
+		return 0, false
 	}
-	ok, err := totp.ValidateCustom(code, secret, now.UTC(), totp.ValidateOpts{
-		Period:    TOTPPeriod,
-		Skew:      TOTPSkew,
-		Digits:    otp.DigitsSix,
-		Algorithm: otp.AlgorithmSHA1,
-	})
-	return err == nil && ok
+	current := now.UTC().Unix() / TOTPPeriod
+	for step := current - TOTPSkew; step <= current+TOTPSkew; step++ {
+		want, err := totp.GenerateCodeCustom(secret, time.Unix(step*TOTPPeriod, 0).UTC(), totpOpts)
+		if err != nil {
+			return 0, false
+		}
+		if subtle.ConstantTimeCompare([]byte(want), []byte(code)) == 1 {
+			return step, true
+		}
+	}
+	return 0, false
 }
 
 func MFAGraceDeadline(now time.Time) time.Time {
