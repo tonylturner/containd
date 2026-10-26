@@ -85,15 +85,18 @@ type Engine struct {
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
-// Warnings lists the applied ruleset's rules whose predicates resolve toward
-// denial; a failed apply carries none. ICSCoverage is the live coverage of
-// the applied snapshot's ICS rules; omitted when it has none.
+// SnapshotVersion is the version of the snapshot the last apply attempted,
+// whether it succeeded or failed. Warnings lists the applied ruleset's rules
+// whose predicates resolve toward denial; a failed apply carries none.
+// ICSCoverage is the live coverage of the applied snapshot's ICS rules;
+// omitted when it has none.
 type RulesetStatus struct {
-	Ruleset     string                `json:"ruleset"`
-	AppliedAt   time.Time             `json:"appliedAt"`
-	Error       string                `json:"error,omitempty"`
-	Warnings    []enforce.RuleWarning `json:"warnings,omitempty"`
-	ICSCoverage []coverage.Rule       `json:"icsCoverage,omitempty"`
+	Ruleset         string                `json:"ruleset"`
+	SnapshotVersion string                `json:"snapshotVersion,omitempty"`
+	AppliedAt       time.Time             `json:"appliedAt"`
+	Error           string                `json:"error,omitempty"`
+	Warnings        []enforce.RuleWarning `json:"warnings,omitempty"`
+	ICSCoverage     []coverage.Rule       `json:"icsCoverage,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -452,7 +455,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		start := time.Now()
 		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
 		if applyErr != nil {
-			e.setRulesetStatus(compiled, nil, applyErr)
+			e.setRulesetStatus(snap.Version, compiled, nil, applyErr)
 			return applyErr
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
@@ -462,7 +465,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.setRulesetStatus(compiled, warnings, nil)
+	e.setRulesetStatus(snap.Version, compiled, warnings, nil)
 	e.resetExclusionHits()
 	return nil
 }

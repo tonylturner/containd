@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -15,7 +14,7 @@ import (
 // The compiler supplies established traffic, loopback and the env-backed
 // reserved INPUT allow; every new forwarded connection is dropped.
 func RecoverySnapshot() rules.Snapshot {
-	return rules.Snapshot{Version: "management-recovery", Default: rules.ActionDeny}
+	return rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny}
 }
 
 // ApplyBootConfig shares the promotion/replay lock so a delayed recovery apply
@@ -51,7 +50,10 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 
 // Observe the engine, not a successful HTTP POST or the guard's health. A
 // restarted/unreachable engine must never be advertised as fail-closed.
-func managementRecoveryStatus(ctx context.Context, store config.Store, engine EngineClient) string {
+// The engine compiles with authority management cannot see (its engine API
+// path, its reservation), so recovery is recognized by the snapshot version
+// the engine applied, not by recompiling the ruleset here.
+func managementRecoveryStatus(ctx context.Context, engine EngineClient) string {
 	if engine == nil {
 		return "recovery pending: engine unavailable"
 	}
@@ -62,11 +64,7 @@ func managementRecoveryStatus(ctx context.Context, store config.Store, engine En
 	if status.Error != "" {
 		return "recovery failed: " + status.Error
 	}
-	compiler := enforce.NewCompiler()
-	compiler.ManagementReservation = config.ReservationForStore(store)
-	snapshot := RecoverySnapshot()
-	expected, err := compiler.CompileFirewall(&snapshot)
-	if err != nil || status.AppliedAt.IsZero() || status.Ruleset != expected {
+	if status.AppliedAt.IsZero() || status.Ruleset == "" || status.SnapshotVersion != RecoverySnapshot().Version {
 		return "recovery pending: ruleset not applied"
 	}
 	return "recovery: new transit dropped"

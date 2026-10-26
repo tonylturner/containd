@@ -58,7 +58,7 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 		recovery := ""
 		if bootFault != "" {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
-			recovery = managementRecoveryStatus(ctx, store, engine)
+			recovery = managementRecoveryStatus(ctx, engine)
 			cancel()
 		}
 		var listenerFaults []string

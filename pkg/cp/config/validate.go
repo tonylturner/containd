@@ -24,6 +24,9 @@ func (c *Config) Validate() error {
 	if err := UpgradeInPlace(c); err != nil {
 		return err
 	}
+	if err := validateVersion(c.Version); err != nil {
+		return err
+	}
 	if err := validateHostname(c.System.Hostname); err != nil {
 		return err
 	}

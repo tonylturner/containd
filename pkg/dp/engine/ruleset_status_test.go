@@ -51,3 +51,25 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 		t.Fatalf("status without enforcement = %+v, want no ruleset and no warnings", st)
 	}
 }
+
+// The status names the snapshot each apply attempted, applied or failed.
+func TestRulesetStatusRecordsSnapshotVersion(t *testing.T) {
+	applier := &recordingApplier{}
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApplyRules(context.Background(), rules.Snapshot{Version: "v1", Default: rules.ActionDeny}); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.RulesetStatus(); st.SnapshotVersion != "v1" || st.Error != "" {
+		t.Fatalf("status after apply = %+v", st)
+	}
+	applier.err = errors.New("nft apply failed")
+	if err := e.ApplyRules(context.Background(), rules.Snapshot{Version: "v2", Default: rules.ActionDeny}); err == nil {
+		t.Fatal("apply error swallowed")
+	}
+	if st := e.RulesetStatus(); st.SnapshotVersion != "v2" || st.Error == "" {
+		t.Fatalf("status after failed apply = %+v, want v2 with its error", st)
+	}
+}

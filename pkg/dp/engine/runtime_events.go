@@ -436,11 +436,12 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 	return st
 }
 
-func (e *Engine) setRulesetStatus(ruleset string, warnings []enforce.RuleWarning, err error) {
+func (e *Engine) setRulesetStatus(version, ruleset string, warnings []enforce.RuleWarning, err error) {
 	st := &RulesetStatus{
-		Ruleset:   ruleset,
-		AppliedAt: time.Now().UTC(),
-		Warnings:  warnings,
+		Ruleset:         ruleset,
+		SnapshotVersion: version,
+		AppliedAt:       time.Now().UTC(),
+		Warnings:        warnings,
 	}
 	if err != nil {
 		st.Error = err.Error()
