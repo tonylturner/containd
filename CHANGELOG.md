@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The IEC 104 Linux smoke (`scripts/smoke-iec104.sh`) also checks live
   inventory counts, APCI alerts and settled holdback-pressure gauges against
   their Prometheus series.
+- `show system ssh` reports the effective SSH password policy and where it
+  comes from (saved setting, lab default, bootstrap or environment).
 
 ### Changed
 
@@ -58,9 +60,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pass `CONTAIND_ALLOWED_ORIGINS` through starter/dev Compose and remove the
   ineffective `CONTAIND_MODE` knob from Compose environment lists and the example
   environment file; select split modes with command overrides.
+- An explicit SSH `allowPassword: false` now holds in lab mode, with an empty
+  or unreadable key directory and over environment defaults. Staging or
+  committing it is refused unless an admin has a usable authorized key, so the
+  setting cannot lock out SSH management. Committed SSH authentication
+  settings apply to new logins without a restart.
 
 ### Fixed
 
+- The SSH setup wizard stops and reports a failed password change instead of
+  auditing and announcing success.
+- SSH host keys rotate on schedule on a long-running server; existing sessions
+  keep their connection.
 - Staging a configuration edit no longer copies the IDS rule bank. With a
   30,000-rule bank, an edit drops from about 180 ms and 200 MB of allocation to
   well under 1 ms. Banks are stored once per running, candidate and previous

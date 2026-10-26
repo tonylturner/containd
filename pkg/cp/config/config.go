@@ -630,7 +630,8 @@ type NATConfig struct {
 }
 
 // PortForward defines a simple DNAT rule for inbound traffic.
-// Note: a corresponding firewall allow rule is still required for traffic to pass (forward chain).
+// An enabled forward also admits the translated traffic in the forward chain;
+// no separate firewall allow rule is needed.
 type PortForward struct {
 	ID             string   `json:"id"`
 	Enabled        bool     `json:"enabled"`
