@@ -78,13 +78,13 @@ func (m *AVManager) applyClamAV(ctx context.Context, cfg config.AVConfig) error 
 	if m.opts.ClamdPath == "" {
 		return errors.New("clamav mode: clamd is not installed in this engine image")
 	}
-	if _, err := parseFreshclamSchedule(cfg.ClamAV.UpdateSchedule); err != nil {
+	if _, err := freshclamInterval(cfg.ClamAV); err != nil {
 		return err
 	}
 	if cfg.ClamAV.FreshclamEnabled && m.opts.FreshclamPath == "" {
 		return errors.New("clamav mode: freshclam is not installed in this engine image")
 	}
-	if err := m.prepareDir(m.opts.DatabaseDir); err != nil {
+	if err := m.prepareDatabaseDir(); err != nil {
 		return fmt.Errorf("prepare database directory: %w", err)
 	}
 	if err := m.prepareDir(filepath.Dir(clamdSocket(cfg))); err != nil {

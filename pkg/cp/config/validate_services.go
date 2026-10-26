@@ -119,16 +119,32 @@ func validateAV(cfg AVConfig) error {
 	if cfg.MaxSizeBytes < 0 || cfg.MaxSizeBytes > maxAVScanBytes {
 		return fmt.Errorf("services.av.maxSizeBytes must be between 0 (no limit) and %d", maxAVScanBytes)
 	}
+	if cfg.BlockTTL < 0 {
+		return errors.New("services.av.blockTtlSeconds must not be negative; 0 selects 600")
+	}
+	if cfg.CacheTTL < 0 {
+		return errors.New("services.av.cacheTtl must not be negative; 0 selects 10m")
+	}
 	if mode == "clamav" {
-		// An empty schedule selects the default interval. The engine runs
-		// FreshClam on an interval, not a cron expression.
-		if s := strings.TrimSpace(cfg.ClamAV.UpdateSchedule); s != "" {
-			if d, err := time.ParseDuration(s); err != nil || d <= 0 {
-				return fmt.Errorf("services.av.clamav.updateSchedule %q must be a positive duration such as 4h", s)
-			}
+		if _, err := cfg.ClamAV.UpdateInterval(); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// UpdateInterval parses UpdateSchedule, the FreshClam interval. It is a
+// positive Go duration such as "4h", not a cron expression. A blank schedule
+// returns zero, which selects the engine's default interval.
+func (c ClamAVConfig) UpdateInterval() (time.Duration, error) {
+	s := strings.TrimSpace(c.UpdateSchedule)
+	if s == "" {
+		return 0, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d, nil
+	}
+	return 0, fmt.Errorf("services.av.clamav.updateSchedule %q must be a positive duration such as 4h", s)
 }
 
 const (

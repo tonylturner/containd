@@ -278,7 +278,10 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["clamav_custom_defs"] = customDefsPath(cfg)
 	out["freshclam_path"] = m.opts.FreshclamPath
 	out["freshclam_enabled"] = cfg.ClamAV.FreshclamEnabled
-	out["freshclam_interval"] = freshclamInterval(cfg.ClamAV.UpdateSchedule).String()
+	out["freshclam_interval"] = ""
+	if interval, err := freshclamInterval(cfg.ClamAV); err == nil {
+		out["freshclam_interval"] = interval.String()
+	}
 	out["freshclam_last"] = formatMaybe(m.fresh.last)
 	out["freshclam_error"] = m.fresh.err
 	out["freshclam_running"] = m.fresh.running
@@ -350,18 +353,6 @@ func (m *AVManager) daemonAccount() (name string, uid, gid int, ok bool) {
 		return "", 0, 0, false
 	}
 	return u.Username, uid, gid, true
-}
-
-// prepareDir creates dir and, when daemons run as their own account, gives
-// it to that account so clamd and FreshClam can write there.
-func (m *AVManager) prepareDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if _, uid, gid, ok := m.daemonAccount(); ok {
-		return os.Chown(dir, uid, gid)
-	}
-	return nil
 }
 
 func exitText(err error) string {
