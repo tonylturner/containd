@@ -14,7 +14,11 @@ import {
   parseWarningHeader,
   postJSONResult,
 } from "./api-request";
-import { normalizeICSCoverageList, type ICSCoverageRule } from "./api-ics-coverage";
+import {
+  normalizeICSCoverageReport,
+  type ICSCoverageReport,
+  type ICSCoverageRule,
+} from "./api-ics-coverage";
 
 import type {
   ApiResult,
@@ -43,8 +47,8 @@ export type RulesetPreview = {
     reason: string;
   };
   warnings?: RuleWarning[];
-  /** Coverage of the candidate's semantic ICS rules; empty when it has none. */
-  icsCoverage: ICSCoverageRule[];
+  /** Static coverage of the candidate's ICS rules; GET /dataplane/ics-coverage is the UI's source. */
+  icsCoverage?: ICSCoverageRule[];
   engineStatus?: RulesetEngineStatus;
   engineStatusError?: string;
 };
@@ -55,7 +59,8 @@ export type RulesetEngineStatus = {
   appliedAt?: string;
   error?: string;
   warnings?: RuleWarning[];
-  icsCoverage: ICSCoverageRule[];
+  snapshotVersion?: string;
+  icsCoverage?: ICSCoverageRule[];
 };
 
 export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
@@ -101,25 +106,15 @@ export async function getPcapStatus(): Promise<PcapStatus | null> {
   return await getJSON<PcapStatus>("/api/v1/pcap/status");
 }
 
+/** Admin-only: the compiled candidate ruleset; 400 when the candidate is invalid. */
 export async function getRulesetPreview(): Promise<ApiResult<RulesetPreview>> {
-  const res = await getJSONResult<Record<string, unknown> | null>("/api/v1/dataplane/ruleset");
-  if (!res.ok) return res;
-  const raw = res.data ?? {};
-  const preview = {
-    ...raw,
-    icsCoverage: normalizeICSCoverageList(raw.icsCoverage),
-  } as RulesetPreview;
-  const status = raw.engineStatus;
-  if (status && typeof status === "object" && !Array.isArray(status)) {
-    const st = status as Record<string, unknown>;
-    preview.engineStatus = {
-      ...st,
-      icsCoverage: normalizeICSCoverageList(st.icsCoverage),
-    } as RulesetEngineStatus;
-  } else {
-    delete preview.engineStatus;
-  }
-  return { ok: true, data: preview };
+  return await getJSONResult<RulesetPreview>("/api/v1/dataplane/ruleset");
+}
+
+/** Candidate and applied ICS coverage for any authenticated user. */
+export async function getICSCoverage(): Promise<ApiResult<ICSCoverageReport>> {
+  const res = await getJSONResult<unknown>("/api/v1/dataplane/ics-coverage");
+  return res.ok ? { ok: true, data: normalizeICSCoverageReport(res.data) } : res;
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {

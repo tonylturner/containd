@@ -1,25 +1,28 @@
 import {
+  isExclusionReason,
   sameICSCoverage,
   type ICSCoverageReason,
+  type ICSCoverageReport,
   type ICSCoverageRule,
   type ICSCoverageState,
   type ICSEnforcementHealth,
 } from "../../lib/api-ics-coverage";
-import type { RulesetPreview } from "../../lib/api";
 
 type BadgeVariant = "success" | "warning" | "error" | "neutral";
 
-/** Where per-rule coverage comes from: the admin-only ruleset preview. */
+/** Per-rule coverage from GET /api/v1/dataplane/ics-coverage. */
 export type ICSCoverageView =
   | { status: "loading" }
-  | { status: "restricted" }
   | { status: "unavailable"; error: string }
   | {
       status: "loaded";
-      candidate: Map<string, ICSCoverageRule>;
-      // Null when the engine's applied status could not be read.
+      // Null, with candidateError, when the candidate has no coverage.
+      candidate: Map<string, ICSCoverageRule> | null;
+      candidateError?: string;
+      // Null, with appliedError, when the applied rules are unknown.
       applied: Map<string, ICSCoverageRule> | null;
       appliedError?: string;
+      appliedAt?: string;
       applyError?: string;
     };
 
@@ -59,15 +62,18 @@ function byRule(list: ICSCoverageRule[]): Map<string, ICSCoverageRule> {
   return new Map(list.map((r) => [r.ruleId, r]));
 }
 
-/** Builds the coverage view from a ruleset preview response. */
-export function coverageViewFromPreview(preview: RulesetPreview): ICSCoverageView {
-  const status = preview.engineStatus;
+const NOT_REPORTED = "not reported by the server";
+
+/** Builds the coverage view; a side without its list is unknown, never empty. */
+export function coverageViewFromReport(report: ICSCoverageReport): ICSCoverageView {
   return {
     status: "loaded",
-    candidate: byRule(preview.icsCoverage),
-    applied: status ? byRule(status.icsCoverage) : null,
-    appliedError: status ? undefined : preview.engineStatusError || "the engine reported no applied status",
-    applyError: status?.error || undefined,
+    candidate: report.candidate ? byRule(report.candidate) : null,
+    candidateError: report.candidate ? undefined : report.candidateError || NOT_REPORTED,
+    applied: report.applied ? byRule(report.applied) : null,
+    appliedError: report.applied ? undefined : report.engineStatusError || NOT_REPORTED,
+    appliedAt: report.appliedAt,
+    applyError: report.applyError,
   };
 }
 
@@ -80,36 +86,42 @@ function line(prefix: string, rule: ICSCoverageRule): CoverageLine {
 }
 
 /**
- * The coverage lines of one rule: the applied state, then the candidate's when
- * it differs. Never derives protection from the configured mode.
+ * The coverage lines of one rule: the applied state with every reason,
+ * runtime faults included, then the candidate's when its configuration
+ * differs. Never derives protection from the configured mode.
  */
 export function describeRuleCoverage(view: ICSCoverageView, ruleId: string): CoverageLine[] {
   switch (view.status) {
     case "loading":
       return [{ label: "coverage: checking", variant: "neutral", reasons: [] }];
-    case "restricted":
-      return [{ label: "coverage: admin only", variant: "neutral", reasons: [] }];
     case "unavailable":
       return [{ label: "coverage unavailable", variant: "neutral", reasons: [] }];
   }
-  const candidate = view.candidate.get(ruleId);
   const applied = view.applied?.get(ruleId);
   const lines: CoverageLine[] = [];
   if (applied) lines.push(line("applied", applied));
   else if (view.applied) lines.push({ label: "not applied", variant: "neutral", reasons: [] });
   else lines.push({ label: "applied: unknown", variant: "neutral", reasons: [] });
+  if (!view.candidate) {
+    lines.push({ label: "candidate: unavailable", variant: "neutral", reasons: [] });
+    return lines;
+  }
+  const candidate = view.candidate.get(ruleId);
   if (candidate && !(applied && sameICSCoverage(applied, candidate))) {
     lines.push(line("candidate", candidate));
   }
   return lines;
 }
 
-/** A reason as one sentence, with the exclusion and its runtime matches. */
+/**
+ * A reason as one sentence, with the exclusion and the connections it
+ * exempted; a runtime fault is marked as a fact about the running engine.
+ */
 export function formatReason(reason: ICSCoverageReason): string {
-  let text = reason.message;
+  let text = reason.runtime ? `Running engine: ${reason.message}` : reason.message;
   if (reason.value && !text.includes(reason.value)) text += ` (${reason.value})`;
-  if (reason.matches) {
-    text += ` — ${reason.matches} ${reason.matches === 1 ? "flow" : "flows"} bypassed inspection since apply`;
+  if (reason.matches && isExclusionReason(reason)) {
+    text += ` \u2014 ${reason.matches} ${reason.matches === 1 ? "connection" : "connections"} exempted since the last apply`;
   }
   return text;
 }
