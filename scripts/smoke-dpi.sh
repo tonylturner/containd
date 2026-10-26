@@ -7,14 +7,20 @@ set -euo pipefail
 # Both capture modes assert: Modbus FC 3 reads pass, including a read split
 # across two TCP segments and two reads coalesced into one; DNP3 FC 1 reads
 # pass, the outstation's response and unsolicited data reach the master, and
-# DPI decodes the read; a denied Modbus write matches its rule and later
-# writes are blocked; the 10-minute dynamic block appears in nft
-# block_flows.
+# DPI decodes the read; a Modbus write matches its deny rule; the candidate
+# preview, the applied engine status and /health report the ICS rules'
+# coverage.
 #
-# SMOKE_DPI_CAPTURE=afpacket (default) observes traffic on the interfaces;
-# the first denied write reaches the server and only later writes are
-# blocked. SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
-# (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) and also asserts
+# SMOKE_DPI_CAPTURE=afpacket (default) observes copies of the traffic on the
+# interfaces, which cannot stop a command. It asserts that management
+# refuses the ICS rules in enforce mode without an inline path, then runs
+# the traffic with the rules in learn mode: they report monitoring, denied
+# writes reach the server, and nothing is blocked.
+#
+# SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
+# (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) in enforce mode. The rules
+# report enforcing; later writes of a denied flow are blocked and the
+# 10-minute dynamic block appears in nft block_flows. It also asserts
 # first-actuation prevention, from server state: the
 # first Modbus FC 6 write on a fresh connection and after a read on a
 # persistent connection, the first Modbus FC 8, and the first complete DNP3
@@ -40,11 +46,11 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=17
+TESTS_EXPECTED=22
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=24 ;;
+  nfqueue) TESTS_EXPECTED=26 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -262,6 +268,58 @@ probe_dnp3_control() {
   fi
 }
 
+# assert_enforce_refused CFG: without an inline path, saving the ICS rules in
+# enforce mode must fail validation with an error that names a rule and the
+# fix.
+assert_enforce_refused() {
+  local code body
+  body="$WORK_DIR/enforce-refused.json"
+  code=$(curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -o "$body" -H "$AUTH_HEADER" \
+    -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- <<<"$1" || true)
+  if [[ "$code" == "400" ]] && jq -e '.error | contains("rule smoke-") and contains("dataplane.nfqueueGroup")' "$body" >/dev/null 2>&1; then
+    pass "Enforce without NFQUEUE refused: $(jq -r '.error' "$body")"
+  else
+    check_fail "Enforce without NFQUEUE was not refused (HTTP $code): $(head -c 300 "$body")"
+  fi
+}
+
+# assert_ics_coverage STATE: every ICS rule reports STATE in the candidate
+# preview and in the applied engine status, and /health summarizes it. The
+# NFQUEUE bind is asynchronous, so the applied state is awaited.
+assert_ics_coverage() {
+  local state=$1 filter
+  # shellcheck disable=SC2016 # $s is a jq variable
+  filter='(.icsCoverage | length) == 5 and all(.icsCoverage[]; .state == $s)
+    and (.engineStatus.icsCoverage | length) == 5 and all(.engineStatus.icsCoverage[]; .state == $s)'
+  for _ in $(seq 1 20); do
+    if $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
+    pass "Candidate and applied ICS coverage: every rule $state"
+  else
+    check_fail "ICS coverage is not $state: $($CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -c '{icsCoverage, applied: .engineStatus.icsCoverage}' | head -c 600)"
+  fi
+  if $CURL "${BASE}/health" | jq -e --arg s "$state" '.icsEnforcement.state == $s' >/dev/null 2>&1; then
+    pass "Health icsEnforcement reports $state"
+  else
+    check_fail "Health icsEnforcement is not $state: $($CURL "${BASE}/health" | jq -c '.icsEnforcement')"
+  fi
+}
+
+# assert_no_dynamic_block SRC PORT: learn mode never installs a block.
+assert_no_dynamic_block() {
+  local src=$1 port=$2 set
+  set=$(compose exec -T engine nft list set inet containd block_flows 2>&1 | tr -d '\r')
+  if grep -Fq "$src . $MODBUS_DST . tcp . $port" <<<"$set"; then
+    check_fail "Learn mode installed a dynamic block for $src -> $MODBUS_DST:$port"
+  else
+    pass "Learn mode installed no dynamic block for $src -> $MODBUS_DST:$port"
+  fi
+}
+
 # assert_dynamic_block SRC PORT: the US DENY path still installs its
 # 10-minute dynamic block (src . dst . proto . dport) in nft block_flows.
 assert_dynamic_block() {
@@ -415,6 +473,17 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
       ]
 ')
 
+# AF_PACKET has no inline path: enforce is refused, so the traffic runs in
+# learn mode.
+if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
+  log "Checking that enforce without NFQUEUE is refused..."
+  assert_enforce_refused "$UPDATED_CFG"
+  UPDATED_CFG=$(jq '.dataPlane.dpiMode = "learn"' <<<"$UPDATED_CFG")
+  COVERAGE_STATE=monitoring
+else
+  COVERAGE_STATE=enforcing
+fi
+
 DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataPlane')
 
 tmp_cfg_resp=$(mktemp)
@@ -428,6 +497,7 @@ fi
 rm -f "$tmp_cfg_resp" "$tmp_cfg_err"
 
 apply_snapshot
+assert_ics_coverage "$COVERAGE_STATE"
 
 START_TS=$(timestamp)
 export START_TS
@@ -544,11 +614,17 @@ if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
   probe_dnp3_control operate-nr 6 "${LAN_NET}.9" 0
 fi
 
-log "Triggering Modbus write enforcement..."
+log "Triggering a denied Modbus write..."
 if compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 502 >"$WORK_DIR/modbus-write-trigger.out" 2>"$WORK_DIR/modbus-write-trigger.err"; then
-  log "Initial Modbus write completed before dynamic block took effect ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
-else
+  if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
+    log "Initial Modbus write completed ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
+  else
+    pass "Learn: the denied Modbus write reaches the server ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
+  fi
+elif [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
   log "Initial Modbus write blocked immediately ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err"))"
+else
+  check_fail "Learn: the denied Modbus write was blocked: $(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err")"
 fi
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
@@ -558,18 +634,26 @@ if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
 fi
 pass "Modbus write matched the deny rule"
 
-log "Testing follow-up Modbus write is blocked..."
-if compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 502 >"$WORK_DIR/modbus-write-blocked.out" 2>"$WORK_DIR/modbus-write-blocked.err"; then
-  log "Unexpected allow: follow-up Modbus write succeeded"
-  cat "$WORK_DIR/modbus-write-blocked.out"
-  exit 1
-else
-  pass "Follow-up Modbus write blocked after enforcement"
-fi
-
-assert_dynamic_block "$MODBUS_SRC" 502
+FOLLOW_UP_STATUS=0
+compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 502 >"$WORK_DIR/modbus-write-blocked.out" 2>"$WORK_DIR/modbus-write-blocked.err" || FOLLOW_UP_STATUS=$?
 if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
+  log "Testing follow-up Modbus write is blocked..."
+  if [[ $FOLLOW_UP_STATUS -eq 0 ]]; then
+    log "Unexpected allow: follow-up Modbus write succeeded"
+    cat "$WORK_DIR/modbus-write-blocked.out"
+    exit 1
+  fi
+  pass "Follow-up Modbus write blocked after enforcement"
+  assert_dynamic_block "$MODBUS_SRC" 502
   assert_dynamic_block "${LAN_NET}.8" 20000
+else
+  log "Testing follow-up Modbus write is not blocked in learn mode..."
+  if [[ $FOLLOW_UP_STATUS -eq 0 ]]; then
+    pass "Learn: follow-up Modbus write is not blocked"
+  else
+    check_fail "Learn: follow-up Modbus write failed (exit $FOLLOW_UP_STATUS): $(tr -d '\r' <"$WORK_DIR/modbus-write-blocked.err")"
+  fi
+  assert_no_dynamic_block "$MODBUS_SRC" 502
 fi
 
 if ! wait_for_jq "${BASE}/stats/protocols" 'any(.[]; .protocol == "modbus" and .packetCount >= 2 and .readCount >= 1 and .writeCount >= 1)'; then
@@ -609,6 +693,14 @@ if [[ -z "$PERSIST_PORT" ]] || ! tr -d '\r' <"$WORK_DIR"/modbus-persistent.out |
   exit 1
 fi
 pass "Persistent connection read reply received (client port ${PERSIST_PORT})"
+if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
+  if tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 3p | grep -q '^WRITE_OK' &&
+    tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 4p | grep -q '^READ_OK'; then
+    pass "Learn: the write and the following read complete on the persistent connection"
+  else
+    check_fail "Learn: the persistent connection did not complete write and read: $(tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | tr '\n' ' ')"
+  fi
+fi
 
 persistent_write_filter=$(cat <<'EOF'
 any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.PERSIST_PORT | tonumber) and .attributes.function_code == 6 and .attributes.is_write == true and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))

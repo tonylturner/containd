@@ -40,7 +40,7 @@ func (e *Engine) observeDomainExclusions(state *flow.State, pkt *dpi.ParsedPacke
 	if d == nil || state == nil || pkt == nil {
 		return
 	}
-	if state.Key.Proto == 6 && (state.Key.SrcPort == iec104Port || state.Key.DstPort == iec104Port) {
+	if isIECFlow(state) {
 		return
 	}
 	d.mu.Lock()
@@ -85,6 +85,7 @@ func (e *Engine) observeDomainExclusions(state *flow.State, pkt *dpi.ParsedPacke
 	rule := e.domainRule(name)
 	d.decisions[state] = rule != ""
 	if rule != "" {
+		e.countDomainExclusion(rule)
 		e.recordDomainCounter("dpi_exclusion_" + reason)
 		slog.Debug("DPI domain exclusion matched", "rule", rule, "reason", reason, "name", name, "flow", state.Key.Hash())
 	}
@@ -94,7 +95,7 @@ func (e *Engine) domainExcluded(state *flow.State) bool {
 	if e.domains == nil || state == nil {
 		return false
 	}
-	if state.Key.Proto == 6 && (state.Key.SrcPort == iec104Port || state.Key.DstPort == iec104Port) {
+	if isIECFlow(state) {
 		return false
 	}
 	client := e.domainClientState(state)

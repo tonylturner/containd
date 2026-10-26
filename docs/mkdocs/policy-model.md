@@ -67,8 +67,13 @@ rules, which are inactive (see
 [Identity and schedule predicates](#identity-and-schedule-predicates)); its
 maintenance access stays closed at all times.
 
+Applying a template with `mode: "enforce"` is refused while
+`dataplane.nfqueueGroup` is 0, as for any ICS rule in enforce mode.
+
 Use `POST /api/v1/firewall/rules/preview` to inspect matches before committing;
-preview is not a live packet-delivery test.
+preview is not a live packet-delivery test. For a rule with an ICS protocol it
+also reports the rule's coverage (see
+[ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage)).
 
 The admin-only `GET /api/v1/dataplane/ruleset` previews the candidate nftables
 ruleset through the live engine, without applying it. It uses the candidate's

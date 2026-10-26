@@ -34,13 +34,16 @@ the predicate's condition. See
 
 ## Capture is not inline enforcement
 
-- **AF_PACKET** observes packet copies. Later dynamic blocks can affect subsequent
-  traffic, but cannot prevent delivery of a packet already observed.
+- **AF_PACKET** observes packet copies and cannot prevent delivery of a packet
+  already observed. ICS rules in effective enforce mode are therefore rejected
+  at validation while `nfqueueGroup` is 0; use learn mode with AF_PACKET.
 - **NFQUEUE** holds selected packets for userspace verdicts. Set the candidate
   dataplane's `nfqueueGroup` to a nonzero queue (for example 101), preserve the
   rest of the dataplane settings, and commit. The queue and rules must be active
-  on the routed packet path. Generic DPI can cache per-flow verdicts; IEC 104
-  retains session-level inspection.
+  on the routed packet path. A denied command is dropped inline; later packets
+  of the flow are blocked by the cached verdict and a temporary flow block.
+  Generic DPI can cache per-flow verdicts; IEC 104 retains session-level
+  inspection.
 
 DPI effective mode is per-rule `ics.mode`, then global `dpiMode`, then `learn`.
 Learn suppresses the corresponding DPI denial, **not** independent nftables
@@ -54,6 +57,47 @@ TCP rule. Enforce-mode tracking exhaustion is fail closed; learn-mode exhaustion
 accepts new connections without inspection. These are protocol-specific limits,
 not a universal fail-open/fail-closed guarantee. AV has separate failure settings;
 see [Config Format](config-format.md).
+
+## ICS rule coverage
+
+Every firewall rule that names an ICS protocol reports its coverage: whether a
+prohibited command is actually stopped, not only which mode is configured.
+
+| State | Meaning |
+| --- | --- |
+| `monitoring` | The effective mode is learn: the rule observes by design. |
+| `enforcing` | An inline path inspects every flow in the rule's scope. |
+| `partial` | Enforcing, but an exclusion lets some flows in scope skip inspection. |
+| `not_enforcing` | The effective mode is enforce, but nothing stops a prohibited command. |
+
+Each lowered state carries reasons with a code and a message:
+
+| Code | Cause |
+| --- | --- |
+| `no-inline-path` | `nfqueueGroup` is 0 (validation prevents this; a direct engine apply can still carry it). |
+| `enforcement-disabled` | `dataplane.enforcement` is false, so nothing steers traffic to the engine. |
+| `dpi-disabled` | The DPI master switch is off. IEC 104 envelopes are inspected regardless. |
+| `decoder-disabled` | The rule's protocol decoder is off in `dpiIcsProtocols`. |
+| `queue-unavailable` | The engine does not hold the configured queue; the kernel drops the rule's traffic instead of inspecting it. |
+| `exclusion-overlap` | An IP or CIDR exclusion meets the rule's addresses (not IEC 104). |
+| `domain-exclusion` | A domain exclusion can resolve into the rule's scope (not IEC 104). |
+
+Exclusion reasons name the exclusion in `value`. A learn rule keeps
+`monitoring` and lists the reasons that limit what it observes. Unrelated
+exclusions never lower a rule. Coverage appears in:
+
+- `GET /api/v1/dataplane/ruleset`: `icsCoverage` for the candidate, from its
+  settings alone, and `engineStatus.icsCoverage` for the applied rules under the
+  running engine's settings and state. Applied exclusion reasons carry
+  `matches`, the connections that exclusion has exempted from inspection since
+  the rules were last applied.
+- `POST /api/v1/firewall/rules/preview`: `icsCoverage` for the previewed rule
+  under the running engine.
+- `GET /api/v1/health`: `icsEnforcement`, counts only (see
+  [API Reference](api-reference.md)).
+
+Generic decoders still pass a packet whose payload they cannot parse; only
+IEC 104 fails closed on malformed traffic.
 
 ## Actions and temporary blocks
 

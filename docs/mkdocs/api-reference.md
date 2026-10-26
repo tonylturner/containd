@@ -145,6 +145,12 @@ A persisted replay/recovery fault survives management restarts until a
 successful apply and takes precedence over configured mode. Its generic
 `reason` does not expose policy diagnostics without authentication; the commit
 response carries details. There is no separate config-apply-error field.
+`icsEnforcement` summarizes the applied ICS rule coverage with `state` and the
+counts `enforcing`, `partial`, `notEnforcing` and `monitoring`; it names no rule
+or exclusion. `state` is `none` without ICS rules, the worst state among
+enforce-mode rules, `monitoring` when every ICS rule is in learn mode, or
+`unknown` when the engine cannot be read. `enforcement` stays the nftables-level
+state. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
 and `reason`, describing IEC104 queue/reset health independently. An inactive
 IEC104 policy is not proof nft is available. A successful commit does not
@@ -384,7 +390,9 @@ DPI mode and per-protocol settings are staged via the API or UI. Use
 `GET /api/v1/dataplane`, edit the returned settings, then `POST /api/v1/dataplane`
 and commit. POST replaces the settings rather than merging them. Fields include:
 
-- `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy enforcement)
+- `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy
+  enforcement); any other value is rejected. ICS rules that resolve to enforce
+  need a nonzero `nfqueueGroup`.
 - `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)
 
 See [ICS DPI](ics-dpi.md) for details.

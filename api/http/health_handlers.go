@@ -32,7 +32,8 @@ const engineHealthTimeout = time.Second
 var engineUnreachable = dpengine.IEC104Enforcement{Active: false, Healthy: false, Reason: "engine unreachable"}
 
 // healthHandler is unauthenticated liveness and always returns 200.
-// IEC104 queue/reset health remains separate from general ruleset state.
+// IEC104 queue/reset health remains separate from general ruleset state, and
+// semantic ICS rule coverage (icsEnforcement) from the nft-level state.
 func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// One budget for all observations, not a fresh timeout per dependency.
@@ -51,7 +52,8 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 				forwarding = health.IPv4Forwarding
 			}
 		}
-		enforcement := enforcementHealth(ctx, snapshot, snapshotErr, engine)
+		ruleset := observeRuleset(ctx, engine)
+		enforcement := enforcementHealth(snapshot, snapshotErr, ruleset)
 		binding := gin.H{"state": "unknown"}
 		if snapshotErr == nil && snapshot.Config != nil && engine != nil {
 			cfg := snapshot.Config
@@ -81,6 +83,7 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			"time":              time.Now().UTC().Format(time.RFC3339Nano),
 			"iec104Enforcement": iec,
 			"enforcement":       enforcement,
+			"icsEnforcement":    icsEnforcementHealth(ruleset),
 			"ipv4Forwarding":    forwarding,
 			"managementBinding": binding,
 		})
