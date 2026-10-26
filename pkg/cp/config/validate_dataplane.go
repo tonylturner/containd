@@ -15,6 +15,9 @@ func validateDataPlane(dp DataPlaneConfig) error {
 	if err := validateDomainExclusions(dp.DPIExclusions); err != nil {
 		return err
 	}
+	if m := dp.DPIMode; m != "" && m != "learn" && m != "enforce" {
+		return fmt.Errorf("dataplane.dpiMode invalid %q (want learn or enforce)", m)
+	}
 	for _, name := range dp.CaptureInterfaces {
 		if name == "" {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")

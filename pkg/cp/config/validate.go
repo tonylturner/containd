@@ -57,6 +57,9 @@ func (c *Config) Validate() error {
 	if err := validateIEC104Policy(c); err != nil {
 		return err
 	}
+	if err := validateICSEnforcePath(c); err != nil {
+		return err
+	}
 	if err := validatePCAP(c.PCAP); err != nil {
 		return err
 	}
