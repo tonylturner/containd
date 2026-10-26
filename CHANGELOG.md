@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `dataplane.enforceTable` must start with a letter or underscore and be at most
+  248 characters, which is what nftables can address. Revocations now work with
+  table names that contain upper case or hyphens.
 - The engine is the only antivirus owner in split and combined deployments.
   Management's AV status, update and custom-definition routes delegate to the
   engine and return 503 when it is unreachable. A cron-style
@@ -128,6 +131,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The engine no longer flushes the whole nftables ruleset on every apply and
+  at boot. Docker's embedded DNS (so CLI `diag`, FreshClam and other name
+  lookups), the DHCP redirect and any other table in the namespace now survive
+  commits. The policy now lives in `inet <enforceTable>_policy` (default
+  `inet containd_policy`) and is replaced atomically. Temporary blocks and
+  connection revocations stay in `inet <enforceTable>` (default
+  `inet containd`, so `block_flows` keeps its name) and survive commits. The
+  first apply after an upgrade removes the older policy from `inet containd`
+  and carries existing flow blocks over with their remaining timeout.
+- Connection revocations never refuse access to the management listeners from
+  the management interfaces or through the reserved management path.
+- Disabling enforcement removes containd's nftables tables, and renaming
+  `enforceTable` replaces them, so the kernel matches the reported state.
+- The DHCP server's redirect applies when its table does not exist yet. Before,
+  the DHCP server never started. Failures to remove the redirect are reported.
 - Antivirus scanning reports what the scanner said: clamd replies are parsed in
   NUL mode, ICAP RESPMOD and OPTIONS follow RFC 3507, truncated or unknown
   replies are errors instead of clean, and `timeoutSec`/`maxSizeBytes` apply to

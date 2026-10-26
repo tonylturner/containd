@@ -60,6 +60,8 @@ commit-confirmed and rollback.
 ## Capabilities
 
 - Zone-based nftables firewalling and SNAT/DNAT: [policy model](docs/mkdocs/policy-model.md).
+  containd changes only its own tables (`inet containd`, `inet containd_policy`,
+  `inet containd_dhcp`) and leaves other rules, such as Docker's DNS, alone.
 - ICS protocol inspection, including IEC 60870-5-104: [ICS DPI](docs/mkdocs/ics-dpi.md).
 - DNS- and TLS SNI-based [DPI domain exclusions](docs/mkdocs/ics-dpi.md#dpi-exclusions).
 - Candidate/running configuration with commit-confirmed and rollback: [config format](docs/mkdocs/config-format.md).
