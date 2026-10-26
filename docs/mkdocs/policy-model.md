@@ -46,3 +46,5 @@ from current queue ownership. A later queue bind or loss can change steering
 before commit. If the engine cannot compile, preview reports an error rather
 than guessing with compiler defaults.
 Preview does not enable enforcement or prove that a kernel apply will succeed.
+When candidate enforcement is disabled, preview returns no nftables ruleset and
+states plainly that enforcement is disabled and nothing would be applied.

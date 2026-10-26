@@ -5,6 +5,7 @@ package engineapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,41 @@ func TestRulesetPreviewSettingsMapping(t *testing.T) {
 		if err != nil || !strings.Contains(preview.Ruleset, "table inet "+want+" {") {
 			t.Fatalf("preview=%+v err=%v", preview, err)
 		}
+	}
+}
+
+func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
+	for _, runningEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("running-enforcement=%v", runningEnabled), func(t *testing.T) {
+			dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: runningEnabled}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.DefaultConfig()
+			cfg.DataPlane = config.DataPlaneConfig{Enforcement: false, EnforceTable: "never_applied", NFLogGroup: 205, NFQueueGroup: 209}
+			body, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := dp.RulesetStatus()
+			rec := httptest.NewRecorder()
+			previewRulesetHandler(dp).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/ruleset/preview", bytes.NewReader(body)))
+			var got map[string]json.RawMessage
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if _, exists := got["ruleset"]; exists {
+				t.Fatalf("disabled candidate returned a ruleset: %s", rec.Body.String())
+			}
+			var runtime engine.RulesetPreviewRuntime
+			if json.Unmarshal(got["runtime"], &runtime) != nil || runtime.IEC104EnvelopeOpen ||
+				runtime.Reason != "Enforcement is disabled; nothing would be applied" {
+				t.Fatalf("runtime = %+v", runtime)
+			}
+			if dp.CurrentRules() != nil || dp.RulesetStatus() != before {
+				t.Fatal("disabled preview changed live enforcement")
+			}
+		})
 	}
 }
 

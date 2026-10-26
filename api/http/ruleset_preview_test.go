@@ -32,7 +32,7 @@ func (e *rulesetPreviewEngine) PreviewRuleset(_ context.Context, cfg *config.Con
 
 func TestRulesetPreviewDelegatesCandidate(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "custom", NFLogGroup: 205, NFQueueGroup: 209}
+	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, EnforceTable: "custom", NFLogGroup: 205, NFQueueGroup: 209}
 	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{}, result: dpengine.RulesetPreview{Ruleset: "engine-compiled", Runtime: dpengine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}}}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -42,6 +42,28 @@ func TestRulesetPreviewDelegatesCandidate(t *testing.T) {
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil ||
 		!reflect.DeepEqual(got, engine.result) || !reflect.DeepEqual(engine.cfg, cfg) {
 		t.Fatalf("status=%d body=%s forwarded=%+v", rec.Code, rec.Body.String(), engine.cfg)
+	}
+}
+
+func TestRulesetPreviewEnforcementDisabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DataPlane.Enforcement = false
+	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{}, result: dpengine.RulesetPreview{
+		Runtime: dpengine.RulesetPreviewRuntime{Reason: "Enforcement is disabled; nothing would be applied"},
+	}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil)
+	getRulesetPreviewHandler(&mockStore{cfg: cfg}, engine)(c)
+	var got map[string]json.RawMessage
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, exists := got["ruleset"]; exists {
+		t.Fatalf("disabled candidate returned a ruleset: %s", rec.Body.String())
+	}
+	if !strings.Contains(string(got["runtime"]), "Enforcement is disabled; nothing would be applied") {
+		t.Fatalf("disabled status missing: %s", rec.Body.String())
 	}
 }
 

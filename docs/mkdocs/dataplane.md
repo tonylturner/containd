@@ -47,6 +47,8 @@ compiler construction as apply on an isolated candidate. Its runtime sample
 describes the IEC 104 queue-ownership decision, not a promise about later queue
 ownership or the last installed ruleset. Preview never binds queues or changes
 live enforcement.
+With enforcement disabled in the candidate, preview skips nftables compilation
+and reports that nothing would be applied.
 
 For enablement, privileges, capture modes, and failure limits, see
 [Enforcement](dataplane-enforcement.md). For staging and commit semantics, see

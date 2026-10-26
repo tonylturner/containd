@@ -36,6 +36,13 @@ func previewRulesetHandler(dp *engine.Engine) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if !cfg.DataPlane.Enforcement {
+			writeJSON(w, engine.RulesetPreview{
+				Snapshot: snap,
+				Runtime:  engine.RulesetPreviewRuntime{Reason: "Enforcement is disabled; nothing would be applied"},
+			})
+			return
+		}
 		preview, err := dp.PreviewRuleset(snap, compilerSettings(cfg.DataPlane))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

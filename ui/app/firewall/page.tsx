@@ -420,7 +420,8 @@ export default function FirewallPage() {
         )}
         {rulesetPreview?.runtime && (
           <p className="mt-3 text-xs text-[var(--text-muted)]">
-            {rulesetPreview.runtime.reason}. Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering.
+            {rulesetPreview.runtime.reason}.
+            {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
           </p>
         )}
         {rulesetPreview?.ruleset && (

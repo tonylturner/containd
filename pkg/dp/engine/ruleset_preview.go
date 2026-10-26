@@ -7,8 +7,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// RulesetPreviewRuntime describes the envelope decision sampled for a preview,
-// not the state last installed in the kernel.
+// RulesetPreviewRuntime describes the envelope decision sampled for a preview
+// or why enforcement would apply nothing, not the last installed kernel state.
 type RulesetPreviewRuntime struct {
 	IEC104EnvelopeOpen bool   `json:"iec104EnvelopeOpen"`
 	Reason             string `json:"reason"`
@@ -16,7 +16,7 @@ type RulesetPreviewRuntime struct {
 
 type RulesetPreview struct {
 	Snapshot rules.Snapshot        `json:"snapshot"`
-	Ruleset  string                `json:"ruleset"`
+	Ruleset  string                `json:"ruleset,omitempty"`
 	Runtime  RulesetPreviewRuntime `json:"runtime"`
 }
 

@@ -59,8 +59,10 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 
 		resp := gin.H{
 			"snapshot": preview.Snapshot,
-			"ruleset":  preview.Ruleset,
 			"runtime":  preview.Runtime,
+		}
+		if preview.Ruleset != "" {
+			resp["ruleset"] = preview.Ruleset
 		}
 		if engine != nil {
 			type rulesetStatusClient interface {
