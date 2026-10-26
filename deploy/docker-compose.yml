@@ -122,6 +122,8 @@ services:
       # - "127.0.0.1:${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
     volumes:
       - ./data:/data
+      # ClamAV signature databases survive container replacement.
+      - clamav-db:/var/lib/clamav
     devices:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
@@ -232,3 +234,6 @@ networks:
     ipam:
       config:
         - subnet: ${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}
+
+volumes:
+  clamav-db:

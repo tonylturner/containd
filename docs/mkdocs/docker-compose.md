@@ -186,6 +186,12 @@ The bind-mount source depends on the Compose file location:
 
 Back up the directory for the layout you actually run, not an unrelated `data/`.
 
+The starter and dev Compose files also mount the named volume `clamav-db` on
+`/var/lib/clamav`, so the official ClamAV databases survive container
+replacement instead of being downloaded again. In a split deployment, mount a
+volume there on the engine service. It holds no configuration and need not be
+backed up; `docker compose down -v` removes it.
+
 ### SSH bootstrap
 
 To avoid “chicken/egg” provisioning, you can seed an admin SSH key (authorized_keys line):

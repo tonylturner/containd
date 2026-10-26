@@ -129,7 +129,9 @@ ClamAV mode:
   installs it in the database directory and reloads clamd. Deleting a
   definition removes it and reloads clamd.
 - Official databases live in `/var/lib/clamav` inside the engine container.
-  Mount a volume there to keep them across container replacement.
+  The Compose files mount the named volume `clamav-db` there, so replacing
+  the container does not download them again. A split deployment mounts such
+  a volume on the engine service; management never uses the databases.
 
 Applying AV fails, and the commit reports a `services:` warning, when the
 backend is missing, clamd exits or does not answer `PING` within three
