@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
@@ -26,12 +27,14 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/mp/sshserver"
 	"go.uber.org/zap"
 )
 
 type Options struct {
 	Reservation *mgmtpath.Reservation
 	Combined    bool
+	Reload      <-chan struct{}
 }
 
 type mgmtStores struct {
@@ -106,7 +109,13 @@ func Run(ctx context.Context, opts Options) error {
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list))
+	var sshServer atomic.Pointer[sshserver.Server]
+	resetSessions := httpapi.FactoryResetSessions(func(_ context.Context, initiator string) {
+		if srv := sshServer.Load(); srv != nil {
+			srv.RevokeConnections(initiator)
+		}
+	})
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -130,13 +139,15 @@ func Run(ctx context.Context, opts Options) error {
 	serveStaticUI(router)
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()
+	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
+	defer stopReload()
 
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
 	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault)
+	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault, sshServer.Store)
 	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 

@@ -33,7 +33,7 @@ type sshRuntimeConfig struct {
 	baseURL        string
 }
 
-func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error)) (string, bool) {
+func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
 	configureSSHPolicy(store, userStore)
 	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
 
@@ -92,6 +92,9 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
+	for _, notify := range ready {
+		notify(srv)
+	}
 
 	if rt.bootstrapKey != "" {
 		if err := srv.SeedAuthorizedKey(rt.bootstrapUser, rt.bootstrapKey); err != nil {

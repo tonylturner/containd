@@ -1851,8 +1851,13 @@ components:
           type: string
         loggedOut:
           type: boolean
+          description: The auth cookie is cleared and the client should log out; lab web/API tokens are not revoked.
         message:
           type: string
+        warnings:
+          type: array
+          description: Auxiliary apply or audit cleanup failures; nonempty means runtime convergence is incomplete.
+          items: {type: string}
   parameters:
     pathId:
       name: id
@@ -2123,7 +2128,7 @@ paths:
 
   /system/factory-reset:
     post:
-      summary: Reset appliance databases (admin)
+      summary: Reset appliance configuration and sessions (admin)
       description: >
         Preflights the autobound appliance defaults (shared with first boot) against
         the immutable management reservation before wiping users, sessions, config,
@@ -2137,6 +2142,15 @@ paths:
         and users are separate databases, so that failure does not undo the
         successfully applied configuration. Audit is cleared after runtime apply.
         A successful reset clears the boot fault and applies the defaults.
+        The response warnings array and message report incomplete convergence when
+        auxiliary applies fail; HTTP 200 alone does not guarantee convergence.
+        Session-backed web/API tokens are revoked outside lab mode. Lab mode
+        never looks up sessions; signed, unexpired lab tokens remain valid after
+        reset even with a JWT secret. Without a secret, lab mode still accepts
+        any nonempty token. The reset message reports that lab tokens remain valid.
+        SSH connections are closed,
+        except an initiating appliance console until it prints the result.
+        The reserved management path and lab credentials are retained.
       tags: [System]
       requestBody:
         required: true
@@ -2148,7 +2162,13 @@ paths:
               properties:
                 confirm: {type: string, enum: [NUCLEAR]}
       responses:
-        "200": {description: Reset complete; reauthenticate with default credentials, content: {application/json: {schema: {$ref: '#/components/schemas/FactoryResetResponse'}}}}
+        "200":
+          description: Reset applied; inspect warnings for incomplete convergence and reauthenticate with default credentials
+          headers:
+            X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FactoryResetResponse'}
         "400": {description: Invalid confirmation or defaults conflict with reserved management path, content: {application/json: {schema: {
                   $ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}

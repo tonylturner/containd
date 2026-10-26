@@ -62,6 +62,8 @@ type Server struct {
 	hostKeyClock hostKeyClock
 
 	pwLimiter *ratelimit.AttemptLimiter
+	connMu    sync.Mutex
+	conns     map[*sshConnection]struct{}
 }
 
 func New(opts Options) (*Server, error) {
@@ -162,6 +164,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) Close() error {
+	s.RevokeConnections("")
 	s.lnMu.Lock()
 	defer s.lnMu.Unlock()
 	if s.ln != nil {
@@ -172,6 +175,11 @@ func (s *Server) Close() error {
 
 func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	defer nc.Close()
+	connCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn := s.trackConnection(nc, cancel)
+	defer s.untrackConnection(conn)
+	connCtx = context.WithValue(connCtx, connectionContextKey{}, conn)
 
 	if s.opts.AllowLocalIP != nil {
 		host, _, err := net.SplitHostPort(nc.LocalAddr().String())
@@ -199,12 +207,14 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		userID = sc.Permissions.Extensions["user_id"]
 	}
 
-	connCtx := context.Background()
 	token, sessionID, err := s.issueToken(connCtx, username, userID)
 	if err != nil {
 		_ = sc.Close()
 		return
 	}
+	s.connMu.Lock()
+	conn.sessionID = sessionID
+	s.connMu.Unlock()
 	if s.opts.AuditStore != nil {
 		_ = s.opts.AuditStore.Add(connCtx, audit.Record{
 			Actor:  username,
@@ -215,7 +225,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token}
+	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{connection: conn}}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 
@@ -251,6 +261,11 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 }
 
 func (s *Server) handleSession(ctx context.Context, username, remote string, reg *cli.Registry, ch ssh.Channel, in <-chan *ssh.Request) {
+	defer func() {
+		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
+			conn.close()
+		}
+	}()
 	type execMsg struct {
 		Command string
 	}
@@ -326,6 +341,7 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 			if err != nil {
 				writeTTY(ch, err.Error()+"\n")
 			}
+			s.writeResetResult(ctx, ch)
 			return
 		default:
 			_ = req.Reply(false, nil)
@@ -367,7 +383,9 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 			writeTTY(rw, "shell access requires a PTY-enabled SSH session\n")
 			continue
 		case "menu":
-			s.runMenu(ctx, username, rw, reader, reg)
+			if s.runMenu(ctx, username, rw, reader, reg) {
+				return
+			}
 			continue
 		case "diagnostics", "diag":
 			s.runDiagnosticsMenu(ctx, rw, reader, reg)
@@ -401,6 +419,12 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		}
 		if err != nil {
 			writeTTY(rw, err.Error()+"\n")
+		}
+		if s.writeResetResult(ctx, rw) {
+			return
+		}
+		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
+			return
 		}
 	}
 }

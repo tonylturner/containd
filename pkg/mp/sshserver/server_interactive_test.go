@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -312,6 +313,52 @@ func TestInteractiveMenus(t *testing.T) {
 	}
 	if !strings.Contains(rw.String(), "Unknown option.") {
 		t.Fatalf("expected diagnostics unknown output, got %q", rw.String())
+	}
+}
+
+type failedResetHTTPClient struct {
+	err error
+}
+
+func (c failedResetHTTPClient) Do(*http.Request) (*http.Response, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return jsonResponse(http.StatusInternalServerError, map[string]any{
+		"error":     "configuration apply failed",
+		"detail":    "services: unavailable",
+		"restored":  true,
+		"reapplied": true,
+	}), nil
+}
+
+func TestFactoryResetMenuFailureKeepsMenuOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "apply failure", want: "configuration apply failed"},
+		{name: "transport failure", err: errors.New("management unavailable"), want: "management unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newTestSSHServer(t)
+			reg := cli.NewRegistry(nil, &cli.API{
+				BaseURL: "http://127.0.0.1:8080",
+				Client:  failedResetHTTPClient{err: tc.err},
+			})
+			session, rw := newTestSession(srv, reg, "NUCLEAR\n")
+			if !session.handleMainMenuChoice("10") {
+				t.Fatal("failed reset requested logout")
+			}
+			got := rw.String()
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, "Factory reset failed.") {
+				t.Fatalf("missing reset error: %q", got)
+			}
+			if strings.Contains(got, "Factory reset complete.") || strings.Contains(got, "You will be logged out.") {
+				t.Fatalf("failed reset reported completion: %q", got)
+			}
+		})
 	}
 }
 

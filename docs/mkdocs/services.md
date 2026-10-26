@@ -117,3 +117,15 @@ To configure managed server mode:
 ## Auth/SSH
 - Auth uses JWT cookie sessions by default with admin/view roles.
 - SSH server integration is active and runs the same CLI registry (admin-only).
+
+## Reset and reload
+
+Factory reset reapplies appliance defaults to services as well as dataplane
+policy. Disabling AV stops its managed ClamAV daemon. DNS and proxy shutdowns
+wait for daemon exit, escalating to a kill after two seconds and reporting an
+error if exit cannot be confirmed within another two seconds.
+
+`SIGHUP` in management or combined mode reapplies the stored running service
+configuration; it does not promote candidate edits or reload environment
+variables. See [reload and reset outcomes](api-reference.md#factory-reset) for
+warnings, session revocation and restart-only settings.

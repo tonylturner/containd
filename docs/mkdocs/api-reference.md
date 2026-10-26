@@ -13,6 +13,7 @@ writes require a same-origin request or an explicitly allowed origin.
 Lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
 privileges without normal session enforcement. If a JWT secret is configured,
 the token must be a valid signed JWT; without one, any nonempty token is accepted.
+Factory reset does not revoke lab tokens, even with a JWT secret configured.
 Do not expose lab mode to untrusted clients.
 
 Static bearer authentication is a fallback when the user store or JWT secret
@@ -195,9 +196,52 @@ default admin in one users-database transaction, then clear audit history and
 the browser auth cookie. A user-reset failure rolls back the users and sessions
 to their prior state and returns HTTP 500. It does not undo the successfully
 applied configuration: the config and users databases do not share a
-transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`;
-reauthenticate with the default credentials. Configuration history, pending
-rollback and the old IDS bank are replaced, not retained for rollback.
+transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`, indicating
+cookie clearing and client logout, not revocation of lab tokens. To log in again,
+use the default credentials. Configuration history, pending rollback and the old
+IDS bank are replaced, not retained for rollback.
+
+The response includes `warnings` and the `X-Containd-Warnings` header when an
+auxiliary apply fails, including engine-side service configuration. HTTP 200
+means the reset was applied, not that every subsystem converged. With warnings,
+`message` reports incomplete convergence rather than completion; inspect the
+warnings and runtime health before continuing. Mandatory daemon, dataplane or
+ruleset failures still use the failure/recovery response above.
+
+Outside lab mode, session-backed web/API tokens are revoked. Lab mode does not
+look up session records: signed, unexpired tokens remain valid after reset even
+with a JWT secret configured. Without a secret, lab mode still accepts any
+nonempty token by design. The reset message explicitly reports that lab tokens
+remain valid. SSH connections are closed.
+An initiating appliance-console session prints its result and warnings before
+disconnecting; Linux-shell connections are closed along with other sessions.
+The reserved management path is retained, and lab mode keeps the documented
+`containd` / `containd` credential.
+
+### Reload running configuration (SIGHUP)
+
+Send `SIGHUP` to `containd mgmt` or `containd all` to load **running**, not
+candidate, from the configuration store and replay the existing apply sequence:
+
+- Control-plane services: syslog, DNS, NTP, proxies, VPN and AV/ICAP settings.
+- Engine interfaces, routing and service settings, including DHCP and WireGuard.
+- Dataplane capture/inspection/enforcement settings, compiled firewall/NAT/IDS
+  policy and saved PCAP configuration.
+
+This repairs runtime drift; it does not commit candidate edits or change
+configuration history. Invalid configuration fails preflight. A failed replay
+retains the stored running configuration and records a runtime-health fault;
+already-replayed subsystems are not transactionally rolled back. The process
+logs the result and warnings and writes a `config.reload` audit record. Retry
+after resolving the reported failure. Auxiliary apply failures remain warnings,
+as with commit.
+
+Environment variables and command-line flags are never reloaded. Management
+HTTP/HTTPS listeners, TLS files, HTTP middleware, SSH listen address/banner/shell
+mode and other startup-only system settings require a restart. SSH authentication
+policy and host-key rotation already read their live running settings.
+Engine-only mode logs that configuration reload is performed through management;
+signal the management process to replay into a split engine.
 
 ## Events: Filtered Queries and Legacy Lists
 
@@ -291,7 +335,9 @@ engine listener's `/metrics` instead.
 ## Binary Runtime Environment
 
 These are binary environment names, not Compose interpolation inputs.
-Set them before starting the process; `SIGHUP` does not reload configuration.
+Set them before starting the process; changing environment variables or flags
+requires a restart. `SIGHUP` only reapplies the stored running configuration
+described [above](#reload-running-configuration-sighup).
 Listener defaults below apply when neither an environment override nor a saved
 listener setting supplies a value.
 

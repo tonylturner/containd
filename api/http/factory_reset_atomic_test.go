@@ -90,7 +90,8 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 				c.Set("auditStore", auditStore)
 				c.Next()
 			})
-			router.POST("/system/factory-reset", factoryResetHandler(store, userStore, engine, nil))
+			revoked := false
+			router.POST("/system/factory-reset", factoryResetHandler(store, userStore, engine, nil, func(context.Context, string) { revoked = true }))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
 			var body struct {
@@ -108,6 +109,9 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			}
 			if rec.Header().Get("Set-Cookie") != "" || rec.Header().Get("X-Containd-Warnings") != "" {
 				t.Fatalf("failure cleared auth or downgraded error: %v", rec.Header())
+			}
+			if revoked {
+				t.Fatal("failed reset revoked SSH connections")
 			}
 			got, err := store.Load(ctx)
 			if err != nil || !reflect.DeepEqual(jsonValue(t, running), jsonValue(t, got)) {

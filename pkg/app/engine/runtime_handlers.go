@@ -170,8 +170,12 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 			if dpEngine != nil && dpEngine.AVSink() != nil {
 				if adapter, ok := dpEngine.AVSink().(*avSinkAdapter); ok && adapter != nil {
 					avCtx, cancelAV := context.WithTimeout(r.Context(), 3*time.Second)
-					_ = adapter.ApplyAVConfig(avCtx, svc.AV)
+					err := adapter.ApplyAVConfig(avCtx, svc.AV)
 					cancelAV()
+					if err != nil {
+						http.Error(w, "AV service apply failed: "+err.Error(), http.StatusServiceUnavailable)
+						return
+					}
 				}
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

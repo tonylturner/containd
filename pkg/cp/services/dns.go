@@ -43,6 +43,7 @@ type DNSManager struct {
 	lastConf   string
 
 	cmd     *exec.Cmd
+	done    <-chan struct{}
 	running bool
 
 	statsCancel context.CancelFunc
@@ -120,13 +121,11 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
 	}
-	if m.UnboundPath == "" {
-		m.log.Warnw("unbound binary not found; skipping enable", "path", m.UnboundPath)
-		return fmt.Errorf("unbound binary not found; set CONTAIND_UNBOUND_PATH or install unbound")
-	}
 	path := filepath.Join(m.BaseDir, "unbound.conf")
 	if !cfg.Enabled {
-		_ = m.stopLocked()
+		if err := m.stopLocked(); err != nil {
+			return err
+		}
 		m.emit("service.dns.disabled", map[string]any{})
 		_ = os.Remove(path)
 		m.mu.Lock()
@@ -134,6 +133,10 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 		m.lastError = ""
 		m.mu.Unlock()
 		return nil
+	}
+	if m.UnboundPath == "" {
+		m.log.Warnw("unbound binary not found; skipping enable", "path", m.UnboundPath)
+		return fmt.Errorf("unbound binary not found; set CONTAIND_UNBOUND_PATH or install unbound")
 	}
 
 	port := cfg.ListenPort
@@ -334,7 +337,9 @@ func (m *DNSManager) startOrReload(configPath string) error {
 			go m.emit("service.dns.reloaded", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
 			return nil
 		}
-		_ = m.stopLockedNoLock()
+		if err := m.stopLockedNoLock(); err != nil {
+			return err
+		}
 	}
 
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
@@ -345,6 +350,8 @@ func (m *DNSManager) startOrReload(configPath string) error {
 		return err
 	}
 	m.cmd = cmd
+	done := make(chan struct{})
+	m.done = done
 	m.running = true
 	m.lastStart = time.Now().UTC()
 	m.lastExit = ""
@@ -352,8 +359,12 @@ func (m *DNSManager) startOrReload(configPath string) error {
 
 	go func() {
 		err := cmd.Wait()
+		close(done)
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		if m.cmd != cmd {
+			return
+		}
 		m.running = false
 		m.lastStop = time.Now().UTC()
 		if err != nil {
@@ -385,7 +396,10 @@ func (m *DNSManager) stopLockedNoLock() error {
 		return nil
 	}
 
-	_ = m.cmd.Process.Signal(syscall.SIGTERM)
+	if err := stopManagedProcess(m.cmd.Process, m.done); err != nil {
+		m.lastError = err.Error()
+		return err
+	}
 	go m.emit("service.dns.stopped", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
 	m.running = false
 	m.cmd = nil

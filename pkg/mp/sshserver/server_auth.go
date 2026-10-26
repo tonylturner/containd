@@ -146,7 +146,7 @@ func validKeyUsername(username string) bool {
 }
 
 func (s *Server) issueToken(ctx context.Context, username, userID string) (token string, sessionID string, err error) {
-	if s.opts.LabMode {
+	if s.opts.LabMode && len(s.opts.JWTSecret) == 0 {
 		return "lab", "", nil
 	}
 	u, err := s.opts.UserStore.GetByUsername(ctx, username)
