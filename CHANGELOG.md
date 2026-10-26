@@ -335,6 +335,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The ICS templates and NAT pages show loading until the first answer instead of "No templates available", disabled SNAT, no port forwards or setup tips. NAT settings the server did not return are reported as unavailable instead of being shown, and saved, as disabled NAT.
+- The flows list keeps its rows and "Showing x of y" footer during its 10-second refresh.
+- Diagnostics refuses IPv4 addresses with leading zeros (such as 192.0.2.07) for temporary host and flow blocks.
+- Port fields accept decimal digits only ("1e3" and "0x50" are refused). IPv6 address and CIDR checks now match the server's parser, so inputs such as ":::", "1::2::3" and "10.0.0.0/" are refused.
+- The NAT port-forward ingress zone defaults to "wan" only when that zone exists; otherwise a zone must be chosen. Before, the row could show one zone, stage "wan", and fail on save.
 - The Publish Internal Service wizard checks the internal server address on the server step and shows the error under the field. A port forward's destination must be IPv4, so other text no longer passes the step only to fail at Stage.
 - Adding a port forward on the NAT page refuses a fractional port (it took `1.5` as port 1) and a destination that is not an IPv4 address, instead of failing on save.
 - IP address and CIDR fields refuse IPv4 octets with leading zeros (`192.0.2.05`), which the server rejects.
