@@ -1,32 +1,45 @@
 # ICS/OT Deep Packet Inspection
 
-containd includes native Go decoders for 15 protocols (7 ICS, 8 IT) that run in the data plane engine. The same decoder set (`DefaultDecoders()`) is shared between the live capture engine and offline PCAP analysis.
+containd has **16 native Go protocol decoders: 8 ICS + 8 IT**. Live capture and
+PCAP analysis share `DefaultDecoders()`. ICS marker and port detector are two
+additional utility registrations, not protocol decoders. Decoding a field does
+not make it an enforceable firewall predicate.
 
 ## DPI Modes
 
-The ICS DPI engine supports two operational modes:
+DPI mode resolves **per-rule `ics.mode` > global `dpiMode` > `learn`**.
 
-| Mode | Behavior |
-|------|----------|
-| **Learn** | Passive observation only. Traffic is inspected and profiled but never blocked. Use this mode during initial deployment to baseline normal ICS communication patterns. |
-| **Enforce** | Active policy enforcement. DPI results drive firewall verdicts -- traffic that violates ICS policy rules is blocked. |
+- **Learn** records would-deny decisions without applying that DPI denial.
+- **Enforce** applies DPI policy decisions when the enforcement/capture path is
+  configured. AF_PACKET cannot drop the packet it observes; inline prevention
+  requires NFQUEUE. See [Enforcement](dataplane-enforcement.md).
 
-The recommended workflow is **learn first, then enforce**: deploy in learn mode, review the generated traffic profiles and auto-generated allowlist rules, tune as needed, then switch to enforce mode.
+Global learn mode is **not a no-block switch**: explicit enforce-mode rules and
+independent nftables firewall decisions can still block traffic. Automatic
+profile collection additionally requires at least one committed firewall entry
+with explicit `ics.mode: "learn"`; setting the global mode alone is insufficient.
+This gate does not limit collection to only events matching that entry.
 
-Configure via the UI (DPI Configuration section on the Firewall page), the API (`POST /api/v1/engine/config` with `dpiMode`), or the CLI (`set dpi mode learn|enforce`).
+## Configuration and protocol toggles
 
-## Per-Protocol Enable/Disable
+Use the Firewall page's DPI configuration UI or the authenticated management API.
+Read `GET /api/v1/dataplane`, edit the returned object, then post the **complete
+replacement object** to `POST /api/v1/dataplane`. Preserve capture, queue, and
+other settings: this endpoint replaces candidate dataplane configuration, not a
+partial patch. Commit with `POST /api/v1/config/commit` to activate changes.
+See [Config Format](config-format.md) for the lifecycle and wire schema.
 
-Each ICS protocol decoder can be individually enabled or disabled. This allows you to activate inspection only for protocols present in your environment, reducing processing overhead.
-
-Configure via the UI (ICS DPI Configuration modal on the Firewall page) or the API (`dpiIcsProtocols` map in `POST /api/v1/engine/config`):
+The following is a field excerpt to merge into that object, not a complete
+replacement request:
 
 ```json
 {
-  "dpiMode": "enforce",
+  "dpiEnabled": true,
+  "dpiMode": "learn",
   "dpiIcsProtocols": {
     "modbus": true,
     "dnp3": true,
+    "iec104": true,
     "cip": false,
     "s7comm": false,
     "mms": true,
@@ -36,174 +49,131 @@ Configure via the UI (ICS DPI Configuration modal on the Firewall page) or the A
 }
 ```
 
-## Protocol Decoders
+An omitted protocol toggle leaves its decoder enabled. `dpiProtocols` controls
+the IT decoders separately. Enabling a decoder does not create a policy rule.
 
-### ICS Protocols
+## Protocol decoders
 
-| Protocol | Port | Package | Key Fields |
-|----------|------|---------|------------|
-| Modbus/TCP | 502 | `pkg/dp/ics/modbus` | Unit ID, function code, address, quantity, payload length, read/write classification |
-| DNP3 | 20000 | `pkg/dp/ics/dnp3` | Source/destination station addresses, function code, object headers, data link layer |
-| CIP/EtherNet/IP | 44818 | `pkg/dp/ics/cip` | Service code, class/instance/attribute, EPATH parsing, MSP sub-service parsing, object classes |
-| S7comm | 102 | `pkg/dp/ics/s7comm` | PDU type, function code, DB number, parameter/data fields |
-| IEC 61850 MMS | 102 | `pkg/dp/ics/iec61850` | MMS service type, named variables, domain references |
-| BACnet | 47808 | `pkg/dp/ics/bacnet` | APDU type, service choice, object identifier, object type, property ID |
-| OPC UA | 4840 | `pkg/dp/ics/opcua` | Message type, service request/response, node IDs |
+| ICS protocol | Usual port | Decoder package |
+| --- | --- | --- |
+| Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
+| DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
+| IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
+| CIP/EtherNet/IP | TCP 44818 | `pkg/dp/ics/cip` |
+| S7comm | TCP 102 | `pkg/dp/ics/s7comm` |
+| IEC 61850 MMS | TCP 102 | `pkg/dp/ics/iec61850` |
+| BACnet | UDP 47808 | `pkg/dp/ics/bacnet` |
+| OPC UA | TCP 4840 | `pkg/dp/ics/opcua` |
 
-### IT Protocols
-
-| Protocol | Package | Key Fields |
-|----------|---------|------------|
-| DNS | `pkg/dp/dpi/it` | Query name, type, response code, compression pointer support |
-| TLS | `pkg/dp/dpi/it` | SNI, JA3 fingerprint, TLS version, cipher suites |
-| HTTP | `pkg/dp/dpi/it` | Method, URI, host, status code, content type |
-| SSH | `pkg/dp/dpi/it` | Version string, key exchange algorithms |
-| SMB | `pkg/dp/dpi/it` | Command, dialect, share name |
-| NTP | `pkg/dp/dpi/it` | Stratum, reference ID, mode |
-| SNMP | `pkg/dp/dpi/it` | Version, community, PDU type, OIDs |
-| RDP | `pkg/dp/dpi/it` | Protocol version, security flags |
-
-## Decoder Interface
-
-`pkg/dp/dpi` exposes:
-```go
-type Decoder interface {
-    Supports(state *flow.State) bool
-    OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error)
-    OnFlowEnd(state *flow.State) ([]Event, error)
-}
-
-type Event struct {
-    FlowID     string
-    Proto      string
-    Kind       string
-    Attributes map[string]any
-    Timestamp  time.Time
-}
-```
-
-## DPI Pipeline
-
-The data plane processes packets through a multi-stage pipeline:
-
-1. **NFQUEUE steering** -- only flows matching DPI criteria are diverted to userspace; all other traffic follows the nftables fast path.
-2. **TCP reassembly** -- out-of-order segments are buffered and reassembled before feeding decoders.
-3. **Protocol detection** -- `DefaultDecoders()` are tried in order; port-based detection and an ICS marker identify protocol type. Only enabled protocols are evaluated.
-4. **Verdict caching** -- once a flow is classified, the verdict is cached to avoid redundant inspection.
-5. **Event emission** -- DPI events feed into IDS rules, anomaly detection, signature matching, asset inventory, learn mode, protocol statistics, and event export.
+The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
+and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
+specific attribute map. Inspect emitted events before authoring attribute-based
+[IDS conditions](ids-rules.md).
 
 ## ICS Firewall Rule Predicates
 
-Firewall rules support protocol-specific conditions. Each ICS protocol exposes different predicate fields matching its data model:
+Firewall rules contain an `ics` object. Generic predicates for protocols other
+than IEC 104 are:
 
-### Modbus
-- Function code (e.g., `1` Read Coils, `3` Read Holding Registers, `5` Write Single Coil, `6` Write Single Register, `15` Write Multiple Coils, `16` Write Multiple Registers)
-- Unit ID (0--247)
-- Read-only / Write-only classification
-- Address ranges
+| JSON field | Meaning and limits |
+| --- | --- |
+| `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
+| `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
+| `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
+| `addresses` | Register/address strings or ranges; evaluated from `address` |
+| `objectClasses` | CIP object-class IDs, 0–65535; evaluated from `object_class`; CIP only |
+| `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
+| `direction` | `request` or `response`; omit for both |
+| `mode` | `learn` or `enforce`; omit to inherit global mode |
 
-### DNP3
-- Function code (e.g., `1` Read, `2` Write, `3` Select, `4` Operate, `13` Cold Restart, `14` Warm Restart)
-- Source and destination station addresses (0--65519)
-- Object headers
+Only metadata actually emitted by the decoder can satisfy these conditions.
+There are no firewall selectors for DNP3 station addresses/object headers, CIP
+instance/attribute/EPATH/MSP, S7 DB numbers, MMS named variables/domains, BACnet
+objects/properties, or OPC UA message/service/Node ID patterns. Decoder telemetry
+and IDS attributes are not additional firewall selector fields.
 
-### CIP/EtherNet/IP
-- Service code (e.g., `0x01` Get Attribute All, `0x0E` Create, `0x4C` Read Tag, `0x4D` Write Tag, `0x52` Read Tag Fragmented)
-- Object class/instance/attribute
-- EPATH expressions
-- MSP sub-service matching
+### IEC 104 fields and matching
 
-### S7comm
-- Function code (e.g., `0x04` Read Var, `0x05` Write Var, `0xF0` Setup Communication)
-- DB number
+With `protocol: "iec104"`, use these fields instead of the generic selectors:
 
-### IEC 61850 MMS
-- MMS service type
-- Named variable references
-- Domain references
+| JSON field | Meaning and limits |
+| --- | --- |
+| `typeIds` | Numeric array, 1–255; enforce `ALLOW` accepts only descriptor-backed types |
+| `classes` | Array drawn from `monitor`, `control`, `system`, `unknown`; enforce `ALLOW` cannot include `unknown` |
+| `ca` | Common-address array, 0–65534; broadcast 65535 cannot be named |
+| `ioa` | Inclusive ranges such as `[{"start": 0, "end": 100}]`, endpoints 0–16777215, no overlaps |
+| `readOnly` | Restrict to the decoder's safe-read set; false means no read constraint, not writes-only |
+| `direction`, `mode` | Same spellings and mode inheritance as above |
 
-### BACnet
-- Service choice
-- Object type (Analog Input, Analog Output, Binary Input, etc.)
-- Property ID (Present Value, Status Flags, etc.)
-- Object identifier
+Omit a list to match any value. Present IEC lists reject `null`, empty arrays,
+and null members. IOA entries require exactly `start` and `end`. Predicate keys
+are case-sensitive; unknown or duplicate keys are rejected. IEC 104 rejects
+`functionCode`, `unitId`, `addresses`, `objectClasses`, and `writeOnly` by presence,
+even with a zero/false value. IEC-only list fields are rejected on other protocols.
 
-### OPC UA
-- Message type
-- Service request/response type
-- Node ID patterns
+Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
+45–51; 58–64; 70, 100, 101, 102, 103, 105, and 107. Other types decode as
+unsupported, not as implicitly allowed commands.
 
-## ICS Asset Auto-Discovery
+Safe-read includes S/U frames, response-direction monitoring, general
+interrogation (100), request-direction read (102), and end of initialization (70).
+It excludes control commands/confirmations, counter interrogation, clock sync,
+reset process, timed test, malformed/unsupported events, and broadcast CA.
 
-The inventory module (`pkg/dp/inventory`) passively identifies ICS assets from observed traffic. Discovered assets include IP address, protocol, device type (when identifiable), and first/last seen timestamps. The inventory is accessible via `GET /api/v1/inventory`.
+IEC 104 rules define an L3/L4 inspection envelope. Any matching enforce-mode rule
+makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules in
+order, defaults to deny, and cannot be bypassed by a broad TCP/2404 allow rule or
+a generic allow default. `ALLOW` cannot match malformed or broadcast objects.
+ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
 ## Learn Mode
 
-IEC 104 tracking shares a 4,096-entry session table across learn and enforce
-envelopes (including retained closed sessions and abort tombstones). At capacity,
-new learn-mode connections are **accepted without stream inspection**, not
-blocked or reset. Each untracked SYN emits an `ics.session` event with
-`outcome: untracked`, `mode: learn`, `reason: bound`, and `limit: 4096`, on
-the client/server tuple without a session or APDU ID. Subsequent midstream
-traffic is accepted without allocating state. Existing tracked connections
-continue to be inspected; new SYNs can be tracked again when entries expire.
-Enforce envelopes remain fail closed when tracking capacity is exhausted.
+The generic learner records non-IEC-104 ICS profiles; IEC 104 is excluded from
+both automatic learning and asset discovery. Review learned rules before use:
+observation is not authorization.
 
-The learn module (`pkg/dp/learn`) records traffic profiles during a learning period. Once sufficient data is collected, it generates allowlist firewall rules that match observed behavior. The workflow is:
+1. Commit an explicit learn-mode firewall entry and configure capture/DPI.
+2. Inspect `GET /api/v1/learn/profiles`.
+3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
+4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
+   (`status: staged`); it does not activate them. Generated rules use explicit
+   `ics.mode: "enforce"`, so review them even if global mode is learn.
+5. Review ordering, scope, and per-rule modes in candidate, then commit with
+   `POST /api/v1/config/commit`. Changing only global mode does not override an
+   explicit per-rule learn mode.
+6. `DELETE /api/v1/learn` clears the profiles when no longer needed.
 
-1. Set DPI mode to **learn** via the UI or API.
-2. `GET /api/v1/learn/profiles` -- view current traffic profiles.
-3. `POST /api/v1/learn/generate` -- generate candidate rules from profiles.
-4. Review generated rules in the UI firewall page.
-5. `POST /api/v1/learn/apply` -- apply generated rules to the firewall config.
-6. Switch DPI mode to **enforce**.
-7. `DELETE /api/v1/learn` -- clear learned profiles when no longer needed.
-
-## Anomaly Detection
-
-The anomaly detector (`pkg/dp/anomaly`) identifies:
-
-- Malformed protocol frames
-- Protocol specification violations
-- Rate anomalies (unusual traffic volume or frequency)
-
-Anomalies are accessible via `GET /api/v1/anomalies`.
-
-## Signature-Based IDS
-
-The signature engine (`pkg/dp/signatures`) ships with 16 built-in ICS malware signatures. Custom signatures can be added via the API:
-
-- `GET /api/v1/signatures` -- list loaded signatures.
-- `POST /api/v1/signatures` -- add a custom signature.
-- `DELETE /api/v1/signatures/:id` -- remove a signature.
-- `GET /api/v1/signatures/matches` -- list signature match events.
+IEC 104 tracking shares a **4,096-entry session table** across learn and enforce
+envelopes, including retained closed sessions and abort tombstones. At capacity,
+new learn-mode connections are accepted **without stream inspection**. Each
+untracked SYN emits `ics.session` with `outcome: untracked`, `mode: learn`,
+`reason: bound`, and `limit: 4096`, on the client/server tuple without a session
+or APDU ID. Midstream traffic stays untracked; existing sessions remain inspected.
+New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
+at capacity.
 
 ## PCAP Offline Analysis
 
-Upload a PCAP file for offline DPI processing and automatic policy generation:
+The public management endpoints `POST /api/v1/pcap/analyze` (multipart `file`) and
+`POST /api/v1/pcap/analyze/:name` call `AnalyzeForPolicy`. They return analysis
+statistics, event summaries, profiles, and generated rules for review. IEC 104
+is summarized but never generates permissive learned rules. Results **do not
+update live inventory, stage candidate rules, or commit policy**.
 
-- `POST /api/v1/pcap/analyze` -- upload and analyze a PCAP file.
-- `POST /api/v1/pcap/analyze/:name` -- analyze a previously uploaded PCAP by name.
+The engine's separate `/internal/pcap/analyze` endpoints call `Analyze`, returning
+only events, flows, protocol/count statistics, and duration. These internal
+endpoints are not the public policy-generation interface. See
+[API Reference](api-reference.md) for public requests.
 
-The analysis runs the same `DefaultDecoders()` pipeline used by the live engine, producing DPI events, asset inventory updates, and candidate firewall rules.
+## Events and templates
 
-## Event Export
+Live telemetry includes inventory, anomalies, signatures, and protocol statistics.
+Inventory excludes IEC 104. Native IDS rules and the built-in signature engine
+are separate consumers. See [Logging and Evidence](logging-evidence.md) for
+bounded retention, queries, and the distinction between working syslog sinks and
+the unwired SIEM export configuration.
 
-DPI and security events can be exported in multiple formats (`pkg/dp/export`):
-
-- **CEF** -- ArcSight Common Event Format
-- **JSON** -- structured JSON
-- **Syslog** -- RFC 5424
-
-Export destinations include file, UDP, and TCP endpoints.
-
-## Protocol Statistics
-
-The stats module (`pkg/dp/stats`) tracks per-protocol traffic counters and identifies top talkers:
-
-- `GET /api/v1/stats/protocols` -- protocol breakdown.
-- `GET /api/v1/stats/top-talkers` -- top source/destination pairs by volume.
-
-## ICS Policy Templates
-
-Seven ICS protocol templates are available via `GET /api/v1/templates/ics` and can be applied with `POST /api/v1/templates/ics/apply`. Templates provide baseline configurations for common ICS environments including Purdue model zones and maintenance window policies.
+Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
+BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to
+the general registry, not this seven-template set. Applying templates stages
+candidate changes; see [Policy Model](policy-model.md#templates-and-preview).

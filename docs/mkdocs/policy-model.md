@@ -1,13 +1,39 @@
 # Policy Model
 
-- Zone-based firewall with nftables backend and optional eBPF XDP/TC acceleration.
-- Candidate/running configs; commit/rollback/commit-confirmed flows.
-- Policies reference zones, CIDRs, assets, and ICS protocol primitives across all 7 supported ICS protocols (Modbus, DNP3, CIP, S7comm, MMS, BACnet, OPC UA) -- including function codes, register ranges, service codes, and read/write classification. Each protocol has distinct predicate fields matching its data model (see [ICS DPI -- Firewall Rule Predicates](ics-dpi.md#ics-firewall-rule-predicates)).
-- DPI operates in learn or enforce mode. Learn mode passively profiles traffic; enforce mode actively blocks policy violations.
-- Per-protocol enable/disable allows activating inspection only for protocols present in the environment.
-- Schedule predicates enable time-based rule activation (e.g., maintenance windows).
-- Identity predicates enable user-based access control on firewall rules.
-- 7 ICS policy templates available (Purdue baseline, maintenance windows, per-protocol defaults) via `GET /api/v1/templates/ics` and `POST /api/v1/templates/ics/apply`.
-- General policy templates available via `GET /api/v1/templates` and `POST /api/v1/templates/apply`.
-- Firewall rule preview via `POST /api/v1/firewall/rules/preview` allows testing rule matches before committing.
-- Learn mode generates allowlist rules from observed traffic (see [ICS DPI](ics-dpi.md#learn-mode)).
+Policy separates the configuration you are editing from the configuration the
+engine runs:
+
+- **Candidate** holds staged changes. Saving a rule or applying a template does
+  not activate it.
+- **Running** is the committed configuration. Commit validates candidate state
+  and applies it; rollback restores a prior revision. Commit-confirmed requires
+  confirmation within its timeout. See [Config Format](config-format.md).
+
+## Firewall and DPI
+
+Zone firewall rules use the Linux nftables backend. Rules are ordered and match
+zones, CIDRs/assets, transport/port ranges, and optional identity, schedule, and
+ICS predicates. Generic evaluation uses the firewall default action when nothing
+matches. Actions are `ALLOW` or `DENY`.
+
+DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
+global bypass: enforce-mode rules and independent kernel decisions can still
+block traffic. IEC 104 uses a dedicated inspection envelope with default-deny
+object evaluation, even if the generic firewall default is allow. See
+[ICS predicates and modes](ics-dpi.md#ics-firewall-rule-predicates) and
+[Enforcement](dataplane-enforcement.md).
+
+Native [IDS rules](ids-rules.md) evaluate decoded events and generate alerts;
+these are distinct from firewall decisions. Learned allowlist rules require
+review, candidate staging, and commit.
+
+## Templates and preview
+
+The seven templates at `GET /api/v1/templates/ics` comprise two Modbus variants
+and DNP3, S7comm, CIP, BACnet, and OPC UA examples, not one per supported protocol.
+`POST /api/v1/templates/ics/apply` stages their rules. Purdue and maintenance
+window templates belong to the general `/api/v1/templates` registry and its
+`/apply` endpoint.
+
+Use `POST /api/v1/firewall/rules/preview` to inspect matches before committing;
+preview is not a live packet-delivery test.

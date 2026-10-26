@@ -1,38 +1,47 @@
 # Data Plane Overview
 
-## Components
-- Capture manager (`pkg/dp/capture`): AF_PACKET capture worker (Linux) with interface validation.
-- Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, manages NFQUEUE selective DPI steering, per-flow verdict caching, ICS asset auto-discovery, anomaly detection, signature matching, learn mode, and protocol statistics.
-- Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS, identity, and schedule predicates are evaluated when present.
-- Flow tracking (`pkg/dp/flow`): flow key/state scaffolding with timeouts, hashing (strings.Builder optimized), and sweep outside mutex.
-- TCP reassembly (`pkg/dp/reassembly`): out-of-order segment handling with pre-allocated buffers.
-- Verdict cache (`pkg/dp/engine`): per-flow DPI verdict cache (TOCTOU-safe) to avoid redundant inspection of already-classified flows.
-- Kernel programming (Linux):
-  - Interface addressing + default routes applied via netlink (`pkg/dp/netcfg`).
-  - Static routes + basic policy routing rules (PBR) applied via netlink (`routing` config).
-  - nftables rules compiled/applied for zone firewall, NAT masquerade, and basic DNAT/port-forwards.
-  - Ownership loop in `containd engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
+The Linux engine applies immutable policy snapshots and processes traffic on the
+interfaces and paths assigned to the appliance. Traffic taking another route is
+outside its control.
 
-## Pipeline
-1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.
-2) Selective capture (NFQUEUE/AF_PACKET) for DPI/IDS flows.
-3) Flow tracker (5-tuple + direction, timestamps, state) for enrichment and IDS.
-4) Rule evaluation against immutable snapshot; actions: allow/drop/reset, tag, rate-limit; IPS verdicts update nftables sets and conntrack.
-5) DPI decoders (15 protocols via `DefaultDecoders()`, filtered by per-protocol enable/disable settings):
-   - ICS: Modbus, DNP3, CIP/EtherNet/IP (with full EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA.
-   - IT: DNS (with compression pointer support), TLS (SNI/JA3), HTTP, SSH, SMB, NTP, SNMP, RDP.
-   - TCP reassembly with out-of-order handling feeds protocol parsers.
-   - Protocol-specific parsers emit `dpi.Event` structs.
-   - Same decoder set is shared between live engine and offline PCAP analysis.
-   - DPI operates in **learn** mode (passive observation) or **enforce** mode (active policy enforcement). See [ICS DPI](ics-dpi.md#dpi-modes).
-6) IDS/IPS engine consuming DPI events and flow context for signatures/behavioral rules.
-7) ICS asset auto-discovery builds inventory from observed traffic.
-8) Anomaly detection identifies malformed frames, protocol violations, and rate anomalies.
-9) Signature engine matches against 16 built-in ICS malware signatures.
-10) Learn mode records traffic profiles and generates allowlist rules.
-11) Protocol statistics and top talkers are tracked per flow.
+## Packet pipeline
 
-## Rule model
-- Source/dest zones, CIDRs, protocol+port (ranges). Default action fallback.
-- Snapshot swapping is atomic (pointer swap in engine).
+1. nftables and conntrack handle zone firewalling, NAT masquerade, and DNAT port
+   forwarding. The engine also applies interface addresses, routes, and basic
+   policy routing through netlink.
+2. NFQUEUE steers selected packets to inline DPI. AF_PACKET capture observes
+   copies instead; it cannot hold or retract the observed packet.
+3. Flow tracking and TCP reassembly supply connection context to protocol
+   decoders. Generic DPI uses a per-flow verdict cache. IEC 104 uses a separate
+   stateful inspection envelope and session gate rather than relying on that
+   generic cache.
+4. Firewall rules evaluate to `ALLOW` or `DENY`. Generic enforced DPI denials can
+   install temporary flow blocks. IEC 104 can drop the held packet and abort/reset
+   a session. A native IDS alert alone is not a packet drop.
+5. Decoded events feed bounded telemetry, anomaly and signature checks, and
+   protocol statistics. Asset discovery and automatic rule learning consume
+   non-IEC-104 ICS events only.
 
+## Protocol coverage
+
+`DefaultDecoders()` supplies **16 protocol decoders: 8 ICS + 8 IT**, shared with
+PCAP analysis:
+
+- ICS: Modbus, DNP3, IEC 60870-5-104, CIP/EtherNet/IP, S7comm, IEC 61850 MMS,
+  BACnet, and OPC UA.
+- IT: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, and RDP.
+- ICS marker and port detector are additional utility registrations, not protocols.
+
+Protocol toggles select decoders; they do not create matching firewall rules.
+See [ICS DPI](ics-dpi.md) for predicates, learn-mode limits, and IEC 104 behavior.
+
+## Policy and runtime state
+
+Rules match zones, CIDRs, transport/port ranges, and supported ICS, identity, and
+schedule predicates. Evaluation is ordered, with a default action when no generic
+rule matches. IEC 104 object evaluation instead defaults to deny inside its
+inspection envelope. Snapshot swaps are atomic.
+
+For enablement, privileges, capture modes, and failure limits, see
+[Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
+[Policy Model](policy-model.md).
