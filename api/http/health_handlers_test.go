@@ -206,6 +206,66 @@ func TestHealthEnforcementStates(t *testing.T) {
 	}
 }
 
+func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
+	store := stageStore(t)
+	ctx := context.Background()
+	cfg, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DataPlane.Enforcement = true
+	cfg.Interfaces[0].Device = "eth0"
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	mutated := make(chan error, 1)
+	go func() {
+		mutated <- store.MutateCandidate(ctx, func(candidate *config.Config) error {
+			close(entered)
+			<-release
+			candidate.System.Hostname = "candidate-only"
+			return nil
+		})
+	}()
+	<-entered
+	engine := &mockEngine{
+		state:   []config.InterfaceState{{Name: "eth0"}},
+		ruleset: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()},
+	}
+	server := NewServerWithEngine(store, nil, engine)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	started := time.Now()
+	timer := time.AfterFunc(50*time.Millisecond, unblock)
+	defer timer.Stop()
+	server.ServeHTTP(rec, req)
+	elapsed := time.Since(started)
+	if elapsed < 50*time.Millisecond || elapsed > engineHealthTimeout+100*time.Millisecond {
+		t.Fatalf("health did not wait within budget: %s", elapsed)
+	}
+	var body struct {
+		Enforcement struct {
+			State string `json:"state"`
+		} `json:"enforcement"`
+		Binding struct {
+			State string `json:"state"`
+		} `json:"managementBinding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || body.Enforcement.State != "enforcing" || body.Binding.State != "configured" {
+		t.Fatalf("brief contention hid real state: %d %s", rec.Code, rec.Body)
+	}
+	if err := <-mutated; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
@@ -231,8 +291,10 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 		})
 	}()
 	<-entered
-	snapshot, err := store.ReadHealthSnapshot(ctx)
-	if !errors.Is(err, config.ErrHealthBusy) || snapshot.Config != nil {
+	readCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	snapshot, err := store.ReadHealthSnapshot(readCtx)
+	if !errors.Is(err, config.ErrHealthBusy) || !errors.Is(err, context.DeadlineExceeded) || snapshot.Config != nil {
 		t.Fatalf("intermediate health snapshot exposed: %+v %v", snapshot, err)
 	}
 	loaded := make(chan *config.Config, 1)
@@ -253,11 +315,11 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	}()
 	select {
 	case <-answered:
-	case <-time.After(engineHealthTimeout):
+	case <-time.After(engineHealthTimeout + 100*time.Millisecond):
 		t.Fatal("health blocked on running apply")
 	}
-	if time.Since(start) >= engineHealthTimeout {
-		t.Fatal("health exceeded observation budget")
+	if elapsed := time.Since(start); elapsed < engineHealthTimeout || elapsed > engineHealthTimeout+100*time.Millisecond {
+		t.Fatalf("health did not use the shared observation budget: %s", elapsed)
 	}
 	var body struct {
 		Enforcement struct {

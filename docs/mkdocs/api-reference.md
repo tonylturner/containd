@@ -93,9 +93,10 @@ exactly `state` and `reason`:
   enforcement is enabled, or a persisted replay/recovery fault makes runtime
   synchronization uncertain (including a failed disable operation).
 - `unknown`: the configuration/fault or engine state could not be read within
-  the observation budget. During a running-state transition, health does not
-  wait for the commit or expose its unapplied document; enforcement and
-  management binding report `unknown` when their config snapshot is busy.
+  the observation budget. Health waits through brief store contention, but it
+  never waits past that shared budget or exposes an unapplied document. Enforcement
+  and management binding report `unknown` if the store remains busy until the
+  budget expires.
 
 A persisted replay/recovery fault survives management restarts until a
 successful apply and takes precedence over configured mode. Its generic
