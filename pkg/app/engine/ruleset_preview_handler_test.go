@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -109,7 +110,7 @@ func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 				runtime.Reason != "Enforcement is disabled; nothing would be applied" {
 				t.Fatalf("runtime = %+v", runtime)
 			}
-			if dp.CurrentRules() != nil || dp.RulesetStatus() != before {
+			if dp.CurrentRules() != nil || !reflect.DeepEqual(dp.RulesetStatus(), before) {
 				t.Fatal("disabled preview changed live enforcement")
 			}
 		})

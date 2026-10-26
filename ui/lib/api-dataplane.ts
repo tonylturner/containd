@@ -68,8 +68,21 @@ export async function getPcapStatus(): Promise<PcapStatus | null> {
   return await getJSON<PcapStatus>("/api/v1/pcap/status");
 }
 
-export async function getRulesetPreview(): Promise<RulesetPreview | null> {
-  return await getJSON<RulesetPreview>("/api/v1/dataplane/ruleset");
+// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
+// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
+export type RuleWarning = {
+  ruleId: string;
+  predicate: "identity" | "schedule";
+  action: "ALLOW" | "DENY";
+  message: string;
+};
+
+export type RulesetPreviewResult = RulesetPreview & {
+  warnings?: RuleWarning[];
+};
+
+export async function getRulesetPreview(): Promise<RulesetPreviewResult | null> {
+  return await getJSON<RulesetPreviewResult>("/api/v1/dataplane/ruleset");
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {

@@ -37,8 +37,11 @@ See [ICS DPI](ics-dpi.md) for predicates, learn-mode limits, and IEC 104 behavio
 
 ## Policy and runtime state
 
-Rules match zones, CIDRs, transport/port ranges, and supported ICS, identity, and
-schedule predicates. Evaluation is ordered, with a default action when no generic
+Rules match zones, CIDRs, transport/port ranges, and ICS predicates. Identity
+and schedule predicates resolve toward denial wherever the dataplane cannot
+evaluate them; see
+[Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+Evaluation is ordered, with a default action when no generic
 rule matches. IEC 104 object evaluation instead defaults to deny inside its
 inspection envelope. Snapshot swaps are atomic.
 

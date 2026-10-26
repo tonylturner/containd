@@ -81,10 +81,13 @@ type Engine struct {
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
+// Warnings lists the applied ruleset's rules whose predicates resolve toward
+// denial; a failed apply carries none.
 type RulesetStatus struct {
-	Ruleset   string    `json:"ruleset"`
-	AppliedAt time.Time `json:"appliedAt"`
-	Error     string    `json:"error,omitempty"`
+	Ruleset   string                `json:"ruleset"`
+	AppliedAt time.Time             `json:"appliedAt"`
+	Error     string                `json:"error,omitempty"`
+	Warnings  []enforce.RuleWarning `json:"warnings,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -416,22 +419,24 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		return err
 	}
 	var compiled string
+	var warnings []enforce.RuleWarning
 	var applyErr error
 
 	if e.compiler != nil {
 		start := time.Now()
 		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
 		if applyErr != nil {
-			e.setRulesetStatus(compiled, applyErr)
+			e.setRulesetStatus(compiled, nil, applyErr)
 			return applyErr
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
+		warnings = e.compiler.RuleWarnings(&snap)
 	}
 
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.setRulesetStatus(compiled, nil)
+	e.setRulesetStatus(compiled, warnings, nil)
 	return nil
 }
 

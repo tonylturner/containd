@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -32,6 +33,8 @@ type PreviewTimeRange struct {
 
 // PreviewRule tests a candidate in isolation, not against preceding rules or
 // default actions. It does not apply rules, log decisions or enforce verdicts.
+// Predicates the running enforcement cannot evaluate resolve toward denial,
+// as they do when the rule is applied.
 func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
 	return e.previewRule(entry, resolveZonesForFlow)
 }
@@ -44,7 +47,8 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	evs := e.eventStore.ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{entry}})
+	effective, active := enforcedCandidate(entry, e.enforcedQueueID())
+	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{effective}})
 	for _, ev := range evs {
 		if result.TimeRange == nil {
 			result.TimeRange = &PreviewTimeRange{Start: ev.Timestamp, End: ev.Timestamp}
@@ -55,6 +59,9 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 			if ev.Timestamp.After(result.TimeRange.End) {
 				result.TimeRange.End = ev.Timestamp
 			}
+		}
+		if !active {
+			continue
 		}
 		ctx, ok := previewEventContext(snap, entry, ev, resolve)
 		if !ok {
@@ -75,6 +82,36 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		}
 	}
 	return result
+}
+
+// enforcedCandidate returns entry as enforcement decides it when the engine
+// queues ICS rules to queueID, and false when it can never match: an ALLOW
+// rule with an unenforced predicate is inactive, and a DENY rule applies as
+// if each unenforced predicate always matched.
+func enforcedCandidate(entry rules.Entry, queueID int) (rules.Entry, bool) {
+	for _, p := range enforce.UnenforcedPredicates(entry, queueID) {
+		if entry.Action == rules.ActionAllow {
+			return entry, false
+		}
+		switch p {
+		case enforce.PredicateIdentity:
+			entry.Identities = nil
+		case enforce.PredicateSchedule:
+			entry.Schedule = rules.SchedulePredicate{}
+		}
+	}
+	return entry, true
+}
+
+// enforcedQueueID is the NFQUEUE group the running compiler steers ICS rules
+// to; 0 when enforcement is disabled or no queue is configured.
+func (e *Engine) enforcedQueueID() int {
+	e.flowMu.Lock()
+	defer e.flowMu.Unlock()
+	if e.compiler == nil {
+		return 0
+	}
+	return e.compiler.QueueID
 }
 
 func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver) (rules.EvalContext, bool) {

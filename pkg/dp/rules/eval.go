@@ -156,8 +156,9 @@ func (e *Evaluator) EvaluateMatch(ctx EvalContext) (Action, *Entry) {
 			return ce.Action, &ce.Entry
 		}
 	}
-	if e.snapshot.Default != "" {
-		return e.snapshot.Default, nil
+	// Like the nftables chain policy, only an explicit ALLOW default admits.
+	if e.snapshot.Default == ActionAllow {
+		return ActionAllow, nil
 	}
 	return ActionDeny, nil
 }
