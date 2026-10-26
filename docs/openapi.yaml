@@ -133,6 +133,16 @@ components:
         iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
         ipv4Forwarding:
           type: string
+        managementBinding:
+          type: object
+          description: >
+            `configured` when a management grant names an existing device;
+            `unbound-appliance` when no granted interface is bound, so the
+            listed ports accept management on every existing NIC that is not
+            explicitly denied; `unknown` when state cannot be read.
+          properties:
+            state: { type: string, enum: [configured, unbound-appliance, unknown] }
+            recoveryPorts: { type: array, items: { type: integer } }
           enum: [enabled, disabled, unknown]
           description: >
             IPv4 forwarding state read by the engine from

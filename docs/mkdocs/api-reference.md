@@ -79,6 +79,13 @@ Unauthenticated `GET /api/v1/health` includes `ipv4Forwarding`, which is
 `unknown` means the sysctl could not be read or the management API could not
 reach the engine.
 
+`managementBinding.state` is `configured`, `unbound-appliance`, or `unknown`.
+`unbound-appliance` means management access is granted only on logical
+interfaces that have no existing device. The management listeners in
+`recoveryPorts` then accept connections on every existing NIC except those
+whose access is explicitly disabled, so an unbound appliance never locks out
+management. Bind the interfaces to clear this state.
+
 When a commit applies a configuration spanning multiple zone-assigned
 interface devices and forwarding is disabled, the response includes the
 `X-Containd-Warnings` header:

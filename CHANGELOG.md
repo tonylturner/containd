@@ -118,6 +118,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Interface autobind binds each logical interface independently. A subnet
+  setting (`CONTAIND_<NAME>_SUBNET`) binds only when exactly one up NIC
+  matches and never falls back to name, route or index guesses. Five- and
+  seven-NIC appliances with `CONTAIND_MGMT_RESERVATION` now boot, including
+  after NIC renumbering.
+- Management access granted only on unbound logical interfaces no longer
+  locks out the appliance. The management listeners stay reachable on every
+  existing NIC whose access is not explicitly disabled, and `GET
+  /api/v1/health` reports `managementBinding.state: unbound-appliance`.
 - Static icon URLs now include the runtime `/containd/` base path when the UI
   is mounted under that prefix.
 - Firewall and ICS rule previews run in the engine with its live zone mappings
