@@ -144,11 +144,25 @@ func readSecretInteractive(r *bufio.Reader, out io.Writer) (string, bool) {
 // readTerminalLine returns "\x03" for Ctrl-C and false for Ctrl-D on an empty
 // line or a read error. Other control characters are dropped.
 func readTerminalLine(r *bufio.Reader, out io.Writer, echo bool) (string, bool) {
+	// The shared reader retains the previous call's last byte. Inspect it
+	// without reading ahead: CR-only clients must get their next prompt
+	// immediately, and a CRLF's LF may arrive in a later network read.
+	skipLF := false
+	if r.UnreadByte() == nil {
+		previous, _ := r.ReadByte() // UnreadByte guarantees this byte is buffered.
+		skipLF = previous == '\r'
+	}
 	var buf []byte
 	for {
 		b, err := r.ReadByte()
 		if err != nil {
 			return "", false
+		}
+		if skipLF {
+			skipLF = false
+			if b == '\n' {
+				continue
+			}
 		}
 		if b == 0x04 && len(buf) == 0 {
 			return "", false
