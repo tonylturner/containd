@@ -49,9 +49,13 @@ export {
 } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
-export type { RulePreview } from "./api-network";
+export type { FirewallRulePatch, RulePreview } from "./api-network";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
+export type {
+  AVStatus, DHCPStatus, DNSStatus, NTPStatus, ProxyStatus, ProxyTelemetryStatus,
+  ServiceMeter, ServicesStatus, SyslogStatus, VPNStatus,
+} from "./api-service-status";
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
@@ -388,7 +392,8 @@ export type AVConfig = {
   blockTtlSeconds?: number;
   maxSizeBytes?: number;
   timeoutSec?: number;
-  cacheTtl?: string;
+  /** Verdict cache lifetime in nanoseconds; 0 selects 10 minutes. */
+  cacheTtl?: number;
   icap?: {
     servers?: { address: string; useTls?: boolean; service?: string }[];
   };
@@ -706,8 +711,6 @@ export type ReverseProxyConfig = {
   enabled?: boolean;
   sites?: ReverseProxySite[];
 };
-
-export type ServicesStatus = Record<string, unknown>;
 
 export type SystemStats = {
   cpu: { usagePercent: number; numCPU: number };

@@ -63,20 +63,25 @@ test("trusted CA upload without a config store is an error, not stored", async (
   await expect(page.getByText(/Trusted CA bundle (stored|applied)/)).toHaveCount(0);
 });
 
-async function openServices(page: Page, av: Record<string, unknown>) {
-  await mockAPI(page, { "/api/v1/services/status": { json: { av } } });
+// A reachable engine's antivirus status carries its scan meter.
+async function openServices(page: Page, av: Record<string, unknown>, sparkline: number[]) {
+  const meter = {
+    sparkline, count: sparkline.reduce((a, b) => a + b, 0), rate_per_min: 0,
+    errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0,
+  };
+  await mockAPI(page, { "/api/v1/services/status": { json: { av: { available: true, ...meter, ...av } } } });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");
   await loaded;
   await expect(page.getByText("Async AV scanning")).toBeVisible();
 }
 
-test("antivirus card shows no fabricated detection series", async ({ page }) => {
-  await openServices(page, { enabled: true, mode: "clamav", clamav_custom_defs: "/data/clamav/custom" });
+test("antivirus card shows no fabricated scan series", async ({ page }) => {
+  await openServices(page, { enabled: true, mode: "clamav", clamav_custom_defs: "/data/clamav/custom" }, []);
   await expect(page.locator('[title^="AV scans"]')).toHaveCount(0);
 });
 
 test("antivirus card shows a reported scan series", async ({ page }) => {
-  await openServices(page, { enabled: true, mode: "clamav", sparkline: [1, 3, 2] });
+  await openServices(page, { enabled: true, mode: "clamav" }, [1, 3, 2]);
   await expect(page.locator('[title="AV scans per minute"]')).toHaveCount(1);
 });

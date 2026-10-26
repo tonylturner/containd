@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type ServicesStatus } from "../../../lib/api";
+import { api, type ServiceMeter, type ServicesStatus } from "../../../lib/api";
 import { staticAssetURL } from "../../../lib/api-core";
 import { Shell } from "../../../components/Shell";
 import { Card as BaseCard } from "../../../components/Card";
@@ -12,6 +12,14 @@ import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
 import { Sparkline } from "../../../components/Sparkline";
 import { InfoTip } from "../../../components/InfoTip";
+
+type MeteredService = "syslog" | "proxy" | "envoy" | "nginx" | "dns" | "ntp" | "dhcp" | "vpn" | "av";
+
+// The engine reports antivirus scans only while it answers.
+function meterOf(status: ServicesStatus | null, svc: MeteredService): ServiceMeter | undefined {
+  if (svc === "av") return status?.av.available ? status.av : undefined;
+  return status?.[svc];
+}
 
 export default function ServicesOverviewPage() {
   const toast = useToast();
@@ -24,28 +32,20 @@ export default function ServicesOverviewPage() {
   // A card charts only the per-minute series the API reports; without one it
   // shows no chart.
   const spark = useCallback(
-    (svc: string, title: string, color: string, background: string) => {
-      const s = (status as any)?.[svc];
-      if (!Array.isArray(s?.sparkline) || s.sparkline.length === 0) return undefined;
-      return { values: s.sparkline as number[], title, color, background };
+    (svc: MeteredService, title: string, color: string, background: string) => {
+      const values = meterOf(status, svc)?.sparkline;
+      if (!values?.length) return undefined;
+      return { values, title, color, background };
     },
     [status],
   );
 
   const rate = useCallback(
-    (svc: string) => {
-      const s = (status as any)?.[svc];
-      if (typeof s?.rate_per_min === "number") return s.rate_per_min as number;
-      return null;
-    },
+    (svc: MeteredService) => meterOf(status, svc)?.rate_per_min ?? null,
     [status],
   );
   const errRate = useCallback(
-    (svc: string) => {
-      const s = (status as any)?.[svc];
-      if (typeof s?.errors_rate_per_min === "number") return s.errors_rate_per_min as number;
-      return null;
-    },
+    (svc: MeteredService) => meterOf(status, svc)?.errors_rate_per_min ?? null,
     [status],
   );
 
@@ -78,10 +78,10 @@ export default function ServicesOverviewPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const dnsRunning = (status as any)?.dns?.running;
-  const dhcpEnabled = (status as any)?.dhcp?.enabled;
-  const vpnActive =
-    (status as any)?.vpn?.wireguard_enabled || (status as any)?.vpn?.openvpn_running;
+  const dnsRunning = status?.dns?.running;
+  const dhcpEnabled = status?.dhcp?.enabled;
+  const vpnActive = status?.vpn?.wireguard_enabled || status?.vpn?.openvpn_running;
+  const av = status?.av;
 
   return (
     <Shell
@@ -173,7 +173,7 @@ export default function ServicesOverviewPage() {
             Forward unified events to external collectors.
           </p>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Forwarders: {(status?.syslog as any)?.configured_forwarders ?? 0}
+            Forwarders: {status?.syslog?.configured_forwarders ?? 0}
             {rate("syslog") !== null && (
               <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
             )}
@@ -205,11 +205,11 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Forward proxy for outbound traffic and reverse proxy for published apps." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Envoy: {(status?.proxy as any)?.envoy_running ? "running" : "stopped"}{" "}
-            {(status?.proxy as any)?.envoy_last_error && `(error=${(status?.proxy as any)?.envoy_last_error})`}
+            Envoy: {status?.proxy?.envoy_running ? "running" : "stopped"}{" "}
+            {status?.proxy?.envoy_last_error && `(error=${status?.proxy?.envoy_last_error})`}
             <br />
-            Nginx: {(status?.proxy as any)?.nginx_running ? "running" : "stopped"}{" "}
-            {(status?.proxy as any)?.nginx_last_error && `(error=${(status?.proxy as any)?.nginx_last_error})`}
+            Nginx: {status?.proxy?.nginx_running ? "running" : "stopped"}{" "}
+            {status?.proxy?.nginx_last_error && `(error=${status?.proxy?.nginx_last_error})`}
             {rate("proxy") !== null && (
               <>
                 <br />
@@ -255,11 +255,11 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Embedded resolver with upstream forwarding and caching." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {(status?.dns as any)?.enabled ? "yes" : "no"}, running:{" "}
-            {(status?.dns as any)?.running ? "yes" : "no"}
+            Enabled: {status?.dns?.enabled ? "yes" : "no"}, running:{" "}
+            {status?.dns?.running ? "yes" : "no"}
             <br />
-            Upstreams: {(status?.dns as any)?.configured_upstreams ?? 0}{" "}
-            {(status?.dns as any)?.last_error && `(error=${(status?.dns as any)?.last_error})`}
+            Upstreams: {status?.dns?.configured_upstreams ?? 0}{" "}
+            {status?.dns?.last_error && `(error=${status?.dns?.last_error})`}
             {rate("dns") !== null && (
               <>
                 <br />
@@ -289,11 +289,11 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {(status?.ntp as any)?.enabled ? "yes" : "no"}, running:{" "}
-            {(status?.ntp as any)?.running ? "yes" : "no"}
+            Enabled: {status?.ntp?.enabled ? "yes" : "no"}, running:{" "}
+            {status?.ntp?.running ? "yes" : "no"}
             <br />
-            Servers: {(status?.ntp as any)?.servers_count ?? 0}{" "}
-            {(status?.ntp as any)?.last_error && `(error=${(status?.ntp as any)?.last_error})`}
+            Servers: {status?.ntp?.servers_count ?? 0}{" "}
+            {status?.ntp?.last_error && `(error=${status?.ntp?.last_error})`}
             {rate("ntp") !== null && (
               <>
                 <br />
@@ -323,9 +323,9 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {(status?.dhcp as any)?.enabled ? "yes" : "no"}{" "}
-            {((status?.dhcp as any)?.listen_ifaces ?? 0) > 0 &&
-              `(ifaces=${(status?.dhcp as any)?.listen_ifaces ?? 0})`}
+            Enabled: {status?.dhcp?.enabled ? "yes" : "no"}{" "}
+            {(status?.dhcp?.listen_ifaces ?? 0) > 0 &&
+              `(ifaces=${status?.dhcp?.listen_ifaces ?? 0})`}
             {rate("dhcp") !== null && (
               <>
                 <br />
@@ -360,9 +360,9 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Secure remote access tunnels (WireGuard preferred; OpenVPN optional)." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            WireGuard: {(status?.vpn as any)?.wireguard_enabled ? "on" : "off"}{" "}
-            {((status?.vpn as any)?.wg_peers ?? 0) > 0 &&
-              `(peers=${(status?.vpn as any)?.wg_peers ?? 0})`}
+            WireGuard: {status?.vpn?.wireguard_enabled ? "on" : "off"}{" "}
+            {(status?.vpn?.wg_peers ?? 0) > 0 &&
+              `(peers=${status?.vpn?.wg_peers ?? 0})`}
             {rate("vpn") !== null && (
               <>
                 <br />
@@ -391,37 +391,33 @@ export default function ServicesOverviewPage() {
             <span>Async AV scanning</span>
             <InfoTip label="Optional ICAP or embedded ClamAV scanning without inline latency spikes." />
           </div>
-          {(status?.av as any)?.available === false ? (
+          {av?.available === false ? (
             <p className="mt-2 text-xs text-(--text-muted)">
-              Engine status unavailable: {(status?.av as any)?.error ?? "no reason reported"}
+              Engine status unavailable: {av.error || "no reason reported"}
             </p>
-          ) : (
+          ) : av ? (
             <p className="mt-2 text-xs text-(--text-muted)">
-              Mode: {(status?.av as any)?.mode}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
+              Mode: {av.mode}, Enabled: {av.enabled ? "yes" : "no"}
               <br />
               {/* The engine blocks for 600 seconds when no TTL is set. */}
-              Block TTL: {(status?.av as any)?.block_ttl || 600}s{" "}
-              {(status?.av as any)?.freshclam_last && `freshclam ${ (status?.av as any)?.freshclam_last }`}
-              {(status?.av as any)?.clamav_custom_defs && (
+              Block TTL: {av.block_ttl || 600}s{" "}
+              {av.freshclam_last && `freshclam ${av.freshclam_last}`}
+              {av.clamav_custom_defs && (
                 <>
                   <br />
-                  Custom defs: {(status?.av as any)?.clamav_custom_defs}
+                  Custom defs: {av.clamav_custom_defs}
                 </>
               )}
-              {(status?.av as any)?.last_render && (
+              {av.last_render && (
                 <>
                   <br />
-                  Last update: {(status?.av as any)?.last_render}
+                  Last update: {av.last_render}
                 </>
               )}
-              {rate("av") !== null && (
-                <>
-                  <br />
-                  Rate: {(rate("av") ?? 0).toFixed(1)} /min
-                </>
-              )}
+              <br />
+              Rate: {av.rate_per_min.toFixed(1)} /min
             </p>
-          )}
+          ) : null}
           <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
           </Link>

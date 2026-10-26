@@ -96,14 +96,19 @@ export default function ICSPolicyPage() {
     return m;
   }, [rules]);
 
+  // The editor reports a disabled filter as no predicate; null clears the
+  // stored one, where an omitted key would keep it.
   async function onSave(id: string, ics: ICSPredicate | undefined) {
     setError(null);
-    const result = await api.updateFirewallRule(id, { ics });
+    const result = await api.updateFirewallRule(id, { ics: ics ?? null });
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    toast("ICS filter staged — commit to apply.", "success");
+    toast(
+      ics ? "ICS filter staged — commit to apply." : "ICS filter removal staged — commit to apply.",
+      "success",
+    );
     setEditing(null);
     refresh();
   }

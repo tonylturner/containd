@@ -4,7 +4,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type AVConfig } from "../../../../lib/api";
+import { api, isAdmin, type AVConfig, type AVStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
@@ -28,7 +28,7 @@ export default function AVPage() {
     icap: { servers: [] },
     clamav: { freshclamEnabled: true },
   });
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<AVStatus | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -47,7 +47,7 @@ export default function AVPage() {
     setRefreshError(null);
     try {
       const svc = await api.getServicesStatus();
-      setStatus((svc as any)?.av ?? null);
+      setStatus(svc?.av ?? null);
       const s = await api.getAV();
       if (s) setCfg(s);
       const defsResp = await api.listAVDefs();
@@ -220,12 +220,12 @@ export default function AVPage() {
 
       {status?.available === false && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-          Engine antivirus unavailable: {status?.error ?? "no response"}
+          Engine antivirus unavailable: {status.error || "no response"}
         </div>
       )}
-      {status && status?.available !== false && cfg.enabled !== (status?.enabled ?? false) && (
+      {status?.available && cfg.enabled !== status.enabled && (
         <div className="mb-4 rounded-lg border px-3 py-2 text-sm">
-          Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status?.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
+          Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
         </div>
       )}
       <Card className="mb-4">
@@ -235,6 +235,8 @@ export default function AVPage() {
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-10 w-1/2" />
           </div>
+        ) : !status.available ? (
+          <p className="mt-3 text-sm text-(--text-muted)">The engine did not report its runtime status.</p>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
             <div>Enabled: <span className="text-(--text)">{status?.enabled ? "yes" : "no"}</span></div>
@@ -260,16 +262,18 @@ export default function AVPage() {
             <div>Freshclam: <span className="text-(--text)">{status?.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
             <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
-            <div>Block TTL: <span className="text-(--text)">{status?.block_ttl ?? cfg.blockTtlSeconds ?? 600}s</span></div>
+            <div>Block TTL: <span className="text-(--text)">{status.block_ttl || 600}s</span></div>
             <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
-            <div className="md:col-span-3">
-              <Sparkline
-                values={status?.sparkline ?? []}
-                color="var(--purple)"
-                background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                title="Engine AV scans per minute"
-              />
-            </div>
+            {status.sparkline.length ? (
+              <div className="md:col-span-3">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--purple)"
+                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
+                  title="Engine AV scans per minute"
+                />
+              </div>
+            ) : null}
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
           </div>

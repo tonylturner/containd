@@ -5,7 +5,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
+import { api, isAdmin, type DNSConfig, type DNSStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
@@ -18,7 +18,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 export default function DNSPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<DNSStatus | null>(null);
   const [cfg, setCfg] = useState<DNSConfig>({
     enabled: false,
     listenPort: 53,
@@ -33,8 +33,8 @@ export default function DNSPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const svc = (await api.getServicesStatus()) as ServicesStatus | any;
-    setStatus((svc as any)?.dns ?? null);
+    const svc = await api.getServicesStatus();
+    setStatus(svc?.dns ?? null);
     const s = await api.getDNS();
     setCfg({
       enabled: s?.enabled ?? false,
@@ -63,10 +63,6 @@ export default function DNSPage() {
 
   const upstreamText = useMemo(
     () => (cfg.upstreamServers ?? []).join("\n"),
-    [cfg.upstreamServers],
-  );
-  const dnsSpark = useMemo(
-    () => [4, 8, 6, (cfg.upstreamServers?.length ?? 1) + 6, 12, 9, 14],
     [cfg.upstreamServers],
   );
 
@@ -176,14 +172,16 @@ export default function DNSPage() {
                 {status.last_error}
               </div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={dnsSpark}
-                color="var(--primary)"
-                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                title="Resolver query trend"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--primary)"
+                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                  title="DNS events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>
