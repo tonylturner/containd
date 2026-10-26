@@ -20,6 +20,7 @@ import {
   COMMON_PROTOCOLS,
   genId,
   ICS_PROTOCOLS,
+  serverPortError,
   type WizardId,
 } from "./wizard-shared";
 import {
@@ -149,12 +150,13 @@ export default function WizardPage() {
     setApplying(true);
     setError(null);
     try {
-      const port = parseInt(serverPort, 10);
-      if (!port || port < 1 || port > 65535) {
-        setError("Invalid port number.");
+      const portError = serverPortError(serverPort);
+      if (portError) {
+        setError(portError);
         setApplying(false);
         return;
       }
+      const port = Number(serverPort.trim());
 
       // Add port forward via NAT
       const pf: PortForward = {
@@ -303,7 +305,7 @@ export default function WizardPage() {
         if (step === 1) return !!wanZone;
         return true;
       case "publish-service":
-        if (step === 0) return !!serverIp && !!serverPort;
+        if (step === 0) return !!serverIp && !serverPortError(serverPort);
         if (step === 1) return true;
         if (step === 2) return !!ingressZone;
         return true;

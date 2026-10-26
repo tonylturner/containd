@@ -80,8 +80,8 @@ for (const [name, body] of [["object", { unexpected: true }], ["string", "unexpe
 
 // A page that loaded a healthy list must also report a later malformed
 // answer as unavailable, whether a poll, the Refresh button, a config change
-// or an action refetches it, and never keep presenting the earlier list as
-// current where the page hides it on error.
+// or an action refetches it, and hide the earlier list rather than keep
+// presenting it as current.
 
 const malformed = { unexpected: true };
 
@@ -132,14 +132,13 @@ type Trigger = "poll" | "refresh" | "config" | "action";
 
 const transitions: {
   path: string; endpoint: string; healthy: unknown; marker: string; message: string;
-  // Whether the page hides the earlier list once it reports the error.
-  hidesStale: boolean; triggers: Trigger[]; pollMs?: number; extra?: Record<string, unknown>;
+  triggers: Trigger[]; pollMs?: number; extra?: Record<string, unknown>;
 }[] = [
-  { path: "/alerts", endpoint: "/api/v1/events", healthy: [alert], marker: "healthy alert marker", message: "Failed to load alerts.", hidesStale: false, triggers: ["poll", "refresh"], pollMs: 10_000 },
-  { path: "/flows", endpoint: "/api/v1/flows", healthy: [flow], marker: "modbus", message: "Flows unavailable", hidesStale: true, triggers: ["poll", "refresh"], pollMs: 10_000 },
-  { path: "/templates", endpoint: "/api/v1/templates/ics", healthy: [template], marker: "healthy-template-marker", message: "ICS templates unavailable", hidesStale: true, triggers: ["refresh", "config"] },
+  { path: "/alerts", endpoint: "/api/v1/events", healthy: [alert], marker: "healthy alert marker", message: "Failed to load alerts.", triggers: ["poll", "refresh"], pollMs: 10_000 },
+  { path: "/flows", endpoint: "/api/v1/flows", healthy: [flow], marker: "modbus", message: "Flows unavailable", triggers: ["poll", "refresh"], pollMs: 10_000 },
+  { path: "/templates", endpoint: "/api/v1/templates/ics", healthy: [template], marker: "healthy-template-marker", message: "ICS templates unavailable", triggers: ["refresh", "config"] },
   {
-    path: "/sessions", endpoint: "/api/v1/conntrack", healthy: [connection], marker: "192.0.2.41", message: "malformed connection list", hidesStale: true, triggers: ["refresh", "action"],
+    path: "/sessions", endpoint: "/api/v1/conntrack", healthy: [connection], marker: "192.0.2.41", message: "malformed connection list", triggers: ["refresh", "action"],
     extra: {
       "/api/v1/conntrack/kill": {
         scope: "connection", matched: 1, deleted: 1, conntrackDeleted: true, revocationInstalled: true,
@@ -170,7 +169,7 @@ for (const t of transitions) {
       await answered;
 
       await expect(page.getByText(t.message, { exact: false }).first()).toBeVisible();
-      if (t.hidesStale) await expect(page.getByText(t.marker, { exact: false })).toHaveCount(0);
+      await expect(page.getByText(t.marker, { exact: false })).toHaveCount(0);
       expect(pageErrors).toEqual([]);
     });
   }
