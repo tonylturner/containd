@@ -3,12 +3,14 @@
 package enforce
 
 import (
+	"context"
 	"net"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -102,5 +104,35 @@ func TestNftUpdaterTargetsDynamicTable(t *testing.T) {
 	}
 	if got := NewNftUpdater("").TableName; got != "containd" {
 		t.Fatalf("default dynamic table = %q", got)
+	}
+}
+
+func TestTableNameRuleIsSharedByCompilerAndUpdater(t *testing.T) {
+	entry := conntrack.Entry{Proto: "tcp", Src: "192.0.2.1", Dst: "192.0.2.2", Sport: "1234", Dport: "443",
+		ReplySrc: "192.0.2.2", ReplyDst: "192.0.2.1", ReplySport: "443", ReplyDport: "1234"}
+	for name, ok := range map[string]bool{
+		"containd": true, "Fw-1": true, "fw_2": true, "_x": true, strings.Repeat("a", maxTableName): true,
+		"1fw": false, "-fw": false, "fw.1": false, "fw 1": false, "fw;flush": false, strings.Repeat("a", maxTableName+1): false,
+	} {
+		if err := ValidateTableName(name); (err == nil) != ok {
+			t.Fatalf("ValidateTableName(%q) = %v, want ok=%v", name, err, ok)
+		}
+		c := NewCompiler()
+		c.TableName = name
+		if _, err := c.CompileFirewall(&rules.Snapshot{}); (err == nil) != ok {
+			t.Fatalf("compile with table %q: %v", name, err)
+		}
+		if _, err := NewNftUpdater(name).revocationBatch([]conntrack.Entry{entry}, "connection", time.Minute); (err == nil) != ok {
+			t.Fatalf("revocation with table %q: %v", name, err)
+		}
+		if !ok {
+			u := &NftUpdater{Path: "/nonexistent/nft", TableName: name}
+			if err := u.BlockHostTemp(context.Background(), net.ParseIP("10.0.0.1"), time.Second); err == nil || !strings.Contains(err.Error(), "invalid nft table name") {
+				t.Fatalf("block with table %q: %v", name, err)
+			}
+		}
+	}
+	if err := ValidateTableName(""); err == nil {
+		t.Fatal("empty table name accepted")
 	}
 }

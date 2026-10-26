@@ -56,6 +56,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if snap == nil {
 		return "", errors.New("snapshot is nil")
 	}
+	if err := ValidateTableName(c.dynamicTable()); err != nil {
+		return "", err
+	}
 	table := c.policyTable()
 	locals, err := resolveLocalInput(snap)
 	if err != nil {
@@ -665,6 +668,9 @@ func (u *NftUpdater) buildBlockFlowArgs(srcIP, dstIP net.IP, proto, dport string
 }
 
 func (u *NftUpdater) run(ctx context.Context, args []string) error {
+	if err := ValidateTableName(u.TableName); err != nil {
+		return err
+	}
 	path := u.Path
 	if path == "" {
 		path = "nft"

@@ -22,6 +22,28 @@ import (
 
 const defaultTableName = "containd"
 
+// maxTableName leaves room for the policy table suffix within the kernel's
+// 255-byte object names.
+const maxTableName = 255 - len("_policy")
+
+// ValidateTableName checks a dynamic table name. It is the one rule for
+// table names in this package: nft's identifier syntax restricted to the
+// characters configuration allows, a letter or underscore followed by
+// letters, digits, underscores and hyphens. nft cannot address a name that
+// starts with a digit or hyphen, even quoted.
+func ValidateTableName(name string) error {
+	if name == "" || len(name) > maxTableName {
+		return fmt.Errorf("invalid nft table name %q: want 1-%d characters", name, maxTableName)
+	}
+	for i, r := range name {
+		letter := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !letter && (i == 0 || (r != '-' && (r < '0' || r > '9'))) {
+			return fmt.Errorf("invalid nft table name %q: start with a letter or underscore, then use letters, digits, underscores and hyphens", name)
+		}
+	}
+	return nil
+}
+
 // PolicyTable names the policy table paired with a dynamic table.
 func PolicyTable(table string) string {
 	if table == "" {

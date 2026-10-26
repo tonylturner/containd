@@ -94,8 +94,8 @@ func (u *NftUpdater) revocationBatch(entries []conntrack.Entry, scope string, tt
 	if ttl < time.Second || ttl > time.Hour || ttl%time.Second != 0 || len(entries) == 0 {
 		return "", fmt.Errorf("revocation needs entries and a 1–3600 second interval")
 	}
-	if u.TableName == "" || sanitizeIdent(u.TableName) != u.TableName {
-		return "", fmt.Errorf("invalid nft table name")
+	if err := ValidateTableName(u.TableName); err != nil {
+		return "", err
 	}
 	keys := map[string]bool{}
 	for _, e := range entries {
