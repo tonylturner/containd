@@ -15,7 +15,10 @@ import (
 )
 
 type autoAssignOptions struct {
-	Reservation       *mgmtpath.Reservation
+	Reservation *mgmtpath.Reservation
+	// KeepBound pins every row that already names a device and withholds
+	// those devices from discovery, so only unbound rows receive assignments.
+	KeepBound         bool
 	AllowFallback     bool
 	DefaultRouteIface string
 }
@@ -99,6 +102,14 @@ func computeDefaultInterfaceAssignments(ifaces []config.Interface, state []confi
 
 	assignments := map[string]string{}
 	usedDev := map[string]bool{}
+	if opts.KeepBound {
+		for _, iface := range ifaces {
+			if dev := strings.TrimSpace(iface.Device); dev != "" {
+				assignments[iface.Name] = dev
+				usedDev[dev] = true
+			}
+		}
+	}
 	if opts.Reservation != nil {
 		for _, iface := range ifaces {
 			if iface.Device == opts.Reservation.Device || iface.Device == "" && iface.Name == opts.Reservation.Device {
@@ -297,17 +308,38 @@ func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
 	return false
 }
 
-// AutoBindDefaultInterfaceDevices is the exported wrapper around the
-// in-package autoBindDefaultInterfaceDevices so other startup paths can
-// trigger the same logical-name → kernel-device autobind that the
-// commit/getConfig handlers already run. Boot callers persist the result with
-// config.Repair so running and any staged candidate get the same repair.
+// AutoBindDefaultInterfaceDevices is the boot repair binder: it may move
+// default rows that look like stale index-order bindings. Boot callers persist
+// the result with config.Repair so running and any staged candidate get the
+// same repair. Runtime applies use bindUnboundDefaultInterfaceDevices instead.
 func AutoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
 }
 
-func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
-	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
+// bindUnboundDefaultInterfaceDevices fills unbound default rows from local
+// discovery for a runtime apply. Explicit bindings were staged and validated:
+// they are applied as written, and their devices are never given to another
+// row. Custom interface layouts are left entirely to the operator.
+func bindUnboundDefaultInterfaceDevices(cfg *config.Config) {
+	if cfg == nil || !defaultInterfaceLayout(cfg.Interfaces) {
+		return
+	}
+	state, defaultRouteIface, err := discoverLocalInterfaces()
+	if err != nil {
+		return
+	}
+	assignments, err := computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+		KeepBound:         true,
+		DefaultRouteIface: defaultRouteIface,
+	})
+	if err != nil {
+		return
+	}
+	for i := range cfg.Interfaces {
+		if strings.TrimSpace(cfg.Interfaces[i].Device) == "" {
+			cfg.Interfaces[i].Device = assignments[cfg.Interfaces[i].Name]
+		}
+	}
 }
 
 // AutoBindDefaultInterfaceDevicesReserved never moves an existing reserved binding.
@@ -315,11 +347,21 @@ func AutoBindDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Res
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
-	state, err := collectLocalInterfaceState()
+	state, defaultRouteIface, err := discoverLocalInterfaces()
 	if err != nil {
 		return false
 	}
-	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, detectKernelDefaultRouteIface(), r)
+	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, defaultRouteIface, r)
+}
+
+// discoverLocalInterfaces reports kernel interface state and the device that
+// carries the default route. Tests replace it to model a host.
+var discoverLocalInterfaces = func() ([]config.InterfaceState, string, error) {
+	state, err := collectLocalInterfaceState()
+	if err != nil {
+		return nil, "", err
+	}
+	return state, detectKernelDefaultRouteIface(), nil
 }
 
 func autoBindDefaultInterfaceDevicesFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string) bool {
@@ -375,17 +417,28 @@ func collectLocalInterfaceState() ([]config.InterfaceState, error) {
 	return out, nil
 }
 
-func shouldRepairDefaultInterfaceBindings(ifaces []config.Interface, state []config.InterfaceState, assignments map[string]string) bool {
-	defaultNames := defaultInterfaceOrder()
+// defaultInterfaceLayout reports whether every row is a default logical
+// interface. Discovery only binds such layouts.
+func defaultInterfaceLayout(ifaces []config.Interface) bool {
 	defaultSet := map[string]struct{}{}
-	ifaceByName := map[string]config.Interface{}
-	for _, name := range defaultNames {
+	for _, name := range defaultInterfaceOrder() {
 		defaultSet[name] = struct{}{}
 	}
 	for _, iface := range ifaces {
 		if _, ok := defaultSet[iface.Name]; !ok {
 			return false
 		}
+	}
+	return len(ifaces) > 0
+}
+
+func shouldRepairDefaultInterfaceBindings(ifaces []config.Interface, state []config.InterfaceState, assignments map[string]string) bool {
+	if !defaultInterfaceLayout(ifaces) {
+		return false
+	}
+	defaultNames := defaultInterfaceOrder()
+	ifaceByName := map[string]config.Interface{}
+	for _, iface := range ifaces {
 		ifaceByName[iface.Name] = iface
 	}
 

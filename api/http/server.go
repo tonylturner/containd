@@ -512,7 +512,6 @@ func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 // runningConfigApplyMu protects replay and running-store mutations coupled to
 // runtime applies. Hold it before loading a config to modify, through its apply.
 var runningConfigApplyMu sync.Mutex
-var bindDefaultInterfaceDevices = autoBindDefaultInterfaceDevices
 
 func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	// Load only after acquiring the lock: a queued replay must not push a
@@ -545,8 +544,9 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 // applyConfigSnapshot must not load or mutate the store: a transition holds its
 // mutex across this callback. Validation uses only immutable boot authority.
 func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, error) {
-	// Re-bind logical interface names to physical kernel devices before
-	// applying them. Keep this change in memory only: applying a previously
+	// Bind unbound default logical interfaces to discovered kernel devices
+	// before applying them. Explicit bindings are applied exactly as staged
+	// and validated. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
 	if err := config.ValidateForStore(store, cfg); err != nil {
@@ -555,7 +555,7 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	// Reserved bindings were persisted by bootstrap. Never normalize them during
 	// replay: preflight must precede every runtime side effect.
 	if config.ReservationForStore(store) == nil {
-		bindDefaultInterfaceDevices(cfg)
+		bindUnboundDefaultInterfaceDevices(cfg)
 	}
 	if err := config.ValidateForStore(store, cfg); err != nil {
 		return nil, err
