@@ -19,18 +19,18 @@ import (
 )
 
 // requireRaw skips unless the test runs as root (raw sockets need
-// CAP_NET_RAW); CONTAIND_KERNEL_TESTS=1 turns the skip into a failure. Run:
+// CAP_NET_RAW); CONTAIND_NETNS_KERNEL_TEST=1 turns the skip into a failure. Run:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/session.test ./pkg/dp/session
-//	docker run --rm --user 0 -e CONTAIND_KERNEL_TESTS=1 -v "$PWD/build:/w" \
+//	docker run --rm --user 0 -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" \
 //	  --entrypoint /w/session.test containd/containd:dev -test.run Kernel -test.v
 func requireRaw(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() == 0 {
 		return
 	}
-	if os.Getenv("CONTAIND_KERNEL_TESTS") == "1" {
-		t.Fatal("CONTAIND_KERNEL_TESTS=1 but the test is not running as root")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") == "1" {
+		t.Fatal("CONTAIND_NETNS_KERNEL_TEST=1 but the test is not running as root")
 	}
 	t.Skip("raw socket test needs root")
 }

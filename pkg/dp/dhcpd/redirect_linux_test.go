@@ -35,11 +35,11 @@ func TestRedirectScriptReplacesOnlyItsTable(t *testing.T) {
 // nft in a disposable network namespace, for example:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/dhcpd.test ./pkg/dp/dhcpd
-//	docker run --rm --cap-add NET_ADMIN -e CONTAIND_KERNEL_TESTS=1 -v "$PWD/build:/w" alpine:3.21 \
+//	docker run --rm --cap-add NET_ADMIN -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
 //	  sh -c 'apk add -q nftables && /w/dhcpd.test -test.run Kernel -test.v'
 func TestKernelRedirectScriptAppliesWithTableAbsentAndPresent(t *testing.T) {
-	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" || os.Geteuid() != 0 {
-		t.Skip("requires CONTAIND_KERNEL_TESTS=1 as root in a disposable network namespace with nft")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 as root in a disposable network namespace with nft")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

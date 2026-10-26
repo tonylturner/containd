@@ -230,7 +230,7 @@ func (p *peer) command(t *testing.T, line string) string {
 // Run in one disposable container with NET_ADMIN, SYS_ADMIN and nft/ip installed.
 // Namespace creation/setns requires SYS_ADMIN in addition to NET_ADMIN.
 func TestKernelConntrackKill(t *testing.T) {
-	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" {
 		t.Skip("opt-in isolated kernel test")
 	}
 	for _, tc := range []struct {

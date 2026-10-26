@@ -19,15 +19,15 @@ import (
 )
 
 // Kernel tests need root with CAP_NET_ADMIN and the nft binary. They skip
-// otherwise, unless CONTAIND_KERNEL_TESTS=1 demands them. Run them with:
+// otherwise, unless CONTAIND_NETNS_KERNEL_TEST=1 demands them. Run them with:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/capture.test ./pkg/dp/capture
-//	docker run --rm --cap-add NET_ADMIN --user 0 -e CONTAIND_KERNEL_TESTS=1 \
+//	docker run --rm --cap-add NET_ADMIN --user 0 -e CONTAIND_NETNS_KERNEL_TEST=1 \
 //	  -v "$PWD/build:/w" --entrypoint /w/capture.test containd/containd:dev \
 //	  -test.run Kernel -test.v
 func requireKernel(t *testing.T) {
 	t.Helper()
-	demanded := os.Getenv("CONTAIND_KERNEL_TESTS") == "1"
+	demanded := os.Getenv("CONTAIND_NETNS_KERNEL_TEST") == "1"
 	missing := ""
 	if os.Geteuid() != 0 {
 		missing = "root"
@@ -38,7 +38,7 @@ func requireKernel(t *testing.T) {
 		return
 	}
 	if demanded {
-		t.Fatalf("CONTAIND_KERNEL_TESTS=1 but %s is unavailable", missing)
+		t.Fatalf("CONTAIND_NETNS_KERNEL_TEST=1 but %s is unavailable", missing)
 	}
 	t.Skipf("kernel test needs %s", missing)
 }
