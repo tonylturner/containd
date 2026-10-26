@@ -62,9 +62,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			if preview.Ruleset != applier.ruleset {
 				t.Fatalf("preview differs from apply:\n%s\napply:\n%s", preview.Ruleset, applier.ruleset)
 			}
-			applied := e.compiler.RuleWarnings(e.CurrentRules())
+			applied := e.RulesetStatus().Warnings
 			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
-				t.Fatalf("preview warnings %+v differ from apply warnings %+v", preview.Warnings, applied)
+				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
 			if strings.Contains(preview.Ruleset, "tcp dport 22") {
 				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
@@ -80,7 +80,7 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			// compiler, rules, gate decision or last-apply status.
 			other := enforce.CompilerSettings{TableName: "other", NFQueueGroup: 209}
 			otherPreview, err := e.PreviewRuleset(snap, other)
-			if err != nil || otherPreview.Runtime.IEC104EnvelopeOpen || *e.compiler != before || e.RulesetStatus() != lastStatus {
+			if err != nil || otherPreview.Runtime.IEC104EnvelopeOpen || *e.compiler != before || !reflect.DeepEqual(e.RulesetStatus(), lastStatus) {
 				t.Fatalf("isolated preview = %+v, err=%v", otherPreview.Runtime, err)
 			}
 			if !strings.Contains(otherPreview.Ruleset, "table inet other") || applier.ruleset != preview.Ruleset {

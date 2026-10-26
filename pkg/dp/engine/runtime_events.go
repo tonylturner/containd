@@ -432,10 +432,11 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 	return *ptr
 }
 
-func (e *Engine) setRulesetStatus(ruleset string, err error) {
+func (e *Engine) setRulesetStatus(ruleset string, warnings []enforce.RuleWarning, err error) {
 	st := &RulesetStatus{
 		Ruleset:   ruleset,
 		AppliedAt: time.Now().UTC(),
+		Warnings:  warnings,
 	}
 	if err != nil {
 		st.Error = err.Error()

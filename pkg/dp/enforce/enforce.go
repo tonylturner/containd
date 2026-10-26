@@ -258,7 +258,7 @@ func defaultPolicy(a rules.Action) string {
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	dpiEligible := isDPIEligible(e)
 	queued := queuedToEngine(e, queueID)
-	if !queued && e.Action == rules.ActionAllow && len(unenforcedPredicates(e, queueID)) > 0 {
+	if !queued && e.Action == rules.ActionAllow && len(UnenforcedPredicates(e, queueID)) > 0 {
 		return nil, nil
 	}
 	base := []string{}
@@ -438,7 +438,7 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	}
 	var out []RuleWarning
 	for _, e := range snap.Firewall {
-		for _, p := range unenforcedPredicates(e, c.QueueID) {
+		for _, p := range UnenforcedPredicates(e, c.QueueID) {
 			out = append(out, ruleWarning(e, p))
 		}
 	}
@@ -446,9 +446,10 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	return out
 }
 
-// unenforcedPredicates lists e's predicates that no component evaluates
-// when the compiler queues to queueID.
-func unenforcedPredicates(e rules.Entry, queueID int) []UnenforcedPredicate {
+// UnenforcedPredicates lists e's predicates that no component evaluates
+// when the compiler queues to queueID (0: no queue). The compiler and the
+// rule impact preview both resolve these toward denial.
+func UnenforcedPredicates(e rules.Entry, queueID int) []UnenforcedPredicate {
 	var out []UnenforcedPredicate
 	if e.HasIdentityPredicate() {
 		out = append(out, PredicateIdentity)

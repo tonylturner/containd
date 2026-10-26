@@ -64,6 +64,9 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 		if preview.Ruleset != "" {
 			resp["ruleset"] = preview.Ruleset
 		}
+		if len(preview.Warnings) > 0 {
+			resp["warnings"] = preview.Warnings
+		}
 		if engine != nil {
 			type rulesetStatusClient interface {
 				RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
