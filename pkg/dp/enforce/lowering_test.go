@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -28,6 +29,29 @@ func emptyZoneSnapshot() *rules.Snapshot {
 			{ID: "ops-spare", SourceZones: []string{"spare"}, Identities: []string{"ops"}, Action: rules.ActionAllow},
 			{ID: "iec-spare", SourceZones: []string{"spare"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
 				ICS: rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow},
+		},
+	}
+}
+
+// longestZone is the longest zone name that can have interfaces.
+var longestZone = strings.Repeat("z", maxZoneName)
+
+// zoneNamesSnapshot has zones whose names differ only in case, '-', ' '
+// and '_', and the longest zone name, each with interfaces and used by
+// local input and NAT rules.
+func zoneNamesSnapshot() *rules.Snapshot {
+	return &rules.Snapshot{
+		Default:    rules.ActionDeny,
+		ZoneIfaces: map[string][]string{"a-b": {"eth1"}, "a_b": {"eth2"}, "A B": {"eth3"}, "ab": {"eth4"}, longestZone: {"eth5"}},
+		LocalInput: []rules.LocalServiceRule{
+			{ID: "ssh-a-b", Zone: "a-b", Proto: "tcp", Port: 22},
+			{ID: "ssh-a_b", Zone: "a_b", Proto: "tcp", Port: 22},
+			{ID: "ssh-longest", Zone: longestZone, Proto: "tcp", Port: 22},
+		},
+		NAT: rules.NATConfig{Enabled: true, EgressZone: "ab", SourceZones: []string{"A B", "a-b"},
+			PortForwards: []rules.PortForward{{ID: "web", Enabled: true, IngressZone: "a_b", Proto: "tcp", ListenPort: 8443, DestIP: "192.0.2.10", DestPort: 443}}},
+		Firewall: []rules.Entry{
+			{ID: "a-b-to-ab", SourceZones: []string{"a-b"}, DestZones: []string{"ab"}, Action: rules.ActionAllow},
 		},
 	}
 }
@@ -69,6 +93,7 @@ var loweringGoldens = []struct {
 	{"testdata/identity_schedule_policy.nft", goldenSnapshot, goldenCompiler},
 	{"testdata/empty_zone_policy.nft", emptyZoneSnapshot, goldenCompiler},
 	{"testdata/address_family_policy.nft", familySnapshot, goldenCompiler},
+	{"testdata/zone_names_policy.nft", zoneNamesSnapshot, goldenCompiler},
 }
 
 // policyTable cuts the policy table out of a compiled script.
@@ -196,5 +221,47 @@ func TestAddressesAreParsed(t *testing.T) {
 	lines, err := compileEntryWithoutCounters(rules.Entry{ID: "r", Sources: []string{" 10.1.0.0/16", "2001:db8::/32 ", "::ffff:10.2.0.1"}, Action: rules.ActionDeny}, nil, 0, 0)
 	if want := []string{"ip saddr { 10.1.0.0/16 } drop", "ip6 saddr { 2001:db8::/32, ::ffff:10.2.0.1 } drop"}; err != nil || !reflect.DeepEqual(lines, want) {
 		t.Fatalf("lines = %q, %v; want %q", lines, err, want)
+	}
+}
+
+// TestZoneSetsAreDistinct checks that zones whose names differ only in case
+// or punctuation get sets of their own, each holding only its interfaces:
+// nft merges sets declared twice, which would widen every zone's rules.
+func TestZoneSetsAreDistinct(t *testing.T) {
+	snap := zoneNamesSnapshot()
+	out, err := goldenCompiler().CompileFirewall(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := regexp.MustCompile(`set (zone_\w+) \{\n    type ifname;\n    elements = \{ ([^}]*) \}`).FindAllStringSubmatch(out, -1)
+	got := map[string]string{}
+	for _, m := range declared {
+		if _, dup := got[m[1]]; dup {
+			t.Fatalf("set %s declared twice:\n%s", m[1], out)
+		}
+		got[m[1]] = m[2]
+	}
+	want := map[string]string{}
+	for zone, ifaces := range snap.ZoneIfaces {
+		want[zoneSetName(zone)] = `"` + ifaces[0] + `"`
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("zone sets = %v, want %v", got, want)
+	}
+	if n := len(zoneSetName(longestZone)); n != 255 {
+		t.Fatalf("longest zone set name has %d bytes, want the kernel's 255", n)
+	}
+}
+
+func TestZoneNameTooLongForSetIsRefused(t *testing.T) {
+	long := longestZone + "z"
+	snap := &rules.Snapshot{ZoneIfaces: map[string][]string{long: {"eth1"}}}
+	if _, err := goldenCompiler().CompileFirewall(snap); err == nil || !strings.Contains(err.Error(), "at most 125 bytes") {
+		t.Fatalf("compile error = %v, want the zone name refused", err)
+	}
+	// A zone without interfaces declares no set, so its name is not limited.
+	snap.ZoneIfaces[long] = nil
+	if _, err := goldenCompiler().CompileFirewall(snap); err != nil {
+		t.Fatal(err)
 	}
 }

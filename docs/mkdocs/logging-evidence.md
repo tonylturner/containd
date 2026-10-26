@@ -96,7 +96,8 @@ in the configured format:
 `failed_total`, `last_error`, `last_flush`, total `backlog`, and per forwarder
 `forwarder`, `last_id`, `backlog` (records not yet delivered), `last_error`
 and `last_sent`. A growing backlog or a set `last_error` means the collector is
-not receiving audit records.
+not receiving audit records. The CLI command `show syslog status` prints the
+same fields.
 
 The top-level `export` configuration and `pkg/dp/export` CEF/JSON/Syslog library
 are **not wired into the runtime**. Setting that configuration does not export

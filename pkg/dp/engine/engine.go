@@ -246,8 +246,9 @@ func New(cfg Config) (*Engine, error) {
 // later Start calls see the engine as already started.
 //
 // When fresh does not enforce, Reconfigure first deletes the nft tables this
-// engine installed, so the kernel stops enforcing too. If that fails it
-// returns the error and changes nothing.
+// engine installed, so the kernel stops enforcing too, and the ruleset status
+// stops describing them. If that fails it returns the error and changes
+// nothing.
 func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
@@ -255,6 +256,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 		if err := e.gate.release(); err != nil {
 			return fmt.Errorf("remove enforcement tables: %w", err)
 		}
+		e.releaseRulesetStatus()
 	}
 
 	prevCancel := e.runCancel
@@ -608,7 +610,7 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 // (DirForward) or accepted it (DirReverse).
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	e.flowMu.Lock()
-	state := e.connectionStateLocked(pkt, now)
+	state, forgotten := e.connectionStateLocked(pkt, now)
 	state.Touch(uint64(len(pkt.Payload)), now)
 	if state.Packets == 1 && state.Key.Dir == flow.DirForward {
 		e.countAddressExclusionLocked(state)
@@ -621,6 +623,11 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	}
 	e.flowMu.Unlock()
 
+	// End the forgotten connection's streams before this packet starts the
+	// new one.
+	for _, st := range forgotten {
+		e.endFlowStream(st, nil)
+	}
 	if needsSweep {
 		e.sweepFlows(now)
 	}
@@ -630,9 +637,11 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 // connectionStateLocked finds or creates the direction state for pkt. A
 // SYN marks its sender as the opener and a SYN-ACK as the server; without
 // a handshake, the opposite direction or a known ICS service port orients
-// it. Ambiguous or unknown ports retain first-seen orientation. Must
-// be called with e.flowMu held.
-func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.State {
+// it. Ambiguous or unknown ports retain first-seen orientation. When the
+// handshake contradicts the recorded orientation, the states of the old
+// connection are forgotten and returned, for the caller to end their
+// streams once it releases e.flowMu. Must be called with e.flowMu held.
+func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow.State, []*flow.State) {
 	key := flow.Key{
 		SrcIP:   pkt.SrcIP,
 		DstIP:   pkt.DstIP,
@@ -641,6 +650,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 		Proto:   pkt.Proto,
 	}
 	hint, hinted := handshakeDirection(pkt)
+	var forgotten []*flow.State
 	for _, dir := range []flow.Direction{flow.DirForward, flow.DirReverse} {
 		key.Dir = dir
 		state, ok := e.flows[key.Hash()]
@@ -648,12 +658,15 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 			continue
 		}
 		if !hinted || hint == dir {
-			return state
+			return state, nil
 		}
 		// The handshake contradicts the recorded orientation: the tuple
 		// carries a new connection. Forget both of the old directions.
-		e.dropFlowLocked(key)
-		e.dropFlowLocked(key.Reversed())
+		for _, old := range []flow.Key{key, key.Reversed()} {
+			if st := e.dropFlowLocked(old); st != nil {
+				forgotten = append(forgotten, st)
+			}
+		}
 		break
 	}
 
@@ -679,7 +692,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
 	metrics.FlowsActive.Inc()
-	return state
+	return state, forgotten
 }
 
 // handshakeDirection reports the direction a TCP handshake segment
@@ -694,12 +707,19 @@ func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
 	return flow.DirForward, true
 }
 
-func (e *Engine) dropFlowLocked(key flow.Key) {
+// dropFlowLocked forgets the state of key and returns it, nil when there
+// is none. Every state the engine forgets has its streams ended exactly
+// once by endFlowStream: here by the caller, outside e.flowMu, and by
+// sweepFlows for expired ones. Must be called with e.flowMu held.
+func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	hash := key.Hash()
-	if _, ok := e.flows[hash]; ok {
-		delete(e.flows, hash)
-		metrics.FlowsActive.Dec()
+	st, ok := e.flows[hash]
+	if !ok {
+		return nil
 	}
+	delete(e.flows, hash)
+	metrics.FlowsActive.Dec()
+	return st
 }
 
 func (e *Engine) sweepFlows(now time.Time) {

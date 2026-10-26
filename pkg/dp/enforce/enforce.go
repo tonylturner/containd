@@ -478,24 +478,6 @@ func compileLocalInputRule(r rules.LocalServiceRule, zones zoneIndex) (string, e
 	return strings.Join(parts, " "), nil
 }
 
-func sanitizeIdent(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	out := strings.Builder{}
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			out.WriteRune(r)
-			continue
-		}
-		if r == '-' || r == ' ' {
-			out.WriteRune('_')
-		}
-	}
-	if out.Len() == 0 {
-		return "zone"
-	}
-	return out.String()
-}
-
 // validateCIDRList validates that each entry is a valid IP address or CIDR
 // notation. This prevents injection of arbitrary nftables syntax through
 // user-supplied source addresses.

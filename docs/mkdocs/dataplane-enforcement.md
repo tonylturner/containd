@@ -23,9 +23,14 @@ the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
 `inet <enforceTable>`, such as the policy chains and sets an older containd
 version kept there, is removed on the next apply; flow blocks from an older
 version carry over with their remaining timeout. Disabling enforcement deletes
-the tables the running engine installed. Renaming the table replaces the old
+the tables the running engine installed, and the ruleset status then reports
+no installed ruleset. Renaming the table replaces the old
 tables with the new ones on the next apply. A table name starts with a letter
 or underscore, followed by letters, digits, underscores and hyphens.
+Local input and NAT rules match a zone's interfaces through the set
+`zone_<hex-encoded zone name>` in the policy table, so every zone gets its own
+set even when names differ only in case or punctuation. A zone with interfaces
+can therefore have a name of at most 125 bytes.
 
 nftables enforces identity and schedule predicates on the rules it handles,
 with per-label address sets and absolute-time interval sets in the policy

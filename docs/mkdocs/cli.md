@@ -39,6 +39,7 @@ require a restart; committing does not rebind management sockets.
   - `show diff`
   - `show system`
   - `show services status`
+  - `show syslog status` (event forwarding counters, then audit record forwarding: totals, backlog and, per forwarder, cursor, backlog, last send and last error)
   - `show routing`
   - `show nat`
   - `show port-forwards` (DNAT config)

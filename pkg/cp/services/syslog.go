@@ -183,6 +183,7 @@ func (m *SyslogManager) flushEvents(ctx context.Context) {
 	listFn := m.listEvents
 	lastID := m.lastID
 	forwarders := append([]config.SyslogForwarder{}, m.config.Forwarders...)
+	format := m.config.Format
 	batchSize := m.batchSize
 	m.mu.Unlock()
 	if listFn == nil || len(forwarders) == 0 {
@@ -205,7 +206,7 @@ func (m *SyslogManager) flushEvents(ctx context.Context) {
 		if ev.ID != 0 && ev.ID <= lastID {
 			continue
 		}
-		payload := m.formatEvent(ev, forwarders[0].Proto)
+		payload := m.formatEvent(ev, format)
 		for _, fwd := range forwarders {
 			network := fwd.Proto
 			if network == "" {
@@ -309,11 +310,9 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func (m *SyslogManager) formatEvent(ev dpevents.Event, proto string) string {
-	format := m.config.Format
-	if format == "" {
-		format = "rfc5424"
-	}
+// formatEvent formats ev for the configured format, which the caller reads
+// under m.mu with the forwarders it sends to; anything but json is RFC 5424.
+func (m *SyslogManager) formatEvent(ev dpevents.Event, format string) string {
 	if format == "json" {
 		b, _ := json.Marshal(ev)
 		return string(b)

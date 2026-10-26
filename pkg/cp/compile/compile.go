@@ -5,9 +5,7 @@ package compile
 
 import (
 	"fmt"
-	"net"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -474,28 +472,6 @@ func sanitizeIdent(s string) string {
 		return "id"
 	}
 	return out.String()
-}
-
-func listenPortOrDefault(addr string, def int) int {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return def
-	}
-	// Accept ":8080", "0.0.0.0:8080", "127.0.0.1:8080", "[::]:8080".
-	_, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		// Might be ":8080" (host missing) => SplitHostPort fails unless we add dummy host.
-		if strings.HasPrefix(addr, ":") {
-			portStr = strings.TrimPrefix(addr, ":")
-		} else {
-			return def
-		}
-	}
-	p, err := strconv.Atoi(portStr)
-	if err != nil || p < 1 || p > 65535 {
-		return def
-	}
-	return p
 }
 
 func compileIDSConds(in []config.IDSCondition) []dprules.IDSCondition {

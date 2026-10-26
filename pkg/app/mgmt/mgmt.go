@@ -18,7 +18,6 @@ import (
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
-	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -47,6 +46,7 @@ type mgmtStores struct {
 type mgmtListenerConfig struct {
 	httpAddr            string
 	httpsAddr           string
+	sshAddr             string
 	httpLoopbackAddr    string
 	httpsLoopbackAddr   string
 	enableHTTP          bool
@@ -135,6 +135,8 @@ func Run(ctx context.Context, opts Options) error {
 		serviceManager.event = bound.event
 	}
 	runtimeCfg, listenerCfg = bound.cfg, bound.listener
+	// Every compile in this process admits these until the next start.
+	config.SetBoundManagementListeners(listenerCfg.served())
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -286,11 +288,13 @@ func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservat
 }
 
 func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {
+	listeners := config.EffectiveManagementListeners(cfg)
 	listenerCfg := mgmtListenerConfig{
-		httpAddr:      resolveHTTPAddr(cfg),
-		httpsAddr:     resolveHTTPSAddr(cfg),
-		enableHTTP:    boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
-		enableHTTPS:   boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		httpAddr:      listeners.HTTP.Addr,
+		httpsAddr:     listeners.HTTPS.Addr,
+		sshAddr:       listeners.SSH.Addr,
+		enableHTTP:    listeners.HTTP.Enabled,
+		enableHTTPS:   listeners.HTTPS.Enabled,
 		optionalFault: optionalFault,
 	}
 	listenerCfg.httpLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpAddr)
@@ -320,25 +324,15 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	return listenerCfg, nil
 }
 
-func resolveHTTPAddr(cfg *config.Config) string {
-	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
-	if httpAddr == "" && cfg != nil {
-		httpAddr = common.FirstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
+// served is the listeners this configuration binds: HTTP and HTTPS as
+// resolved, HTTPS off when its certificate failed, and SSH, which starts
+// best effort after them.
+func (lc mgmtListenerConfig) served() config.ManagementListeners {
+	return config.ManagementListeners{
+		HTTP:  config.ManagementListener{Addr: lc.httpAddr, Enabled: lc.enableHTTP},
+		HTTPS: config.ManagementListener{Addr: lc.httpsAddr, Enabled: lc.enableHTTPS},
+		SSH:   config.ManagementListener{Addr: lc.sshAddr, Enabled: true},
 	}
-	if httpAddr == "" {
-		return ":8080"
-	}
-	return httpAddr
-}
-
-func resolveHTTPSAddr(cfg *config.Config) string {
-	if httpsAddr := common.EnvTrimmed("CONTAIND_MGMT_HTTPS_ADDR", ""); httpsAddr != "" {
-		return httpsAddr
-	}
-	if cfg != nil && cfg.System.Mgmt.HTTPSListenAddr != "" {
-		return cfg.System.Mgmt.HTTPSListenAddr
-	}
-	return ":8443"
 }
 
 func applyMgmtHTTPMiddleware(logger *zap.SugaredLogger, handler http.Handler, listenerCfg mgmtListenerConfig) http.Handler {

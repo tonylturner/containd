@@ -7,6 +7,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,4 +94,46 @@ func TestSyslogReapplyWhileForwarderStarts(t *testing.T) {
 			t.Fatalf("Apply: %v", err)
 		}
 	}
+}
+
+// A flush formats its events with the format read with its forwarders, while
+// a concurrent Apply rewrites the configuration (checked under -race).
+func TestSyslogFlushWhileFormatChanges(t *testing.T) {
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket: %v", err)
+	}
+	defer conn.Close()
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	mgr := NewSyslogManager()
+	mgr.log = zap.NewNop().Sugar()
+	defer mgr.Stop()
+	var id atomic.Uint64
+	mgr.SetEventLister(func(int) []dpevents.Event {
+		return []dpevents.Event{{ID: id.Add(1), Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now().UTC()}}
+	})
+	cfg := func(format string) config.SyslogConfig {
+		return config.SyslogConfig{Forwarders: []config.SyslogForwarder{{Address: "127.0.0.1", Port: port, Proto: "udp"}}, Format: format}
+	}
+	if err := mgr.Apply(context.Background(), cfg("json")); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 50 {
+			format := "json"
+			if i%2 == 0 {
+				format = "rfc5424"
+			}
+			if err := mgr.Apply(context.Background(), cfg(format)); err != nil {
+				t.Errorf("Apply: %v", err)
+				return
+			}
+		}
+	}()
+	for range 50 {
+		mgr.flushEvents(context.Background())
+	}
+	<-done
 }

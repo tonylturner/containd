@@ -275,7 +275,41 @@ func showSyslogStatus(api *API) Command {
 		if le := fmtAny(syslog["last_error"]); le != "" {
 			fmt.Fprintf(out, "  last_error: %s\n", le)
 		}
+		if audit, ok := syslog["audit"].(map[string]any); ok {
+			writeSyslogAuditStatus(out, audit)
+		}
 		return nil
+	}
+}
+
+// writeSyslogAuditStatus prints audit record forwarding: the totals, then
+// each forwarder's cursor, backlog and last error.
+func writeSyslogAuditStatus(out io.Writer, audit map[string]any) {
+	if !boolAny(audit["enabled"]) {
+		fmt.Fprintln(out, "  audit: disabled")
+		return
+	}
+	fmt.Fprintln(out, "  audit: enabled")
+	for _, key := range []string{"sent_total", "failed_total", "backlog", "last_flush", "last_error"} {
+		if v := fmtAny(audit[key]); v != "" {
+			fmt.Fprintf(out, "    %s: %s\n", key, v)
+		}
+	}
+	forwarders, _ := audit["forwarders"].([]any)
+	for i, raw := range forwarders {
+		fwd, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		sent := fmtAny(fwd["last_sent"])
+		if sent == "" {
+			sent = "never"
+		}
+		fmt.Fprintf(out, "    %d) %s last_id=%s backlog=%s last_sent=%s\n", i+1,
+			fmtAny(fwd["forwarder"]), fmtAny(fwd["last_id"]), fmtAny(fwd["backlog"]), sent)
+		if le := fmtAny(fwd["last_error"]); le != "" {
+			fmt.Fprintf(out, "       last_error: %s\n", le)
+		}
 	}
 }
 
@@ -382,6 +416,14 @@ func fmtAny(v any) string {
 		return fmt.Sprintf("%.0f", t)
 	case string:
 		return t
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			if p := fmtAny(item); p != "" {
+				parts = append(parts, p)
+			}
+		}
+		return strings.Join(parts, ",")
 	default:
 		return ""
 	}

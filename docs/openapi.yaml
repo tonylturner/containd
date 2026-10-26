@@ -1813,7 +1813,7 @@ components:
         error: {type: string, description: Error of the last apply when it failed.}
         failedSnapshotVersion: {type: string, description: Version of the snapshot the last apply failed to install.}
         failedAt: {format: date-time, type: string, description: When the last apply failed.}
-        ruleset: {type: string, description: Compiled text of the installed ruleset.}
+        ruleset: {type: string, description: Compiled text of the installed ruleset; empty when none is installed, as with enforcement disabled.}
         snapshotVersion: {type: string, description: Version of the installed snapshot.}
         schedulePlanner: {$ref: '#/components/schemas/SchedulePlannerStatus'}
         icsCoverage:

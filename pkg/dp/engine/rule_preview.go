@@ -26,8 +26,8 @@ type PreviewRuleResponse struct {
 	TimeRange     *PreviewTimeRange `json:"time_range"`
 	TotalEvents   int               `json:"total_events"`
 	// Warnings reports a candidate that matches nothing under the running
-	// identity bindings, which explains its zero matches; omitted when there
-	// are none.
+	// zone interfaces or identity bindings, which explains its zero matches;
+	// omitted when there are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 	// ICSCoverage is the candidate's coverage under the running settings
 	// and runtime state; omitted for a rule without an ICS protocol.
@@ -59,6 +59,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}}
 	if snap != nil {
 		candidate.IdentityBindings = snap.IdentityBindings
+		candidate.ZoneIfaces = snap.ZoneIfaces
 	}
 	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
 	if cov := e.coverageOf(candidate); len(cov) == 1 {
