@@ -81,6 +81,12 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			factoryResetApplyError(c, err)
 			return
 		}
+		// Dynamic blocks and connection revocations are runtime state the
+		// applied defaults do not replace. A failed clear leaves them in
+		// force, so it is reported as incomplete convergence.
+		if err := engine.ClearBlocks(ctx); err != nil {
+			warnings = append(warnings, fmt.Sprintf("dynamic blocks: %v", err))
+		}
 		// Wiping sessions revokes session-backed tokens outside lab mode. Lab
 		// authentication deliberately does not consult session records. No user
 		// state changes until the configuration has been successfully applied.

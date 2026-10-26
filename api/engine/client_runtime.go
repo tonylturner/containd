@@ -195,6 +195,24 @@ func (c *HTTPClient) ClearInventory(ctx context.Context) error {
 	return nil
 }
 
+// ClearBlocks removes every temporary block and connection revocation the
+// engine holds. It succeeds without change when enforcement is disabled.
+func (c *HTTPClient) ClearBlocks(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/blocks/clear", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return engineStatusError(resp, "engine blocks clear status")
+	}
+	return nil
+}
+
 func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
 	u := c.BaseURL + "/internal/conntrack"
 	if limit > 0 {

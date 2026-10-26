@@ -99,3 +99,35 @@ func TestKillConntrackRejectsOldOrMalformedResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestClearBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"cleared", http.StatusOK, "", ""},
+		{"nft failure", http.StatusBadGateway, "nft: netlink busy\n", "engine blocks clear status 502: nft: netlink busy"},
+		{"no engine", http.StatusServiceUnavailable, "", "engine blocks clear status 503"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/internal/blocks/clear" {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			err := NewHTTPClient(srv.URL).ClearBlocks(context.Background())
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != tc.want {
+				t.Fatalf("ClearBlocks error %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

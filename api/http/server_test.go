@@ -190,6 +190,8 @@ type mockEngine struct {
 	avDeleted    string
 	trustErr     error
 	trustPushes  []trust.Bundle
+	clearErr     error
+	blockClears  int
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -289,6 +291,11 @@ func (m *mockEngine) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Dura
 
 func (m *mockEngine) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
 	return nil
+}
+
+func (m *mockEngine) ClearBlocks(ctx context.Context) error {
+	m.blockClears++
+	return m.clearErr
 }
 
 func (m *mockEngine) AVStatus(ctx context.Context) (map[string]any, error) {

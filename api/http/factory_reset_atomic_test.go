@@ -113,6 +113,9 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			if revoked {
 				t.Fatal("failed reset revoked SSH connections")
 			}
+			if engine.blockClears != 0 {
+				t.Fatal("failed reset cleared dynamic blocks")
+			}
 			got, err := store.Load(ctx)
 			if err != nil || !reflect.DeepEqual(jsonValue(t, running), jsonValue(t, got)) {
 				t.Fatalf("running changed: %+v %v", got, err)
@@ -207,12 +210,16 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine := &mockEngine{}
 	router := gin.New()
-	router.POST("/", factoryResetHandler(store, userStore, &mockEngine{}, nil))
+	router.POST("/", factoryResetHandler(store, userStore, engine, nil))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("reset failed: %d %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Containd-Warnings") != "" {
+		t.Fatalf("reset failed: %d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	if engine.blockClears != 1 {
+		t.Fatalf("dynamic blocks cleared %d times, want 1", engine.blockClears)
 	}
 	running, err := store.Load(ctx)
 	if err != nil || running.System.Hostname != "containd" {

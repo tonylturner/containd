@@ -74,6 +74,8 @@ type EngineClient interface {
 	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
 	BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error
 	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
+	// ClearBlocks removes every temporary block and connection revocation.
+	ClearBlocks(ctx context.Context) error
 
 	// Antivirus: the engine is the only scanner owner; management delegates.
 	AVStatus(ctx context.Context) (map[string]any, error)

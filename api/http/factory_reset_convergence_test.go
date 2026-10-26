@@ -292,3 +292,36 @@ func TestFactoryResetReportsAuditCleanupWarning(t *testing.T) {
 		t.Fatalf("audit cleanup failure hidden: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A reset whose block clear fails is applied, but the blocks it could not
+// remove stay in force: the response must report incomplete convergence.
+func TestFactoryResetReportsDynamicBlockClearFailure(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
+	store := stageStore(t)
+	us, err := users.NewSQLiteStore(filepath.Join(t.TempDir(), "users.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer us.Close()
+	engine := &mockEngine{clearErr: errors.New("engine blocks clear status 502: nft: netlink busy")}
+	router := gin.New()
+	router.POST("/reset", factoryResetHandler(store, us, engine, nil))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+	var body struct {
+		Warnings []string `json:"warnings"`
+		Message  string   `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := "dynamic blocks: engine blocks clear status 502: nft: netlink busy"
+	if rec.Code != http.StatusOK || engine.blockClears != 1 || !reflect.DeepEqual(body.Warnings, []string{want}) ||
+		rec.Header().Get("X-Containd-Warnings") != want || strings.Contains(body.Message, "completed") || !strings.Contains(body.Message, want) {
+		t.Fatalf("block clear failure hidden: %d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	admins, err := us.List(context.Background())
+	if err != nil || len(admins) != 1 || admins[0].Username != "containd" {
+		t.Fatalf("users not reset after an applied configuration: %+v %v", admins, err)
+	}
+}

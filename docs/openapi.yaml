@@ -2201,7 +2201,9 @@ paths:
         stores. Configuration replacement uses atomic restore/reapply recovery.
         On runtime apply failure users, sessions and existing audit history are not
         wiped; successful recovery restores running, candidate, previous, pending
-        rollback and the IDS bank. After runtime apply succeeds, replacing users and
+        rollback and the IDS bank. After runtime apply succeeds, the engine's
+        temporary blocks and connection revocations are cleared; a failed clear is
+        reported as a "dynamic blocks:" warning. Replacing users and
         sessions with the default admin is atomic within the users database; a
         user-reset failure preserves the prior users and sessions. Configuration
         and users are separate databases, so that failure does not undo the
