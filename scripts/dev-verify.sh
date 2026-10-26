@@ -82,6 +82,7 @@ shellcheck_targets=(
     scripts/quickstart.sh
     scripts/semgrep-verify.sh
     scripts/smoke-dpi.sh
+    scripts/smoke-forward-mutations.sh
     scripts/smoke-forward.sh
     scripts/smoke-iec104.sh
     scripts/smoketest
