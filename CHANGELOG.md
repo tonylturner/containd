@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refresh contributor testing, performance and code-boundary guidance and
+  package navigation; remove the empty internal API placeholder.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security

@@ -1,10 +1,12 @@
 # Performance Baseline
 
-`containd` now includes a small, repeatable performance baseline for the dataplane decoder path. The goal is not to claim final performance numbers; it is to make regressions visible and give contributors one obvious command to run before and after dataplane work.
+Use the dataplane decoder benchmarks to compare packet-path changes before
+and after a refactor. These microbenchmarks do not measure whole-appliance
+throughput or latency under live traffic.
 
-## Current Baseline
+## Benchmark Scope
 
-The baseline currently covers:
+The baseline covers:
 
 - the engine packet path in `pkg/dp/engine`
 - TCP reassembly in `pkg/dp/dpi`
@@ -46,8 +48,8 @@ By default, profiles are written under `${TMPDIR:-/tmp}/containd-perf`.
 Inspect them with:
 
 ```bash
-go tool pprof /tmp/containd-perf/dpi.cpu.pprof
-go tool pprof /tmp/containd-perf/itdpi.cpu.pprof
+go tool pprof "${TMPDIR:-/tmp}/containd-perf/dpi.cpu.pprof"
+go tool pprof "${TMPDIR:-/tmp}/containd-perf/itdpi.cpu.pprof"
 ```
 
 ## How To Use This
@@ -67,14 +69,14 @@ Recommended workflow:
 3. rerun the baseline
 4. if a benchmark regresses, capture a profile before merging
 
-## Current Limitations
+## Limitations
 
-This is an initial baseline, not a full performance program.
-
-It does not yet cover:
+The baseline does not cover:
 
 - long-running multi-packet protocol sessions beyond the current single-packet engine and reassembly benchmarks
 - UI route performance
 - automated regression thresholds in CI
 
-Those are the next maturity steps once the basic benchmark workflow is in regular use.
+Compare runs on the same host and toolchain, and inspect allocation counts
+as well as timing. Microbenchmark results alone do not establish live
+forwarding capacity.

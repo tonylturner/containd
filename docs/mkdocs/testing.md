@@ -1,8 +1,9 @@
 # Testing And Coverage
 
-`containd` now has a repeatable local workflow for smoke, lint, security checks, fuzzing, benchmarks, and package coverage.
-
-This page is not a claim that coverage is "done." It is the place contributors should start when they want to understand how much of the codebase is currently exercised and how to measure changes before a refactor or feature lands.
+Use these workflows to measure package coverage and select checks for a
+refactor or feature. See [Contributing](https://github.com/tonylturner/containd/blob/main/CONTRIBUTING.md)
+for development prerequisites and the contributor workflow, and
+[Performance Baseline](performance.md) for benchmarks and profiles.
 
 ## Coverage Workflow
 
@@ -51,14 +52,22 @@ That complements the other validation workflows:
 
 ## UI Route Smoke
 
-For browser-level client sanity, the UI now includes a Playwright route sweep that logs in via mocked API responses, visits every app route, and fails on uncaught page exceptions or console errors.
+`npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only
+the route sweep. The route sweep logs in via mocked API responses, visits app
+routes, and fails on uncaught page exceptions or console errors.
 
 Run it directly from `ui/`:
 
 ```bash
+npm ci
 npx playwright install chromium
 npm run test:routes
 ```
+
+To run only the route sweep, use `npm run test:routes -- route-smoke.spec.ts`.
+The Playwright configuration starts a local Next.js development server on
+port 3100; set `PLAYWRIGHT_PORT` to an unused port if another server is
+running there, so the tests do not reuse an unrelated server.
 
 Or include it in the broader repo verification pass:
 
@@ -72,30 +81,31 @@ This route smoke is intentionally shallow:
 - it is not a replacement for full interactive lab testing
 - it specifically exercises malformed firewall/ICS rule shapes so UI regressions like `.join is not a function` fail in CI instead of surfacing only during manual testing
 
-## Current Shape
+### UI Build And Documentation
 
-The current audit-refactor baseline is uneven:
+For a production static export, `npm run build` also runs the docs prebuild.
+To include generated documentation in the export, install Python and the
+packages in `docs/requirements-mkdocs.txt`, and put `mkdocs` on `PATH` before
+building. The prebuild can reuse existing generated docs when MkDocs is
+unavailable; it does not generate missing docs without that toolchain.
 
-- protocol parsers and several control-plane packages are in decent shape
-- smoke and integration coverage are strong for forwarding, NAT, and the current Modbus/TCP DPI path
-- CLI, management app, services, and some Linux-specific runtime packages still have much lighter direct statement coverage
+## Selecting Tests
 
-This is expected for an appliance-style repo:
+| Change | Checks |
+|---|---|
+| Go package behavior | Focused package tests; use the coverage report to identify untested paths |
+| Protocol parsing or stream reassembly | Adjacent malformed-input tests, fuzz targets and benchmarks |
+| UI routes or forms | Playwright specs and UI lint; mocked API tests do not validate the live backend |
+| Forwarding, NAT or live DPI | `bash scripts/smoketest`; set `SMOKE_INCLUDE_DPI=0` for forwarding only |
+| Linux networking or runtime behavior | Tests on Linux with the capabilities required by the package or harness |
 
-- some packages are exercised more through smoke/integration than direct unit coverage
-- some Linux-only runtime packages are difficult to cover deeply on non-Linux hosts
-
-That said, low direct coverage is still a signal. If you are changing one of the lowest-coverage packages, add focused tests while the code is fresh.
-
-## What To Prioritize
-
-The highest-value coverage additions are:
-
-1. engine and management orchestration paths that currently rely mostly on smoke coverage
-2. Linux-specific runtime packages like `netcfg`, `dhcpd`, and `conntrack`
-3. service render/apply code paths
-4. migration and rollback scenarios around config lifecycle
-5. multi-packet parser behavior beyond the current fuzz and smoke baseline
+Keep regression tests beside the code they exercise, following
+[Code Boundaries](code-boundaries.md). Direct statement coverage and live
+integration checks measure different things; neither substitutes for the
+other. Smoke fixture setup and isolation are documented in
+[`test/data-smoke/README.md`](https://github.com/tonylturner/containd/blob/main/test/data-smoke/README.md),
+and IEC104 scenarios in
+[`test/iec104/README.md`](https://github.com/tonylturner/containd/blob/main/test/iec104/README.md).
 
 ## What Coverage Does Not Replace
 
@@ -109,4 +119,4 @@ It does not replace:
 - security scans
 - real lab-path testing
 
-Treat `scripts/coverage-report.sh` as part of the audit toolbox, not the only quality gate.
+Treat `scripts/coverage-report.sh` as one verification tool, not the only quality gate.

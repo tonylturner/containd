@@ -1,15 +1,10 @@
 # Code Boundaries
 
-This page defines the current ownership boundaries for the largest contributor-facing files in `containd`.
+This page defines ownership boundaries for contributor-facing files in `containd`.
 
-The goal is simple: keep facade files small, keep domain logic near its route or feature, and stop regressing into another `3000+` line catch-all file.
-
-Current structural baseline:
-
-- No tracked `.go`, `.ts`, or `.tsx` source file is over the audit threshold of `1200` lines.
-- New work should preserve that state. Crossing the threshold again is treated as a structural regression, not normal growth.
-- Use `scripts/complexity-report.sh` during larger refactors to catch hotspots before they grow back into facade-style dumping grounds.
-- The current complexity report is also clean at the `>20` threshold. Treat new over-threshold functions as a regression signal, not just a cleanup suggestion.
+Keep facade files small and domain logic near its route or feature. Use
+`scripts/complexity-report.sh` during larger refactors to identify functions
+that need decomposition.
 
 ## General Rules
 
@@ -63,6 +58,13 @@ Primary auth facade:
 
 Rule:
 - new auth branches should become small helper functions by mode or remediation policy, not more nested conditionals inside `authMiddleware`
+
+## Engine Control API Boundaries
+
+The engine's internal HTTP routes are registered in `pkg/app/engine/engine.go`.
+Management-plane callers use `pkg/mp/engineclient/`. Keep engine control
+handlers with the engine application, separate from the public management
+API in `api/http/`.
 
 ## Config Model Boundaries
 
@@ -235,18 +237,15 @@ Before merging a new feature, ask:
 
 - Does this code belong in a facade or in a domain file?
 - Is this adding another unrelated responsibility to a large file?
-- Should this become a sibling module now instead of after the next three features?
+- Would a sibling module give this code a clearer responsibility?
 - Is the new location obvious to the next contributor?
 
-If the answer to any of those is "no", split first and then add the feature.
+If the placement is unclear or adds unrelated responsibilities, split first
+and then add the feature.
 
 For ongoing maintenance, pair this document with:
 - `scripts/complexity-report.sh` for complexity drift
 - `scripts/dev-verify.sh --with-semgrep` for local structural/safety verification
 - `scripts/coverage-report.sh` for coverage drift in refactored packages
-- the full stabilization pass used on this branch when a large refactor lands:
-  - `bash scripts/dev-verify.sh --with-semgrep`
-  - `bash scripts/dev-verify.sh --with-coverage`
-  - `bash scripts/smoketest`
-  - `bash scripts/perf-baseline.sh --bench-time 10x`
-  - `mkdocs build -f docs/mkdocs.yml`
+- [Testing and Coverage](testing.md) for test selection and smoke workflows
+- [Performance Baseline](performance.md) for dataplane benchmarks and profiles

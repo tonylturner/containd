@@ -1,3 +1,6 @@
 # Common Utilities
 
-Shared types, logging helpers, and error handling for containd components.
+Shared environment and string helpers, logging adapters, Prometheus metrics,
+authentication-attempt throttling (`ratelimit`), and management reservation
+and binding helpers (`mgmtpath`) used across containd components. See
+[Code Boundaries](../../docs/mkdocs/code-boundaries.md) for placement guidance.
