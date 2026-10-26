@@ -90,14 +90,6 @@ func LoopbackManagementAPI() (string, *http.Client, error) {
 	}, nil
 }
 
-// CheckLoopbackManagement is the error LoopbackManagementAPI returns once
-// management records bound and served; nil when the console and SSH CLI
-// sessions have a listener to call.
-func CheckLoopbackManagement(bound config.ManagementListeners, served ServedManagement) error {
-	_, _, err := loopbackListener(bound, served)
-	return err
-}
-
 // loopbackListener is the scheme and 127.0.0.1 port of the bound listener
 // that LoopbackManagementAPI calls.
 func loopbackListener(bound config.ManagementListeners, served ServedManagement) (string, int, error) {

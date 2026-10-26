@@ -333,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SSH is recorded as a bound management listener only after its socket binds. A failed SSH bind leaves SSH off with a listener fault instead of reporting it enabled; HTTP and HTTPS are unaffected.
 - HTTP redirects to HTTPS only when the HTTPS listener bound.
 - SSH exec requests report exit status 0 on success and 1 on a failed or empty command, and the appliance shell reports 0 when it closes, so OpenSSH clients no longer exit 255.
 - With the Linux shell (`ssh.shellMode` linux), a shell killed by a signal reports exit-signal with the signal's name (RFC 4254) instead of exit status 4294967295, and a shell wait error reports 1 instead of 0.
