@@ -376,18 +376,6 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 	}
 }
 
-// Exit statuses of a session's command (RFC 4254 section 6.10).
-const (
-	exitSuccess uint32 = 0
-	exitFailure uint32 = 1
-)
-
-// sendExitStatus reports the exit status of the session's command or shell
-// before the channel closes, so clients do not report a missing status.
-func sendExitStatus(ch ssh.Channel, status uint32) {
-	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
-}
-
 func (s *Server) isLinuxShellMode() bool {
 	return strings.EqualFold(s.opts.ShellMode, "linux")
 }
