@@ -5,6 +5,7 @@ package mgmtapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -209,11 +210,16 @@ func authKeysDirNeedsBootstrap(authKeysDir string) bool {
 	return len(entries) == 0
 }
 
-// sshBaseURL is the management API URL of SSH CLI sessions: the bound
+// sshBaseURL is the management API URL of SSH CLI sessions: the served
 // HTTP listener httpAddr through loopbackAddr, the loopback listener
 // management adds for it, or on 127.0.0.1 when httpAddr itself accepts
-// loopback connections.
+// loopback connections. SSH sessions call the API with a plain HTTP client
+// that cannot pin the HTTPS certificate, so without a served HTTP listener
+// (httpAddr empty) SSH has no listener to call and stays off.
 func sshBaseURL(httpAddr, loopbackAddr string) (string, error) {
+	if httpAddr == "" {
+		return "", errors.New("the management HTTP listener is disabled; SSH CLI sessions call the management API over loopback HTTP and cannot use the HTTPS listener")
+	}
 	if loopbackAddr != "" && loopbackAddr != httpAddr {
 		return "http://" + loopbackAddr, nil
 	}

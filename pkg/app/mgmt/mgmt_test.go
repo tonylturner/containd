@@ -5,8 +5,12 @@ package mgmtapp
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -196,5 +200,79 @@ func TestEnsureDefaultConfig(t *testing.T) {
 	}
 	if !boolDefault(cfg.System.Mgmt.EnableHTTP, false) || !boolDefault(cfg.System.Mgmt.EnableHTTPS, false) {
 		t.Fatal("expected default http/https listeners enabled")
+	}
+}
+
+// A stored rule with an ICS address entry that validation now refuses starts
+// management in recovery, with the rule and the entry in the boot fault,
+// and leaves the stored rule for the operator to fix.
+func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.db")
+	t.Setenv("CONTAIND_CONFIG_DB", path)
+	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))
+	t.Setenv("CONTAIND_USERS_DB", filepath.Join(dir, "users.db"))
+	store, err := config.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Save(ctx, config.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	setStoredRules(t, path, []config.Rule{{
+		ID: "modbus-addr", Action: config.ActionAllow,
+		Protocols: []config.Protocol{{Name: "tcp", Port: "502"}},
+		ICS:       config.ICSPredicate{Protocol: "modbus", Mode: "learn", Addresses: []string{"0x0100", "0x01G0"}},
+	}})
+
+	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
+	if err != nil {
+		t.Fatalf("a bad stored address stopped management: %v", err)
+	}
+	defer stores.store.Close()
+	defer stores.auditStore.Close()
+	defer stores.userStore.Close()
+	fault, err := config.ManagementBootFaultForStore(ctx, stores.store)
+	if err != nil || !strings.Contains(fault, `rule modbus-addr ics addresses entry "0x01G0"`) {
+		t.Fatalf("fault = %q, %v", fault, err)
+	}
+	if !errors.Is(config.CheckManagementBootFault(ctx, stores.store), config.ErrManagementBootFault) {
+		t.Fatal("boot is not in recovery")
+	}
+	if len(running.Firewall.Rules) != 1 || !slices.Equal(running.Firewall.Rules[0].ICS.Addresses, []string{"0x0100", "0x01G0"}) {
+		t.Fatalf("boot rewrote the stored rules: %+v", running.Firewall.Rules)
+	}
+}
+
+// The certificate recorded for the console is the one the HTTPS listener
+// serves: an environment override, generated when missing, rather than the
+// saved setting; none when HTTPS is not served.
+func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
+	dir := t.TempDir()
+	envCert := filepath.Join(dir, "env.crt")
+	t.Setenv("CONTAIND_TLS_CERT_FILE", envCert)
+	t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "env.key"))
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "saved.crt")
+	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "saved.key")
+	cfg.System.Mgmt.EnableHTTP = boolPtr(false)
+	listener, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listener.servedCertificate(); got != envCert {
+		t.Fatalf("served certificate = %q, want %q", got, envCert)
+	}
+	if _, err := os.Stat(envCert); err != nil {
+		t.Fatalf("served certificate not generated: %v", err)
+	}
+	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
+	cfg.System.Mgmt.EnableHTTP = boolPtr(true)
+	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedCertificate() != "" {
+		t.Fatalf("served certificate without HTTPS = %q, %v", listener.servedCertificate(), err)
 	}
 }

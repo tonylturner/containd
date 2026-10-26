@@ -357,19 +357,21 @@ func TestScheduleNoScheduleAlwaysMatches(t *testing.T) {
 }
 
 // TestUnparseableICSAddressesMatchNothing checks that an address predicate
-// whose specifications all fail to parse matches no address, as a CIDR
-// side that lists only unparseable networks matches no host: it must not
-// widen an ALLOW to every address.
+// with an entry that fails to parse matches no address, as a CIDR side that
+// lists only unparseable networks matches no host: it must neither widen an
+// ALLOW to every address nor narrow it to the entries that parse.
 func TestUnparseableICSAddressesMatchNothing(t *testing.T) {
-	ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
-		ID:     "write-one",
-		ICS:    ICSPredicate{Protocol: "modbus", Addresses: []string{"junk", "1-"}},
-		Action: ActionAllow,
-	}}})
-	for _, addr := range []string{"5", "0x0100", ""} {
-		ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: addr}}
-		if got := ev.Evaluate(ctx); got != ActionDeny {
-			t.Fatalf("address %q = %s, want DENY", addr, got)
+	for _, specs := range [][]string{{"junk", "1-"}, {"5", "0x01G0"}, {"0-0x200", "0x200-0x100"}} {
+		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+			ID:     "write-one",
+			ICS:    ICSPredicate{Protocol: "modbus", Addresses: specs},
+			Action: ActionAllow,
+		}}})
+		for _, addr := range []string{"5", "0x0100", ""} {
+			ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: addr}}
+			if got := ev.Evaluate(ctx); got != ActionDeny {
+				t.Fatalf("addresses %q at %q = %s, want DENY", specs, addr, got)
+			}
 		}
 	}
 	if matchAddress([]string{"junk"}, "5") {
