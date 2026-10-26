@@ -115,6 +115,21 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	})
 	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
+	serveStaticUI(router)
+	// Enforce per-interface access toggles based on the destination IP.
+	ipIndex := newIPInterfaceIndex()
+	access := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
+	// Bind before any runtime apply: a listener fallback enters recovery.
+	bound, err := bindManagement(logger, stores, runtimeCfg, opts.Reservation, listenerCfg, func(lc mgmtListenerConfig) ([]*http.Server, []net.Listener, error) {
+		return buildMgmtServers(applyMgmtHTTPMiddleware(logger, access, lc), lc)
+	})
+	if err != nil {
+		return err
+	}
+	if bound.event != nil {
+		serviceManager.event = bound.event
+	}
+	runtimeCfg, listenerCfg = bound.cfg, bound.listener
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -134,26 +149,15 @@ func Run(ctx context.Context, opts Options) error {
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
 		return out
 	})
-	serveStaticUI(router)
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()
 	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
 	defer stopReload()
 
-	// Enforce per-interface access toggles based on the destination IP.
-	ipIndex := newIPInterfaceIndex()
-	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
-
 	// Start SSH server (admin-only) for interactive CLI.
 	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault, sshServer.Store)
-	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
-
-	servers, listeners, err := buildMgmtServers(handler, listenerCfg)
-	if err != nil {
-		return err
-	}
-	return serveMgmtServers(ctx, servers, listeners)
+	return serveMgmtServers(ctx, bound.servers, bound.listeners)
 }
 
 func validateJWTSecret(logger *zap.SugaredLogger) error {

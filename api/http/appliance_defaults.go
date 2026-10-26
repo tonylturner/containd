@@ -16,6 +16,17 @@ func ApplianceDefaults(r *mgmtpath.Reservation) *config.Config {
 	return applianceDefaults(r, AutoBindDefaultInterfaceDevicesReserved)
 }
 
+// WithApplianceListeners returns a copy of cfg whose management HTTP,
+// HTTPS and SSH listener settings are the appliance defaults for r. They
+// are what management binds when stored listener settings cannot serve.
+func WithApplianceListeners(cfg *config.Config, r *mgmtpath.Reservation) *config.Config {
+	defaults := applianceDefaults(r, func(*config.Config, *mgmtpath.Reservation) bool { return false })
+	out := *cfg
+	out.System.Mgmt = defaults.System.Mgmt
+	out.System.SSH.ListenAddr = defaults.System.SSH.ListenAddr
+	return &out
+}
+
 func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtpath.Reservation) bool) *config.Config {
 	def := config.DefaultConfig()
 	config.ApplyBootstrapEnvDefaults(def)

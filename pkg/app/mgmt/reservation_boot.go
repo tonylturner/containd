@@ -69,11 +69,7 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 	if config.ValidateManagementListeners(cfg.System, r) == nil && validateReservedStartup(cfg, r) == nil {
 		return cfg
 	}
-	safe := *cfg
-	defaults := httpapi.ApplianceDefaults(r)
-	safe.System.Mgmt = defaults.System.Mgmt
-	safe.System.SSH.ListenAddr = defaults.System.SSH.ListenAddr
-	return &safe
+	return httpapi.WithApplianceListeners(cfg, r)
 }
 
 // recordBootDecision persists every boot's recovery decision. A refused
@@ -81,13 +77,19 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 // gets the fail-closed recovery ruleset until a valid commit, rollback or
 // factory reset (see api/http ApplyBootConfig).
 func recordBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
+	return persistBootFault(logger, stores, bootConflict(cfg, r), r)
+}
+
+// persistBootFault records conflict, or its absence, as this boot's
+// recovery decision, with an audit record and the returned event when
+// there is one.
+func persistBootFault(logger *zap.SugaredLogger, stores mgmtStores, conflict error, r *mgmtpath.Reservation) (*dpevents.Event, error) {
 	store, ok := stores.store.(interface {
 		SetManagementBootFault(context.Context, string) error
 	})
 	if !ok {
 		return nil, errors.New("config store does not support management boot fault persistence")
 	}
-	conflict := bootConflict(cfg, r)
 	fault := ""
 	if conflict != nil {
 		fault = conflict.Error()

@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -207,8 +208,22 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 		len(snap.Firewall) != 0 || snap.NAT.Enabled || len(snap.ZoneIfaces) != 0 {
 		t.Fatalf("recovery ruleset admits stored transit: %+v", snap)
 	}
-	if !reflect.DeepEqual(snap.LocalInput, compile.ManagementLocalInput(running)) {
-		t.Fatalf("recovery management input = %+v, want stored access %+v", snap.LocalInput, compile.ManagementLocalInput(running))
+	// The stored listeners, and the default ones management falls back to,
+	// with exactly the stored interface access.
+	stored := compile.ManagementLocalInput(running)
+	access := map[string]rules.LocalServiceRule{}
+	for _, rule := range stored {
+		access[rule.ID] = rule
+	}
+	for _, want := range stored {
+		if !slices.ContainsFunc(snap.LocalInput, func(have rules.LocalServiceRule) bool { return reflect.DeepEqual(have, want) }) {
+			t.Fatalf("recovery management input = %+v, want stored access %+v", snap.LocalInput, stored)
+		}
+	}
+	for _, have := range snap.LocalInput {
+		if want, ok := access[have.ID]; ok && (!reflect.DeepEqual(have.Ifaces, want.Ifaces) || !reflect.DeepEqual(have.DeniedIfaces, want.DeniedIfaces)) {
+			t.Fatalf("recovery management input %+v widens stored access %+v", have, want)
+		}
 	}
 	var http8080 *rules.LocalServiceRule
 	for i := range snap.LocalInput {

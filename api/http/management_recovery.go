@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -17,11 +19,19 @@ import (
 // input. The compiler supplies established traffic, loopback and the env-backed
 // reserved INPUT allow; every new forwarded connection is dropped. Without a
 // reservation the stored management listener access is the only management
-// path, so recovery keeps exactly that access and nothing else from stored.
+// path, so recovery keeps exactly that access and nothing else from stored:
+// the stored listeners and the appliance default listeners, which management
+// serves instead when the stored ones cannot be bound, on the interfaces that
+// stored access grants management.
 func RecoverySnapshot(stored *config.Config, r *mgmtpath.Reservation) rules.Snapshot {
 	snap := rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny}
 	if r == nil && stored != nil {
 		snap.LocalInput = compile.ManagementLocalInput(stored)
+		for _, rule := range compile.ManagementLocalInput(WithApplianceListeners(stored, nil)) {
+			if !slices.ContainsFunc(snap.LocalInput, func(have rules.LocalServiceRule) bool { return reflect.DeepEqual(have, rule) }) {
+				snap.LocalInput = append(snap.LocalInput, rule)
+			}
+		}
 	}
 	return snap
 }

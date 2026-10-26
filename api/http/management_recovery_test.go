@@ -192,8 +192,12 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 		len(snap.Firewall) != 0 || len(snap.ZoneIfaces) != 0 || snap.NAT.Enabled {
 		t.Fatalf("recovery leaked stored input: dp=%+v snap=%+v engine=%d services=%d", engine.dp, snap, engine.mutations, services.mutations)
 	}
-	// Without a reservation, stored management access is the only way in.
-	if len(snap.LocalInput) == 0 || !reflect.DeepEqual(snap.LocalInput, compile.ManagementLocalInput(cfg)) {
+	// Without a reservation, stored management access is the only way in:
+	// the stored listeners, then the default listeners management falls
+	// back to (here HTTPS, which the stored config leaves to its default).
+	stored := compile.ManagementLocalInput(cfg)
+	if len(snap.LocalInput) != len(stored)+1 || !reflect.DeepEqual(snap.LocalInput[:len(stored)], stored) ||
+		snap.LocalInput[len(stored)].ID != "auto-allow-mgmt-https" || snap.LocalInput[len(stored)].Port != 8443 {
 		t.Fatalf("recovery management input = %+v", snap.LocalInput)
 	}
 
@@ -254,5 +258,33 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 	}
 	if rec := requestStage(t, server, "GET", "/system/management-reservation", nil); strings.TrimSpace(rec.Body.String()) != `{"active":false}` {
 		t.Fatalf("reservation view after commit = %s", rec.Body)
+	}
+}
+
+// Without a reservation, recovery admits management on the stored
+// listeners and on the default listeners management binds when the stored
+// ones cannot be bound, both only where stored access grants management.
+func TestRecoverySnapshotAdmitsDefaultListeners(t *testing.T) {
+	f := false
+	stored := config.DefaultConfig()
+	stored.System.Mgmt.HTTPListenAddr = "192.0.2.50:9090"
+	stored.Interfaces = []config.Interface{
+		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
+		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+	}
+	ports := map[int]rules.LocalServiceRule{}
+	for _, rule := range RecoverySnapshot(stored, nil).LocalInput {
+		if rule.ID == "auto-allow-mgmt-http" {
+			ports[rule.Port] = rule
+		}
+	}
+	for _, port := range []int{9090, 8080} {
+		rule, ok := ports[port]
+		if !ok || !reflect.DeepEqual(rule.Ifaces, []string{"mgmtnic"}) || !reflect.DeepEqual(rule.DeniedIfaces, []string{"wannic"}) {
+			t.Fatalf("recovery HTTP management input on %d = %+v (%v)", port, rule, ok)
+		}
+	}
+	if len(ports) != 2 {
+		t.Fatalf("recovery HTTP management input = %+v", ports)
 	}
 }
