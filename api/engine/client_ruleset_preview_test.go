@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package engineapi
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/engine"
+)
+
+func TestClientRulesetPreview(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
+	want := engine.RulesetPreview{Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got config.Config
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/internal/ruleset/preview" ||
+			r.Header.Get("Content-Type") != "application/json" || !reflect.DeepEqual(&got, cfg) {
+			t.Errorf("request %s %s config=%+v", r.Method, r.URL, got)
+		}
+		if err := json.NewEncoder(w).Encode(want); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	got, err := NewHTTPClient(server.URL).PreviewRuleset(context.Background(), cfg)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("preview=%+v err=%v", got, err)
+	}
+}
+
+func TestClientRulesetPreviewErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"offline", "offline", http.StatusServiceUnavailable},
+		{"rejected", "invalid candidate", http.StatusBadRequest},
+		{"JSON", "{", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Error(err)
+				}
+				http.Error(w, tc.body, tc.status)
+			}))
+			defer server.Close()
+			if _, err := NewHTTPClient(server.URL).PreviewRuleset(context.Background(), config.DefaultConfig()); err == nil {
+				t.Fatal("preview succeeded")
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewHTTPClient("http://unused.invalid").PreviewRuleset(ctx, config.DefaultConfig()); err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("canceled preview err=%v", err)
+	}
+}

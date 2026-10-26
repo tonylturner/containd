@@ -42,6 +42,12 @@ schedule predicates. Evaluation is ordered, with a default action when no generi
 rule matches. IEC 104 object evaluation instead defaults to deny inside its
 inspection envelope. Snapshot swaps are atomic.
 
+The [ruleset preview](policy-model.md#templates-and-preview) uses the same
+compiler construction as apply on an isolated candidate. Its runtime sample
+describes the IEC 104 queue-ownership decision, not a promise about later queue
+ownership or the last installed ruleset. Preview never binds queues or changes
+live enforcement.
+
 For enablement, privileges, capture modes, and failure limits, see
 [Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
 [Policy Model](policy-model.md).

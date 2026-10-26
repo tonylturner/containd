@@ -37,3 +37,12 @@ window templates belong to the general `/api/v1/templates` registry and its
 
 Use `POST /api/v1/firewall/rules/preview` to inspect matches before committing;
 preview is not a live packet-delivery test.
+
+The admin-only `GET /api/v1/dataplane/ruleset` previews the candidate nftables
+ruleset through the live engine, without applying it. It uses the candidate's
+table, NFQUEUE and NFLOG settings and the engine's reserved management access.
+The response and firewall page explain the IEC 104 envelope decision sampled
+from current queue ownership. A later queue bind or loss can change steering
+before commit. If the engine cannot compile, preview reports an error rather
+than guessing with compiler defaults.
+Preview does not enable enforcement or prove that a kernel apply will succeed.

@@ -118,7 +118,8 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 	for _, e := range dp.DPIExclusions {
 		excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
 	}
-	table := firstNonEmpty(dp.EnforceTable, "containd")
+	settings := compilerSettings(dp)
+	table := settings.TableName
 	return engine.New(engine.Config{
 		Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
 		Events:  store,
@@ -132,7 +133,15 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 		DPIProtocols:    dp.DPIProtocols,
 		DPIICSProtocols: dp.DPIICSProtocols,
 		DPIExclusions:   excl,
-		NFLogGroup:      dp.NFLogGroup,
-		NFQueueGroup:    dp.NFQueueGroup,
+		NFLogGroup:      settings.NFLogGroup,
+		NFQueueGroup:    settings.NFQueueGroup,
 	})
+}
+
+// compilerSettings is the single candidate-config mapping for apply and preview.
+func compilerSettings(dp config.DataPlaneConfig) enforce.CompilerSettings {
+	return enforce.CompilerSettings{
+		TableName:  firstNonEmpty(dp.EnforceTable, "containd"),
+		NFLogGroup: dp.NFLogGroup, NFQueueGroup: dp.NFQueueGroup,
+	}
 }

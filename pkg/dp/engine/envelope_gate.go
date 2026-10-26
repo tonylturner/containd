@@ -46,7 +46,19 @@ type envelopeGate struct {
 // wantOpenLocked reports whether the installed envelope may queue: only to
 // the queue this engine owns.
 func (g *envelopeGate) wantOpenLocked() bool {
-	return g.installed && g.owned != 0 && g.comp != nil && g.comp.QueueID == int(g.owned)
+	return g.installed && g.comp != nil && g.queueOpenLocked(g.comp.QueueID)
+}
+
+// queueOpenLocked is the envelope decision for both candidate and live applies.
+func (g *envelopeGate) queueOpenLocked(queue int) bool {
+	return g.owned != 0 && queue == int(g.owned)
+}
+
+// sampleOpen reads the decision for a candidate queue without changing the gate.
+func (g *envelopeGate) sampleOpen(queue int) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.queueOpenLocked(queue)
 }
 
 // apply compiles snap in the current envelope state and installs it. The
@@ -54,7 +66,7 @@ func (g *envelopeGate) wantOpenLocked() bool {
 func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applier enforce.Applier, snap *rules.Snapshot) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	open := g.owned != 0 && comp.QueueID == int(g.owned)
+	open := g.queueOpenLocked(comp.QueueID)
 	comp.IEC104EnvelopeOpen = open
 	compiled, err := comp.CompileFirewall(snap)
 	if err != nil {

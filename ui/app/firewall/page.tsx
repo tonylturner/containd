@@ -124,6 +124,7 @@ export default function FirewallPage() {
 
   async function loadRulesetPreview() {
     if (!isAdmin()) return;
+    setRulesetPreview(null);
     setRulesetState("loading");
     const preview = await getRulesetPreview();
     if (!preview) {
@@ -389,12 +390,13 @@ export default function FirewallPage() {
           <div>
             <h2 className="text-sm font-semibold text-[var(--text)]">nftables ruleset preview</h2>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Preview the compiled ruleset before it is applied to the dataplane.
+              Compile the candidate using the engine&apos;s current queue ownership, without applying it.
             </p>
           </div>
           {isAdmin() && (
             <button
               onClick={loadRulesetPreview}
+              disabled={rulesetState === "loading"}
               className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
             >
               {rulesetState === "loading" ? "Loading..." : "Preview"}
@@ -408,13 +410,18 @@ export default function FirewallPage() {
         )}
         {rulesetState === "error" && (
           <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Failed to load ruleset preview.
+            Ruleset preview unavailable. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
           </div>
         )}
         {rulesetPreview?.engineStatusError && (
           <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Engine status unavailable: {rulesetPreview.engineStatusError}
           </div>
+        )}
+        {rulesetPreview?.runtime && (
+          <p className="mt-3 text-xs text-[var(--text-muted)]">
+            {rulesetPreview.runtime.reason}. Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering.
+          </p>
         )}
         {rulesetPreview?.ruleset && (
           <pre className="mt-4 max-h-[360px] overflow-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">

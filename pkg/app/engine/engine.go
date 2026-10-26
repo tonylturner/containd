@@ -175,6 +175,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules/preview", previewRuleHandler(dpEngine))
+	mux.HandleFunc("/internal/ruleset/preview", previewRulesetHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine, simMgr))
 	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr, ownership))
