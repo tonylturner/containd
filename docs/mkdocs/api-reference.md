@@ -1,6 +1,25 @@
 # API Reference
 
-containd exposes a REST API under `/api/v1`. All authenticated endpoints require a JWT obtained via `POST /auth/login`.
+containd exposes a REST API under `/api/v1`.
+
+## Authentication
+
+Normal deployments use session-backed JWTs from `POST /auth/login`.
+Send `Authorization: Bearer <token>` or the `containd_token` cookie set by login.
+Sessions have a 30-minute idle timeout and a 4-hour maximum lifetime.
+Logout revokes the session and clears the cookie. Cookie-authenticated browser
+writes require a same-origin request or an explicitly allowed origin.
+
+Lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
+privileges without normal session enforcement. If a JWT secret is configured,
+the token must be a valid signed JWT; without one, any nonempty token is accepted.
+Do not expose lab mode to untrusted clients.
+
+Static bearer authentication is a fallback when the user store or JWT secret
+is unavailable: `CONTAIND_ADMIN_TOKEN` grants admin access and
+`CONTAIND_AUDITOR_TOKEN` grants read-only access. These tokens do not replace
+session authentication in a normally configured appliance. Production startup
+requires a nonempty, non-example JWT secret.
 
 When optional local-account MFA is enabled, `POST /auth/login` returns an MFA challenge instead of a session token, and `POST /auth/login/mfa` completes the login with a TOTP code.
 
@@ -10,17 +29,11 @@ Admins can also require MFA for specific local accounts. When MFA is required fo
 
 A machine-readable OpenAPI 3.0 specification is maintained at [`docs/openapi.yaml`](https://github.com/tonylturner/containd/blob/main/docs/openapi.yaml). You can load this file into any OpenAPI-compatible viewer (Swagger UI, Redocly, Stoplight, etc.) for interactive exploration.
 
-The spec covers authentication, configuration lifecycle, CRUD endpoints for zones/interfaces/firewall rules/assets, embedded services, DPI/ICS operations, PCAP analysis, learn mode, inventory, signatures, anomalies, templates, monitoring, and diagnostics.
-
-Authentication and user-management coverage includes:
-
-- TOTP MFA enrollment, enable, disable, and login verification
-- admin-side MFA disable/reset
-- admin-side MFA requirement, grace-period extension, and requirement clearing
-
-## Quick Endpoint Overview
-
-See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
+The specification is the canonical endpoint and schema reference.
+`TestOpenAPIRoutes` compares every registered `/api/v1` method and path against
+it in both directions, including optional identity routes and delegated audit
+registration. Optional routes require their corresponding server integration.
+The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 
 ## Staged Configuration
 
@@ -41,6 +54,14 @@ capture start/stop) remain immediate. `/pcap/start` uses its request body, or
 running PCAP settings when absent; neither start nor stop persists settings.
 CLI configuration commands report `staged; run "commit" to apply`.
 
+For confirmed commits, send `POST /config/commit_confirmed` with
+`{"ttl_seconds": 60}`, then `POST /config/confirm` before the timer expires.
+Omitted or nonpositive TTLs use 60 seconds; duration overflow is rejected
+before promotion. Expiry restores the prior running configuration and IDS bank
+and requests runtime replay. Replay failures are retried and exposed in health,
+not treated as a successful runtime apply.
+See [Config Format](config-format.md) for the configuration lifecycle and JSON.
+
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
 commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
 Operational, read, preview-only and failed responses carry neither header value.
@@ -48,7 +69,7 @@ Operational, read, preview-only and failed responses carry neither header value.
 ## Orchestrator Client Contract
 
 Orchestrators that push a whole policy, such as RangerDanger, apply it with
-these two calls (paths below are relative to `/api/v1`):
+the following steps (paths below are relative to `/api/v1`):
 
 1. `POST /config/candidate` with the full document. A non-2xx response means
    staging failed; report the error body. Staging alone never activates policy.
@@ -133,10 +154,27 @@ Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 Factory reset also uses the strict apply path, but is destructive and does not
 restore wiped users/config/audit data if its runtime apply fails.
 
-## Event Retention and Page Limits
+## Events: Filtered Queries and Legacy Lists
+
+Use `GET /api/v1/events?query=1` for an `EventPage` envelope containing `events`,
+optional `nextCursor`, `historyTruncated`, and optional `engineError`.
+Filters (`id`, `session`, `flow`, `apdu`, `kind`, `protocol`, `decision`,
+`verdict`, `since`, `category`, `detections`) or `cursor` also select this mode.
+Filters apply **before** the limit, with matches sorted newest-first by timestamp
+and ID, without evidence priority. Filters combine with AND; comma-separated
+`kind` prefixes combine with OR. `since` is inclusive RFC3339.
+
+Send `nextCursor` as `cursor` with the same filters to fetch older matches.
+Pagination searches retained memory, not durable history, and is not a snapshot:
+inserts and eviction can change later pages. An absent cursor does not prove
+complete history. `historyTruncated` is conservative; `engineError` must not be
+treated as a successful empty search. See the OpenAPI event operation for the
+complete query contract and retention bounds.
+
+### Legacy only-limit callers
 
 `GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum
-5000), but **not necessarily the globally newest N**. Each runtime store
+5000) as a bare array, but **not necessarily the globally newest N**. Each runtime store
 keeps a separate count-bounded bank of its latest 1024 real
 `firewall.rule.hit` events whose `attributes.action` is exactly `DENY`.
 Later DENYs evict older bank entries; ordinary telemetry does not. There is
@@ -144,7 +182,8 @@ no age expiry. The bank survives configuration rebuilds, not process restarts,
 and is not a guarantee of a fixed number of hours under DENY floods.
 
 Both the engine's `/internal/events` listing and the management API select
-DENYs first, newest-first if they exceed the limit. Management merges engine
+DENYs and retained IEC104 incident outcomes before ordinary telemetry.
+Management merges engine
 and service candidates before applying the same rule. Remaining slots contain
 the newest other events. Results are deduplicated by event ID and then sorted
 newest-first by timestamp, with descending ID breaking ties. Original IDs,
@@ -185,60 +224,51 @@ ipv4 forwarding is disabled (net.ipv4.ip_forward=0); routed traffic will not pas
 Warnings are returned as repeated `X-Containd-Warnings` header values when
 there is more than one.
 
-## Environment Variables
+## Binary Runtime Environment
 
-The following environment variables control runtime behavior. They are read at startup and (where noted) on `SIGHUP` reload.
-
-### Listeners
+These are binary environment names, not Compose interpolation inputs.
+Set them before starting the process; `SIGHUP` does not reload configuration.
+Listener defaults below apply when neither an environment override nor a saved
+listener setting supplies a value.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTAIND_MGMT_HTTP_ADDR` | `:8080` | HTTP listen address inside the container |
-| `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | HTTPS listen address inside the container |
+| `CONTAIND_MGMT_ADDR` | `:8080` | Management HTTP listen address |
+| `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | Management HTTPS listen address |
 | `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
-| `CONTAIND_ENGINE_ADDR` | `:8081` | Dataplane engine listen address |
-| `CONTAIND_ENGINE_URL` | *(auto in combined mode)* | URL the management plane uses to reach the engine. In combined `all` mode, containd defaults this to `http://127.0.0.1:8081` when unset. |
-
-### Persistence
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTAIND_CONFIG_DB` | `/data/config.db` | Path to the configuration SQLite database |
-| `CONTAIND_AUDIT_DB` | `/data/audit.db` | Path to the audit log SQLite database |
-| `CONTAIND_USERS_DB` | `/data/users.db` | Path to the users SQLite database |
-
-### Authentication & Security
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTAIND_LAB_MODE` | `0` | Enable lab/dev defaults (`1` to enable). When disabled (default), enforces a strong JWT secret. |
-| `CONTAIND_JWT_SECRET` | *(generated by starter scripts / required in real deployments)* | HMAC secret for JWT signing. **Must** be set to a unique value when `LAB_MODE=0`. Generate with `openssl rand -hex 32`. |
-| `CONTAIND_COOKIE_SECURE` | `0` | Force the `Secure` flag on session cookies. Set to `1` when serving behind TLS. |
-| `CONTAIND_TRUSTED_PROXIES` | *(empty)* | Comma-separated CIDRs/IPs of reverse proxies trusted for `X-Forwarded-For` headers. |
+| `CONTAIND_ENGINE_ADDR` | `127.0.0.1:8081` in `all`; `:8081` in `engine` | Engine API listen address |
+| `CONTAIND_ENGINE_URL` | Local engine URL in `all` | Management-to-engine URL; set explicitly for split processes |
+| `CONTAIND_CONFIG_DB` | `data/config.db` | Configuration SQLite database |
+| `CONTAIND_AUDIT_DB` | `data/audit.db` | Audit SQLite database |
+| `CONTAIND_USERS_DB` | `data/users.db` | Users SQLite database |
+| `CONTAIND_LAB_MODE` | Disabled | Lab authentication described above |
+| `CONTAIND_JWT_SECRET` | Unset | Set a unique secret, e.g. `openssl rand -hex 32` |
+| `CONTAIND_COOKIE_SECURE` | Automatic | Unset: Secure on HTTPS requests. `1` forces Secure; `0` disables it. Set `1` behind a TLS-terminating proxy. |
+| `CONTAIND_TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated trusted proxy IPs/CIDRs for forwarded client addresses |
 | `CONTAIND_ALLOWED_ORIGINS` | *(empty)* | Optional comma-separated browser origins allowed to embed or call the appliance cross-origin. Cookie-authenticated browser writes from other origins are denied unless listed here. |
-| `CONTAIND_DEFAULT_ADMIN_USERNAME` | `containd` | Username for the initial admin account (provisioned on first run). |
-| `CONTAIND_DEFAULT_ADMIN_PASSWORD` | `containd` | Password for the initial admin account. |
 
-### SSH
+Relative database paths are relative to the process working directory.
+The engine API is **unauthenticated**. Restrict it to the management process or
+a trusted private network; never publish the split-mode listener to untrusted
+clients.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTAIND_SSH_AUTH_KEYS_DIR` | `/data/ssh/authorized_keys.d` | Directory for SSH authorized-key files |
-| `CONTAIND_SSH_HOST_KEY` | `/data/ssh/host_key` | Path to the SSH host key |
-| `CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY` | *(empty)* | Optional `authorized_keys` line to seed on first boot |
-| `CONTAIND_SSH_BOOTSTRAP_ADMIN_USER` | `containd` | User associated with the bootstrap SSH key |
+### Compose `.env` Inputs
 
-### Dataplane
+Compose reads `.env` to interpolate deployment settings. In the published
+Compose file, `CONTAIND_MGMT_HTTP_ADDR` supplies the container's
+`CONTAIND_MGMT_ADDR`; the binary does not read `CONTAIND_MGMT_HTTP_ADDR`.
+Compose supplies absolute `/data/*.db` paths on its persistent mount, unlike
+the binary's relative defaults. Compose runs combined `all` mode; split mode
+uses the `engine` and `mgmt` subcommands.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONTAIND_CAPTURE_IFACES` | *(empty)* | Comma-separated list of interfaces to capture on |
-| `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable). The published starter and dev compose files override this to `1` by default. |
-| `CONTAIND_DPI_MOCK` | `0` | Enable synthetic DPI event generation for testing (`1` to enable) |
+Use [Docker Compose](docker-compose.md) for deployment inputs and
+[Services](services.md) for SSH and service configuration.
 
 ### DPI Configuration (Staged)
 
-DPI mode and per-protocol settings are staged via the API or UI, not environment variables. Use `POST /api/v1/dataplane`, then commit, with:
+DPI mode and per-protocol settings are staged via the API or UI. Use
+`GET /api/v1/dataplane`, edit the returned settings, then `POST /api/v1/dataplane`
+and commit. POST replaces the settings rather than merging them. Fields include:
 
 - `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy enforcement)
 - `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)

@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Complete the management OpenAPI route reference and guard it against the
+  registered router, including optional identity and audit endpoints.
+- Document staged dataplane settings, session and lab authentication, filtered
+  event queries, and binary environment names separately from Compose inputs.
 - Failed runtime applies restore the pre-request running config and IDS bank,
   previous/pending state and candidate, then reapply the restored snapshot using
   an independent recovery context. JSON errors report restore/reapply outcomes;
