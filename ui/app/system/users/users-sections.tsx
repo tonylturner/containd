@@ -3,6 +3,9 @@
 import { Card } from "../../../components/Card";
 import type { User, UserRole } from "../../../lib/api";
 
+/** The user action in flight: create, or edit/password/delete of one user. */
+export type PendingAction = "create" | `edit:${string}` | `password:${string}` | `delete:${string}` | null;
+
 function formatTimestamp(value?: string) {
   if (!value) return "—";
   const dt = new Date(value);
@@ -24,12 +27,15 @@ export function ResetPasswordModal({
   onChange,
   onCancel,
   onSubmit,
+  pending,
 }: {
   open: boolean;
   value: string;
   onChange: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
+  /** The password is being set: no second submit. */
+  pending: boolean;
 }) {
   if (!open) return null;
 
@@ -64,10 +70,10 @@ export function ResetPasswordModal({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={!value}
+            disabled={!value || pending}
             className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
           >
-            Set Password
+            {pending ? "Setting\u2026" : "Set Password"}
           </button>
         </div>
       </div>
@@ -93,6 +99,7 @@ export function ManageUsersPanel({
   onRequireUserMFA,
   onClearUserMFARequirement,
   onExtendUserMFAGrace,
+  pending,
 }: {
   loading: boolean;
   users: User[];
@@ -130,6 +137,8 @@ export function ManageUsersPanel({
   onRequireUserMFA: (user: User) => void;
   onClearUserMFARequirement: (user: User) => void;
   onExtendUserMFAGrace: (user: User) => void;
+  /** The action in flight; its button is disabled until it finishes. */
+  pending: PendingAction;
 }) {
   const filteredUsers = users.filter((u) => {
     const q = query.trim().toLowerCase();
@@ -292,10 +301,10 @@ export function ManageUsersPanel({
                     <div className="flex flex-wrap justify-end gap-2">
                       <button
                         onClick={() => saveEdit(u.id)}
-                        disabled={!canEdit}
-                        className="rounded-md bg-(--amber) px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
+                        disabled={!canEdit || pending === `edit:${u.id}`}
+                        className="rounded-md bg-(--amber) px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
                       >
-                        Save
+                        {pending === `edit:${u.id}` ? "Saving\u2026" : "Save"}
                       </button>
                       <button
                         onClick={cancelEdit}
@@ -358,10 +367,10 @@ export function ManageUsersPanel({
                       )}
                       <button
                         onClick={() => onDeleteUser(u)}
-                        disabled={!canEdit}
-                        className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                        disabled={!canEdit || pending === `delete:${u.id}`}
+                        className="rounded-md bg-red-600/20 px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10 disabled:opacity-60"
                       >
-                        Delete
+                        {pending === `delete:${u.id}` ? "Deleting\u2026" : "Delete"}
                       </button>
                     </div>
                   )}
@@ -380,6 +389,7 @@ export function CreateUserPanel({
   newUser,
   setNewUser,
   onCreate,
+  pending,
 }: {
   canEdit: boolean;
   newUser: {
@@ -408,6 +418,8 @@ export function CreateUserPanel({
     },
   ) => void;
   onCreate: () => void;
+  /** The user is being created: no second submit. */
+  pending: boolean;
 }) {
   return (
     <Card padding="lg">
@@ -482,10 +494,10 @@ export function CreateUserPanel({
         />
         <button
           onClick={onCreate}
-          disabled={!canEdit}
-          className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+          disabled={!canEdit || pending}
+          className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
         >
-          Create user
+          {pending ? "Creating\u2026" : "Create user"}
         </button>
       </div>
     </Card>
