@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
@@ -38,31 +38,23 @@ export default function AlertsPage() {
   const [search, setSearch] = useState("");
   const [sevFilter, setSevFilter] = useState("");
 
-  async function manualRefresh() {
-    setError(null);
+  // A failed load clears the error only on the next success, so the earlier
+  // list stays hidden instead of reappearing while a retry is in flight.
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const list = await api.listEvents(2000);
+      const list = await api.listEvents(2000, signal);
       if (!list) { setError("Failed to load alerts."); return; }
+      setError(null);
       setEvents(list);
-    } catch {
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setError("Failed to load alerts.");
     }
-  }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-
-    async function refresh() {
-      setError(null);
-      try {
-        const list = await api.listEvents(2000, controller.signal);
-        if (!list) { setError("Failed to load alerts."); return; }
-        setEvents(list);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError("Failed to load alerts.");
-      }
-    }
+    const refresh = () => load(controller.signal);
 
     refresh();
     if (!live) return () => controller.abort();
@@ -74,7 +66,7 @@ export default function AlertsPage() {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [live]);
+  }, [live, load]);
 
   const alerts = useMemo(() => {
     let list = events.flatMap((ev) => {
@@ -127,15 +119,17 @@ export default function AlertsPage() {
             )}
             {live ? "Live" : "Paused"}
           </button>
-          <button onClick={manualRefresh}
+          <button onClick={() => load()}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs font-medium text-(--text) transition-colors">
             Refresh
           </button>
         </div>
       }
     >
-      {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
-
+      {/* An unavailable list hides the earlier one rather than present it as current. */}
+      {error ? (
+        <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>
+      ) : <>
       {/* Severity summary */}
       <div className="mb-4 flex gap-3">
         {(["critical", "high", "medium", "low"] as const).map((s) => (
@@ -205,6 +199,7 @@ export default function AlertsPage() {
           )}
         </div>
       )}
+      </>}
     </Shell>
   );
 }
