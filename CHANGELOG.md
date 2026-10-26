@@ -329,6 +329,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- In an IEC 104 enforce envelope, the server's RST refusing a client's SYN (for example, a station that does not listen on 2404) now reaches the client, which fails at once instead of retrying its SYN until it times out. Every other packet before the SYN-ACK, apart from the client's SYN, is still dropped.
 - An IEC 104 client that lost its connection without closing it, for example
   by restarting, reconnects at once from the same source port in an enforce
   envelope instead of being dropped until the session idles out.
