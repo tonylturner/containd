@@ -252,6 +252,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Web UI: user management actions, MFA actions included, and the AV, DNS,
+  NTP and syslog Save buttons show pending and saved feedback. The acting
+  button is disabled while its save runs, so a double click submits once.
 - Web UI: a page shows the data as unavailable instead of crashing when an
   API response has the wrong shape. Shape checks cover 18 list and object
   routes. The topology view reads health from the shared health store.
