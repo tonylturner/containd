@@ -35,7 +35,7 @@ type RuleHitSink interface {
 // ensures rule IDs containing `:` (which would otherwise be valid per
 // config validation) don't silently get dropped here. The trailing
 // space is consumed by \s* and then anchored by $.
-var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
+var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z_]+)\s*$`)
 
 type nfLogHandle interface {
 	Close() error

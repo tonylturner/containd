@@ -84,7 +84,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		if entry.ICS.Protocol == rules.ProtocolIEC104 {
 			_, matched = evaluator.EvaluateIEC104(ctx)
 		} else {
-			_, matched = evaluator.EvaluateMatch(ctx)
+			matched = evaluator.AnyMatch(ctx)
 		}
 		if matched == nil {
 			continue
@@ -99,11 +99,11 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 
 // enforcedCandidate returns entry as enforcement decides it when the engine
 // queues ICS rules to queueID, and false when it can never match: an ALLOW
-// rule with an unenforced predicate is inactive, and a DENY rule applies as
-// if each unenforced predicate always matched.
+// or TAG rule with an unenforced predicate is inactive, and any other rule
+// applies as if each unenforced predicate always matched.
 func enforcedCandidate(entry rules.Entry, queueID int) (rules.Entry, bool) {
 	for _, p := range enforce.UnenforcedPredicates(entry, queueID) {
-		if entry.Action == rules.ActionAllow {
+		if entry.Action == rules.ActionAllow || entry.Action == rules.ActionTag {
 			return entry, false
 		}
 		switch p {

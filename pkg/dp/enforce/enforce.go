@@ -71,6 +71,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
+	if err := writeRuleObjects(&buf, snap); err != nil {
+		return "", err
+	}
 	// Declared before the forward chain that jumps to it.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
@@ -157,14 +160,12 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// Revocations and temporary blocks act in the dynamic table's earlier
 	// forward chain, before anything below (see writeDynamicTable).
 
-	entries := append([]rules.Entry(nil), snap.Firewall...)
-	sort.SliceStable(entries, func(i, j int) bool {
-		ai, aj := entries[i].Action, entries[j].Action
-		if ai != aj {
-			return ai == rules.ActionAllow
-		}
-		return entries[i].ID < entries[j].ID
-	})
+	// RATE_LIMIT meters come first, so that they meter every packet of a
+	// flow, before IEC104 steering, NFQUEUE and the established accept.
+	meters, tags, decide := forwardSections(snap.Firewall)
+	if err := c.writeEntries(buf, snap, meters); err != nil {
+		return err
+	}
 
 	// Emit dpiEligible rules (those with ICS predicates compiled to
 	// `queue num N`) BEFORE the ct established fast-path. Otherwise only
@@ -178,17 +179,14 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// scope, marked; they replace the rule's own line.
 	if c.QueueID > 0 {
 		c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap)
-		for _, e := range entries {
-			if !isDPIEligible(e) || isIEC104Rule(e) {
-				continue
+		var queued []rules.Entry
+		for _, e := range decide {
+			if isDPIEligible(e) && !isIEC104Rule(e) {
+				queued = append(queued, e)
 			}
-			lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
-			if err != nil {
-				return err
-			}
-			for _, line := range lines {
-				buf.WriteString("    " + line + ";\n")
-			}
+		}
+		if err := c.writeEntries(buf, snap, queued); err != nil {
+			return err
 		}
 	}
 
@@ -198,13 +196,26 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	}
 	// Emit non-dpiEligible rules after the conntrack fast-path so plain
 	// L4 traffic gets the established-flow optimization. dpiEligible
-	// rules already emitted above with QueueID > 0 are skipped here.
-	// nftables is first-match, so ALLOW exceptions (more specific) must
-	// emit before DENY rules (broader) — preserved by the sort above.
-	for _, e := range entries {
-		if queuedToEngine(e, c.QueueID) {
-			continue
+	// rules already emitted above with QueueID > 0 are skipped here. TAG
+	// lines only count and continue. nftables is first-match, so every
+	// ALLOW emits before every DENY and RESET (rules.DecisionOrder): any
+	// matching ALLOW wins.
+	var rest []rules.Entry
+	for _, e := range append(tags, decide...) {
+		if !queuedToEngine(e, c.QueueID) {
+			rest = append(rest, e)
 		}
+	}
+	if err := c.writeEntries(buf, snap, rest); err != nil {
+		return err
+	}
+	buf.WriteString("  }\n")
+	return nil
+}
+
+// writeEntries emits the lines of entries in order.
+func (c *Compiler) writeEntries(buf *bytes.Buffer, snap *rules.Snapshot, entries []rules.Entry) error {
+	for _, e := range entries {
 		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
 		if err != nil {
 			return err
@@ -213,7 +224,6 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 			buf.WriteString("    " + line + ";\n")
 		}
 	}
-	buf.WriteString("  }\n")
 	return nil
 }
 
@@ -234,12 +244,15 @@ func defaultPolicy(a rules.Action) string {
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
 //
 // A predicate nftables cannot evaluate (identity, schedule) resolves toward
-// denial unless the rule is queued to the engine: an ALLOW entry emits no
-// line, and a DENY entry drops without the predicate's condition.
+// denial unless the rule is queued to the engine: an ALLOW or TAG entry
+// emits no line, and a DENY, RESET or RATE_LIMIT entry applies without the
+// predicate's condition.
+//
+// Each line counts into the rule's counter; actionForms lowers the action.
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	dpiEligible := isDPIEligible(e)
 	queued := queuedToEngine(e, queueID)
-	if !queued && e.Action == rules.ActionAllow && len(UnenforcedPredicates(e, queueID)) > 0 {
+	if !queued && (e.Action == rules.ActionAllow || e.Action == rules.ActionTag) && len(UnenforcedPredicates(e, queueID)) > 0 {
 		return nil, nil
 	}
 	base := []string{}
@@ -248,21 +261,6 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 	}
 	if c := zoneClause("oifname", e.DestZones, zoneIfaces); c != "" {
 		base = append(base, c)
-	}
-
-	// Pick the verdict once — same for every emitted protocol-variant line.
-	verdict := ""
-	if queued {
-		verdict = fmt.Sprintf("queue num %d", queueID)
-	} else {
-		switch e.Action {
-		case rules.ActionAllow:
-			verdict = "accept"
-		case rules.ActionDeny:
-			verdict = "drop"
-		default:
-			return nil, fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
-		}
 	}
 
 	// Build the optional log statement. Only emit for non-DPI rules:
@@ -284,6 +282,10 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 
 	lines := make([]string, 0, len(protos))
 	for _, p := range protos {
+		forms, err := actionForms(e, p, queued, queueID, counterStmt(e.ID), logStmt)
+		if err != nil {
+			return nil, err
+		}
 		parts := append([]string(nil), base...)
 		match, err := protocolMatch(p)
 		if err != nil {
@@ -299,11 +301,13 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 		if len(e.Destinations) > 0 {
 			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
 		}
-		if logStmt != "" {
-			parts = append(parts, logStmt)
+		for _, f := range forms {
+			line := append([]string(nil), parts...)
+			if f.match != "" {
+				line = append([]string{f.match}, line...)
+			}
+			lines = append(lines, strings.Join(append(line, f.stmts), " "))
 		}
-		parts = append(parts, verdict)
-		lines = append(lines, strings.Join(parts, " "))
 	}
 	return lines, nil
 }
@@ -398,18 +402,21 @@ const (
 	PredicateSchedule UnenforcedPredicate = "schedule"
 )
 
-// RuleWarning reports a firewall rule whose predicate resolves toward
-// denial because it cannot be evaluated: an ALLOW rule is inactive, and a
-// DENY rule applies as if the predicate always held.
+// RuleWarning reports a firewall rule that does not act as written: a
+// predicate that resolves toward denial because it cannot be evaluated (an
+// ALLOW rule is inactive, and a DENY rule applies as if the predicate
+// always held), or a DENY or RESET rule that an ALLOW shadows (ShadowedBy).
 type RuleWarning struct {
-	RuleID    string              `json:"ruleId"`
-	Predicate UnenforcedPredicate `json:"predicate"`
-	Action    rules.Action        `json:"action"`
-	Message   string              `json:"message"`
+	RuleID     string              `json:"ruleId"`
+	Predicate  UnenforcedPredicate `json:"predicate,omitempty"`
+	ShadowedBy string              `json:"shadowedBy,omitempty"`
+	Action     rules.Action        `json:"action"`
+	Message    string              `json:"message"`
 }
 
 // RuleWarnings lists, in rule ID order, every predicate of snap's firewall
-// rules that resolves toward denial under this compiler's queue setting.
+// rules that resolves toward denial under this compiler's queue setting,
+// and every DENY or RESET rule an ALLOW shadows (shadowWarnings).
 // Identity predicates are never evaluated. Schedules are evaluated by the
 // engine only for rules queued to it, so nftables cannot honour them on
 // any other rule.
@@ -423,6 +430,7 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 			out = append(out, ruleWarning(e, p))
 		}
 	}
+	out = append(out, shadowWarnings(snap)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
 	return out
 }
@@ -446,8 +454,8 @@ func ruleWarning(e rules.Entry, p UnenforcedPredicate) RuleWarning {
 	if p == PredicateSchedule {
 		reason = "schedules are enforced only on ICS rules inspected through NFQUEUE"
 	}
-	effect := "ALLOW rule inactive"
-	if e.Action != rules.ActionAllow {
+	effect := string(e.Action) + " rule inactive"
+	if e.Action != rules.ActionAllow && e.Action != rules.ActionTag {
 		effect = string(e.Action) + " rule applies as if the " + string(p) + " always matched"
 	}
 	return RuleWarning{RuleID: e.ID, Predicate: p, Action: e.Action, Message: reason + "; " + effect}

@@ -230,6 +230,7 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 			out.DstIP = state.Key.DstIP.String()
 			out.SrcPort = state.Key.SrcPort
 			out.DstPort = state.Key.DstPort
+			out.Attributes = WithTags(out.Attributes, state.Tags)
 		}
 		if pkt != nil {
 			out.Transport = pkt.Proto

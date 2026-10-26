@@ -98,7 +98,7 @@ type TelemetryClient interface {
 }
 
 type ConntrackClient interface {
-	ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error)
+	ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error)
 }
 
 type ConntrackKiller interface {
@@ -304,6 +304,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/anomalies", listAnomaliesHandler(engine))
 		protected.DELETE("/anomalies", requireAdmin(), clearAnomaliesHandler(engine))
 		protected.GET("/conntrack", listConntrackHandler(engine))
+		protected.GET("/firewall/counters", ruleCountersHandler(engine))
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))

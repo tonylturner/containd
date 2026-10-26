@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/netip"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,13 +65,18 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatalf("preview differs from apply:\n%s\napply:\n%s", preview.Ruleset, applier.ruleset)
 			}
 			applied := e.RulesetStatus().Warnings
-			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
+			// maint is inactive; modbus-guests has an unenforced identity
+			// and the modbus ALLOW shadows it.
+			if len(preview.Warnings) != 3 || !reflect.DeepEqual(preview.Warnings, applied) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
+			}
+			if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 207;`).MatchString(preview.Ruleset) {
+				t.Fatalf("modbus rule not queued:\n%s", preview.Ruleset)
 			}
 			if strings.Contains(preview.Ruleset, "tcp dport 22") {
 				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
 			}
-			for _, want := range []string{"table inet candidate_table", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept",
+			for _, want := range []string{"table inet candidate_table", "group 203", "ip daddr 10.99.99.2 tcp dport 8080 accept",
 				`iifname "eth6" ip daddr 10.98.0.2 tcp dport 9091 accept`} {
 				if !strings.Contains(preview.Ruleset, want) {
 					t.Fatalf("missing %q:\n%s", want, preview.Ruleset)

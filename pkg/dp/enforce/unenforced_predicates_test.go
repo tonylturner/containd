@@ -55,7 +55,7 @@ func TestUnenforcedPredicatesResolveTowardDenial(t *testing.T) {
 				e := rules.Entry{ID: "r1", Action: tc.action, Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
 					ICS: rules.ICSPredicate{Protocol: tc.ics}}
 				set(&e)
-				lines, err := compileEntry(e, nil, tc.queueID, 0)
+				lines, err := compileEntryWithoutCounters(e, nil, tc.queueID, 0)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -91,7 +91,7 @@ func TestCompileFirewallOmitsScheduledAllow(t *testing.T) {
 		},
 	}
 	c := NewCompiler()
-	ruleset, err := c.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(c, snap)
 	if err != nil {
 		t.Fatal(err)
 	}

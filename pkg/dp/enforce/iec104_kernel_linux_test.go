@@ -38,9 +38,10 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 		t.Fatalf("apply: %v\n%s", err, ruleset)
 	}
 	listed := nftList(t, "forward")
+	counted := counterStmt("a-iec-allow") + " jump iec104_envelope"
 	for _, want := range []string{
-		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 jump iec104_envelope",
-		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 jump iec104_envelope",
+		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 " + counted,
+		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 " + counted,
 	} {
 		if !strings.Contains(listed, want) {
 			t.Fatalf("kernel ruleset lacks %q:\n%s", want, listed)

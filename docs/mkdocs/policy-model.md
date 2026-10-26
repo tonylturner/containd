@@ -11,11 +11,73 @@ engine runs:
 
 ## Firewall and DPI
 
-Zone firewall rules use the Linux nftables backend. Rules are ordered and match
-zones, CIDRs/assets, transport/port ranges, and optional identity, schedule, and
-ICS predicates. Generic evaluation uses the firewall default action when nothing
-matches. Actions are `ALLOW` or `DENY`; an omitted or empty default action means
-`DENY`.
+Zone firewall rules use the Linux nftables backend. Rules match zones,
+CIDRs/assets, transport/port ranges, and optional identity, schedule, and ICS
+predicates. Generic evaluation uses the firewall default action when nothing
+decides. The default action is `ALLOW` or `DENY`; an omitted or empty default
+action means `DENY`.
+
+### Actions and precedence
+
+Rule order in the configuration does not decide anything. A packet or ICS
+message is decided in three steps, in nftables and in the engine alike:
+
+1. If any matching `ALLOW` rule exists, it is allowed.
+2. Otherwise, if a `DENY` or `RESET` rule matches, the first of them by rule ID
+   decides.
+3. Otherwise the default action applies.
+
+The rule a decision reports, in events and logs, is the first match in that
+order: `ALLOW` rules by rule ID, then `DENY` and `RESET` rules by rule ID. A
+`DENY` or `RESET` rule that overlaps an `ALLOW` is shadowed where they overlap.
+This holds for ICS rules too: an ICS `DENY` overlapping any `ALLOW`, including
+a plain L3/L4 `ALLOW`, is shadowed. IEC 104 objects are the one exception to
+the L4 part of this: they are decided among IEC 104 rules only, so a broad
+`ALLOW` on TCP 2404 does not admit them (see
+[IEC 104 fields and matching](ics-dpi.md#iec-104-fields-and-matching)).
+
+The ruleset warnings (below) name a `DENY` or `RESET` rule when one `ALLOW`
+rule matches all of its traffic (`shadowedBy`). The check is conservative: a
+rule covered only by several `ALLOW` rules together is not reported, and IEC
+104 rules are left out.
+
+| Action | Decides | Effect |
+| --- | --- | --- |
+| `ALLOW` | yes | Accepts the packet. |
+| `DENY` | yes | Drops the packet. |
+| `RESET` | yes, as `DENY` | Rejects back to the sender: a TCP reset for TCP, ICMP or ICMPv6 destination unreachable (administratively prohibited) otherwise. |
+| `RATE_LIMIT` | no | Drops the packets over `rateLimit` for each directional 5-tuple; a packet under the limit continues to the decision. |
+| `TAG` | no | Labels matching flows and their events with `tag`; no kernel effect. |
+
+`RESET`, `RATE_LIMIT` and `TAG` act on a rule's L3/L4 scope and take no ICS
+protocol: IEC 104 keeps sole ownership of session resets, and an ICS rate or
+label is not defined. `RESET` cannot be the default action. Inside NFQUEUE
+inspection the engine cannot reject a queued packet, so a `RESET` rule that
+decides an inspected ICS message drops it like `DENY` and blocks the flow.
+
+`RATE_LIMIT` is a kernel packet policer, keyed by source and destination
+address, layer-4 protocol and, for TCP and UDP, both ports; on IPv4 and IPv6.
+`packetsPerSecond` is 1 to 1,000,000; `burst` is the bucket depth in packets, 0
+to 1,000,000, where 0 means `packetsPerSecond`. It meters every packet of a
+flow, established ones included, before NFQUEUE and IEC 104 steering. It never
+admits traffic. Each rule's meter tracks up to 65,536 tuples per address family
+and key; a tuple expires once idle long enough to refill its bucket, and while
+a meter is full, new tuples pass unmetered until entries expire. A rule with
+sources or destinations meters IPv4 only, because nftables matches rule
+addresses as IPv4.
+
+`TAG` labels are lower-case, 1 to 32 characters (`a-z`, `0-9`, `_`, `.`, `-`,
+starting with a letter or digit); a configuration uses at most 32 distinct
+labels. A flow's labels are those of every `TAG` rule matching its tuple when
+it opens (opener, server, protocol, server port), so a `TAG` rule takes no
+schedule. They appear as a `tags` attribute on the flow's events and on the
+connection list (`GET /api/v1/conntrack`), which derives them the same way
+from the running ruleset.
+
+Every rule has an nftables counter. `GET /api/v1/firewall/counters` reports
+each rule's packets and bytes, and each `RATE_LIMIT` rule's excess drops, for
+the applied ruleset; logging need not be on. Every apply restarts the counters
+at zero, and the response says when (`since`).
 
 ### Identity and schedule predicates
 

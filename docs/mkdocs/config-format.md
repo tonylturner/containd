@@ -218,7 +218,10 @@ Notes:
     when that route leaves intent. Unsupported collisions fail with route details.
     See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
 - `firewall.defaultAction` applies to forwarded traffic that no rule matches. It is `ALLOW` or `DENY`; omitted or empty means `DENY`, and any other value is rejected.
-- `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
+- `firewall.rules` must have unique `id`; `action` is `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT` or `TAG` (see [Actions and precedence](policy-model.md#actions-and-precedence)). Rule order does not decide: any matching `ALLOW` wins, then the first matching `DENY` or `RESET` by `id`.
+  - `RATE_LIMIT` needs `rateLimit`: `{"packetsPerSecond": 100, "burst": 20}`, with `packetsPerSecond` 1–1000000 and `burst` 0–1000000 packets (0 means `packetsPerSecond`). Other actions reject `rateLimit`.
+  - `TAG` needs `tag`, matching `^[a-z0-9][a-z0-9_.-]{0,31}$`, and takes no `schedule`; a config uses at most 32 distinct labels. Other actions reject `tag`.
+  - `RESET`, `RATE_LIMIT` and `TAG` reject an `ics.protocol`; `RESET` is not a valid `firewall.defaultAction`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
   `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces

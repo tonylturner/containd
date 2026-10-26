@@ -22,7 +22,7 @@ func TestCompileFirewallBasic(t *testing.T) {
 			{ID: "20", Action: rules.ActionDeny, Sources: []string{"10.0.0.0/8"}},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestCompileFirewallMultiProtocol(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCompileFirewallNoProtocolsStillEmits(t *testing.T) {
 			{ID: "no-proto", Action: rules.ActionDeny, Sources: []string{"10.10.10.0/24"}},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCompileFirewallZoneBindings(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestCompileFirewallEmitsLogClauseForL4Rules(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestCompileFirewallNoLogWithoutNFLogGroup(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestCompileFirewallNATChains(t *testing.T) {
 		},
 	}
 
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestCompileEntryProtocolMatches(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Sources: []string{"172.30.0.4"}, Protocols: []rules.Protocol{tc.proto}}
-			lines, err := compileEntry(e, nil, 0, 0)
+			lines, err := compileEntryWithoutCounters(e, nil, 0, 0)
 			if err != nil {
 				t.Fatalf("compileEntry: %v", err)
 			}
@@ -618,7 +618,7 @@ func TestCompileEntryRejectsInvalidProtocols(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Protocols: []rules.Protocol{p}}
-			if lines, err := compileEntry(e, nil, 0, 0); err == nil {
+			if lines, err := compileEntryWithoutCounters(e, nil, 0, 0); err == nil {
 				t.Fatalf("expected error, got %q", lines)
 			}
 		})

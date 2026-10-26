@@ -86,6 +86,8 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Destinations: dsts,
 			Protocols:    make([]dprules.Protocol, 0, len(r.Protocols)),
 			Action:       dprules.Action(r.Action),
+			RateLimit:    rateLimit(r.RateLimit),
+			Tag:          r.Tag,
 			Log:          r.Log,
 			Identities:   append([]string(nil), r.Identities...),
 			ICS:          ICSPredicate(r.ICS),
