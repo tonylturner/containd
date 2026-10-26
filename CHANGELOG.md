@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Web UI: RESET, RATE_LIMIT and TAG rule actions with rate limit and tag
+  fields; rule identities and schedules; an Identity Bindings page; per-rule hit
+  counters; connection tags on Sessions; unbound-identity and shadowed rule
+  warnings; and boot recovery state with or without a management reservation.
 - The engine image ships ClamAV, FreshClam and CA roots. The engine renders
   and supervises clamd and a single FreshClam schedule, reports live readiness
   and the definitions version, and validates custom definitions before

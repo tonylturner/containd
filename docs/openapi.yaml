@@ -553,7 +553,7 @@ components:
             only".
         writeOnly: {type: boolean, description: Match writes only (not iec104)}
         direction: {type: string, enum: [request, response]}
-        mode: {type: string, enum: [learn, enforce], description: Overrides dataplane.dpiMode for this rule}
+        mode: {type: string, enum: ["", learn, enforce], description: "Overrides dataplane.dpiMode for this rule. Empty or absent inherits the global mode; in a rule patch, an empty string clears a stored mode."}
         typeIds:
           type: array
           minItems: 1
@@ -1784,9 +1784,15 @@ components:
           - $ref: '#/components/schemas/RateLimit'
           nullable: true
           description: Null clears the rate limit.
-        tag: {type: string}
+        tag: {type: string, description: An empty string clears the tag.}
         log: {type: boolean}
-        schedule: {$ref: '#/components/schemas/ScheduleConfig'}
+        schedule:
+          allOf:
+          - $ref: '#/components/schemas/ScheduleConfig'
+          nullable: true
+          description: >-
+            Merged into the stored schedule; unspecified fields are kept. Null
+            clears the schedule (required before changing a rule to TAG).
     EngineRulesetStatus:
       properties:
         appliedAt: {format: date-time, type: string}
