@@ -24,7 +24,7 @@ func TestManagerApplyContinuesAfterServiceError(t *testing.T) {
 			Supervise: false,
 			EnvoyPath: fakeEnvoy,
 		}),
-		AV: NewAVManager(),
+		DHCP: NewDHCPManager(dir),
 	}
 
 	cfg := config.ServicesConfig{
@@ -34,25 +34,14 @@ func TestManagerApplyContinuesAfterServiceError(t *testing.T) {
 				ListenPort: 3128,
 			},
 		},
-		AV: config.AVConfig{
-			Enabled:    true,
-			Mode:       "clamav",
-			FailPolicy: "open",
-			ClamAV: config.ClamAVConfig{
-				SocketPath:       "/var/run/clamav/clamd.sock",
-				FreshclamEnabled: true,
-			},
-		},
+		DHCP: config.DHCPConfig{Enabled: true},
 	}
 
 	err := mgr.Apply(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected proxy validation error")
 	}
-	if got := mgr.AV.Current().Mode; got != "clamav" {
-		t.Fatalf("expected AV runtime config to still update, got mode %q", got)
-	}
-	if !mgr.AV.Current().Enabled {
-		t.Fatal("expected AV runtime config to remain enabled")
+	if !mgr.DHCP.Current().Enabled {
+		t.Fatal("expected DHCP to apply after the proxy error")
 	}
 }

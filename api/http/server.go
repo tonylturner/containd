@@ -20,10 +20,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/identity"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
@@ -72,6 +74,15 @@ type EngineClient interface {
 	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
 	BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error
 	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
+
+	// Antivirus: the engine is the only scanner owner; management delegates.
+	AVStatus(ctx context.Context) (map[string]any, error)
+	TriggerAVUpdate(ctx context.Context) error
+	ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error)
+	UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error)
+	DeleteAVDef(ctx context.Context, name string) error
+	// ConfigureTrust distributes the additional CA bundle to the engine.
+	ConfigureTrust(ctx context.Context, b trust.Bundle) error
 }
 
 // RulePreviewClient delegates impact evaluation to the engine's live policy context.
@@ -149,14 +160,6 @@ type ServicesValidator interface {
 // (syslog/proxies/etc.) when commits are made.
 type ServicesApplier interface {
 	Apply(ctx context.Context, cfg config.ServicesConfig) error
-}
-
-type AVUpdater interface {
-	TriggerAVUpdate(ctx context.Context) error
-}
-
-type AVDefsManager interface {
-	CustomDefsPath() string
 }
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
@@ -244,7 +247,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
-		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
+		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store, engine))
 		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
@@ -280,15 +283,15 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
 		protected.GET("/services/av", getAVHandler(store))
 		protected.POST("/services/av", requireAdmin(), setAVHandler(store, services))
-		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(services))
-		protected.GET("/services/av/defs", listAVDefsHandler(store, services))
-		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(store, services))
-		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(store, services))
+		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(engine))
+		protected.GET("/services/av/defs", listAVDefsHandler(engine))
+		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(engine))
+		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(engine))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
 		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
-		protected.GET("/services/status", getServicesStatusHandler(services))
+		protected.GET("/services/status", getServicesStatusHandler(services, engine))
 		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/events/:id", eventDetailHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
@@ -574,6 +577,10 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	}
 	if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
 		warnings = append(warnings, fmt.Sprintf("routing: %v", err))
+	}
+	// Trust precedes services so AV clients verify with the current bundle.
+	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
+		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
 	}
 	if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
 		warnings = append(warnings, fmt.Sprintf("services: %v", err))

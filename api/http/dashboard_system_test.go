@@ -207,7 +207,7 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 	router := gin.New()
 	router.GET("/system/tls", getTLSHandler(store))
 	router.POST("/system/tls/cert", setTLSCertHandler(store))
-	router.POST("/system/tls/trusted-ca", setTrustedCAHandler(store))
+	router.POST("/system/tls/trusted-ca", setTrustedCAHandler(store, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/system/tls", nil)

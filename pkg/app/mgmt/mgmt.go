@@ -136,7 +136,6 @@ func Run(ctx context.Context, opts Options) error {
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
 		return out
 	})
-	serviceManager.StartAVWorker(context.Background())
 	serveStaticUI(router)
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()

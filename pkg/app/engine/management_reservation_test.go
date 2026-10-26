@@ -37,7 +37,7 @@ func TestManagementPartialAPIsRejectBeforeSideEffects(t *testing.T) {
 	owner := newOwnershipManager(logger)
 	owner.reservation = r
 	cfgHandler := configHandler(logger, dp, &simulationManager{})
-	svcHandler := servicesHandler(logger, dp, owner, nil)
+	svcHandler := servicesHandler(logger, dp, owner, nil, nil)
 	for _, tc := range []struct {
 		name, body string
 		handler    http.Handler

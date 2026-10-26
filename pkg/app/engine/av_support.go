@@ -5,7 +5,6 @@ package engineapp
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -16,9 +15,9 @@ import (
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
+// avSinkAdapter feeds dataplane HTTP previews to the engine's AV manager.
 type avSinkAdapter struct {
 	av *services.AVManager
-	dp *engine.Engine
 }
 
 func (a *avSinkAdapter) EnqueueAVScan(ctx context.Context, task engine.AVScanTask) {
@@ -39,13 +38,6 @@ func (a *avSinkAdapter) EnqueueAVScan(ctx context.Context, task engine.AVScanTas
 	})
 }
 
-func (a *avSinkAdapter) ApplyAVConfig(ctx context.Context, cfg config.AVConfig) error {
-	if a == nil || a.av == nil {
-		return fmt.Errorf("av sink unavailable")
-	}
-	return a.av.Apply(ctx, cfg)
-}
-
 func wireAVEvents(avMgr *services.AVManager, dpEngine *engine.Engine) {
 	if avMgr == nil {
 		return
@@ -62,12 +54,12 @@ func wireAVEvents(avMgr *services.AVManager, dpEngine *engine.Engine) {
 	}
 	if dpEngine != nil {
 		avMgr.OnVerdict = func(task services.ScanTask, res services.ScanResult) {
-			handleAVVerdict(dpEngine, task, res)
+			handleAVVerdict(dpEngine, avMgr.Current(), task, res)
 		}
 	}
 }
 
-func handleAVVerdict(dpEngine *engine.Engine, task services.ScanTask, res services.ScanResult) {
+func handleAVVerdict(dpEngine *engine.Engine, cfg config.AVConfig, task services.ScanTask, res services.ScanResult) {
 	if dpEngine == nil || res.Verdict == "" {
 		return
 	}
@@ -90,10 +82,6 @@ func handleAVVerdict(dpEngine *engine.Engine, task services.ScanTask, res servic
 			Timestamp:  time.Now().UTC(),
 		})
 	}
-	cfg := config.AVConfig{}
-	if a, ok := dpEngine.AVSink().(*avSinkAdapter); ok && a != nil && a.av != nil {
-		cfg = a.av.Current()
-	}
 	if task.ICS && cfg.FailOpenICS {
 		emit("service.av.bypass_ics", map[string]any{
 			"hash":   task.Hash,
@@ -107,11 +95,12 @@ func handleAVVerdict(dpEngine *engine.Engine, task services.ScanTask, res servic
 		return
 	}
 	emit("service.av.detected", map[string]any{
-		"hash":    task.Hash,
-		"proto":   task.Proto,
-		"source":  task.Source,
-		"dest":    task.Dest,
-		"flow_id": flowID,
+		"hash":      task.Hash,
+		"proto":     task.Proto,
+		"source":    task.Source,
+		"dest":      task.Dest,
+		"flow_id":   flowID,
+		"signature": res.Signature,
 	})
 	upd := dpEngine.Updater()
 	if upd == nil {

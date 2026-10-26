@@ -4474,8 +4474,10 @@ paths:
       description: >-
         Validates every PEM block as a CA certificate and atomically replaces the
         bundle under /data. The running trustedCAFile setting selects its path;
-        the default is /data/tls/trusted_ca.pem. This operation stores the bundle
-        only; outbound client trust is not reconfigured.
+        the default is /data/tls/trusted_ca.pem. The stored content and its
+        revision are then sent to the engine, whose ICAP-over-TLS and FreshClam
+        clients trust the system roots plus this bundle. Every config apply
+        sends the bundle again.
       tags: [System]
       requestBody:
         required: true
@@ -4484,12 +4486,21 @@ paths:
             schema: {$ref: '#/components/schemas/SetTrustedCARequest'}
       responses:
         '200':
-          description: Bundle stored or cleared
+          description: Bundle stored or cleared and applied by the engine
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/StatusResponse'}
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  revision: {type: string, description: 'sha256:<hex> of the stored bundle, or none when cleared'}
         '400':
           description: Invalid JSON, empty or invalid CA bundle, conflicting clear and PEM, or path outside /data
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Bundle stored, but the engine is unavailable or did not apply it
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4949,16 +4960,27 @@ paths:
     post:
       summary: Start AV definition update (admin)
       tags: [Services]
+      description: >-
+        Queues an immediate FreshClam run on the engine's update schedule.
+        The response means the run was accepted; the result appears in the
+        av entry of /services/status.
       responses:
         '202':
-          description: Success
+          description: Update queued
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
+        '409':
+          description: AV is not enabled in clamav mode, automatic updates are disabled, or an update is already running
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '503':
+          description: Engine unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
   /services/av/defs:
     get:
       summary: List live custom AV definitions
       tags: [Services]
+      description: Custom signature databases stored on the engine; path is engine-local.
       responses:
         '200':
           description: Success
@@ -4969,9 +4991,25 @@ paths:
                 properties:
                   files: {type: array, items: {type: string}}
                   path: {type: string}
+                  definitions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        size: {type: integer}
+                        modified: {type: string, format: date-time}
+                        active: {type: boolean, description: A running clamd is loading the definition}
+        '503':
+          description: Engine unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
     post:
       summary: Upload live AV definition (admin)
       tags: [Services]
+      description: >-
+        Streams a ClamAV signature database (for example .ndb, .hdb, .ldb or
+        .yar, at most 64 MiB) to the engine, which validates it with clamscan,
+        activates it and reloads clamd.
       responses:
         '200':
           description: Success
@@ -4982,6 +5020,13 @@ paths:
                 properties:
                   status: {type: string}
                   file: {type: string}
+                  active: {type: boolean, description: clamd is loading the definition}
+        '400':
+          description: Invalid name, type, size or signature content
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '503':
+          description: Engine unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
       requestBody:
         required: true
         content:
@@ -5004,6 +5049,12 @@ paths:
                 properties:
                   status: {type: string}
                   file: {type: string}
+        '400':
+          description: Invalid or unknown definition
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '503':
+          description: Engine unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
       parameters:
       - name: file
         in: query
@@ -5013,7 +5064,10 @@ paths:
     get:
       summary: Inspect live services
       tags: [Services]
-      description: Service-manager status, or a status string of unavailable/unknown when no provider is configured.
+      description: >-
+        Management service status keyed by service. The av entry is the
+        engine's live antivirus status (ready, db_version, counters); when the
+        engine cannot be reached it is {"available": false, "error": ...}.
       responses:
         '200':
           description: Success

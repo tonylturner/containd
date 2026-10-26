@@ -122,12 +122,17 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer guard.Close()
 	ownership.guard = guard
-	avMgr := services.NewAVManager()
-	if avMgr != nil {
-		wireAVEvents(avMgr, dpEngine)
-		avMgr.StartWorker(ctx)
-		dpEngine.SetAVSink(&avSinkAdapter{av: avMgr, dp: dpEngine})
-	}
+	// The engine is the only AV owner: clamd, FreshClam and the scan worker
+	// live with this process and stop with it.
+	avMgr := services.NewAVManager(ctx, services.DefaultAVOptions())
+	defer func() {
+		if err := avMgr.Stop(); err != nil {
+			logger.Errorf("stop antivirus: %v", err)
+		}
+	}()
+	wireAVEvents(avMgr, dpEngine)
+	avMgr.StartWorker()
+	dpEngine.SetAVSink(&avSinkAdapter{av: avMgr})
 	// Start capture (no-op if no interfaces).
 	go func() {
 		if err := dpEngine.StartWithRetry(ctx); err != nil {
@@ -208,7 +213,9 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
-	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
+	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr))
+	registerAVHandlers(mux, avMgr)
+	mux.HandleFunc("/internal/trust", trustHandler(avMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 	mux.HandleFunc("/internal/simulation", simulationHandler(simMgr))

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -58,7 +60,8 @@ func TestTrustedCAUpload(t *testing.T) {
 	cfg.System.Mgmt.TrustedCAFile = path
 	store := &mockStore{cfg: cfg}
 	router := gin.New()
-	router.POST("/upload", trustedCAUploadHandler(store, dir))
+	engine := &mockEngine{}
+	router.POST("/upload", trustedCAUploadHandler(store, engine, dir))
 	chain := trustedCATestChain(t)
 	leaf, _ := generateTestCertPEM(t)
 	post := func(body string, want int, message string) {
@@ -82,6 +85,10 @@ func TestTrustedCAUpload(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(original)) != strings.TrimSpace(chain) {
 		t.Fatalf("uploaded chain: %q, %v", original, err)
 	}
+	// The engine receives the stored content and its revision, not a path.
+	if len(engine.trustPushes) != 1 || engine.trustPushes[0].PEM != string(original) || engine.trustPushes[0].Revision != trust.Revision(string(original)) {
+		t.Fatalf("engine trust pushes = %+v", engine.trustPushes)
+	}
 	for _, data := range []string{"", " \n", "garbage", leaf, chain + "garbage"} {
 		post(encode(setTrustedCARequest{PEM: data}), http.StatusBadRequest, "invalid PEM CA bundle")
 	}
@@ -92,10 +99,30 @@ func TestTrustedCAUpload(t *testing.T) {
 	if err != nil || !bytes.Equal(got, original) {
 		t.Fatalf("rejected upload changed bundle: %q, %v", got, err)
 	}
+	if len(engine.trustPushes) != 1 {
+		t.Fatalf("rejected uploads reached the engine: %+v", engine.trustPushes)
+	}
 	post(`{"clear":true}`, http.StatusOK, "updated")
 	got, err = os.ReadFile(path)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("clear: %q, %v", got, err)
+	}
+	if last := engine.trustPushes[len(engine.trustPushes)-1]; !last.Empty() || last.Revision != trust.NoRevision {
+		t.Fatalf("clear pushed %+v", last)
+	}
+
+	// An engine that cannot apply the bundle is reported, not hidden.
+	engine.trustErr = errors.New("dial tcp: connection refused")
+	post(encode(setTrustedCARequest{PEM: chain}), http.StatusServiceUnavailable, "saved but not applied")
+	if got, err := os.ReadFile(path); err != nil || strings.TrimSpace(string(got)) != strings.TrimSpace(chain) {
+		t.Fatalf("bundle not saved when the engine failed: %q, %v", got, err)
+	}
+	noEngine := gin.New()
+	noEngine.POST("/upload", trustedCAUploadHandler(store, nil, dir))
+	rec := httptest.NewRecorder()
+	noEngine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "engine unavailable") {
+		t.Fatalf("no engine: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -103,7 +130,7 @@ func TestTrustedCAUploadStorageBoundary(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.System.Mgmt.TrustedCAFile = filepath.Join(t.TempDir(), "ca.pem")
 	router := gin.New()
-	router.POST("/upload", setTrustedCAHandler(&mockStore{cfg: cfg}))
+	router.POST("/upload", setTrustedCAHandler(&mockStore{cfg: cfg}, &mockEngine{}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "must be under /data") {

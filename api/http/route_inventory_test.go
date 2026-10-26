@@ -20,9 +20,7 @@ import (
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
-type routeInventoryServices struct {
-	customDefsPath string
-}
+type routeInventoryServices struct{}
 
 func (s routeInventoryServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 	return nil
@@ -32,17 +30,11 @@ func (s routeInventoryServices) Status() any { return map[string]any{} }
 
 func (s routeInventoryServices) RecentEvents(limit int) []dpevents.Event { return nil }
 
-func (s routeInventoryServices) TriggerAVUpdate(ctx context.Context) error { return nil }
-
-func (s routeInventoryServices) CustomDefsPath() string { return s.customDefsPath }
-
 func newRouteInventoryServer(t *testing.T) *gin.Engine {
 	t.Helper()
 	resetTestRateLimiters()
 	cfg := config.DefaultConfig()
 	cfg.PCAP.Interfaces = []string{"wan"}
-	customDefsPath := t.TempDir()
-	cfg.Services.AV.ClamAV.CustomDefsPath = customDefsPath
 	store := &mockStore{cfg: cfg}
 	engine := newRuntimeMockEngine()
 	userStore := newMockUserStore()
@@ -51,7 +43,7 @@ func newRouteInventoryServer(t *testing.T) *gin.Engine {
 		store,
 		nil,
 		engine,
-		routeInventoryServices{customDefsPath: customDefsPath},
+		routeInventoryServices{},
 		userStore,
 		resolver,
 	)

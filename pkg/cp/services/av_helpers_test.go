@@ -4,15 +4,10 @@
 package services
 
 import (
-	"bufio"
 	"context"
-	"encoding/binary"
 	"errors"
-	"io"
-	"net"
-	"os"
-	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,169 +15,76 @@ import (
 	"go.uber.org/zap"
 )
 
-func startICAPTestServer(t *testing.T, statusLine string, headers ...string) string {
+// newTestAVManager returns a manager with test paths, stopped at cleanup.
+func newTestAVManager(t *testing.T, opts AVOptions) *AVManager {
 	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Listen: %v", err)
+	if opts.StateDir == "" {
+		opts.StateDir = t.TempDir()
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-				buf := make([]byte, 4096)
-				_, _ = c.Read(buf)
-				var b strings.Builder
-				b.WriteString(statusLine)
-				b.WriteString("\r\n")
-				for _, h := range headers {
-					b.WriteString(h)
-					b.WriteString("\r\n")
-				}
-				b.WriteString("\r\n")
-				_, _ = c.Write([]byte(b.String()))
-			}(conn)
+	if opts.DatabaseDir == "" {
+		opts.DatabaseDir = t.TempDir()
+	}
+	m := NewAVManager(context.Background(), opts)
+	m.log = zap.NewNop().Sugar()
+	t.Cleanup(func() {
+		if err := m.Stop(); err != nil {
+			t.Errorf("Stop: %v", err)
 		}
-	}()
-
-	return ln.Addr().String()
+	})
+	return m
 }
 
-func startClamAVTestSocket(t *testing.T, response string) string {
-	t.Helper()
-
-	dir, err := os.MkdirTemp("/tmp", "clamav-")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socketPath := filepath.Join(dir, "clamd.sock")
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("Listen(unix): %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-				// Parse the INSTREAM protocol the client speaks: a
-				// NUL-terminated command, then length-prefixed chunks until a
-				// zero-length chunk. Scanning the raw bytes for four zeros
-				// instead would match the command's NUL plus the length
-				// prefix of a short payload and reply before the client has
-				// finished writing, which the client sees as a broken pipe.
-				r := bufio.NewReader(c)
-				if _, err := r.ReadBytes(0); err != nil {
-					return
-				}
-				for {
-					var hdr [4]byte
-					if _, err := io.ReadFull(r, hdr[:]); err != nil {
-						return
-					}
-					n := binary.BigEndian.Uint32(hdr[:])
-					if n == 0 {
-						break
-					}
-					if _, err := io.CopyN(io.Discard, r, int64(n)); err != nil {
-						return
-					}
-				}
-				_, _ = c.Write([]byte(response + "\n"))
-			}(conn)
-		}
-	}()
-
-	return socketPath
-}
-
-func TestAVManagerApplyStatusAndFreshclamGuards(t *testing.T) {
-	mgr := NewAVManager()
-	mgr.log = zap.NewNop().Sugar()
-
-	var emitted []string
-	mgr.OnEvent = func(kind string, attrs map[string]any) {
-		emitted = append(emitted, kind)
-	}
+func TestAVManagerICAPApplyStatusAndFreshclamGuards(t *testing.T) {
+	icapAddr, _ := startFakeICAP(t, nil, icapReply("ICAP/1.0 200 OK", "Methods: RESPMOD", "Encapsulated: null-body=0"))
+	mgr := newTestAVManager(t, AVOptions{})
+	var mu atomic.Value
+	mgr.OnEvent = func(kind string, attrs map[string]any) { mu.Store(kind) }
 
 	cfg := config.AVConfig{
-		Enabled:      true,
-		Mode:         "icap",
-		MaxSizeBytes: 2048,
-		ICAP: config.ICAPConfig{
-			Servers: []config.ICAPServer{{Address: "127.0.0.1:13440", Service: "respmod"}},
-		},
+		Enabled: true,
+		Mode:    "icap",
+		ICAP:    config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr, Service: "avscan"}}},
 	}
 	if err := mgr.Apply(context.Background(), cfg); err != nil {
 		t.Fatalf("Apply(): %v", err)
 	}
-	if mgr.icap.MaxSize != 2048 {
-		t.Fatalf("expected ICAP max size 2048, got %d", mgr.icap.MaxSize)
+	if mu.Load() != "service.av.updated" {
+		t.Fatalf("last event = %v, want service.av.updated", mu.Load())
 	}
-	if got := mgr.CustomDefsPath(); got != "/data/clamav/custom" {
-		t.Fatalf("CustomDefsPath() = %q", got)
-	}
-	if got := mgr.pickICAPServer().Address; got != "127.0.0.1:13440" {
-		t.Fatalf("pickICAPServer() = %q", got)
-	}
-	if got := mgr.pickClamSocket(); got != "/var/run/clamav/clamd.ctl" {
-		t.Fatalf("pickClamSocket() = %q", got)
-	}
-	status := mgr.Status()
-	if status["enabled"] != true || status["mode"] != "icap" {
+	status := mgr.Status(context.Background())
+	if status["enabled"] != true || status["mode"] != "icap" || status["ready"] != true || status["clamav_custom_defs"] != DefaultCustomDefsPath {
 		t.Fatalf("unexpected Status(): %+v", status)
 	}
-	if status["clamav_custom_defs"] != "/data/clamav/custom" {
-		t.Fatalf("unexpected custom defs in status: %+v", status)
-	}
-	if len(emitted) == 0 || emitted[len(emitted)-1] != "service.av.updated" {
-		t.Fatalf("expected service.av.updated event, got %v", emitted)
+	if status["timeout"] != 5 || status["cache_ttl"] != "10m0s" {
+		t.Fatalf("effective defaults not reported: %+v", status)
 	}
 
-	mgr.customDefsPath = "/tmp/custom-defs"
-	if got := mgr.CustomDefsPath(); got != "/tmp/custom-defs" {
-		t.Fatalf("CustomDefsPath(custom) = %q", got)
+	// An unreachable ICAP server fails the apply instead of being recorded only.
+	cfg.ICAP.Servers[0].Address = "127.0.0.1:1"
+	if err := mgr.Apply(context.Background(), cfg); err == nil {
+		t.Fatal("Apply accepted an unreachable ICAP server")
+	}
+	if status := mgr.Status(context.Background()); status["ready"] != false || status["last_error"] == "" {
+		t.Fatalf("unreachable server reported ready: %+v", status)
 	}
 
-	if err := (*AVManager)(nil).RunFreshclamNow(context.Background()); err == nil {
+	if err := (*AVManager)(nil).RunFreshclamNow(); err == nil {
 		t.Fatal("expected nil manager RunFreshclamNow error")
 	}
-	if err := mgr.RunFreshclamNow(context.Background()); err == nil || !strings.Contains(err.Error(), "clamav mode") {
-		t.Fatalf("expected clamav mode error, got %v", err)
+	if err := mgr.RunFreshclamNow(); !errors.Is(err, ErrAVConflict) || !strings.Contains(err.Error(), "clamav mode") {
+		t.Fatalf("expected clamav mode conflict, got %v", err)
 	}
-	mgr.lastCfg = config.AVConfig{Enabled: false, Mode: "clamav", ClamAV: config.ClamAVConfig{FreshclamEnabled: true}}
-	if err := mgr.RunFreshclamNow(context.Background()); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("expected disabled error, got %v", err)
-	}
-	mgr.lastCfg.Enabled = true
-	mgr.freshRunning = true
-	if err := mgr.RunFreshclamNow(context.Background()); err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Fatalf("expected already running error, got %v", err)
+	if err := mgr.Apply(context.Background(), config.AVConfig{Mode: "bogus", Enabled: true}); !errors.Is(err, ErrAVInvalid) {
+		t.Fatalf("unknown mode = %v, want ErrAVInvalid", err)
 	}
 
-	if got := defaultFreshclamInterval(""); got != 6*time.Hour {
-		t.Fatalf("defaultFreshclamInterval(empty) = %s", got)
+	for in, want := range map[string]time.Duration{"": 6 * time.Hour, "90m": 90 * time.Minute, "invalid": 6 * time.Hour} {
+		if got := freshclamInterval(in); got != want {
+			t.Fatalf("freshclamInterval(%q) = %s, want %s", in, got, want)
+		}
 	}
-	if got := defaultFreshclamInterval("90m"); got != 90*time.Minute {
-		t.Fatalf("defaultFreshclamInterval(valid) = %s", got)
-	}
-	if got := defaultFreshclamInterval("invalid"); got != 6*time.Hour {
-		t.Fatalf("defaultFreshclamInterval(invalid) = %s", got)
+	if _, err := parseFreshclamSchedule("0 */4 * * *"); !errors.Is(err, ErrAVInvalid) {
+		t.Fatalf("cron schedule accepted: %v", err)
 	}
 }
 
@@ -191,13 +93,10 @@ func TestAVManagerCacheQueueWorkerAndPolicies(t *testing.T) {
 		t.Fatalf("nil manager Scan() = %+v", res)
 	}
 
-	mgr := &AVManager{
-		cache:    make(map[string]cachedVerdict),
-		maxCache: 1,
-		queue:    NewScanQueue(1),
-		log:      zap.NewNop().Sugar(),
-	}
-	mgr.recordVerdict("one", "clean")
+	mgr := newTestAVManager(t, AVOptions{})
+	mgr.maxCache = 1
+	mgr.queue = NewScanQueue(1)
+	mgr.recordVerdict("one", time.Minute, "clean")
 	if got, ok := mgr.cachedVerdict("one"); !ok || got != "clean" {
 		t.Fatalf("cachedVerdict(one) = %q, %v", got, ok)
 	}
@@ -205,7 +104,7 @@ func TestAVManagerCacheQueueWorkerAndPolicies(t *testing.T) {
 	if _, ok := mgr.cachedVerdict("expired"); ok {
 		t.Fatal("expected expired verdict to be evicted")
 	}
-	mgr.recordVerdict("two", "clean")
+	mgr.recordVerdict("two", time.Minute, "clean")
 	if _, ok := mgr.cache["one"]; ok {
 		t.Fatal("expected cache reset when maxCache reached")
 	}
@@ -227,16 +126,9 @@ func TestAVManagerCacheQueueWorkerAndPolicies(t *testing.T) {
 	}
 
 	verdicts := make(chan ScanResult, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	worker := &AVManager{
-		queue: NewScanQueue(2),
-		log:   zap.NewNop().Sugar(),
-		OnVerdict: func(task ScanTask, res ScanResult) {
-			verdicts <- res
-		},
-	}
-	worker.StartWorker(ctx)
+	worker := newTestAVManager(t, AVOptions{})
+	worker.OnVerdict = func(task ScanTask, res ScanResult) { verdicts <- res }
+	worker.StartWorker()
 	worker.EnqueueScan(ScanTask{Hash: "disabled"})
 	select {
 	case res := <-verdicts:
@@ -247,99 +139,51 @@ func TestAVManagerCacheQueueWorkerAndPolicies(t *testing.T) {
 		t.Fatal("timed out waiting for worker verdict")
 	}
 
-	policyMgr := &AVManager{log: zap.NewNop().Sugar()}
-	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "unknown", CacheTTL: time.Minute}
-	if res := policyMgr.Scan(context.Background(), ScanTask{Hash: "cached"}); res.Verdict != "clean" || res.Error != nil {
-		t.Fatalf("unexpected Scan() result for unknown mode: %+v", res)
+	policyMgr := newTestAVManager(t, AVOptions{})
+	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "unknown", FailPolicy: "closed", CacheTTL: time.Minute}
+	if res := policyMgr.Scan(context.Background(), ScanTask{Hash: "cached"}); res.Verdict != "error" || res.Error == nil {
+		t.Fatalf("unknown mode must not scan clean: %+v", res)
 	}
-	if got, ok := policyMgr.cachedVerdict("cached"); !ok || got != "clean" {
-		t.Fatalf("expected cached clean verdict, got %q, %v", got, ok)
+	if len(policyMgr.cache) != 0 {
+		t.Fatalf("unknown mode cached a verdict: %v", policyMgr.cache)
 	}
 
-	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav"}
-	policyMgr.clamd = nil
+	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav", FailPolicy: "closed", ClamAV: config.ClamAVConfig{SocketPath: "/nonexistent/clamd.sock"}}
 	if res := policyMgr.Scan(context.Background(), ScanTask{Preview: []byte("payload")}); res.Verdict != "error" || res.Error == nil {
 		t.Fatalf("expected clamav unavailable error, got %+v", res)
 	}
 
 	errBoom := errors.New("boom")
-	policyMgr.lastCfg = config.AVConfig{FailPolicy: "open"}
-	if res := policyMgr.handleScanError(errBoom, "icap", ScanTask{Hash: "h-open"}); res.Verdict != "bypass" || !errors.Is(res.Error, errBoom) {
-		t.Fatalf("expected fail-open bypass, got %+v", res)
+	for _, tc := range []struct {
+		cfg     config.AVConfig
+		ics     bool
+		verdict string
+	}{
+		{cfg: config.AVConfig{FailPolicy: "open"}, verdict: "bypass"},
+		{cfg: config.AVConfig{}, verdict: "bypass"},
+		{cfg: config.AVConfig{FailPolicy: "closed"}, verdict: "error"},
+		{cfg: config.AVConfig{FailPolicy: "closed", FailOpenICS: true}, ics: true, verdict: "bypass"},
+		{cfg: config.AVConfig{FailPolicy: "closed"}, ics: true, verdict: "error"},
+	} {
+		if res := policyMgr.handleScanError(tc.cfg, errBoom, "icap", ScanTask{Hash: "h", ICS: tc.ics}); res.Verdict != tc.verdict || !errors.Is(res.Error, errBoom) {
+			t.Fatalf("handleScanError(%+v, ics=%v) = %+v, want %s", tc.cfg, tc.ics, res, tc.verdict)
+		}
 	}
-	policyMgr.lastCfg = config.AVConfig{FailPolicy: "closed"}
-	if res := policyMgr.handleScanError(errBoom, "icap", ScanTask{Hash: "h-closed"}); res.Verdict != "error" || !errors.Is(res.Error, errBoom) {
-		t.Fatalf("expected fail-closed error, got %+v", res)
+	if status := policyMgr.Status(context.Background()); status["errors_count"] == 0 {
+		t.Fatalf("scan errors not counted: %+v", status)
 	}
-	policyMgr.lastCfg = config.AVConfig{FailPolicy: "closed", FailOpenICS: true}
-	if res := policyMgr.handleScanError(errBoom, "icap", ScanTask{Hash: "h-ics", ICS: true}); res.Verdict != "bypass" || !errors.Is(res.Error, errBoom) {
-		t.Fatalf("expected ICS fail-open bypass, got %+v", res)
-	}
-}
-
-func TestICAPAndClamAVClients(t *testing.T) {
-	t.Run("icap probe and scan", func(t *testing.T) {
-		cleanAddr := startICAPTestServer(t, "ICAP/1.0 200 OK")
-		icap := &ICAPClient{Timeout: time.Second, MaxSize: 8}
-		srv := config.ICAPServer{Address: cleanAddr, Service: "avscan"}
-		if err := icap.Probe(context.Background(), srv); err != nil {
-			t.Fatalf("Probe(clean): %v", err)
-		}
-		if verdict, err := icap.Scan(context.Background(), srv, []byte("ok")); err != nil || verdict != "clean" {
-			t.Fatalf("Scan(clean) = %q, %v", verdict, err)
-		}
-		if verdict, err := icap.Scan(context.Background(), srv, []byte("too-large")); err == nil || verdict != "skipped" {
-			t.Fatalf("Scan(too-large) = %q, %v", verdict, err)
-		}
-
-		malwareAddr := startICAPTestServer(t, "ICAP/1.0 200 OK", "X-ICAP-Status: VirusFound")
-		if verdict, err := (&ICAPClient{Timeout: time.Second}).Scan(context.Background(), config.ICAPServer{Address: malwareAddr}, []byte("evil")); err != nil || verdict != "malware" {
-			t.Fatalf("Scan(malware) = %q, %v", verdict, err)
-		}
-	})
-
-	t.Run("clamav client scan", func(t *testing.T) {
-		cleanSock := startClamAVTestSocket(t, "stream: OK")
-		client := &ClamAVClient{Timeout: time.Second, Socket: cleanSock}
-		if verdict, err := client.Scan(context.Background(), []byte("clean")); err != nil || verdict != "clean" {
-			t.Fatalf("ClamAV clean = %q, %v", verdict, err)
-		}
-
-		malwareSock := startClamAVTestSocket(t, "stream: Eicar FOUND")
-		client.Socket = malwareSock
-		if verdict, err := client.Scan(context.Background(), []byte("malware")); err != nil || verdict != "malware" {
-			t.Fatalf("ClamAV malware = %q, %v", verdict, err)
-		}
-
-		errorSock := startClamAVTestSocket(t, "stream: ERROR something bad")
-		client.Socket = errorSock
-		if verdict, err := client.Scan(context.Background(), []byte("broken")); err == nil || verdict != "error" {
-			t.Fatalf("ClamAV error = %q, %v", verdict, err)
-		}
-	})
 }
 
 func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
-	icapAddr := startICAPTestServer(t, "ICAP/1.0 200 OK", "X-ICAP-Status: VirusFound")
-	clamSock := startClamAVTestSocket(t, "stream: Eicar FOUND")
+	icapAddr, _ := startFakeICAP(t, nil, icapReply("ICAP/1.0 200 OK", "X-ICAP-Status: VirusFound", "Encapsulated: null-body=0"))
+	clamSock := startFakeClamd(t, nulReply("stream: Eicar-Signature FOUND"))
 
-	var events []string
-	mgr := NewAVManager()
-	mgr.log = zap.NewNop().Sugar()
-	mgr.OnEvent = func(kind string, attrs map[string]any) {
-		events = append(events, kind)
-	}
-	mgr.icap = &ICAPClient{Timeout: time.Second}
-	mgr.clamd = &ClamAVClient{Timeout: time.Second, Socket: clamSock}
-	mgr.clamdSocket = clamSock
-
+	mgr := newTestAVManager(t, AVOptions{})
 	mgr.lastCfg = config.AVConfig{
 		Enabled:    true,
 		Mode:       "icap",
 		FailPolicy: "open",
-		ICAP: config.ICAPConfig{
-			Servers: []config.ICAPServer{{Address: icapAddr, Service: "avscan"}},
-		},
+		ICAP:       config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr, Service: "avscan"}}},
 	}
 	if res := mgr.Scan(context.Background(), ScanTask{Hash: "icap-hash", Preview: []byte("payload")}); res.Verdict != "malware" || res.Error != nil {
 		t.Fatalf("expected ICAP malware verdict, got %+v", res)
@@ -350,27 +194,58 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 		Mode:    "clamav",
 		ClamAV:  config.ClamAVConfig{SocketPath: clamSock},
 	}
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "clam-hash", Preview: []byte("payload")}); res.Verdict != "malware" || res.Error != nil {
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "clam-hash", Preview: []byte("payload")}); res.Verdict != "malware" || res.Signature != "Eicar-Signature" || res.Error != nil {
 		t.Fatalf("expected ClamAV malware verdict, got %+v", res)
 	}
+	if status := mgr.Status(context.Background()); status["detections"] != 2 || status["count"] != 2 {
+		t.Fatalf("scan counters = %+v", status)
+	}
+}
 
-	foundDetected := false
-	for _, kind := range events {
-		if kind == "service.av.detected" {
-			foundDetected = true
-			break
+func TestAVManagerHonoursSizeTimeoutAndCacheScope(t *testing.T) {
+	var calls atomic.Int32
+	clamSock := startFakeClamd(t, func(cmd string, stream []byte) []byte {
+		calls.Add(1)
+		if string(stream) == "slow" {
+			time.Sleep(1500 * time.Millisecond)
 		}
+		return []byte("stream: OK\x00")
+	})
+	mgr := newTestAVManager(t, AVOptions{})
+	mgr.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav", FailPolicy: "closed", MaxSizeBytes: 4, TimeoutSec: 1, ClamAV: config.ClamAVConfig{SocketPath: clamSock}}
+
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "big", Preview: []byte("12345")}); res.Verdict != "error" || res.Error == nil {
+		t.Fatalf("oversize payload = %+v", res)
 	}
-	if !foundDetected {
-		t.Fatalf("expected malware detection event, got %v", events)
+	if calls.Load() != 0 {
+		t.Fatalf("oversize payload reached clamd")
+	}
+	start := time.Now()
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "slow", Preview: []byte("slow")}); res.Verdict != "error" {
+		t.Fatalf("slow scan = %+v", res)
+	}
+	if time.Since(start) > 1400*time.Millisecond {
+		t.Fatalf("timeoutSec not honoured: %s", time.Since(start))
 	}
 
-	dir := t.TempDir()
-	mgr.customDefsPath = filepath.Join(dir, "defs")
-	if err := os.MkdirAll(mgr.customDefsPath, 0o755); err != nil {
-		t.Fatalf("MkdirAll(customDefsPath): %v", err)
+	// Resetting maxSizeBytes and timeoutSec to zero restores the defaults.
+	mgr.lastCfg.MaxSizeBytes = 0
+	mgr.lastCfg.TimeoutSec = 0
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "clean" {
+		t.Fatalf("unlimited scan = %+v", res)
 	}
-	if got := mgr.CustomDefsPath(); got == "" {
-		t.Fatal("expected non-empty custom defs path")
+	before := calls.Load()
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "clean" || calls.Load() != before {
+		t.Fatalf("cached scan = %+v calls %d->%d", res, before, calls.Load())
+	}
+	// A new definitions generation or backend must not reuse the verdict.
+	mgr.defsGen++
+	if mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); calls.Load() != before+1 {
+		t.Fatalf("definitions generation did not invalidate cache")
+	}
+	other := startFakeClamd(t, nulReply("stream: Other FOUND"))
+	mgr.lastCfg.ClamAV.SocketPath = other
+	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "malware" {
+		t.Fatalf("backend change reused cached verdict: %+v", res)
 	}
 }

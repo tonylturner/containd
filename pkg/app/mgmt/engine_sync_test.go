@@ -211,7 +211,7 @@ func TestStartEngineSyncReplaysStoredRunningConfig(t *testing.T) {
 	defer stop()
 	want := []string{
 		"/health", "/internal/interfaces", "/internal/routing",
-		"/internal/services", "/internal/config", "/internal/pcap/config",
+		"/internal/trust", "/internal/services", "/internal/config", "/internal/pcap/config",
 		"/internal/pcap/stop", "/internal/apply_rules",
 	}
 	var got []string
