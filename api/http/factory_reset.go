@@ -4,6 +4,8 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -56,10 +58,26 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			apiError(c, http.StatusNotImplemented, "factory reset requires SQLite stores")
 			return
 		}
-		// Revoke the current session even if the caller keeps its token.
-		if sid := strings.TrimSpace(c.GetString(ctxSessionKey)); sid != "" {
-			_ = userStore.RevokeSession(ctx, sid)
+		// Preserve the full config state until runtime apply succeeds. In
+		// particular, do not stage defaults over the caller's candidate.
+		var warnings []string
+		attempt := 0
+		err := cs.ApplyReset(ctx, def, func(ctx context.Context, previous, next *config.Config) error {
+			w, err := applyConfigSnapshot(ctx, cfgStore, engine, services, previous, next)
+			if attempt == 0 {
+				warnings = w
+			}
+			attempt++
+			return err
+		})
+		if err != nil {
+			factoryResetApplyError(c, err)
+			return
 		}
+		setWarningHeader(c, warnings)
+
+		// Wiping sessions also revokes the current token. No authentication
+		// state changes until the configuration has been successfully applied.
 		if err := us.WipeAll(ctx); err != nil {
 			internalError(c, err)
 			return
@@ -68,23 +86,6 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			internalError(c, err)
 			return
 		}
-
-		// Wipe config store and re-seed defaults.
-		if err := cs.WipeAll(ctx); err != nil {
-			internalError(c, err)
-			return
-		}
-
-		if err := cfgStore.Save(ctx, def); err != nil {
-			internalError(c, err)
-			return
-		}
-		warnings, err := applyRunningConfigLocked(ctx, cfgStore, engine, services, nil)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
 
 		// Wipe audit log (after the reset) and then write a completion record.
 		if storeVal, ok := c.Get("auditStore"); ok && storeVal != nil {
@@ -105,4 +106,28 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			"message":   "Factory reset completed. Log in with the default credentials and change the password immediately.",
 		})
 	}
+}
+
+func factoryResetApplyError(c *gin.Context, err error) {
+	var failure *config.ApplyError
+	if !errors.As(err, &failure) {
+		internalError(c, err)
+		return
+	}
+	body := gin.H{
+		"error":     "configuration apply failed",
+		"detail":    failure.Err.Error(),
+		"restored":  failure.RestoreError == nil,
+		"reapplied": failure.ReapplyError == nil,
+	}
+	for key, recoveryErr := range map[string]error{
+		"restoreError": failure.RestoreError,
+		"reapplyError": failure.ReapplyError,
+		"healthError":  failure.HealthError,
+	} {
+		if recoveryErr != nil {
+			body[key] = recoveryErr.Error()
+		}
+	}
+	c.JSON(http.StatusInternalServerError, body)
 }

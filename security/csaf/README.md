@@ -1,23 +1,34 @@
-# CSAF
+# CSAF advisory sources
 
-This directory tracks containd's machine-readable advisory material.
+This directory contains containd's CSAF 2.0 advisory JSON and authoring helpers.
+For reporting and disclosure, use [SECURITY.md](../../SECURITY.md). For the
+published advisory index and download locations, see
+[Advisories and CSAF](../../docs/mkdocs/advisories.md).
 
-## Layout
+## Layout and publication
 
-- `advisories/` — published CSAF JSON documents for real vulnerabilities
-- `templates/` — authoring helpers and skeletons for new advisories
+- `advisories/` contains published JSON, including
+  [containd-2026-001](advisories/containd-2026-001.json).
+- `templates/` contains authoring skeletons.
+- Provider metadata source is
+  [`ui/public/.well-known/csaf/provider-metadata.json`](../../ui/public/.well-known/csaf/provider-metadata.json).
+  The appliance URL is `/.well-known/csaf/provider-metadata.json`, not the source
+  path. The release workflow attaches metadata and published advisories in
+  `csaf-documents.tgz`.
 
-## Publication Model
+## Authoring
 
-- Public discovery starts with `SECURITY.md` and `/.well-known/security.txt`.
-- CSAF provider metadata is published at `ui/public/.well-known/csaf/provider-metadata.json`.
-- Published advisories live in `security/csaf/advisories/` and may be attached to GitHub releases as part of the release workflow.
-- Until containd has a real vulnerability advisory to disclose, this repository publishes provider metadata only and keeps `advisories/` intentionally empty except for explanatory docs.
+Use one document per vulnerability or tightly related cluster. Suggested names:
 
-## Authoring Rules
+- `CVE-YYYY-NNNNN.json`
+- `GHSA-xxxx-xxxx-xxxx.json`
+- `containd-YYYY-001.json` when no CVE/GHSA is assigned
 
-- Use CSAF 2.0 JSON documents.
-- Prefer one advisory per vulnerability or tightly related vulnerability cluster.
-- Include affected versions, fixed versions, mitigation/workaround guidance, references, and CWE/CVE/GHSA identifiers when available.
-- Validate advisory documents against the official CSAF schema before publishing.
-- Keep `CHANGELOG.md`, GitHub release notes, GitHub Security Advisories, and CSAF documents aligned.
+Include vulnerability scope, affected products/versions, fixed versions,
+mitigations or workarounds, revision history, and references to releases,
+commits, and CVE/GHSA/CWE identifiers where available. Keep identifiers and
+fixed-version guidance consistent with the changelog, release notes, and hosted
+advisory records.
+
+Validate documents against the official CSAF 2.0 schema before publishing;
+this guide does not claim an automated repository schema-validation gate.

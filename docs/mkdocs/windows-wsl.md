@@ -6,20 +6,9 @@ containd is not a native Windows firewall. For classroom and lab use on Windows,
 
 1. Install Docker Desktop.
 2. Enable the WSL2 backend in Docker Desktop settings.
-3. Open your WSL shell (`Ubuntu`, `Debian`, etc.), not PowerShell, for the starter scripts below.
-4. Run the starter from that WSL shell:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/quickstart.sh
-sh quickstart.sh
-```
-
-If you want a lab directory you can edit before first boot:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
-sh bootstrap-starter.sh --dir containd-lab --no-start
-```
+3. Open your WSL shell (`Ubuntu`, `Debian`, etc.), not PowerShell.
+4. Follow [Docker Compose onboarding](docker-compose.md#quickstart) from that
+   shell. The starter generates the required JWT secret.
 
 ## Important Notes
 

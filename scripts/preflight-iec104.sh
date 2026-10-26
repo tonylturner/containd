@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Exercise Linux NFQUEUE deferred verdicts, queue progress, two-sided TCP
+# resets/reconnects and fail-closed behavior; this is not a product prerequisite.
+# Run from the repository root. Requires Docker Compose, jq, Python 3,
+# build dependency downloads, and a Linux Docker host allowing NET_ADMIN/NET_RAW.
+# Uses private 10.250.0.0/24 and 10.251.0.0/24 networks, no published ports.
+# Removes run-owned containers/networks/volumes/image on exit; results and pcaps
+# stay in build/iec104-preflight/. Do not run concurrently (fixed subnets/output).
+# Scenarios and requirements: test/iec104/README.md#nfqueue-kernel-preflight.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

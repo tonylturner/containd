@@ -7,15 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.34] - 2026-10-26
-
 ### Security
 
-- Upgrade the Go toolchain and both Docker builders to 1.26.10 to fix
-  CVE-2026-111943 in `crypto/x509`.
-- Update the pinned Wolfi base image so the runtime images ship the fixed
-  `ca-certificates-bundle` (CVE-2026-111943) and brotli libraries
-  (CVE-2026-111497).
+- Bind the unauthenticated engine API to `127.0.0.1:8081` by default in combined
+  mode and starter/dev Compose; explicit `CONTAIND_ENGINE_ADDR` overrides still
+  apply, and split engine mode retains `:8081`. Management derives its local
+  engine URL from the same listener setting, including with a reservation.
 
 ### Changed
 
@@ -28,6 +25,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persisted replay/recovery failures. Protocol-specific `iec104Enforcement` is
   unchanged. Confirmed-commit TTLs that overflow a duration are rejected
   rather than promoting without a timer.
+- Condensed the project overview and centralized contributor setup and verification;
+  documented SSH authentication limits, the engine API trust boundary and the published advisory.
+- Reorganized documentation navigation and standardized changelog categories and version links.
+- Focus update and reserved-management documentation on operator behavior and
+  limitations; consolidate VPN guidance under System Services.
+- Pass `CONTAIND_ALLOWED_ORIGINS` through starter/dev Compose and remove the
+  ineffective `CONTAIND_MODE` knob from Compose environment lists and the example
+  environment file; select split modes with command overrides.
+
+### Fixed
+
+- Complete the management OpenAPI route reference and guard it against the
+  registered router, including optional identity and audit endpoints.
+- Document staged dataplane settings, session and lab authentication, filtered
+  event queries, and binary environment names separately from Compose inputs.
+- Failed runtime applies restore the pre-request running config and IDS bank,
+  previous/pending state and candidate, then reapply the restored snapshot using
+  an independent recovery context. JSON errors report restore/reapply outcomes;
+  failed recovery is visible in health. Boot and expiry replay no longer treat
+  nft failures as success.
+- Factory reset replaces configuration through the same restore/reapply path as
+  commit. A failed runtime apply restores the prior configuration and leaves
+  users, sessions and audit history in place; they are wiped only after apply
+  succeeds.
+- Keep liveness responsive during commits and recovery with a deadline-bounded
+  running metadata/fault snapshot and one shared observation timeout. Brief
+  store contention does not hide real state; contention past the budget or
+  unreadable state reports `unknown` without exposing an unapplied document.
+- Correct Compose onboarding, secret initialization, data locations, interface
+  binding and engine API exposure guidance; consolidate lab and WSL setup links.
+- Correct CLI lab authentication and IEC 104 monitoring examples, service runtime
+  ownership, and the importable configuration example; test its schema and validation.
+- Correct DPI protocol coverage, supported rule predicates, learn-mode and PCAP
+  behavior, IDS conversion, and the distinction between nftables enforcement and
+  experimental eBPF code.
+- Document working log sinks and unwired SIEM export, the unauthenticated engine
+  API boundary, authentication limits, and published CSAF advisories; align runtime
+  package provenance and image-verification examples with the release workflow.
+
+### Removed
+
+- Removed the redundant documentation-directory landing page and the unsupported SIGHUP reload claim.
+- Remove the incomplete host/systemd deployment guide; Docker Compose remains
+  the documented appliance installation path.
+- Refresh contributor testing, performance and code-boundary guidance and
+  package navigation; remove the empty internal API placeholder.
+- Clarify regression harness setup, isolation, endpoint image tags and
+  cleanup behavior without changing script execution.
+
+## [0.1.34] - 2026-10-26
+
+### Security
+
+- Upgrade the Go toolchain and both Docker builders to 1.26.10 to fix
+  CVE-2026-111943 in `crypto/x509`.
+- Update the pinned Wolfi base image so the runtime images ship the fixed
+  `ca-certificates-bundle` (CVE-2026-111943) and brotli libraries
+  (CVE-2026-111497).
+
+### Changed
+
 - IEC 104 diagnostics name the supported type set: unsupported types report
   `type N is not in the supported IEC 104 type set`, and the
   `IEC104-MALFORMED` / `IEC104-UNSUPPORTED` signature descriptions state the
@@ -41,15 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Failed runtime applies restore the pre-request running config and IDS bank,
-  previous/pending state and candidate, then reapply the restored snapshot using
-  an independent recovery context. JSON errors report restore/reapply outcomes;
-  failed recovery is visible in health. Boot and expiry replay no longer treat
-  nft failures as success.
-- Keep liveness responsive during commits and recovery with a deadline-bounded
-  running metadata/fault snapshot and one shared observation timeout. Brief
-  store contention does not hide real state; contention past the budget or
-  unreadable state reports `unknown` without exposing an unapplied document.
 - Allow IEC 104 reconnects on retained aborted or closed tuples when the
   session table is full, without exceeding the tracking limit.
 - Bound IEC 104 learn-mode session tracking to the shared 4,096-entry
@@ -116,7 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commits are on `main`, with rebuild-free manual promotion after a later
   merge.
 
-### Changed (visible in API, events and logs)
+### Changed
+
+Visible in API, events and logs:
 
 - **Unknown firewall rule keys are rejected with HTTP 400.** The error names
   the key. Before, unknown keys were silently dropped.
@@ -285,7 +336,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flood DoS). The bump also moves x/crypto, x/sys, x/text, x/sync and x/mod
   to their current releases.
 
-### Changed (visible in events and logs)
+### Changed
+
+Visible in events and logs:
 
 - Modbus and DNP3 produce one event per frame in each direction. 0.1.31
   repeated the first PDU's event and missed later ones.
@@ -437,7 +490,7 @@ a sharp gap in v0.1.27's supervise loop.
   (redundant with the deferred close + the main `<-ctx.Done()`).
   Codex review on PR #22 caught this as P1.
 
-### Tests
+**Tests**
 
 1 new test (`TestNFQueueSuperviseCleansUpBetweenRetries`) that
 asserts the supervise loop cannot re-enter `runFn` while a previous
@@ -467,7 +520,7 @@ way the comment claimed it did.
   [PR #21](https://github.com/tonylturner/containd/pull/21) caught
   the original silent-exit as P1.
 
-### Tests
+**Tests**
 
 3 new tests covering panic-then-restart, give-up-after-max-retries,
 and clean-cancel paths. Test-only `withFastBackoff` seam compresses
@@ -571,14 +624,14 @@ macOS Docker Desktop. Builds on v0.1.25's L4 event pipeline.
   template". `buildICSTemplateRules` now normalizes hyphens to
   underscores at the boundary.
 
-### Tests
+**Tests**
 
 10 new test functions across affected packages: hyphenated template
 acceptance, multi-value warning header propagation, NFQUEUE manager
 with no interfaces, NFQUEUE + chain-reorder snapshot fixtures,
 boot-time autobind no-op vs repair paths.
 
-### Note for downstream consumers
+**Note for downstream consumers**
 
 The `Compiler.QueueID` field added in this release pairs with
 `NFQueueGroup` in the runtime config. Set both or neither — a queue
@@ -587,7 +640,9 @@ would freeze inspected traffic at the kernel hook.
 
 ## [0.1.25] - 2026-05-12
 
-### Added — closes #19
+### Added
+
+Closes #19.
 
 - **L4 firewall rule events** now flow into `/api/v1/events` for rules
   with `log: true` that don't have an `ics:` block. `Compiler.NFLogGroup`
@@ -638,7 +693,7 @@ would freeze inspected traffic at the kernel hook.
   sibling `templates.ApplyWithOpts(name, cfg, ApplyOpts{Mode: ...})`
   is the mode-aware path used by the new handler/CLI surfaces.
 
-### Security / dependencies
+### Security
 
 - Bumped Go toolchain `1.25.8` → `1.25.10` (in go.mod and both
   build/Dockerfile.{mgmt,engine}) to clear 5 HIGH stdlib CVEs flagged
@@ -647,7 +702,7 @@ would freeze inspected traffic at the kernel hook.
 
 - Added `github.com/florianl/go-nflog/v2 v2.3.0`.
 
-### Tests
+**Tests**
 
 23 new test functions across the changed packages, covering log
 clause emission, DPI suppression, no-group disables logging, prefix
@@ -658,7 +713,7 @@ global fallback, learn default, case normalization), template
 factories ship `Log: true`, `ApplyWithOpts` overrides, HTTP apply
 with `mode=enforce`/blank/invalid.
 
-### Note on v0.1.24
+**Note on v0.1.24**
 
 v0.1.24 was tagged briefly but the release workflow failed at its
 VERSION-vs-tag guard (VERSION file lagged the tag). No image was
@@ -667,7 +722,7 @@ these changes.
 
 ## [0.1.23] - 2026-05-08
 
-### Documentation
+### Changed
 - Transparency note in `docs/mkdocs/secure-by-design.md` under **§ 2 Default Passwords** documenting the v0.1.22 lab-mode credential pinning openly. Calls it out as a deliberate weakening of the default-password posture, scoped to the lab boundary, with explicit "when lab mode is appropriate" and "when lab mode is NOT appropriate" lists, the trade-offs (no credential rotation, SSH-on-:2222 uses the same pinned cred), and roadmap for a future per-instance bootstrap that preserves classroom usability without a universal shared credential.
 - `docs/mkdocs/threat-model.md` § Auth Bypass / Privilege Escalation residual-risk list now flags lab mode and links to the secure-by-design transparency note.
 - `docs/mkdocs/lab-compose.md` `.env` reference documents `CONTAIND_LAB_MODE` and explicitly warns it should not be enabled on deployments reachable from hostile or shared networks.
@@ -944,7 +999,7 @@ these changes.
 - Path traversal protection on all file-serving endpoints.
 - Rate limiting on authentication and sensitive API endpoints.
 
-### Performance
+### Changed
 - Flow hash uses strings.Builder for reduced allocations.
 - Verdict cache with TOCTOU fix for concurrent access safety.
 - Flow sweep runs outside mutex to reduce lock contention.
@@ -952,3 +1007,34 @@ these changes.
 - Regex caching in IDS rule evaluation.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
+
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.34...HEAD
+[0.1.34]: https://github.com/tonylturner/containd/compare/v0.1.33...v0.1.34
+[0.1.33]: https://github.com/tonylturner/containd/compare/v0.1.32...v0.1.33
+[0.1.32]: https://github.com/tonylturner/containd/compare/v0.1.31...v0.1.32
+[0.1.31]: https://github.com/tonylturner/containd/compare/v0.1.30...v0.1.31
+[0.1.30]: https://github.com/tonylturner/containd/compare/v0.1.29...v0.1.30
+[0.1.29]: https://github.com/tonylturner/containd/compare/v0.1.28...v0.1.29
+[0.1.28]: https://github.com/tonylturner/containd/compare/v0.1.27...v0.1.28
+[0.1.27]: https://github.com/tonylturner/containd/compare/v0.1.26...v0.1.27
+[0.1.26]: https://github.com/tonylturner/containd/compare/v0.1.25...v0.1.26
+[0.1.25]: https://github.com/tonylturner/containd/compare/v0.1.23...v0.1.25
+[0.1.23]: https://github.com/tonylturner/containd/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/tonylturner/containd/compare/v0.1.21...v0.1.22
+[0.1.21]: https://github.com/tonylturner/containd/compare/v0.1.20...v0.1.21
+[0.1.20]: https://github.com/tonylturner/containd/compare/v0.1.19...v0.1.20
+[0.1.19]: https://github.com/tonylturner/containd/compare/v0.1.18...v0.1.19
+[0.1.18]: https://github.com/tonylturner/containd/compare/v0.1.17...v0.1.18
+[0.1.17]: https://github.com/tonylturner/containd/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/tonylturner/containd/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/tonylturner/containd/compare/v0.1.14...v0.1.15
+[0.1.14]: https://github.com/tonylturner/containd/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/tonylturner/containd/compare/v0.1.12...v0.1.13
+[0.1.12]: https://github.com/tonylturner/containd/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/tonylturner/containd/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/tonylturner/containd/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/tonylturner/containd/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/tonylturner/containd/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/tonylturner/containd/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/tonylturner/containd/compare/v0.1.5-beta...v0.1.6
+[0.1.5-beta]: https://github.com/tonylturner/containd/releases/tag/v0.1.5-beta

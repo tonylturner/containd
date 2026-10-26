@@ -2,25 +2,26 @@
 set -euo pipefail
 
 # Smoke-test live ICS DPI with deterministic Modbus/TCP and DNP3 traffic
-# to check non-regression of US protocols. Requirements: docker compose, jq, curl.
+# to check protocol enforcement. Requirements: docker compose, jq, curl.
 #
 # Both capture modes assert: Modbus FC 3 reads pass, including a read split
 # across two TCP segments and two reads coalesced into one; DNP3 FC 1 reads
 # pass, the outstation's response and unsolicited data reach the master, and
 # DPI decodes the read; a denied Modbus write matches its rule and later
-# writes are blocked; the US 10-minute dynamic block appears in nft
+# writes are blocked; the 10-minute dynamic block appears in nft
 # block_flows.
 #
 # SMOKE_DPI_CAPTURE=afpacket (default) observes traffic on the interfaces;
 # the first denied write reaches the server and only later writes are
 # blocked. SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
-# (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) and also asserts US
+# (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) and also asserts
 # first-actuation prevention, from server state: the
 # first Modbus FC 6 write on a fresh connection and after a read on a
 # persistent connection, the first Modbus FC 8, and the first complete DNP3
 # FC 5 and FC 6 never reach the server. Each probe uses its own client
 # address so the dynamic block of an earlier deny cannot stand in for the
 # inline drop.
+# Fixture and isolation setup: test/data-smoke/README.md.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
 # Compose project and harness subnets. When another smoke stack owns the

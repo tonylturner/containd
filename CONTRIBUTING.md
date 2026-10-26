@@ -1,178 +1,160 @@
 # Contributing to containd
 
-Thank you for your interest in contributing to containd. This document covers the process for contributing to this project.
+Bug fixes, tests, documentation and UI improvements are welcome. For larger
+features or architectural changes, open an issue to discuss the approach first.
+Follow the [Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately
+using [SECURITY.md](SECURITY.md).
 
-## Getting Started
+## Getting started
 
-1. Fork the repository and clone your fork.
-2. Set up the development environment (see below).
-3. Create a feature branch from `main`.
-4. Make your changes, write tests, and verify everything passes.
-5. Submit a pull request.
+1. Fork the repository, clone your fork and create a feature branch from `main`.
+2. Install the dependencies below.
+3. Make a focused change with tests and user-facing documentation as appropriate.
+4. Run the relevant verification checks and submit a pull request with results.
 
-## Development Environment
+## Development environment
 
-### Prerequisites
+Prerequisites:
 
-- Go 1.26.10+ (see `go.mod` for exact version)
-- Node.js 20+ and npm
-- Docker and Docker Compose
-- Python 3.12+ (for docs builds only)
+- Go 1.26.10+ (see `go.mod` for the exact version).
+- Node.js 20+ and npm.
+- Docker with modern Docker Compose for appliance builds and smoke tests.
+- OpenSSL for the JWT secret-generation command below.
+- Python 3.12+ and the pinned MkDocs dependencies for docs **and UI source builds**
+  (the UI prebuild embeds the documentation).
 
-### Building
+Run these commands from the repository root. Activate the virtual environment
+in each shell used for docs or UI builds so `mkdocs` is on `PATH`:
 
 ```bash
-# Go binary
-go build ./cmd/containd
+python3 -m venv build/docs-venv
+. build/docs-venv/bin/activate
+python -m pip install -r docs/requirements-mkdocs.txt
+go mod download
+(cd ui && npm ci)
+```
 
-# UI (static export)
-cd ui && npm ci && npm run build
+### Build and run
 
-# Docker image
+```bash
+# Go binary and UI static export; the subshell preserves the repository cwd.
+go build -o containd ./cmd/containd
+(cd ui && npm run build)
+```
+
+Running the appliance requires writable runtime storage under `/data` and
+external service binaries for enabled services. Use the dev image below for
+the packaged Linux runtime, including on Docker Desktop; a native macOS build
+is not a host firewall.
+See [architecture](docs/mkdocs/architecture.md) and
+[services](docs/mkdocs/services.md) for runtime boundaries.
+
+For a source-built appliance with Compose-managed lab networks:
+
+```bash
 docker build -f build/Dockerfile.mgmt -t containd/containd:dev .
-
-# Full appliance via Compose
 cp .env.example .env
+# This exported value satisfies the Compose secret requirement; keep it private.
+export CONTAIND_JWT_SECRET="$(openssl rand -hex 32)"
 docker compose --env-file .env -f deploy/docker-compose.dev.yml up -d --build
 ```
 
-### Versioning
+Retain the same secret in your private environment or `.env` for subsequent
+starts. Do not commit secrets. Restrict published management ports and rotate
+the bootstrap password immediately; see [SECURITY.md](SECURITY.md).
+For published-image onboarding and network customization, use the canonical
+[Docker Compose guide](docs/mkdocs/docker-compose.md).
 
-- `VERSION` is the canonical release version for the repo.
-- Release tags must match `VERSION` exactly, for example `VERSION=0.1.7` pairs with tag `v0.1.7`.
-- Add a matching `CHANGELOG.md` section before tagging a release. The release workflow publishes that section as the GitHub release notes.
-- `pkg/cp/config.SchemaVersionCurrent` is the config schema version, not the release version. Bump it only when stored config compatibility changes.
-- Local `go build` defaults to `dev` build metadata. Docker builds read `VERSION` automatically unless you override `--build-arg VERSION=...`.
+### Documentation
 
-### Running Tests
+Product documentation lives under `docs/mkdocs/`, with navigation in
+`docs/mkdocs.yml`. With the dependencies above installed, run from the repo root:
 
 ```bash
-# Go unit tests
-go test ./...
-
-# UI lint
-cd ui && npm run lint
-
-# Smoke tests (builds and validates the local appliance image)
-bash scripts/smoketest
+mkdocs build -f docs/mkdocs.yml
+mkdocs serve -f docs/mkdocs.yml
 ```
 
-### Local Verification
+The first command builds the static site; the second starts a local preview
+server. Use `--strict` when checking documentation changes. Keep one canonical
+home per topic and link to it rather than duplicating instructions. Put images
+and diagrams under `docs/mkdocs/assets/`; Markdown files at the docs root refer
+to them as `assets/<file>`.
 
-For the standard contributor verification flow, use:
+### Versioning
+
+- `VERSION` is the canonical release version; release tags must match it exactly
+  (`VERSION=0.1.7` pairs with tag `v0.1.7`).
+- Add user-facing changes under `Unreleased` in `CHANGELOG.md`. Before tagging,
+  add a matching dated release section; the release workflow extracts it as notes.
+- `pkg/cp/config.SchemaVersionCurrent` is the config schema version, not the
+  release version. Bump it only when stored config compatibility changes.
+- Local `go build` defaults to `dev` metadata. Docker builds read `VERSION`
+  unless overridden with `--build-arg VERSION=...`.
+
+## Verification
+
+After dependency setup, the standard local baseline is:
 
 ```bash
 bash scripts/dev-verify.sh
 ```
 
-This runs:
+It runs Go vet, golangci-lint, staticcheck, ineffassign, ShellCheck, Go tests,
+UI lint and a docs build. Install golangci-lint v2 and ShellCheck locally or use
+its Docker fallbacks; staticcheck and ineffassign have `go run` fallbacks.
+The baseline uses non-race Go tests and is not the complete CI gate.
 
-- `go vet ./...`
-- `golangci-lint run` (with a Docker fallback if the binary is not installed locally)
-- `staticcheck ./...` (with a `go run` fallback if the binary is not installed locally)
-- `ineffassign ./...` (with a `go run` fallback if the binary is not installed locally)
-- `shellcheck -x` on the repo shell entrypoints (with a Docker fallback if the binary is not installed locally)
-- `go test ./...`
-- `cd ui && npm run lint`
-- `mkdocs build -f docs/mkdocs.yml`
-
-To include the repo filesystem vulnerability scan too:
+[CI](.github/workflows/ci.yml) also checks module tidiness, runs the full Go race
+suite, scans with curated Semgrep rules, builds the UI and appliance image,
+smokes the public Compose quickstart and scans the image with Trivy. To run the
+module/race/security checks explicitly from the repository root:
 
 ```bash
-bash scripts/dev-verify.sh --with-trivy
+go mod tidy && git diff --exit-code go.mod go.sum
+go test -race ./...
+bash scripts/semgrep-verify.sh
 ```
 
-To include the curated Semgrep security scan too:
+Run affected checks during development and record exact results or why a check
+is not applicable in the PR. Linux-only dataplane tests need a Linux environment;
+a native macOS run does not exercise those files. Detailed procedures and
+prerequisites are in [testing](docs/mkdocs/testing.md).
 
-```bash
-bash scripts/dev-verify.sh --with-semgrep
-```
+Optional local workflows:
 
-For dataplane benchmark and profile work:
+- `bash scripts/dev-verify.sh --with-semgrep` adds the curated security scan.
+- `bash scripts/dev-verify.sh --with-trivy` adds a repository filesystem scan
+  (not the CI image scan).
+- `bash scripts/dev-verify.sh --with-race` adds a targeted race package set
+  (not the full CI race suite).
+- `bash scripts/coverage-report.sh` reports package coverage.
+- `bash scripts/smoketest` builds and exercises the local appliance image.
+- [Performance guidance](docs/mkdocs/performance.md) covers benchmarks/profiles;
+  `bash scripts/complexity-report.sh` supports complexity triage.
 
-```bash
-bash scripts/perf-baseline.sh
-bash scripts/perf-baseline.sh --profile
-```
+## Code standards and boundaries
 
-For complexity triage during refactors:
+- Follow Go conventions, including `gofmt` and `go vet`; justify new dependencies.
+- Keep data plane (`pkg/dp/`), control plane (`pkg/cp/`) and management plane
+  (`pkg/mp/`, `api/`) responsibilities separate. Dataplane snapshots are immutable
+  and use atomic swaps.
+- Treat facades as routing/assembly surfaces. Put HTTP handlers in the matching
+  `api/http/*_handlers.go` domain file and config validation in `validate*.go`.
+- Keep `ui/lib/api.ts` a stable facade over domain modules. Extract large
+  page-local forms, modals and lookup tables into sibling modules.
+- Follow existing Tailwind + shadcn/ui patterns and the dark-first palette.
+  Pages use `Shell`; the UI is a static export, without server-side rendering or
+  Next.js API routes.
+- Keep commits focused with concise imperative subjects and tests for new behavior.
 
-```bash
-bash scripts/complexity-report.sh
-```
+See [code boundaries](docs/mkdocs/code-boundaries.md) for package ownership detail.
 
-## Code Standards
+## Pull requests and issues
 
-### Go
+Describe the change, how to test it and any security impact. Update documentation
+for user-visible behavior and ensure applicable CI checks pass before merging.
+Use GitHub Issues for bugs and feature requests, not private vulnerability reports.
 
-- Follow standard Go conventions (`gofmt`, `go vet`).
-- Prefer `bash scripts/dev-verify.sh` before pushing so local verification matches the expected repo baseline.
-- Maintain strict separation between data plane (`pkg/dp/`), control plane (`pkg/cp/`), and management plane (`pkg/mp/`, `api/`).
-- Data plane snapshots are immutable; use atomic swaps.
-- Avoid introducing new dependencies without justification.
-
-### TypeScript / React
-
-- Follow the existing Tailwind + shadcn/ui patterns.
-- Dark-mode-first; use the existing color palette (see `globals.css` and Tailwind config).
-- All pages use the `Shell` layout component for consistent navigation.
-- Static export only — no server-side rendering or API routes in Next.js.
-
-### General
-
-- Write tests for new functionality.
-- Keep commits focused: one logical change per commit.
-- Write clear commit messages: imperative mood, concise summary, body if needed.
-
-## Code Boundaries
-
-The main contributor-facing facades now have explicit ownership boundaries documented in [docs/mkdocs/code-boundaries.md](docs/mkdocs/code-boundaries.md).
-
-When adding new code:
-
-- Treat facade files as routing/assembly surfaces, not catch-all implementation files.
-- Add new HTTP endpoints to the matching `api/http/*_handlers.go` domain file, not back into `api/http/server.go`.
-- Add config validation to the matching `pkg/cp/config/validate*.go` file, not back into `pkg/cp/config/config.go`.
-- Add new UI API endpoints to the matching `ui/lib/api-*.ts` domain file, and keep `ui/lib/api.ts` as the stable facade.
-- Move large page-local forms, modals, and lookup tables into sibling modules before growing page files further.
-
-## Local Verification
-
-Recommended local verification flows:
-
-- `bash scripts/dev-verify.sh`
-- `bash scripts/dev-verify.sh --with-semgrep`
-- `bash scripts/dev-verify.sh --with-coverage`
-- `bash scripts/smoketest`
-- `bash scripts/perf-baseline.sh`
-
-For coverage-specific inspection, use:
-
-- `bash scripts/coverage-report.sh`
-
-## Pull Request Process
-
-1. Ensure CI passes (Go tests, UI lint/build, Docker build).
-2. Update documentation if your change affects user-facing behavior.
-3. Add a brief description of the change and how to test it.
-4. PRs require at least one review before merging.
-
-## What to Contribute
-
-Good first contributions:
-
-- Bug fixes with a clear reproduction path.
-- Test coverage for untested code paths.
-- Documentation improvements.
-- UI polish (loading states, error handling, accessibility).
-
-Larger contributions (new features, architectural changes) — please open an issue first to discuss the approach before investing significant effort.
-
-## Reporting Issues
-
-- Use GitHub Issues for bugs and feature requests.
-- For security vulnerabilities, see [SECURITY.md](SECURITY.md).
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing, you agree your contributions are licensed under the
+[Apache License 2.0](LICENSE).

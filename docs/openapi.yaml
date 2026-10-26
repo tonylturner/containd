@@ -3,32 +3,42 @@ info:
   title: containd API
   version: "1.0.0"
   description: |
-    REST API for containd -- an ICS/OT firewall management platform.
-    Provides configuration, monitoring, and security services for
-    industrial control system network environments.
-
-    All paths below are relative to the /api/v1 base path.
-    Authenticated endpoints require a JWT obtained via POST /auth/login.
+    REST API for containd, relative to /api/v1.
+    Normal authentication is a session-backed JWT from POST /auth/login (or
+    POST /auth/login/mfa). Send Authorization: Bearer <token> or the HttpOnly
+    containd_token cookie. Cookie-authenticated writes enforce same-origin checks.
+    Lab mode grants admin access to a supplied token (a JWT is verified when a
+    signing secret is configured). Static admin/auditor bearer tokens are a
+    fallback only when the user store or JWT secret is unavailable.
+    Persisted configuration edits stage a shared candidate. Reads of editable
+    settings use that candidate; commit promotes and applies it. Operational
+    commands remain immediate. Authentication and authorization errors use
+    ErrorResponse; protected operations may return 401, 403 or 503. Admin-only
+    operations say so in their summary.
   license:
     name: Apache-2.0
 
 servers:
-  - url: /api/v1
-    description: Default API base path
+- url: /api/v1
+  description: Default API base path
 
 security:
-  - bearerAuth: []
-
+- bearerAuth: []
+- cookieAuth: []
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: >
-        JWT from POST /auth/login. Send as Authorization header
-        or via the token cookie set automatically on login.
+      description: >-
+        Session JWT in normal mode; configured static bearer token in fallback mode. Lab tokens are not production authentication.
 
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: containd_token
+      description: Session cookie set by login; cookie-authenticated browser writes require an allowed Origin.
   schemas:
     IEC104Pressure:
       type: object
@@ -81,120 +91,116 @@ components:
       type: object
       required: [count, sha256]
       properties:
-        count: { type: integer, minimum: 0 }
-        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        count: {type: integer, minimum: 0}
+        sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
 
     LoginRequest:
       type: object
       required: [username, password]
       properties:
-        username: { type: string }
-        password: { type: string, format: password }
+        username: {type: string}
+        password: {type: string, format: password}
 
     LoginResponse:
       type: object
       properties:
-        token: { type: string, description: Signed JWT }
-        expiresAt: { type: string, format: date-time }
-        user: { $ref: "#/components/schemas/User" }
+        token: {type: string, description: Signed JWT}
+        expiresAt: {type: string, format: date-time}
+        user: {$ref: "#/components/schemas/User"}
+      required: [token, expiresAt, user]
 
     MFALoginChallenge:
       type: object
       properties:
-        mfaRequired: { type: boolean, enum: [true] }
-        mfaMethod: { type: string, example: totp }
-        mfaChallengeToken: { type: string }
-        user: { $ref: "#/components/schemas/User" }
+        mfaRequired: {type: boolean, enum: [true]}
+        mfaMethod: {type: string, example: totp}
+        mfaChallengeToken: {type: string}
+        user: {$ref: "#/components/schemas/User"}
+      required: [mfaRequired, mfaMethod, mfaChallengeToken, user]
 
     MFAVerifyLoginRequest:
       type: object
       required: [challengeToken, code]
       properties:
-        challengeToken: { type: string }
-        code: { type: string }
+        challengeToken: {type: string}
+        code: {type: string}
 
     MFAEnrollResponse:
       type: object
       properties:
-        secret: { type: string }
-        otpauthURL: { type: string, format: uri }
-        qrDataURL: { type: string }
-        challengeToken: { type: string }
+        secret: {type: string}
+        otpauthURL: {type: string, format: uri}
+        qrDataURL: {type: string}
+        challengeToken: {type: string}
 
     MFAEnableRequest:
       type: object
       required: [challengeToken, code]
       properties:
-        challengeToken: { type: string }
-        code: { type: string }
+        challengeToken: {type: string}
+        code: {type: string}
 
     MFADisableRequest:
       type: object
       required: [currentPassword, code]
       properties:
-        currentPassword: { type: string, format: password }
-        code: { type: string }
+        currentPassword: {type: string, format: password}
+        code: {type: string}
 
     User:
       type: object
       properties:
-        id: { type: string }
-        username: { type: string }
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string }
-        role: { type: string, enum: [admin, view] }
-        mustChangePassword: { type: boolean }
-        mfaEnabled: { type: boolean }
-        mfaRequired: { type: boolean }
-        mfaGraceUntil: { type: string, format: date-time }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+        id: {type: string}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        role: {type: string, enum: [admin, view]}
+        mustChangePassword: {type: boolean}
+        mfaEnabled: {type: boolean}
+        mfaRequired: {type: boolean}
+        mfaGraceUntil: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
 
     CreateUserRequest:
       type: object
       required: [username, role, password]
       properties:
-        username: { type: string }
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string }
-        role: { type: string, enum: [admin, view] }
-        password: { type: string, format: password }
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        role: {type: string, enum: [admin, view]}
+        password: {type: string, format: password}
 
     ErrorResponse:
       type: object
       properties:
-        error: { type: string, description: Human-readable error message }
-        detail: { type: string, description: Optional additional context }
+        error: {type: string, description: Human-readable error message}
+        detail: {type: string, description: Optional additional context}
 
     HealthResponse:
       type: object
       properties:
-        status: { type: string, example: ok }
-        component: { type: string, example: mgmt }
-        build: { type: string }
-        commit: { type: string }
-        hostname: { type: string }
-        time: { type: string, format: date-time }
-        iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
-        enforcement: { $ref: "#/components/schemas/EnforcementHealth" }
+        status: {type: string, example: ok}
+        component: {type: string, example: mgmt}
+        build: {type: string}
+        commit: {type: string}
+        hostname: {type: string}
+        time: {type: string, format: date-time}
+        iec104Enforcement: {$ref: "#/components/schemas/IEC104Enforcement"}
+        enforcement: {$ref: "#/components/schemas/EnforcementHealth"}
         ipv4Forwarding:
           type: string
           enum: [enabled, disabled, unknown]
-          description: >
-            IPv4 forwarding read by the engine in its network namespace.
-            Unknown when the sysctl cannot be read or the engine is unreachable.
+          description: IPv4 forwarding sysctl state in the engine namespace; unknown if unreadable or unreachable.
         managementBinding:
           type: object
-          description: >
-            Configured when a management grant names an existing device;
-            unbound-appliance when no granted interface is bound, so the listed
-            ports accept management on every existing NIC not explicitly denied;
-            unknown when state cannot be read.
+          description: Unbound appliances accept recovery ports on existing NICs not explicitly denied.
           properties:
-            state: { type: string, enum: [configured, unbound-appliance, unknown] }
-            recoveryPorts: { type: array, items: { type: integer } }
+            state: {type: string, enum: [configured, unbound-appliance, unknown]}
+            recoveryPorts: {type: array, items: {type: integer}}
 
     IEC104Enforcement:
       type: object
@@ -218,8 +224,8 @@ components:
             False after a queue bind, verdict submission, reset send,
             reset injector or bounded-worker failure. IEC104 envelope
             traffic then fails closed until readiness returns.
-        reason: { type: string, description: "Cause when IEC104 is unhealthy, else empty" }
-      example: { active: true, healthy: true, reason: "" }
+        reason: {type: string, description: "Cause when IEC104 is unhealthy, else empty"}
+      example: {active: true, healthy: true, reason: ""}
 
     EnforcementHealth:
       type: object
@@ -245,20 +251,20 @@ components:
             means ruleset apply failure, a persisted replay/recovery fault, or
             no applied ruleset while enforcement is on. Unknown means required
             config/fault or engine state could not be read within the budget.
-        reason: { type: string, description: Generic summary for unavailable or unknown; otherwise empty }
-      example: { state: enforcing, reason: "" }
+        reason: {type: string, description: Generic summary for unavailable or unknown; otherwise empty}
+      example: {state: enforcing, reason: ""}
 
     ConfigApplyError:
       type: object
       required: [error, detail, restored, reapplied]
       properties:
-        error: { type: string, example: configuration apply failed }
-        detail: { type: string, description: Original runtime apply failure }
-        restored: { type: boolean, description: Pre-request stored state and IDS bank restored }
-        reapplied: { type: boolean, description: Restored snapshot successfully reapplied }
-        restoreError: { type: string, description: Present when stored-state restoration failed }
-        reapplyError: { type: string, description: Present when reapply failed or could not be attempted }
-        healthError: { type: string, description: Present when recovery health could not be persisted }
+        error: {type: string, example: configuration apply failed}
+        detail: {type: string, description: Original runtime apply failure}
+        restored: {type: boolean, description: Pre-request stored state and IDS bank restored}
+        reapplied: {type: boolean, description: Restored snapshot successfully reapplied}
+        restoreError: {type: string, description: Present when stored-state restoration failed}
+        reapplyError: {type: string, description: Present when reapply failed or could not be attempted}
+        healthError: {type: string, description: Present when recovery health could not be persisted}
 
     PcapFilter:
       type: object
@@ -266,9 +272,9 @@ components:
         Packet filter. Port matches either the TCP/UDP source or destination
         port; it is not valid with proto icmp.
       properties:
-        src: { type: string, description: Source IPv4 address or CIDR }
-        dst: { type: string, description: Destination IPv4 address or CIDR }
-        proto: { type: string, enum: [any, tcp, udp, icmp], default: any }
+        src: {type: string, description: Source IPv4 address or CIDR}
+        dst: {type: string, description: Destination IPv4 address or CIDR}
+        proto: {type: string, enum: [any, tcp, udp, icmp], default: any}
         port:
           type: string
           pattern: '^[0-9]+(-[0-9]+)?$'
@@ -282,77 +288,86 @@ components:
         running interface and zone configuration. Interface and zone
         selections are unioned and deduplicated.
       properties:
-        enabled: { type: boolean }
+        enabled: {type: boolean}
         interfaces:
           type: array
-          items: { type: string }
+          items: {type: string}
           description: Logical interface name or existing kernel device name
         zones:
           type: array
-          items: { type: string }
+          items: {type: string}
           description: Capture every configured interface assigned to these zones
-        snaplen: { type: integer, minimum: 0 }
-        maxSizeMB: { type: integer, minimum: 0 }
-        maxFiles: { type: integer, minimum: 0 }
-        mode: { type: string, enum: [rolling, once] }
-        promisc: { type: boolean }
-        bufferMB: { type: integer, minimum: 0 }
-        rotateSeconds: { type: integer, minimum: 0 }
-        filePrefix: { type: string }
-        filter: { $ref: "#/components/schemas/PcapFilter" }
-        forwardTargets:
-          type: array
-          items: { type: object, additionalProperties: true }
+        snaplen: {type: integer, minimum: 0}
+        maxSizeMB: {type: integer, minimum: 0}
+        maxFiles: {type: integer, minimum: 0}
+        mode: {type: string, enum: [rolling, once]}
+        promisc: {type: boolean}
+        bufferMB: {type: integer, minimum: 0}
+        rotateSeconds: {type: integer, minimum: 0}
+        filePrefix: {type: string}
+        filter: {$ref: "#/components/schemas/PcapFilter"}
+        forwardTargets: {type: array, items: {$ref: '#/components/schemas/PCAPForwardTarget'}}
 
     PcapStatus:
-      type: object
       properties:
-        running: { type: boolean }
-        interfaces:
-          type: array
-          items: { type: string }
-          description: Resolved kernel device names
-        startedAt: { type: string, format: date-time }
-        lastError: { type: string }
+        interfaces: {items: {type: string}, type: array}
+        lastError: {type: string}
+        running: {type: boolean}
+        startedAt: {format: date-time, type: string}
+      type: object
 
+      required: [running]
     DashboardResponse:
       type: object
       properties:
-        health: { $ref: "#/components/schemas/HealthResponse" }
+        health:
+          type: object
+          properties:
+            status: {type: string}
+            component: {type: string}
+            build: {type: string}
+            commit: {type: string}
+            hostname: {type: string}
+            time: {type: string, format: date-time}
+            labMode: {type: boolean}
         counts:
           type: object
           properties:
-            assets: { type: integer }
-            zones: { type: integer }
-            interfaces: { type: integer }
-            rules: { type: integer }
+            assets: {type: integer}
+            zones: {type: integer}
+            interfaces: {type: integer}
+            rules: {type: integer}
+            icsRules: {type: integer}
         eventStats:
           type: object
           properties:
-            total: { type: integer }
-            idsAlerts: { type: integer }
-            modbusWrites: { type: integer }
-            avDetections: { type: integer }
-            avBlocks: { type: integer }
-        services: { type: object }
-        user: { type: object }
-        lastActivity: { $ref: "#/components/schemas/AuditRecord" }
+            total: {type: integer}
+            idsAlerts: {type: integer}
+            modbusWrites: {type: integer}
+            avDetections: {type: integer}
+            avBlocks: {type: integer}
+        services: {type: object}
+        user: {type: object}
+        lastActivity:
+          allOf:
+          - {$ref: '#/components/schemas/AuditRecord'}
+          nullable: true
 
     Event:
       type: object
       properties:
-        id: { type: integer, format: uint64 }
-        flowId: { type: string }
-        proto: { type: string }
-        kind: { type: string }
-        attributes: { type: object, additionalProperties: true }
-        timestamp: { type: string, format: date-time }
-        srcIp: { type: string }
-        dstIp: { type: string }
-        srcPort: { type: integer }
-        dstPort: { type: integer }
-        transport: { type: string, enum: [tcp, udp] }
-        hash: { type: string }
+        id: {type: integer, format: uint64}
+        flowId: {type: string}
+        proto: {type: string}
+        kind: {type: string}
+        attributes: {type: object, additionalProperties: true}
+        timestamp: {type: string, format: date-time}
+        srcIp: {type: string}
+        dstIp: {type: string}
+        srcPort: {type: integer}
+        dstPort: {type: integer}
+        transport: {type: string, enum: [tcp, udp]}
+        hash: {type: string}
 
     EventPage:
       type: object
@@ -360,63 +375,66 @@ components:
       properties:
         events:
           type: array
-          items: { $ref: "#/components/schemas/Event" }
+          items: {$ref: "#/components/schemas/Event"}
         nextCursor:
           type: string
           description: Opaque exclusive upper bound for the next older page; absent at the end of retained matches.
         historyTruncated:
           type: boolean
-          description: Conservative warning that history may be incomplete, not a per-session loss count. True after any store overflow or when merged service history cannot be certified.
+          description: Conservative warning that history may be incomplete, not a per-session loss count. True after any store overflow or
+            when merged service history cannot be certified.
         engineError:
           type: string
-          description: Engine query failed; events may still contain matching service evidence. Never interpret this as an empty successful engine search.
+          description: Engine query failed; events may still contain matching service evidence. Never interpret this as an empty successful
+            engine search.
 
     FlowSummary:
       type: object
       properties:
-        flowId: { type: string }
+        flowId: {type: string}
         session_id:
           type: string
           description: >
             IEC104 session incarnation that groups this rollup (both wire
             directions of one connection). Absent for non-IEC flows.
-        firstSeen: { type: string, format: date-time }
-        lastSeen: { type: string, format: date-time }
-        srcIp: { type: string }
-        dstIp: { type: string }
-        srcPort: { type: integer }
-        dstPort: { type: integer }
-        transport: { type: string }
-        application: { type: string }
-        eventCount: { type: integer, format: uint64 }
-        avDetected: { type: boolean }
-        avBlocked: { type: boolean }
+        firstSeen: {type: string, format: date-time}
+        lastSeen: {type: string, format: date-time}
+        srcIp: {type: string}
+        dstIp: {type: string}
+        srcPort: {type: integer}
+        dstPort: {type: integer}
+        transport: {type: string}
+        application: {type: string}
+        eventCount: {type: integer, format: uint64}
+        avDetected: {type: boolean}
+        avBlocked: {type: boolean}
 
     FirewallRule:
       type: object
       required: [id, action]
       properties:
-        id: { type: string }
-        description: { type: string }
-        sourceZones: { type: array, items: { type: string } }
-        destZones: { type: array, items: { type: string } }
-        sources: { type: array, items: { type: string }, description: CIDRs }
-        destinations: { type: array, items: { type: string }, description: CIDRs }
+        id: {type: string}
+        description: {type: string}
+        sourceZones: {type: array, items: {type: string}}
+        destZones: {type: array, items: {type: string}}
+        sources: {type: array, items: {type: string}, description: CIDRs}
+        destinations: {type: array, items: {type: string}, description: CIDRs}
         protocols:
           type: array
           items:
             type: object
             required: [name]
             properties:
-              name: { type: string, example: tcp }
-              port: { type: string, example: "2404", description: Single port or range "1000-2000" }
-        identities: { type: array, items: { type: string } }
+              name: {type: string, example: tcp}
+              port: {type: string, example: "2404", description: Single port or range "1000-2000"}
+        identities: {type: array, items: {type: string}}
         ics:
           allOf:
-            - $ref: "#/components/schemas/ICSPredicate"
+          - $ref: "#/components/schemas/ICSPredicate"
           description: Always present in serialized rules; `{}` denotes no ICS predicate.
-        action: { type: string, enum: [ALLOW, DENY] }
-        log: { type: boolean }
+        action: {type: string, enum: [ALLOW, DENY]}
+        log: {type: boolean}
+        schedule: {$ref: '#/components/schemas/ScheduleConfig'}
 
     ICSPredicate:
       type: object
@@ -460,14 +478,14 @@ components:
             array, a single integer, numeric strings, an index-keyed
             object, legacy base64 string, or null.
           oneOf:
-            - { type: array, items: { type: integer, minimum: 0, maximum: 255 } }
-            - { type: integer, minimum: 0, maximum: 255 }
-            - { type: string }
-            - { type: object, additionalProperties: true }
+          - {type: array, items: {type: integer, minimum: 0, maximum: 255}}
+          - {type: integer, minimum: 0, maximum: 255}
+          - {type: string}
+          - {type: object, additionalProperties: true}
           nullable: true
-        unitId: { type: integer, minimum: 0, maximum: 255, description: Modbus unit id }
-        addresses: { type: array, items: { type: string }, description: Register/address values or ranges (not iec104) }
-        objectClasses: { type: array, items: { type: integer }, description: CIP object classes (cip only) }
+        unitId: {type: integer, minimum: 0, maximum: 255, description: Modbus unit id}
+        addresses: {type: array, items: {type: string}, description: Register/address values or ranges (not iec104)}
+        objectClasses: {type: array, items: {type: integer}, description: CIP object classes (cip only)}
         readOnly:
           type: boolean
           description: >
@@ -475,27 +493,27 @@ components:
             GI (100) and read (102) requests, end of initialization (70),
             S-frames and U-frames. false is no constraint, never "writes
             only".
-        writeOnly: { type: boolean, description: Match writes only (not iec104) }
-        direction: { type: string, enum: [request, response] }
-        mode: { type: string, enum: [learn, enforce], description: Overrides dataplane.dpiMode for this rule }
+        writeOnly: {type: boolean, description: Match writes only (not iec104)}
+        direction: {type: string, enum: [request, response]}
+        mode: {type: string, enum: [learn, enforce], description: Overrides dataplane.dpiMode for this rule}
         typeIds:
           type: array
           minItems: 1
-          items: { type: integer, minimum: 1, maximum: 255 }
+          items: {type: integer, minimum: 1, maximum: 255}
           description: IEC104 Type IDs, a numeric array (never base64)
         classes:
           type: array
           minItems: 1
-          items: { type: string, enum: [monitor, control, system, unknown] }
+          items: {type: string, enum: [monitor, control, system, unknown]}
         ca:
           type: array
           minItems: 1
-          items: { type: integer, minimum: 0, maximum: 65534 }
+          items: {type: integer, minimum: 0, maximum: 65534}
           description: IEC104 common addresses; 65535 (broadcast) is rejected
         ioa:
           type: array
           minItems: 1
-          items: { $ref: "#/components/schemas/IOARange" }
+          items: {$ref: "#/components/schemas/IOARange"}
           description: IEC104 information object address ranges; duplicates and overlaps are rejected
       example:
         protocol: iec104
@@ -503,7 +521,7 @@ components:
         classes: [control]
         direction: request
         ca: [1]
-        ioa: [{ start: 65536, end: 65567 }]
+        ioa: [{start: 65536, end: 65567}]
         mode: enforce
 
     IOARange:
@@ -512,141 +530,1269 @@ components:
       required: [start, end]
       description: Closed range, start <= end; both keys are required, so 0 is never "missing"
       properties:
-        start: { type: integer, minimum: 0, maximum: 16777215 }
-        end: { type: integer, minimum: 0, maximum: 16777215 }
-
+        start: {type: integer, minimum: 0, maximum: 16777215}
+        end: {type: integer, minimum: 0, maximum: 16777215}
     AuditRecord:
       type: object
       properties:
-        id: { type: integer, format: int64 }
-        timestamp: { type: string, format: date-time }
-        actor: { type: string }
-        source: { type: string, description: "Origin: ui, api, ssh, or cli" }
-        action: { type: string }
-        target: { type: string }
-        result: { type: string, enum: [success, failure] }
-        detail: { type: string }
+        id: {type: integer, format: int64}
+        timestamp: {type: string, format: date-time}
+        actor: {type: string}
+        source: {type: string, description: "Origin: ui, api, ssh, or cli"}
+        action: {type: string}
+        target: {type: string}
+        result: {type: string}
+        detail: {type: string}
 
     PolicyAnalysis:
-      type: object
       properties:
-        rules: { type: array, items: { type: object }, description: Auto-generated allowlist rules }
-        profiles:
-          type: array
-          items: { $ref: "#/components/schemas/LearnedProfile" }
-        stats:
-          type: object
-          properties:
-            events: { type: array, items: { type: object } }
-            flows: { type: array, items: { type: object } }
-            protocols: { type: object, additionalProperties: { type: integer } }
-            duration: { type: string, description: Duration of the capture }
-            packetCount: { type: integer }
-        eventSummary: { type: object, additionalProperties: { type: integer }, description: Event counts keyed by protocol }
+        eventSummary: {additionalProperties: {type: integer}, type: object}
+        profiles: {items: {$ref: '#/components/schemas/LearnedProfile'}, type: array}
+        rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
+        stats: {$ref: '#/components/schemas/PcapAnalysisResult'}
+      type: object
+      description: Offline analysis and suggested rules only; does not save rules, update live inventory or change live learn state.
 
     LearnedProfile:
-      type: object
       properties:
-        protocol: { type: string }
-        sourceIP: { type: string }
-        destIP: { type: string }
-        unitIDs: { type: object, additionalProperties: { type: boolean } }
-        functionCodes: { type: object, additionalProperties: { type: boolean } }
-        addresses: { type: object, additionalProperties: { type: boolean } }
-        readSeen: { type: boolean }
-        writeSeen: { type: boolean }
-        firstSeen: { type: string, format: date-time }
-        lastSeen: { type: string, format: date-time }
+        addresses: {additionalProperties: {type: boolean}, type: object}
+        destIP: {type: string}
+        firstSeen: {format: date-time, type: string}
+        functionCodes: {additionalProperties: {type: boolean}, type: object}
+        lastSeen: {format: date-time, type: string}
+        objectClasses: {additionalProperties: {type: boolean}, type: object}
+        packetCount: {type: integer}
+        protocol: {type: string}
+        readSeen: {type: boolean}
+        serviceCodes: {additionalProperties: {type: boolean}, type: object}
+        sourceIP: {type: string}
+        unitIDs: {additionalProperties: {type: boolean}, type: object}
+        writeSeen: {type: boolean}
+      type: object
 
     ICSTemplateInfo:
       type: object
       properties:
-        name: { type: string, example: modbus_read_only }
-        description: { type: string }
-        protocol: { type: string, example: modbus }
+        name: {type: string, example: modbus_read_only}
+        description: {type: string}
+        protocol: {type: string, example: modbus}
         parameters:
           type: array
           items:
             type: object
             properties:
-              name: { type: string }
-              label: { type: string }
-              type: { type: string, enum: [text, number, select] }
-              required: { type: boolean }
-              placeholder: { type: string }
-              help: { type: string }
+              name: {type: string}
+              label: {type: string}
+              type: {type: string, enum: [text, number, select]}
+              required: {type: boolean}
+              placeholder: {type: string}
+              help: {type: string}
 
     ApplyICSTemplateRequest:
       type: object
       required: [template]
       properties:
-        template: { type: string, description: "Template name (e.g. modbus_read_only, dnp3_secure_operations)" }
-        sourceZones: { type: array, items: { type: string } }
-        destZones: { type: array, items: { type: string } }
-        source_zones: { type: array, items: { type: string }, deprecated: true }
-        dest_zones: { type: array, items: { type: string }, deprecated: true }
-        preview: { type: boolean, description: "When true, generate rules without saving them to candidate config" }
+        template: {type: string, description: "Template name (e.g. modbus_read_only, dnp3_secure_operations)"}
+        sourceZones: {type: array, items: {type: string}}
+        destZones: {type: array, items: {type: string}}
+        source_zones: {type: array, items: {type: string}, deprecated: true}
+        dest_zones: {type: array, items: {type: string}, deprecated: true}
+        preview: {type: boolean, description: "When true, generate rules without saving them to candidate config"}
         parameters:
           type: object
-          additionalProperties: { type: string }
+          additionalProperties: {type: string}
           description: "Template parameter map used by the UI"
         params:
           type: object
           properties:
-            ranges: { type: array, items: { type: string }, description: Register address ranges (legacy modbus_register_guard shape) }
+            ranges: {type: array, items: {type: string}, description: Register address ranges (legacy modbus_register_guard shape)}
+        mode:
+          type: string
+          enum: ['', learn, enforce]
+          description: Empty inherits global DPI mode.
 
     RulePreviewResponse:
       type: object
       properties:
-        match_count: { type: integer, description: Number of recent events matching the rule }
+        match_count: {type: integer, description: Number of recent events matching the rule}
         sample_matches:
           type: array
-          items: { $ref: "#/components/schemas/Event" }
+          items: {$ref: "#/components/schemas/Event"}
           description: Up to 50 sample matching events
         time_range:
           type: object
           nullable: true
           properties:
-            start: { type: string, format: date-time }
-            end: { type: string, format: date-time }
-        total_events: { type: integer, description: Total events evaluated }
-
-    EngineConfig:
+            start: {type: string, format: date-time}
+            end: {type: string, format: date-time}
+        total_events: {type: integer, description: Total events evaluated}
+    AVConfig:
+      properties:
+        blockTtlSeconds: {type: integer}
+        cacheTtl: {type: integer}
+        clamav: {$ref: '#/components/schemas/ClamAVConfig'}
+        enabled: {type: boolean}
+        failOpenIcs: {type: boolean}
+        failPolicy: {type: string}
+        httpDownload: {type: boolean}
+        httpUpload: {type: boolean}
+        icap: {$ref: '#/components/schemas/ICAPConfig'}
+        maxSizeBytes: {type: integer}
+        mode: {type: string}
+        timeoutSec: {type: integer}
+      type: object
+    Anomaly:
+      properties:
+        attributes: {additionalProperties: {}, type: object}
+        dest_ip: {type: string}
+        message: {type: string}
+        protocol: {type: string}
+        severity: {type: string}
+        source_ip: {type: string}
+        timestamp: {format: date-time, type: string}
+        type: {type: string}
+      type: object
+    Asset:
+      properties:
+        alias: {type: string}
+        criticality: {type: string}
+        description: {type: string}
+        hostnames: {items: {type: string}, type: array, nullable: true}
+        id: {type: string}
+        ips: {items: {type: string}, type: array, nullable: true}
+        name: {type: string}
+        tags: {items: {type: string}, type: array, nullable: true}
+        type: {type: string}
+        zone: {type: string}
+      type: object
+      description: PATCH replaces the asset, retaining only omitted/empty id and name. Other omitted fields reset.
+    ClamAVConfig:
+      properties:
+        customDefsPath: {type: string}
+        freshclamEnabled: {type: boolean}
+        socketPath: {type: string}
+        updateSchedule: {type: string}
+      type: object
+    Config:
+      properties:
+        assets: {items: {$ref: '#/components/schemas/Asset'}, type: array, nullable: true}
+        dataplane: {$ref: '#/components/schemas/DataPlaneConfig'}
+        description: {type: string}
+        export: {$ref: '#/components/schemas/ExportConfig'}
+        firewall: {$ref: '#/components/schemas/FirewallConfig'}
+        ids: {$ref: '#/components/schemas/IDSConfig'}
+        interfaces: {items: {$ref: '#/components/schemas/Interface'}, type: array, nullable: true}
+        objects: {items: {$ref: '#/components/schemas/Object'}, type: array, nullable: true}
+        pcap: {$ref: '#/components/schemas/PcapConfig'}
+        routing: {$ref: '#/components/schemas/RoutingConfig'}
+        schema_version: {type: string}
+        services: {$ref: '#/components/schemas/ServicesConfig'}
+        system: {$ref: '#/components/schemas/SystemConfig'}
+        version: {type: string}
+        zones: {items: {$ref: '#/components/schemas/Zone'}, type: array, nullable: true}
+      type: object
+    ConntrackDeleteRequest:
+      properties:
+        dport: {type: integer}
+        dst: {type: string}
+        proto: {type: string}
+        sport: {type: integer}
+        src: {type: string}
+      type: object
+    ConntrackEntry:
+      properties:
+        assured: {type: boolean}
+        dport: {type: string}
+        dst: {type: string}
+        mark: {type: string}
+        proto: {type: string}
+        raw: {type: string}
+        replyDport: {type: string}
+        replyDst: {type: string}
+        replySport: {type: string}
+        replySrc: {type: string}
+        sport: {type: string}
+        src: {type: string}
+        state: {type: string}
+        timeoutSecs: {type: integer}
+      type: object
+    ContentMatch:
+      properties:
+        depth: {type: integer}
+        distance: {type: integer}
+        isHex: {type: boolean}
+        negate: {type: boolean}
+        nocase: {type: boolean}
+        offset: {type: integer}
+        pattern: {type: string}
+        within: {type: integer}
+      type: object
+    DHCPConfig:
+      properties:
+        dnsServers: {items: {type: string}, type: array}
+        domain: {type: string}
+        enabled: {type: boolean}
+        leaseSeconds: {type: integer}
+        listenIfaces: {items: {type: string}, type: array}
+        pools: {items: {$ref: '#/components/schemas/DHCPPool'}, type: array}
+        reservations: {items: {$ref: '#/components/schemas/DHCPReservation'}, type: array}
+        router: {type: string}
+      type: object
+    DHCPPool:
+      properties:
+        end: {type: string}
+        iface: {type: string}
+        start: {type: string}
+      type: object
+    DHCPReservation:
+      properties:
+        iface: {type: string}
+        ip: {type: string}
+        mac: {type: string}
+      type: object
+    DNSConfig:
+      properties:
+        cacheSizeMB: {type: integer}
+        enabled: {type: boolean}
+        listenPort: {type: integer}
+        listenZones: {items: {type: string}, type: array}
+        upstreamServers: {items: {type: string}, type: array}
+      type: object
+    DPIExclusion:
+      properties: {reason: {type: string}, type: {type: string}, value: {type: string}}
+      type: object
+    DataPlaneConfig:
+      properties:
+        captureInterfaces: {items: {type: string}, type: array}
+        dpiEnabled: {type: boolean}
+        dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
+        dpiIcsProtocols: {additionalProperties: {type: boolean}, type: object}
+        dpiMock: {type: boolean}
+        dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode.}
+        dpiProtocols: {additionalProperties: {type: boolean}, type: object}
+        enforceTable: {type: string}
+        enforcement: {type: boolean}
+        nflogGroup: {type: integer}
+        nfqueueGroup: {type: integer}
+      type: object
+      description: Candidate data plane settings; POST stages a replacement. Commit to apply to the engine. Omitted ICS decoder keys are
+        enabled; explicit false disables them.
+    DHCPLease:
+      properties:
+        expiresAt: {type: string}
+        hostname: {type: string}
+        iface: {type: string}
+        ip: {type: string}
+        mac: {type: string}
+      type: object
+    DpiEvent:
+      properties:
+        Attributes: {additionalProperties: {}, type: object}
+        FlowID: {type: string}
+        Kind: {type: string}
+        Proto: {type: string}
+        Timestamp: {format: date-time, type: string}
+      type: object
+    SimulationStatus:
+      properties:
+        running: {type: boolean}
+      type: object
+    ExportConfig:
+      properties:
+        enabled: {type: boolean}
+        filter: {type: string}
+        format: {type: string}
+        target: {type: string}
+      type: object
+      description: Stored configuration fields only; no runtime DPI event exporter consumes these settings.
+    FirewallConfig:
+      properties:
+        defaultAction: {type: string}
+        nat: {$ref: '#/components/schemas/NATConfig'}
+        rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
+      type: object
+    ForwardProxyConfig:
+      properties:
+        allowedClients: {items: {type: string}, type: array}
+        allowedDomains: {items: {type: string}, type: array}
+        enabled: {type: boolean}
+        listenPort: {type: integer}
+        listenZones: {items: {type: string}, type: array}
+        logRequests: {type: boolean}
+        upstream: {type: string}
+      type: object
+    Gateway:
+      properties:
+        address: {type: string}
+        alias: {type: string}
+        description: {type: string}
+        iface: {type: string}
+        name: {type: string}
+      type: object
+    ICAPConfig:
+      properties:
+        servers: {items: {$ref: '#/components/schemas/ICAPServer'}, type: array}
+      type: object
+    ICAPServer:
+      properties:
+        address: {type: string}
+        service: {type: string}
+        useTls: {type: boolean}
+      type: object
+    IDSCondition:
+      properties:
+        all: {items: {$ref: '#/components/schemas/IDSCondition'}, type: array}
+        any: {items: {$ref: '#/components/schemas/IDSCondition'}, type: array}
+        field: {type: string}
+        not: {$ref: '#/components/schemas/IDSCondition'}
+        op: {type: string}
+        value: {}
+      type: object
+    IDSConfig:
+      properties:
+        enabled: {type: boolean}
+        ruleGroups: {items: {$ref: '#/components/schemas/RuleGroup'}, type: array, nullable: true}
+        rules: {items: {$ref: '#/components/schemas/IDSRule'}, type: array, nullable: true}
+      type: object
+    IDSRule:
+      properties:
+        action: {type: string}
+        contentMatches: {items: {$ref: '#/components/schemas/ContentMatch'}, type: array}
+        conversionNotes: {items: {type: string}, type: array}
+        cve: {items: {type: string}, type: array}
+        description: {type: string}
+        dstAddr: {type: string}
+        dstPort: {type: string}
+        enabled: {type: boolean}
+        id: {type: string}
+        kind: {type: string}
+        labels: {additionalProperties: {type: string}, type: object}
+        message: {type: string}
+        mitreAttackIDs: {items: {type: string}, type: array}
+        proto: {type: string}
+        rawSource: {type: string}
+        references: {items: {type: string}, type: array}
+        severity: {type: string}
+        sourceFormat: {type: string}
+        srcAddr: {type: string}
+        srcPort: {type: string}
+        title: {type: string}
+        when: {$ref: '#/components/schemas/IDSCondition'}
+        yaraStrings: {items: {$ref: '#/components/schemas/YARAString'}, type: array}
+      type: object
+    Interface:
+      properties:
+        access: {$ref: '#/components/schemas/InterfaceAccess'}
+        addressMode: {type: string}
+        addresses: {items: {type: string}, type: array, nullable: true}
+        alias: {type: string}
+        device: {type: string}
+        gateway: {type: string}
+        members: {items: {type: string}, type: array, nullable: true}
+        name: {type: string}
+        parent: {type: string}
+        type: {type: string}
+        vlanId: {type: integer}
+        zone: {type: string}
+      type: object
+      description: PATCH retains omitted/empty name, device and zone; nil addresses and unset access retain existing values. Other fields
+        replace.
+    InterfaceAccess:
+      properties:
+        http: {type: boolean}
+        https: {type: boolean}
+        mgmt: {type: boolean}
+        ssh: {type: boolean}
+      type: object
+    InterfaceState:
+      properties:
+        addrs: {items: {type: string}, type: array}
+        index: {type: integer}
+        mac: {type: string}
+        mtu: {type: integer}
+        name: {type: string}
+        up: {type: boolean}
+      type: object
+    InventoryDiscoveredAsset:
+      properties:
+        firstSeen: {format: date-time, type: string}
+        functionCodes: {type: string, format: byte, description: 'Base64-encoded bytes (Go []uint8 JSON encoding).'}
+        ip: {type: string}
+        lastSeen: {format: date-time, type: string}
+        packetCount: {type: integer}
+        peers: {items: {type: string}, type: array}
+        protocol: {type: string}
+        role: {type: string}
+        stationAddresses: {items: {type: integer}, type: array}
+        unitIds: {type: string, format: byte, description: 'Base64-encoded bytes (Go []uint8 JSON encoding).'}
+      type: object
+    MgmtConfig:
+      properties:
+        enableHSTS: {type: boolean}
+        enableHTTP: {type: boolean}
+        enableHTTPS: {type: boolean}
+        hstsMaxAgeSeconds: {type: integer}
+        httpListenAddr: {type: string}
+        httpsListenAddr: {type: string}
+        listenAddr: {type: string}
+        redirectHTTPToHTTPS: {type: boolean}
+        tlsCertFile: {type: string}
+        tlsKeyFile: {type: string}
+        trustedCAFile: {type: string}
+      type: object
+    NATConfig:
+      properties:
+        egressZone: {type: string}
+        enabled: {type: boolean}
+        portForwards: {items: {$ref: '#/components/schemas/PortForward'}, type: array, nullable: true}
+        sourceZones: {items: {type: string}, type: array, nullable: true}
+      type: object
+    NTPConfig:
+      properties:
+        enabled: {type: boolean}
+        intervalSeconds: {type: integer}
+        servers: {items: {type: string}, type: array}
+      type: object
+    NetcfgWireGuardPeerStatus:
+      properties:
+        allowedIPs: {items: {type: string}, type: array}
+        endpoint: {type: string}
+        lastHandshake: {type: string}
+        publicKey: {type: string}
+        rxBytes: {type: integer}
+        txBytes: {type: integer}
+      type: object
+    NetcfgWireGuardStatus:
+      properties:
+        interface: {type: string}
+        listenPort: {type: integer}
+        peers: {items: {$ref: '#/components/schemas/NetcfgWireGuardPeerStatus'}, type: array}
+        present: {type: boolean}
+        publicKey: {type: string}
+      type: object
+    Object:
+      properties:
+        addresses: {items: {type: string}, type: array, nullable: true}
+        description: {type: string}
+        id: {type: string}
+        members: {items: {type: string}, type: array, nullable: true}
+        name: {type: string}
+        protocols: {items: {$ref: '#/components/schemas/Protocol'}, type: array, nullable: true}
+        tags: {items: {type: string}, type: array, nullable: true}
+        type: {type: string, enum: [HOST, SUBNET, GROUP, SERVICE]}
+      type: object
+      description: PATCH retains omitted/empty id, name and type and nil list fields; other supplied fields replace.
+    OpenVPNConfig:
+      properties:
+        configPath: {type: string}
+        enabled: {type: boolean}
+        managed: {$ref: '#/components/schemas/OpenVPNManagedClientConfig'}
+        mode: {type: string}
+        server: {$ref: '#/components/schemas/OpenVPNManagedServerConfig'}
+      type: object
+    OpenVPNManagedClientConfig:
+      properties:
+        ca: {type: string}
+        cert: {type: string}
+        key: {type: string}
+        password: {type: string}
+        port: {type: integer}
+        proto: {type: string}
+        remote: {type: string}
+        username: {type: string}
+      type: object
+    OpenVPNManagedServerConfig:
+      properties:
+        clientToClient: {type: boolean}
+        listenInterfaces: {items: {type: string}, type: array}
+        listenPort: {type: integer}
+        listenZone: {type: string}
+        proto: {type: string}
+        publicEndpoint: {type: string}
+        pushDNS: {items: {type: string}, type: array}
+        pushRoutes: {items: {type: string}, type: array}
+        tunnelCIDR: {type: string}
+      type: object
+    PCAPForwardTarget:
+      properties:
+        enabled: {type: boolean}
+        host: {type: string}
+        interface: {type: string}
+        port: {type: integer}
+        proto: {type: string}
+      type: object
+    PcapAnalysisResult:
+      properties:
+        byteCount: {type: integer}
+        duration:
+          type: integer
+          description: Capture duration in nanoseconds.
+        events: {items: {$ref: '#/components/schemas/DpiEvent'}, type: array}
+        flows: {items: {$ref: '#/components/schemas/PcapFlowSummary'}, type: array}
+        packetCount: {type: integer}
+        protocols: {additionalProperties: {type: integer}, type: object}
+      type: object
+    PcapFlowSummary:
+      properties:
+        bytes: {type: integer}
+        events: {type: integer}
+        firstSeen: {format: date-time, type: string}
+        key: {type: string}
+        lastSeen: {format: date-time, type: string}
+        packets: {type: integer}
+        protocol: {type: string}
+      type: object
+    PcapItem:
+      properties:
+        createdAt: {format: date-time, type: string}
+        interface: {type: string}
+        name: {type: string}
+        sizeBytes: {type: integer}
+        status: {type: string}
+        tags: {items: {type: string}, type: array}
+      type: object
+    PcapReplayRequest:
+      properties:
+        interface: {type: string}
+        name: {type: string}
+        ratePps: {type: integer}
+      type: object
+      required: [name, interface]
+    PcapTagRequest:
+      properties:
+        name: {type: string}
+        tags: {items: {type: string}, type: array}
+      type: object
+      required: [name]
+    PolicyRule:
+      properties:
+        dst: {type: string}
+        priority: {type: integer}
+        src: {type: string}
+        table: {type: integer}
+      type: object
+    PortForward:
+      properties:
+        allowedSources: {items: {type: string}, type: array}
+        description: {type: string}
+        destIp: {type: string}
+        destPort: {type: integer}
+        enabled: {type: boolean}
+        id: {type: string}
+        ingressZone: {type: string}
+        listenPort: {type: integer}
+        proto: {type: string}
+      type: object
+    Protocol:
+      properties:
+        name: {type: string}
+        port: {type: string}
+      type: object
+    ProxyConfig:
+      properties:
+        forward: {$ref: '#/components/schemas/ForwardProxyConfig'}
+        reverse: {$ref: '#/components/schemas/ReverseProxyConfig'}
+      type: object
+    ReverseProxyConfig:
+      properties:
+        enabled: {type: boolean}
+        sites: {items: {$ref: '#/components/schemas/ReverseProxySite'}, type: array}
+      type: object
+    ReverseProxySite:
+      properties:
+        backends: {items: {type: string}, type: array}
+        certRef: {type: string}
+        description: {type: string}
+        hostnames: {items: {type: string}, type: array}
+        listenPort: {type: integer}
+        name: {type: string}
+        tlsEnabled: {type: boolean}
+      type: object
+    RoutingConfig:
+      properties:
+        gateways: {items: {$ref: '#/components/schemas/Gateway'}, type: array, nullable: true}
+        routes: {items: {$ref: '#/components/schemas/StaticRoute'}, type: array, nullable: true}
+        rules: {items: {$ref: '#/components/schemas/PolicyRule'}, type: array, nullable: true}
+      type: object
+    RuleGroup:
+      properties:
+        description: {type: string}
+        enabled: {type: boolean}
+        filter: {type: string}
+        id: {type: string}
+        name: {type: string}
+        ruleCount: {type: integer}
+      type: object
+    SSHConfig:
+      properties:
+        allowPassword: {type: boolean}
+        authorizedKeysDir: {type: string}
+        banner: {type: string}
+        hostKeyRotationDays: {type: integer}
+        listenAddr: {type: string}
+        shellMode: {type: string}
+      type: object
+    ScheduleConfig:
+      properties:
+        daysOfWeek: {items: {type: string}, type: array}
+        endTime: {type: string}
+        startTime: {type: string}
+        timezone: {type: string}
+      type: object
+    ServicesConfig:
+      properties:
+        av: {$ref: '#/components/schemas/AVConfig'}
+        dhcp: {$ref: '#/components/schemas/DHCPConfig'}
+        dns: {$ref: '#/components/schemas/DNSConfig'}
+        ntp: {$ref: '#/components/schemas/NTPConfig'}
+        proxy: {$ref: '#/components/schemas/ProxyConfig'}
+        syslog: {$ref: '#/components/schemas/SyslogConfig'}
+        vpn: {$ref: '#/components/schemas/VPNConfig'}
+      type: object
+    SignaturesCondition:
+      properties:
+        field: {type: string}
+        op: {type: string}
+        value: {}
+      type: object
+    SignaturesMatch:
+      properties:
+        event: {$ref: '#/components/schemas/DpiEvent'}
+        signature: {$ref: '#/components/schemas/SignaturesSignature'}
+        timestamp: {format: date-time, type: string}
+      type: object
+    SignaturesSignature:
+      properties:
+        conditions: {items: {$ref: '#/components/schemas/SignaturesCondition'}, type: array, minItems: 1}
+        description: {type: string}
+        id: {type: string}
+        name: {type: string}
+        protocol: {type: string}
+        references: {items: {type: string}, type: array}
+        severity: {type: string}
+        threshold: {$ref: '#/components/schemas/SignaturesThreshold'}
+      type: object
+      description: Live custom signature definition; not a candidate configuration edit.
+      required: [id, conditions]
+    SignaturesThreshold:
+      properties:
+        count: {type: integer}
+        windowSeconds: {type: integer}
+      type: object
+    StaticRoute:
+      properties:
+        dst: {type: string}
+        gateway: {type: string}
+        iface: {type: string}
+        metric: {type: integer}
+        table: {type: integer}
+      type: object
+    FlowStats:
+      properties:
+        bytes: {type: integer}
+        dstIp: {type: string}
+        packets: {type: integer}
+        protocol: {type: string}
+        srcIp: {type: string}
+      type: object
+    ProtoStats:
+      properties:
+        alertCount: {type: integer}
+        byteCount: {type: integer}
+        eventCount: {type: integer}
+        lastSeen: {format: date-time, type: string}
+        packetCount: {type: integer}
+        protocol: {type: string}
+        readCount: {type: integer}
+        writeCount: {type: integer}
+      type: object
+    SyslogConfig:
+      properties:
+        batchSize: {type: integer}
+        flushEvery: {type: integer}
+        format: {type: string}
+        forwarders: {items: {$ref: '#/components/schemas/SyslogForwarder'}, type: array, nullable: true}
+      type: object
+    SyslogForwarder:
+      properties:
+        address: {type: string}
+        port: {type: integer}
+        proto: {type: string}
+      type: object
+    SystemConfig:
+      properties:
+        hostname: {type: string}
+        mgmt: {$ref: '#/components/schemas/MgmtConfig'}
+        ssh: {$ref: '#/components/schemas/SSHConfig'}
+      type: object
+    PolicyTemplate:
+      properties:
+        description: {type: string}
+        name: {type: string}
+        rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
+      type: object
+    VPNConfig:
+      properties:
+        openvpn: {$ref: '#/components/schemas/OpenVPNConfig'}
+        wireguard: {$ref: '#/components/schemas/WireGuardConfig'}
+      type: object
+    WGPeer:
+      properties:
+        allowedIPs: {items: {type: string}, type: array}
+        endpoint: {type: string}
+        name: {type: string}
+        persistentKeepalive: {type: integer}
+        publicKey: {type: string}
+      type: object
+    WireGuardConfig:
+      properties:
+        addressCIDR: {type: string}
+        enabled: {type: boolean}
+        interface: {type: string}
+        listenInterfaces: {items: {type: string}, type: array}
+        listenPort: {type: integer}
+        listenZone: {type: string}
+        peers: {items: {$ref: '#/components/schemas/WGPeer'}, type: array}
+        privateKey: {type: string}
+      type: object
+    YARAString:
+      properties: {ascii: {type: boolean}, name: {type: string}, nocase: {type: boolean}, pattern: {type: string}, type: {type: string},
+          wide: {type: boolean}}
+      type: object
+    Zone:
+      properties:
+        alias: {type: string}
+        consequence: {type: string}
+        description: {type: string}
+        name: {type: string}
+        slOverrides: {additionalProperties: {type: boolean}, type: object}
+        slTarget: {type: integer}
+      type: object
+      description: PATCH merges supplied strings, slTarget and individual slOverrides entries.
+    SystemStatsResponse:
       type: object
       properties:
-        dpiMode:
+        cpu: {$ref: '#/components/schemas/CpuStats'}
+        memory: {$ref: '#/components/schemas/MemoryStats'}
+        disk: {$ref: '#/components/schemas/DiskStats'}
+        ruleEval: {$ref: '#/components/schemas/RuleEvalStats'}
+        container: {$ref: '#/components/schemas/ContainerStats'}
+        runtime: {$ref: '#/components/schemas/RuntimeStats'}
+        collectedAt: {type: string}
+    CpuStats:
+      type: object
+      properties:
+        usagePercent: {type: number}
+        numCPU: {type: integer}
+    MemoryStats:
+      type: object
+      properties:
+        totalBytes: {type: integer}
+        usedBytes: {type: integer}
+        availableBytes: {type: integer}
+        usagePercent: {type: number}
+    DiskStats:
+      type: object
+      properties:
+        totalBytes: {type: integer}
+        usedBytes: {type: integer}
+        availableBytes: {type: integer}
+        usagePercent: {type: number}
+    RuleEvalStats:
+      type: object
+      properties:
+        rulesLoaded: {type: integer}
+        avgLatencyMs: {type: number}
+    ContainerStats:
+      type: object
+      properties:
+        running: {type: boolean}
+        id: {type: string}
+        image: {type: string}
+        uptime: {type: string}
+        memUsedBytes: {type: integer}
+        memLimitBytes: {type: integer}
+        memPercent: {type: number}
+    RuntimeStats:
+      type: object
+      properties:
+        goroutines: {type: integer}
+        heapAllocMB: {type: number}
+        heapSysMB: {type: number}
+        gcPauseMsAvg: {type: number}
+        uptime: {type: string}
+    InspectionResponse:
+      type: object
+      properties:
+        host: {$ref: '#/components/schemas/HostInfo'}
+        runtime: {$ref: '#/components/schemas/RuntimeInfo'}
+        container: {$ref: '#/components/schemas/ContainerInfo'}
+        process: {$ref: '#/components/schemas/ProcessInfo'}
+        security: {$ref: '#/components/schemas/SecurityInfo'}
+    HostInfo:
+      type: object
+      properties:
+        kernel: {type: string}
+        os: {type: string}
+        arch: {type: string}
+        hostUptime: {type: string}
+        numCPU: {type: integer}
+    RuntimeInfo:
+      type: object
+      properties:
+        dockerVersion: {type: string}
+        containerdVersion: {type: string}
+        cgroupDriver: {type: string}
+        storageDriver: {type: string}
+    ContainerInfo:
+      type: object
+      properties:
+        id: {type: string}
+        image: {type: string}
+        restartPolicy: {type: string}
+        restartCount: {type: integer}
+        networkMode: {type: string}
+        privileged: {type: boolean}
+        seccompProfile: {type: string}
+        apparmorProfile: {type: string}
+        readonlyRootfs: {type: boolean}
+        noNewPrivileges: {type: boolean}
+        capabilities: {type: array, items: {type: string}}
+        mounts: {type: array, items: {$ref: '#/components/schemas/MountInfo'}}
+        envVars: {type: array, items: {$ref: '#/components/schemas/EnvVar'}}
+    MountInfo:
+      type: object
+      properties:
+        hostPath: {type: string}
+        containerPath: {type: string}
+        mode: {type: string}
+    EnvVar:
+      type: object
+      properties:
+        key: {type: string}
+        value: {type: string}
+    ProcessInfo:
+      type: object
+      properties:
+        pid: {type: integer}
+        goVersion: {type: string}
+        fdCount: {type: integer}
+        fdSoftLimit: {type: integer}
+        fdHardLimit: {type: integer}
+    SecurityInfo:
+      type: object
+      properties:
+        dockerSocketMounted: {type: boolean}
+        cgroupCPUQuota: {type: string}
+        cgroupPIDsLimit: {type: string}
+    TlsInfoResponse:
+      type: object
+      properties:
+        httpListenAddr: {type: string}
+        httpsListenAddr: {type: string}
+        httpEnabled: {type: boolean}
+        httpsEnabled: {type: boolean}
+        certFile: {type: string}
+        keyFile: {type: string}
+        certSubject: {type: string}
+        certIssuer: {type: string}
+        certNotAfter: {type: string}
+        certDnsNames: {type: array, items: {type: string}}
+        certIps: {type: array, items: {type: string}}
+    ConfigBackupInfo:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        createdAt: {type: string, format: date-time}
+        redacted: {type: boolean}
+        size: {type: integer}
+        idsRuleCount: {type: integer}
+    ConfigBackupRequest:
+      type: object
+      properties:
+        name: {type: string}
+        redacted: {type: boolean}
+    SyslogPatch:
+      type: object
+      properties:
+        action: {type: string, description: add appends a forwarder; del removes matching address/port; other values do not change
+            forwarders.}
+        format: {type: string}
+        forwarder: {$ref: '#/components/schemas/SyslogForwarder'}
+        batchSize: {type: integer}
+        flushEvery: {type: integer}
+    BlockHostRequest:
+      type: object
+      properties:
+        ip: {type: string, format: ipv4}
+        ttlSeconds: {type: integer, minimum: 0}
+      required: [ip]
+    BlockFlowRequest:
+      type: object
+      properties:
+        srcIp: {type: string, format: ipv4}
+        dstIp: {type: string, format: ipv4}
+        proto: {type: string}
+        dstPort: {type: string}
+        ttlSeconds: {type: integer, minimum: 0}
+      required: [srcIp, dstIp, proto, dstPort]
+    ConduitResult:
+      type: object
+      properties:
+        state: {type: string}
+        ids: {type: string}
+        proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
+        traffic: {type: number}
+        rules: {type: array, items: {type: string}}
+        gaps: {type: array, items: {type: string}}
+        mitre: {type: array, items: {type: string}}
+        defaultDeny: {type: boolean}
+        tlsEnforced: {type: boolean}
+        protoWhitelist: {type: boolean}
+        mfaRequired: {type: boolean}
+        auditLogged: {type: boolean}
+        avEnabled: {type: boolean}
+    ProtoEntry:
+      type: object
+      properties:
+        n: {type: string}
+        t: {type: string}
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword: {type: string, format: password}
+        newPassword: {type: string, format: password}
+      required: [currentPassword, newPassword]
+    SetPasswordRequest:
+      type: object
+      properties:
+        password: {type: string, format: password}
+      required: [password]
+    UpdateMeRequest:
+      type: object
+      properties:
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+      description: Updates firstName, lastName and email; omitted fields are cleared.
+    SetTLSCertRequest:
+      type: object
+      properties:
+        certPEM: {type: string}
+        keyPEM: {type: string}
+      required: [certPEM, keyPEM]
+    SetTrustedCARequest:
+      type: object
+      properties:
+        pem: {type: string}
+      required: [pem]
+    StatusResponse:
+      type: object
+      properties:
+        status: {type: string}
+      required: [status]
+    ReconcileRequest:
+      type: object
+      properties:
+        confirm: {type: string, enum: [REPLACE]}
+      required: [confirm]
+    InterfaceAssignRequest:
+      type: object
+      properties:
+        mode: {type: string, enum: [auto, explicit]}
+        mappings: {type: object, additionalProperties: {type: string}}
+      description: Stages device bindings. Mappings imply explicit mode when mode is omitted; none or - unbinds a device.
+    IdentityMapping:
+      type: object
+      properties:
+        ip: {type: string}
+        identities: {type: array, items: {type: string}, minItems: 1}
+      required: [ip, identities]
+    SessionResponse:
+      type: object
+      properties:
+        role: {type: string}
+        sessionId: {type: string}
+        idleTTLSeconds: {type: integer}
+        maxTTLSeconds: {type: integer}
+        clientIP: {type: string}
+        authenticatedAs: {type: string}
+        user: {$ref: '#/components/schemas/User'}
+        expiresAt: {type: string, format: date-time}
+        issuedAt: {type: string, format: date-time}
+        lastSeen: {type: string, format: date-time}
+    OsRoutingSnapshot:
+      type: object
+      properties:
+        routes: {type: array, items: {$ref: '#/components/schemas/OsRoute'}}
+        defaultRoute: {$ref: '#/components/schemas/OsRoute'}
+      description: Linux kernel IPv4 routing view; non-Linux hosts return 501.
+    OsRoute:
+      type: object
+      properties:
+        dst: {type: string}
+        gateway: {type: string}
+        iface: {type: string}
+        metric: {type: integer}
+    IDSRuleSource:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        url: {type: string}
+        format: {type: string, enum: [suricata, snort, yara, sigma]}
+        license: {type: string}
+        licenseNote: {type: string}
+    FirewallRulePatch:
+      type: object
+      properties:
+        id: {type: string}
+        description: {type: string}
+        sourceZones: {type: array, items: {type: string}}
+        destZones: {type: array, items: {type: string}}
+        sources: {type: array, items: {type: string}, description: CIDRs}
+        destinations: {type: array, items: {type: string}, description: CIDRs}
+        protocols:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: {type: string, example: tcp}
+              port: {type: string, example: "2404", description: Single port or range "1000-2000"}
+        identities: {type: array, items: {type: string}}
+        ics:
+          allOf:
+          - {$ref: '#/components/schemas/ICSPredicate'}
+          nullable: true
+          description: Null clears the ICS predicate.
+        action: {type: string, enum: [ALLOW, DENY]}
+        log: {type: boolean}
+        schedule: {$ref: '#/components/schemas/ScheduleConfig'}
+    EngineRulesetStatus:
+      properties:
+        appliedAt: {format: date-time, type: string}
+        error: {type: string}
+        ruleset: {type: string}
+      type: object
+    NetcfgManagementFault:
+      properties:
+        address: {type: string}
+        interface: {type: string}
+        reason: {type: string}
+        service: {type: string}
+        time: {format: date-time, type: string}
+      type: object
+    RulesContentMatch:
+      properties:
+        Depth: {type: integer}
+        Distance: {type: integer}
+        IsHex: {type: boolean}
+        Negate: {type: boolean}
+        Nocase: {type: boolean}
+        Offset: {type: integer}
+        Pattern: {type: string}
+        Within: {type: integer}
+      type: object
+    RulesEntry:
+      properties:
+        Action: {type: string}
+        DestZones: {items: {type: string}, type: array}
+        Destinations: {items: {type: string}, type: array}
+        ICS: {$ref: '#/components/schemas/RulesICSPredicate'}
+        ID: {type: string}
+        Identities: {items: {type: string}, type: array}
+        Log: {type: boolean}
+        Protocols: {items: {$ref: '#/components/schemas/RulesProtocol'}, type: array}
+        Schedule: {$ref: '#/components/schemas/RulesSchedulePredicate'}
+        SourceZones: {items: {type: string}, type: array}
+        Sources: {items: {type: string}, type: array}
+      type: object
+    RulesICSPredicate:
+      properties:
+        Addresses: {items: {type: string}, type: array}
+        Direction: {type: string}
+        FunctionCode: {format: byte, type: string}
+        Mode: {type: string}
+        ObjectClasses: {items: {type: integer}, type: array}
+        Protocol: {type: string}
+        ReadOnly: {type: boolean}
+        UnitID: {type: integer}
+        WriteOnly: {type: boolean}
+        ca: {items: {type: integer}, type: array}
+        classes: {items: {type: string}, type: array}
+        ioa: {items: {$ref: '#/components/schemas/RulesIOARange'}, type: array}
+        typeIds: {items: {type: integer}, type: array}
+      type: object
+    RulesIDSCondition:
+      properties:
+        All: {items: {$ref: '#/components/schemas/RulesIDSCondition'}, type: array}
+        Any: {items: {$ref: '#/components/schemas/RulesIDSCondition'}, type: array}
+        Field: {type: string}
+        Not: {$ref: '#/components/schemas/RulesIDSCondition'}
+        Op: {type: string}
+        Value: {}
+      type: object
+    RulesIDSConfig:
+      properties:
+        Enabled: {type: boolean}
+        RuleGroups: {items: {$ref: '#/components/schemas/RulesRuleGroup'}, type: array}
+        Rules: {items: {$ref: '#/components/schemas/RulesIDSRule'}, type: array}
+      type: object
+    RulesIDSRule:
+      properties:
+        Action: {type: string}
+        CVE: {items: {type: string}, type: array}
+        ContentMatches: {items: {$ref: '#/components/schemas/RulesContentMatch'}, type: array}
+        ConversionNotes: {items: {type: string}, type: array}
+        Description: {type: string}
+        DstAddr: {type: string}
+        DstPort: {type: string}
+        Enabled: {type: boolean}
+        ID: {type: string}
+        Kind: {type: string}
+        Labels: {additionalProperties: {type: string}, type: object}
+        MITREAttackIDs: {items: {type: string}, type: array}
+        Message: {type: string}
+        Proto: {type: string}
+        RawSource: {type: string}
+        References: {items: {type: string}, type: array}
+        Severity: {type: string}
+        SourceFormat: {type: string}
+        SrcAddr: {type: string}
+        SrcPort: {type: string}
+        Title: {type: string}
+        When: {$ref: '#/components/schemas/RulesIDSCondition'}
+        YARAStrings: {items: {$ref: '#/components/schemas/RulesYARAString'}, type: array}
+      type: object
+    RulesIOARange:
+      properties:
+        end: {type: integer}
+        start: {type: integer}
+      type: object
+    RulesLocalServiceRule:
+      properties:
+        DeniedIfaces: {items: {type: string}, type: array}
+        ID: {type: string}
+        Ifaces: {items: {type: string}, type: array}
+        Port: {type: integer}
+        Proto: {type: string}
+        RecoverUnbound: {type: boolean}
+        Zone: {type: string}
+      type: object
+    RulesNATConfig:
+      properties:
+        EgressZone: {type: string}
+        Enabled: {type: boolean}
+        PortForwards: {items: {$ref: '#/components/schemas/RulesPortForward'}, type: array}
+        SourceZones: {items: {type: string}, type: array}
+      type: object
+    RulesPortForward:
+      properties:
+        AllowedSources: {items: {type: string}, type: array}
+        Description: {type: string}
+        DestIP: {type: string}
+        DestPort: {type: integer}
+        Enabled: {type: boolean}
+        ID: {type: string}
+        IngressZone: {type: string}
+        ListenPort: {type: integer}
+        Proto: {type: string}
+      type: object
+    RulesProtocol:
+      properties:
+        Name: {type: string}
+        Port: {type: string}
+      type: object
+    RulesRuleGroup:
+      properties:
+        Description: {type: string}
+        Enabled: {type: boolean}
+        Filter: {type: string}
+        ID: {type: string}
+        Name: {type: string}
+        RuleCount: {type: integer}
+      type: object
+    RulesSchedulePredicate:
+      properties:
+        DaysOfWeek: {items: {type: string}, type: array}
+        EndTime: {type: string}
+        StartTime: {type: string}
+        Timezone: {type: string}
+      type: object
+    RulesSnapshot:
+      properties:
+        Default: {type: string}
+        Firewall: {items: {$ref: '#/components/schemas/RulesEntry'}, type: array}
+        IDS: {$ref: '#/components/schemas/RulesIDSConfig'}
+        LocalInput: {items: {$ref: '#/components/schemas/RulesLocalServiceRule'}, type: array}
+        NAT: {$ref: '#/components/schemas/RulesNATConfig'}
+        Version: {type: string}
+        ZoneIfaces: {additionalProperties: {items: {type: string}, type: array}, type: object}
+      type: object
+    RulesYARAString:
+      properties:
+        ASCII: {type: boolean}
+        Name: {type: string}
+        Nocase: {type: boolean}
+        Pattern: {type: string}
+        Type: {type: string}
+        Wide: {type: boolean}
+      type: object
+    MeResponse:
+      type: object
+      properties:
+        id: {type: string}
+        username: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        role: {type: string, enum: [admin, view]}
+        mustChangePassword: {type: boolean}
+        mfaEnabled: {type: boolean}
+        mfaRequired: {type: boolean}
+        mfaGraceUntil: {type: string, format: date-time}
+        labMode: {type: boolean}
+    MFAPolicyResponse:
+      allOf:
+      - {$ref: '#/components/schemas/StatusResponse'}
+      - type: object
+        properties:
+          graceUntil:
+            type: string
+            format: date-time
+    FactoryResetResponse:
+      type: object
+      properties:
+        status:
           type: string
-          enum: [learn, enforce]
-          description: >
-            DPI operational mode. "learn" passively observes traffic without blocking.
-            "enforce" actively blocks traffic that violates ICS policy rules.
-        dpiProtocols:
-          type: object
-          additionalProperties: { type: boolean }
-          description: 'IT protocol enable/disable map (e.g., {"dns": true, "tls": true})'
-        dpiIcsProtocols:
-          type: object
-          additionalProperties: { type: boolean }
-          description: >
-            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104.
-            An absent key is enabled; only an explicit false disables a decoder.
-            A config with IEC104 enforce rules is rejected if iec104 is false.
-          example:
-            modbus: true
-            dnp3: true
-            cip: false
-            s7comm: false
-            mms: true
-            bacnet: false
-            opcua: false
-            iec104: true
-
+        loggedOut:
+          type: boolean
+        message:
+          type: string
   parameters:
     pathId:
       name: id
       in: path
       required: true
-      schema: { type: string }
+      schema: {type: string}
+  headers:
+    Staged:
+      description: Candidate edit only; not active until committed.
+      schema: {type: string, enum: [staged]}
+    Committed:
+      description: Commit or rollback applied running configuration; confirm only canceled the pending rollback deadline.
+      schema: {type: string, enum: [committed]}
+    Warnings:
+      description: >
+        Repeated values describe best-effort auxiliary infrastructure warnings
+        (interfaces, routing, engine services including DHCP redirect, IPv4
+        forwarding and PCAP), not ruleset or dataplane configuration failures.
+        Across multiple bound zones, disabled forwarding includes "ipv4 forwarding
+        is disabled (net.ipv4.ip_forward=0); routed traffic will not pass".
+      schema: {type: string}
 
 paths:
   /diagnostics/iec104:
@@ -671,17 +1817,20 @@ paths:
     get:
       summary: Health check
       description: >
-        Always returns HTTP 200 for liveness. `ipv4Forwarding` reports the
+        Always returns HTTP 200 for liveness, not proof of enforcement. The
+        top-level enforcement object reports general firewall health separately
+        from IEC104 queue/reset readiness; both share one one-second observation
+        budget with running metadata and fault reads. `ipv4Forwarding` reports the
         forwarding sysctl state observed in the engine's network namespace,
         or `unknown` if that state cannot be read.
       security: []
       tags: [System]
       responses:
         "200":
-          description: Service is healthy
+          description: Liveness response; inspect enforcement and IEC104 health separately
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/HealthResponse" }
+              schema: {$ref: "#/components/schemas/HealthResponse"}
 
   # ── Auth ──────────────────────────────────────────────────────────
   /auth/login:
@@ -693,7 +1842,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/LoginRequest" }
+            schema: {$ref: "#/components/schemas/LoginRequest"}
       responses:
         "200":
           description: Login successful or MFA challenge required
@@ -701,17 +1850,20 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - { $ref: "#/components/schemas/LoginResponse" }
-                  - { $ref: "#/components/schemas/MFALoginChallenge" }
+                - {$ref: "#/components/schemas/LoginResponse"}
+                - {$ref: "#/components/schemas/MFALoginChallenge"}
         "401":
           description: Invalid credentials
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429":
           description: Rate-limited
           headers:
-            Retry-After: { schema: { type: integer } }
+            Retry-After: {schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 
   /auth/login/mfa:
     post:
@@ -722,18 +1874,18 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/MFAVerifyLoginRequest" }
+            schema: {$ref: "#/components/schemas/MFAVerifyLoginRequest"}
       responses:
         "200":
           description: MFA verified and session created
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/LoginResponse" }
+              schema: {$ref: "#/components/schemas/LoginResponse"}
         "401":
           description: Invalid or expired challenge token or authentication code
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
 
   /auth/logout:
     post:
@@ -744,6 +1896,9 @@ paths:
         "200":
           description: Logged out
 
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
   /auth/me:
     get:
       summary: Get current user profile
@@ -753,7 +1908,7 @@ paths:
           description: Current user
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
+              schema: {$ref: '#/components/schemas/MeResponse'}
     patch:
       summary: Update current user profile
       tags: [Auth]
@@ -761,13 +1916,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/User" }
+            schema: {$ref: '#/components/schemas/UpdateMeRequest'}
       responses:
         "200":
           description: Updated user
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
+              schema: {$ref: "#/components/schemas/User"}
 
   /auth/me/mfa/enroll:
     post:
@@ -778,9 +1933,10 @@ paths:
           description: Enrollment material for a new authenticator app
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/MFAEnrollResponse" }
-        "409": { description: MFA already enabled }
-        "403": { description: MFA setup required sessions may access this endpoint even when other API access is restricted }
+              schema: {$ref: "#/components/schemas/MFAEnrollResponse"}
+        "409": {description: MFA already enabled, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "403": {description: MFA setup required sessions may access this endpoint even when other API access is restricted, content: {
+              application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /auth/me/mfa/enable:
     post:
@@ -790,12 +1946,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/MFAEnableRequest" }
+            schema: {$ref: "#/components/schemas/MFAEnableRequest"}
       responses:
-        "200": { description: MFA enabled }
-        "401": { description: Invalid or expired challenge token or authentication code }
-        "409": { description: MFA already enabled }
-        "403": { description: MFA setup required sessions may access this endpoint even when other API access is restricted }
+        "200": {description: MFA enabled, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "401": {description: Invalid or expired challenge token or authentication code, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "409": {description: MFA already enabled, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "403": {description: MFA setup required sessions may access this endpoint even when other API access is restricted, content: {
+              application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /auth/me/mfa/disable:
     post:
@@ -805,11 +1962,11 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/MFADisableRequest" }
+            schema: {$ref: "#/components/schemas/MFADisableRequest"}
       responses:
-        "200": { description: MFA disabled }
-        "401": { description: Current password or authentication code invalid }
-        "409": { description: MFA is required for this account and cannot be self-disabled }
+        "200": {description: MFA disabled, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "401": {description: Current password or authentication code invalid, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "409": {description: MFA is required for this account and cannot be self-disabled, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Dashboard ─────────────────────────────────────────────────────
   /dashboard:
@@ -821,7 +1978,7 @@ paths:
           description: Dashboard payload
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DashboardResponse" }
+              schema: {$ref: "#/components/schemas/DashboardResponse"}
 
   /system/management-reservation:
     get:
@@ -840,11 +1997,11 @@ paths:
                 type: object
                 required: [active]
                 properties:
-                  active: { type: boolean }
-                  device: { type: string }
-                  local: { type: string, description: Host address with prefix length }
-                  sources: { type: array, items: { type: string, format: ipv4 } }
-                  port: { type: integer, minimum: 1, maximum: 65535 }
+                  active: {type: boolean}
+                  device: {type: string}
+                  local: {type: string, description: Host address with prefix length}
+                  sources: {type: array, items: {type: string, format: ipv4}}
+                  port: {type: integer, minimum: 1, maximum: 65535}
                   bootFault:
                     type: string
                     description: >
@@ -862,7 +2019,7 @@ paths:
                   listenerFaults:
                     type: array
                     nullable: true
-                    items: { type: string }
+                    items: {type: string}
                     description: >
                       Boot-only optional HTTP/HTTPS/SSH/loopback listener failures.
                       Reserved HTTP remains mandatory; these diagnostics do not
@@ -874,21 +2031,14 @@ paths:
                     type: object
                     required: [active, faults]
                     properties:
-                      active: { type: boolean }
-                      device: { type: string }
-                      local: { type: string }
-                      sources: { type: array, items: { type: string, format: ipv4 } }
-                      port: { type: integer }
-                      error: { type: string }
-                      faults: { type: integer, minimum: 0 }
-                      lastFault:
-                        type: object
-                        properties:
-                          time: { type: string, format: date-time }
-                          interface: { type: string }
-                          address: { type: string }
-                          service: { type: string }
-                          reason: { type: string }
+                      active: {type: boolean}
+                      device: {type: string}
+                      local: {type: string}
+                      sources: {type: array, items: {type: string, format: ipv4}}
+                      port: {type: integer}
+                      error: {type: string}
+                      faults: {type: integer, minimum: 0}
+                      lastFault: {$ref: '#/components/schemas/NetcfgManagementFault'}
 
   /system/factory-reset:
     post:
@@ -897,7 +2047,12 @@ paths:
         Preflights the autobound appliance defaults (shared with first boot) against
         the immutable management reservation before wiping users, sessions, config,
         or audit. Genuine incompatible defaults are refused without changing these
-        stores. A successful reset clears the boot fault and applies the defaults.
+        stores. Configuration replacement uses atomic restore/reapply recovery.
+        On runtime apply failure users, sessions and existing audit history are not
+        wiped; successful recovery restores running, candidate, previous, pending
+        rollback and the IDS bank. Users and audit are wiped only after runtime apply
+        succeeds. A successful reset clears the boot fault and applies the defaults.
+        A later user-store failure does not undo the successfully applied configuration.
       tags: [System]
       requestBody:
         required: true
@@ -907,11 +2062,31 @@ paths:
               type: object
               required: [confirm]
               properties:
-                confirm: { type: string, enum: [NUCLEAR] }
+                confirm: {type: string, enum: [NUCLEAR]}
       responses:
-        "200": { description: Reset complete; reauthenticate with default credentials }
-        "400": { description: Invalid confirmation or defaults conflict with reserved management path }
-        "403": { description: Admin role required }
+        "200": {description: Reset complete; reauthenticate with default credentials, content: {application/json: {schema: {$ref: '#/components/schemas/FactoryResetResponse'}}}}
+        "400": {description: Invalid confirmation or defaults conflict with reserved management path, content: {application/json: {schema: {
+                  $ref: '#/components/schemas/ErrorResponse'}}}}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "500":
+          description: >
+            Reset failed. A runtime apply failure returns ConfigApplyError with the
+            restored/reapplied recovery results; users, sessions and audit are unchanged.
+            A failed reapply leaves runtime health unavailable. Other store failures
+            return ErrorResponse.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConfigApplyError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: configuration apply failed
+                detail: "ruleset: nft apply failed"
+                restored: true
+                reapplied: true
+        "501": {description: Factory reset requires SQLite config and users stores, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "503": {description: Reset stores unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Config ────────────────────────────────────────────────────────
   /config/validate:
@@ -925,11 +2100,12 @@ paths:
       requestBody:
         required: true
         content:
-          application/json: { schema: { type: object } }
+          application/json:
+            schema: {$ref: '#/components/schemas/Config'}
       responses:
-        "200": { description: Configuration valid }
-        "400": { description: Invalid configuration or reserved management path conflict }
-        "403": { description: Admin role required }
+        "200": {description: Configuration valid, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "400": {description: Invalid configuration or reserved management path conflict, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /config:
     get:
@@ -939,17 +2115,20 @@ paths:
         "200":
           description: Running configuration with secrets redacted and ids.rules omitted (use IDS endpoints for the bank).
           content:
-            application/json: { schema: { type: object } }
+            application/json: {schema: {$ref: '#/components/schemas/Config'}}
     post:
       summary: Replace candidate configuration (admin)
       tags: [Config]
       requestBody:
         required: true
         content:
-          application/json: { schema: { type: object } }
+          application/json:
+            schema: {$ref: '#/components/schemas/Config'}
       responses:
-        "200": { description: Configuration staged, not activated }
-        "403": { description: Admin role required }
+        "200": {description: 'Configuration staged, not activated', content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}},
+          headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Stages the shared candidate; commit to apply.
 
   /config/candidate:
     get:
@@ -959,29 +2138,29 @@ paths:
         "200":
           description: Candidate configuration with secrets redacted and ids.rules omitted.
           content:
-            application/json: { schema: { type: object } }
-        "404": { description: No candidate configuration }
+            application/json: {schema: {$ref: '#/components/schemas/Config'}}
+        "404": {description: No candidate configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
     post:
       summary: Save a candidate configuration (admin)
-      description: >
-        Validates and stages the whole config without activating it. ICS
-        predicates decode strictly, and IEC104 enforce that cannot activate
-        is rejected (see ICSPredicate). An omitted or null ids.rules means keep
-        the existing bank; an explicit empty array clears it. GET /config and
-        GET /config/candidate omit ids.rules; exports and backups include it.
+      description: >-
+        Validates and stages the whole config without activating it. ICS predicates decode strictly, and IEC104 enforce that cannot activate is
+        rejected (see ICSPredicate). An omitted or null ids.rules means keep the existing bank; an explicit empty array clears it. GET /config
+        and GET /config/candidate omit ids.rules; exports and backups include it.
       tags: [Config]
       requestBody:
         required: true
         content:
-          application/json: { schema: { type: object } }
+          application/json:
+            schema: {$ref: '#/components/schemas/Config'}
       responses:
-        "200": { description: Candidate saved }
+        "200": {description: Candidate saved, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
         "400":
           description: Invalid JSON or configuration
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "403": { description: Admin role required }
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /config/diff:
     get:
@@ -1002,20 +2181,26 @@ paths:
                 type: object
                 required: [changed, changedSections, running, candidate, idsBank]
                 properties:
-                  changed: { type: boolean }
-                  changedSections: { type: array, items: { type: string } }
-                  running: { type: object, nullable: true }
-                  candidate: { type: object, nullable: true }
+                  changed: {type: boolean}
+                  changedSections: {type: array, items: {type: string}}
+                  running:
+                    allOf:
+                    - {$ref: '#/components/schemas/Config'}
+                    nullable: true
+                  candidate:
+                    allOf:
+                    - {$ref: '#/components/schemas/Config'}
+                    nullable: true
                   idsBank:
                     type: object
                     required: [running, candidate]
                     properties:
-                      running: { $ref: "#/components/schemas/IDSBankSummary" }
-                      candidate: { $ref: "#/components/schemas/IDSBankSummary" }
+                      running: {$ref: "#/components/schemas/IDSBankSummary"}
+                      candidate: {$ref: "#/components/schemas/IDSBankSummary"}
 
   /config/commit:
     post:
-      summary: Commit candidate config and apply to data plane
+      summary: Commit candidate config and apply to data plane (admin)
       description: >
         Applies and promotes the candidate as one serialized operation. Every
         ruleset/dataplane apply failure returns 500 after attempting to restore
@@ -1024,7 +2209,12 @@ paths:
         failed reapply leaves synchronization uncertain and is exposed in health.
         With dataplane.enforcement enabled, 200 means nft rules were installed;
         intentionally disabled enforcement only applies the in-memory snapshot.
-        Auxiliary infrastructure errors may still produce warning headers.
+        Auxiliary infrastructure errors may still produce warning headers;
+        management service-apply failures are fatal and trigger recovery too.
+        Recovery success certifies the firewall snapshot, not every network or
+        service side effect. A non-2xx does not guarantee the live firewall is
+        unchanged; after a disconnect, read running, candidate and health before
+        retrying. A persisted recovery fault survives restarts until successful apply.
         Check health afterwards for continuing IEC104 queue/reset readiness.
         Never treat import as a fallback activation step: import only stages.
       tags: [Config]
@@ -1032,109 +2222,81 @@ paths:
         "200":
           description: Commit applied
           headers:
-            X-Containd-Warnings:
-              description: >
-                One header value per warning. When the config spans multiple
-                zone-assigned interface devices and IPv4 forwarding is
-                disabled, includes "ipv4 forwarding is disabled
-                (net.ipv4.ip_forward=0); routed traffic will not pass".
-              schema: { type: string }
-        "400": { description: Preflight or candidate validation failed; no promotion }
+            X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+        "400": {description: Preflight or candidate validation failed; no promotion or recovery fields, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "500":
           description: Runtime apply failed; inspect recovery outcomes
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ConfigApplyError" }
-        "403": { description: Admin role required }
-
-  /config/commit_confirmed:
-    post:
-      summary: Commit with a confirmation deadline
-      description: >
-        Same apply/recovery semantics as commit. Success starts a rollback timer
-        (60 seconds by default); failure restores the pre-request pending state.
-        Confirm before expiry to retain this running document. Expiry restores
-        stored state and requests replay; a replay error is retried and exposed
-        in health, not converted into a successful runtime apply.
-      tags: [Config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                ttl_seconds: { type: integer, format: int64, description: Positive seconds; omitted or nonpositive uses 60; duration overflow is rejected }
-      responses:
-        "200": { description: Applied and awaiting confirmation }
-        "400": { description: Invalid request or candidate; no promotion }
-        "403": { description: Admin role required }
-        "500":
-          description: Runtime apply failed; inspect recovery outcomes
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ConfigApplyError" }
-
-  /config/confirm:
-    post:
-      summary: Cancel pending automatic rollback
-      description: Confirms stored running state; does not reapply the runtime.
-      tags: [Config]
-      responses:
-        "200": { description: Confirmation recorded }
-        "400": { description: Confirmation failed }
-        "403": { description: Admin role required }
+              schema: {$ref: '#/components/schemas/ConfigApplyError'}
 
   /config/import:
     post:
       summary: Import a configuration as the candidate (admin)
-      description: >
-        Validates the whole config and replaces the candidate with it. It
-        never changes running or activates anything: the data plane keeps its
-        current policy until POST /config/commit. After importing, commit and
-        then check GET /health iec104Enforcement. Validation is the same as
-        for a candidate, including the immutable reserved management path.
+      description: >-
+        Validates the whole config and replaces the candidate with it. It never
+        changes running or activates anything: the data plane keeps its current
+        policy until POST /config/commit. After importing, commit and then check
+        GET /health enforcement and iec104Enforcement. Never use import as a
+        fallback activation step after a failed commit. Validation is the same
+        as for a candidate, including the immutable reserved management path.
         Reservation conflicts are 400 errors naming the field; running and
         candidate are unchanged. Success sets `X-Containd-Config: staged`.
       tags: [Config]
       requestBody:
         required: true
         content:
-          application/json: { schema: { type: object } }
+          application/json:
+            schema: {$ref: '#/components/schemas/Config'}
       responses:
         "200":
           description: Candidate replaced, not activated
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string, enum: [staged] }
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
           description: Invalid JSON or configuration
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "403": { description: Admin role required }
-        "413": { description: Body larger than 10 MiB }
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "413": {description: Body larger than 10 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /config/rollback:
     post:
-      summary: Roll back to previous configuration
+      summary: Roll back to previous configuration (admin)
+      description: >
+        Uses the same strict apply/recovery semantics as commit. On runtime
+        failure, attempts to restore and reapply pre-request running state and
+        IDS bank, retaining candidate, previous snapshots and pending deadline.
+        Failed recovery leaves runtime synchronization uncertain; inspect health.
       tags: [Config]
       responses:
-        "200": { description: Previous configuration restored and applied }
-        "400": { description: Previous configuration unavailable or invalid; no promotion }
-        "403": { description: Admin role required }
-        "500":
-          description: Apply failed; pre-request running state restored and reapplied if possible; candidate retained
+        "200": {description: Previous configuration restored and applied, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}, X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}}}
+        "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400":
+          description: Previous configuration unavailable or invalid; no promotion or recovery fields
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ConfigApplyError" }
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        "500":
+          description: Runtime apply failed; inspect recovery outcomes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigApplyError'}
 
   # ── Users (admin) ─────────────────────────────────────────────────
   /users:
     get:
-      summary: List all users
+      summary: List all users (admin)
       tags: [Users]
       responses:
         "200":
@@ -1143,90 +2305,91 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/User" }
+                items: {$ref: "#/components/schemas/User"}
     post:
-      summary: Create a user
+      summary: Create a user (admin)
       tags: [Users]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+            schema: {$ref: "#/components/schemas/CreateUserRequest"}
       responses:
         "200":
           description: Created user
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
-        "409": { description: Username already taken }
+              schema: {$ref: "#/components/schemas/User"}
+        "409": {description: Username already taken, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /users/{id}:
     patch:
-      summary: Update a user
+      summary: Update a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/User" }
+            schema: {$ref: "#/components/schemas/User"}
       responses:
         "200":
           description: Updated user
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
-        "404": { description: User not found }
+              schema: {$ref: "#/components/schemas/User"}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
     delete:
-      summary: Delete a user
+      summary: Delete a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: User deleted }
-        "404": { description: User not found }
+        "200": {description: User deleted, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /users/{id}/mfa/disable:
     post:
       summary: Disable or reset MFA for a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: MFA disabled }
-        "404": { description: User not found }
+        "200": {description: MFA disabled, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /users/{id}/mfa/require:
     post:
       summary: Require MFA for a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: MFA requirement enabled, with grace period if setup is still pending }
-        "404": { description: User not found }
+        "200": {description: 'MFA requirement enabled, with grace period if setup is still pending', content: {application/json: {schema: {
+                  $ref: '#/components/schemas/MFAPolicyResponse'}}}}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /users/{id}/mfa/clear:
     post:
       summary: Clear the MFA requirement for a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: MFA requirement cleared }
-        "404": { description: User not found }
+        "200": {description: MFA requirement cleared, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /users/{id}/mfa/grace:
     post:
       summary: Extend the MFA setup grace period for a user (admin)
       tags: [Users]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: MFA grace period extended }
-        "404": { description: User not found }
-        "409": { description: MFA is not currently required for this account }
+        "200": {description: MFA grace period extended, content: {application/json: {schema: {$ref: '#/components/schemas/MFAPolicyResponse'}}}}
+        "404": {description: User not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "409": {description: MFA is not currently required for this account, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Services ──────────────────────────────────────────────────────
   # Each service endpoint follows the same pattern:
@@ -1237,68 +2400,115 @@ paths:
 
   /services/syslog:
     get:
-      summary: Get syslog configuration
+      summary: Get candidate services syslog settings
       tags: [Services]
       responses:
-        "200": { description: Syslog config, content: { application/json: { schema: { type: object } } } }
+        "200": {description: Syslog config, content: {application/json: {schema: {$ref: '#/components/schemas/SyslogConfig'}}}}
     post:
-      summary: Set syslog configuration (admin)
+      summary: Replace services syslog settings (admin)
       tags: [Services]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SyslogConfig'}
       responses:
-        "200": { description: Updated }
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/SyslogConfig'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+      description: Stages the shared candidate; commit to apply.
+    patch:
+      summary: Patch syslog settings (admin)
+      tags: [Services]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SyslogPatch'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SyslogConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
 
   /services/dns:
     get:
-      summary: Get DNS configuration
+      summary: Get candidate services dns settings
       tags: [Services]
       responses:
-        "200": { description: DNS config, content: { application/json: { schema: { type: object } } } }
+        "200": {description: DNS config, content: {application/json: {schema: {$ref: '#/components/schemas/DNSConfig'}}}}
     post:
-      summary: Set DNS configuration (admin)
+      summary: Replace services dns settings (admin)
       tags: [Services]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DNSConfig'}
       responses:
-        "200": { description: Updated }
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DNSConfig'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+      description: Stages the shared candidate; commit to apply.
 
   /services/ntp:
     get:
-      summary: Get NTP configuration
+      summary: Get candidate services ntp settings
       tags: [Services]
       responses:
-        "200": { description: NTP config, content: { application/json: { schema: { type: object } } } }
+        "200": {description: NTP config, content: {application/json: {schema: {$ref: '#/components/schemas/NTPConfig'}}}}
     post:
-      summary: Set NTP configuration (admin)
+      summary: Replace services ntp settings (admin)
       tags: [Services]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NTPConfig'}
       responses:
-        "200": { description: Updated }
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/NTPConfig'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+      description: Stages the shared candidate; commit to apply.
 
   /services/dhcp:
     get:
-      summary: Get DHCP configuration
+      summary: Get candidate services dhcp settings
       tags: [Services]
       responses:
-        "200": { description: DHCP config, content: { application/json: { schema: { type: object } } } }
+        "200": {description: DHCP config, content: {application/json: {schema: {$ref: '#/components/schemas/DHCPConfig'}}}}
     post:
-      summary: Set DHCP configuration (admin)
+      summary: Replace services dhcp settings (admin)
       tags: [Services]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DHCPConfig'}
       responses:
-        "200": { description: Updated }
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DHCPConfig'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+      description: Stages the shared candidate; commit to apply.
 
   /services/vpn:
     get:
-      summary: Get VPN configuration
+      summary: Get candidate services vpn settings
       tags: [Services]
       responses:
-        "200": { description: VPN config, content: { application/json: { schema: { type: object } } } }
+        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}}
     post:
-      summary: Set VPN configuration (admin)
+      summary: Replace services vpn settings (admin)
       tags: [Services]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VPNConfig'}
       responses:
-        "200": { description: Updated }
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+      description: Stages the shared candidate; commit to apply.
 
   # ── Firewall ──────────────────────────────────────────────────────
   /firewall/rules:
@@ -1310,14 +2520,20 @@ paths:
           description: Array of firewall rules
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/FirewallRule" } }
+              schema: {type: array, items: {$ref: "#/components/schemas/FirewallRule"}, nullable: true}
     post:
-      summary: Create a firewall rule (admin)
+      summary: Create firewall rule (admin)
       tags: [Firewall]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FirewallRule" } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirewallRule'}
       responses:
-        "200": { description: Rule created }
-        "400": { description: Invalid rule or resulting configuration }
+        "200": {description: Rule created, content: {application/json: {schema: {$ref: '#/components/schemas/FirewallRule'}}}, headers: {
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+        "400": {description: Invalid rule or resulting configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Stages the shared candidate; commit to apply.
 
   /firewall/rules/{id}:
     patch:
@@ -1333,27 +2549,37 @@ paths:
         the predicate.
       tags: [Firewall]
       parameters:
-        - $ref: "#/components/parameters/pathId"
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      - $ref: "#/components/parameters/pathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirewallRulePatch'}
       responses:
         "200":
           description: Rule updated
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/FirewallRule" }
+              schema: {$ref: "#/components/schemas/FirewallRule"}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
           description: Invalid patch or resulting configuration
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "404": { description: Rule not found }
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404": {description: Rule not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
     delete:
-      summary: Delete a firewall rule (admin)
+      summary: Delete firewall rule (admin)
       tags: [Firewall]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: Rule deleted }
+        '204':
+          description: Success
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      description: Stages the shared candidate; commit to apply.
 
   # ── Events & Flows ────────────────────────────────────────────────
   /events:
@@ -1398,62 +2624,62 @@ paths:
         in engineError even when filters match no rows.
       tags: [Telemetry]
       parameters:
-        - name: limit
-          in: query
-          description: Hard maximum page size; filter before limit in query mode, evidence priority in legacy mode.
-          schema: { type: integer, default: 500, minimum: 1, maximum: 5000 }
-        - name: query
-          in: query
-          description: Request EventPage even without filters.
-          schema: { type: string, enum: ["1"] }
-        - name: id
-          in: query
-          description: Exact event ID; event-detail lookup uses this before limiting.
-          schema: { type: integer, format: uint64, minimum: 1 }
-        - name: session
-          in: query
-          description: Exact attributes.session_id (IEC incarnation).
-          schema: { type: string }
-        - name: flow
-          in: query
-          description: Exact flowId or session_id, including session-oriented flow deep links.
-          schema: { type: string }
-        - name: apdu
-          in: query
-          description: Exact apdu_id, trigger_apdu_id, or member of apdu_ids.
-          schema: { type: string }
-        - name: kind
-          in: query
-          description: Case-sensitive kind prefixes, comma-separated OR (for example ics.decision,ics.verdict).
-          schema: { type: string }
-        - name: protocol
-          in: query
-          description: Case-insensitive proto equality.
-          schema: { type: string }
-        - name: decision
-          in: query
-          description: Case-insensitive attributes.decision equality (allow, deny, would_drop).
-          schema: { type: string }
-        - name: verdict
-          in: query
-          description: Case-insensitive attributes.outcome or attributes.action equality (for example drop_failed or DENY).
-          schema: { type: string }
-        - name: since
-          in: query
-          description: Inclusive timestamp lower bound, RFC3339 with optional fractional seconds.
-          schema: { type: string, format: date-time }
-        - name: cursor
-          in: query
-          description: Exclusive upper bound from nextCursor; keep all other filters unchanged.
-          schema: { type: string }
-        - name: category
-          in: query
-          description: Server-side Events page category; dpi excludes firewall and service kinds.
-          schema: { type: string, enum: [all, service, proxy, dpi, firewall, iec104] }
-        - name: detections
-          in: query
-          description: With 1, match only service.av.detected and service.av.block_flow.
-          schema: { type: string, enum: ["1"] }
+      - name: limit
+        in: query
+        description: Hard maximum page size; filter before limit in query mode, evidence priority in legacy mode.
+        schema: {type: integer, default: 500, minimum: 1, maximum: 5000}
+      - name: query
+        in: query
+        description: Request EventPage even without filters.
+        schema: {type: string, enum: ["1"]}
+      - name: id
+        in: query
+        description: Exact event ID; event-detail lookup uses this before limiting.
+        schema: {type: integer, format: uint64, minimum: 1}
+      - name: session
+        in: query
+        description: Exact attributes.session_id (IEC incarnation).
+        schema: {type: string}
+      - name: flow
+        in: query
+        description: Exact flowId or session_id, including session-oriented flow deep links.
+        schema: {type: string}
+      - name: apdu
+        in: query
+        description: Exact apdu_id, trigger_apdu_id, or member of apdu_ids.
+        schema: {type: string}
+      - name: kind
+        in: query
+        description: Case-sensitive kind prefixes, comma-separated OR (for example ics.decision,ics.verdict).
+        schema: {type: string}
+      - name: protocol
+        in: query
+        description: Case-insensitive proto equality.
+        schema: {type: string}
+      - name: decision
+        in: query
+        description: Case-insensitive attributes.decision equality (allow, deny, would_drop).
+        schema: {type: string}
+      - name: verdict
+        in: query
+        description: Case-insensitive attributes.outcome or attributes.action equality (for example drop_failed or DENY).
+        schema: {type: string}
+      - name: since
+        in: query
+        description: Inclusive timestamp lower bound, RFC3339 with optional fractional seconds.
+        schema: {type: string, format: date-time}
+      - name: cursor
+        in: query
+        description: Exclusive upper bound from nextCursor; keep all other filters unchanged.
+        schema: {type: string}
+      - name: category
+        in: query
+        description: Server-side Events page category; dpi excludes firewall and service kinds.
+        schema: {type: string, enum: [all, service, proxy, dpi, firewall, iec104]}
+      - name: detections
+        in: query
+        description: With 1, match only service.av.detected and service.av.block_flow.
+        schema: {type: string, enum: ["1"]}
       responses:
         "200":
           description: Legacy bare array for only-limit callers; EventPage when query or filter parameters are present.
@@ -1461,27 +2687,33 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - { type: array, items: { $ref: "#/components/schemas/Event" } }
-                  - { $ref: "#/components/schemas/EventPage" }
+                - {type: array, items: {$ref: "#/components/schemas/Event"}}
+                - {$ref: "#/components/schemas/EventPage"}
         "400":
           description: Invalid limit, timestamp, cursor, or category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         "502":
           description: Engine implementation does not support filtered queries.
 
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /flows:
     get:
       summary: List aggregated flow summaries
       tags: [Telemetry]
       parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 200, maximum: 5000 }
+      - name: limit
+        in: query
+        schema: {type: integer, default: 200, maximum: 5000}
       responses:
         "200":
           description: Array of flow summaries
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/FlowSummary" } }
+              schema: {type: array, items: {$ref: "#/components/schemas/FlowSummary"}}
 
   # ── Audit ─────────────────────────────────────────────────────────
   /audit:
@@ -1489,18 +2721,19 @@ paths:
       summary: List audit log records
       tags: [Audit]
       parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 100, maximum: 1000 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
+      - name: limit
+        in: query
+        schema: {type: integer, default: 100, maximum: 1000}
+      - name: offset
+        in: query
+        schema: {type: integer, default: 0}
       responses:
         "200":
           description: Array of audit records
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/AuditRecord" } }
+              schema: {type: array, items: {$ref: "#/components/schemas/AuditRecord"}}
+      description: Available when an audit store is configured.
 
   # ── PCAP Analysis ────────────────────────────────────────────────
   /pcap/config:
@@ -1512,22 +2745,25 @@ paths:
           description: Capture settings
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PcapConfig" }
+              schema: {$ref: "#/components/schemas/PcapConfig"}
     post:
-      summary: Save PCAP capture settings (admin)
+      summary: Stage PCAP settings (admin)
       tags: [PCAP]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/PcapConfig" }
+            schema: {$ref: '#/components/schemas/PcapConfig'}
       responses:
         "200":
-          description: Saved settings
+          description: Candidate capture settings; commit to persist running settings.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PcapConfig" }
-        "400": { description: Invalid capture settings }
+              schema: {$ref: '#/components/schemas/PcapConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        "400": {description: Invalid capture settings, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Stages the shared candidate; commit to apply.
 
   /pcap/start:
     post:
@@ -1551,14 +2787,17 @@ paths:
           Start responses and status list resolved kernel devices only.
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/PcapConfig" }
+            schema: {$ref: "#/components/schemas/PcapConfig"}
       responses:
         "200":
           description: Capture started with resolved kernel devices
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PcapStatus" }
-        "400": { description: Invalid or unresolved interface, zone, or filter }
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/PcapStatus'}
+                - {$ref: '#/components/schemas/StatusResponse'}
+        "400": {description: 'Invalid or unresolved interface, zone, or filter', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /pcap/stop:
     post:
@@ -1569,7 +2808,10 @@ paths:
           description: Capture status after stopping
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PcapStatus" }
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/PcapStatus'}
+                - {$ref: '#/components/schemas/StatusResponse'}
 
   /pcap/status:
     get:
@@ -1580,11 +2822,11 @@ paths:
           description: Current capture state and resolved devices
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PcapStatus" }
+              schema: {$ref: "#/components/schemas/PcapStatus"}
 
   /pcap/analyze:
     post:
-      summary: Upload a PCAP file for DPI analysis and policy generation
+      summary: Upload a PCAP file for DPI analysis and policy generation (admin)
       tags: [PCAP]
       requestBody:
         required: true
@@ -1603,26 +2845,30 @@ paths:
           description: Analysis results with generated rules
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PolicyAnalysis" }
-        "400": { description: Invalid or non-PCAP file }
+              schema: {$ref: "#/components/schemas/PolicyAnalysis"}
+        "400": {description: Invalid or non-PCAP file, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Offline analysis returns suggested rules only; does not stage or apply policy, populate live inventory or update live
+        learn profiles.
 
   /pcap/analyze/{name}:
     post:
-      summary: Analyze a previously uploaded PCAP by name
+      summary: Analyze a previously uploaded PCAP by name (admin)
       tags: [PCAP]
       parameters:
-        - name: name
-          in: path
-          required: true
-          schema: { type: string }
-          description: Name of an uploaded PCAP file
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+        description: Name of an uploaded PCAP file
       responses:
         "200":
           description: Analysis results with generated rules
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PolicyAnalysis" }
-        "404": { description: PCAP not found }
+              schema: {$ref: "#/components/schemas/PolicyAnalysis"}
+        "404": {description: PCAP not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Offline analysis returns suggested rules only; does not stage or apply policy, populate live inventory or update live
+        learn profiles.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -1636,38 +2882,42 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/ICSTemplateInfo" }
+                items: {$ref: "#/components/schemas/ICSTemplateInfo"}
 
   /templates/ics/apply:
     post:
-      summary: Apply an ICS template to generate firewall rules
+      summary: Apply an ICS template to generate firewall rules (admin)
       tags: [Templates]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ApplyICSTemplateRequest" }
+            schema: {$ref: "#/components/schemas/ApplyICSTemplateRequest"}
       responses:
         "200":
-          description: Previewed or applied rules from the template
+          description: Previewed rules or rules staged in candidate configuration
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  template: { type: string }
-                  preview: { type: boolean }
-                  applied: { type: boolean }
-                  created: { type: integer }
-                  updated: { type: integer }
-                  ruleCount: { type: integer }
-                  rules: { type: array, items: { type: object } }
-        "400": { description: Unknown template or missing params }
+                  template: {type: string}
+                  preview: {type: boolean}
+                  applied: {type: boolean}
+                  created: {type: integer}
+                  updated: {type: integer}
+                  ruleCount: {type: integer}
+                  rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
+                  mode: {type: string}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        "400": {description: Unknown template or missing params, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Preview returns generated rules without staging. Otherwise upserts candidate rules by ID; commit to apply.
 
   # ── Rule Impact Preview ─────────────────────────────────────────
   /firewall/rules/preview:
     post:
-      summary: Dry-run a proposed rule against recent traffic
+      summary: Dry-run a proposed rule against recent traffic (admin)
       description: >
         Matches the rule against recent events. For an iec104 rule, each
         decoded IEC104 object event (request, response, apci, malformed,
@@ -1679,16 +2929,14 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              description: A firewall rule definition (same schema as rule creation)
+            schema: {$ref: '#/components/schemas/FirewallRulePatch'}
       responses:
         "200":
           description: Preview results showing how many recent events match
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RulePreviewResponse" }
-        "400": { description: Invalid rule payload }
+              schema: {$ref: "#/components/schemas/RulePreviewResponse"}
+        "400": {description: Invalid rule payload, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Learn Mode ──────────────────────────────────────────────────
   /learn/profiles:
@@ -1702,61 +2950,37 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/LearnedProfile" }
+                items: {$ref: "#/components/schemas/LearnedProfile"}
 
   /learn/generate:
     post:
-      summary: Generate firewall rules from learned profiles
+      summary: Generate suggested firewall rules (admin)
       tags: [Learn]
       responses:
         "200":
           description: Generated allowlist rules
           content:
             application/json:
-              schema: { type: array, items: { type: object } }
+              schema: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
 
   /learn/apply:
     post:
-      summary: Apply learned rules to the running configuration
+      summary: Stage learned rules (admin)
       tags: [Learn]
       responses:
-        "200": { description: Learned rules applied to config }
-        "400": { description: Learn mode not available }
+        "200": {description: 'Rules staged, or no rules to apply (no staging header for the no-op).', content: {application/json: {schema: {
+                  type: object, properties: {status: {type: string}, count: {type: integer}, rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}}}}},
+          headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+        "400": {description: Learn mode not available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+      description: Stages the shared candidate; commit to apply.
 
   /learn:
     delete:
-      summary: Clear all learned traffic profiles
+      summary: Clear all learned traffic profiles (admin)
       tags: [Learn]
       responses:
-        "200": { description: Learned data cleared }
-        "400": { description: Learn mode not available }
-
-  # ── Engine / DPI Configuration ─────────────────────────────────
-  /engine/config:
-    get:
-      summary: Get data plane engine configuration
-      tags: [Engine]
-      responses:
-        "200":
-          description: Current engine configuration
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/EngineConfig" }
-    post:
-      summary: Update data plane engine configuration (admin)
-      description: >
-        Configure DPI mode (learn/enforce) and per-protocol enable/disable
-        settings. Changes take effect immediately without a config commit.
-      tags: [Engine]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/EngineConfig" }
-      responses:
-        "200": { description: Engine configuration updated }
-        "400": { description: Invalid configuration }
-        "403": { description: Admin role required }
+        "200": {description: Learned data cleared, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+        "400": {description: Learn mode not available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── ICS Inventory ──────────────────────────────────────────────
   /inventory:
@@ -1768,9 +2992,16 @@ paths:
           description: Array of discovered ICS assets
           content:
             application/json:
-              schema:
-                type: array
-                items: { type: object }
+              schema: {type: array, items: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}}
+    delete:
+      summary: Clear discovered inventory (admin)
+      tags: [Inventory]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
 
   # ── Signatures ─────────────────────────────────────────────────
   /signatures:
@@ -1782,23 +3013,28 @@ paths:
           description: Array of signatures
           content:
             application/json:
-              schema: { type: array, items: { type: object } }
+              schema: {type: array, items: {$ref: '#/components/schemas/SignaturesSignature'}}
     post:
-      summary: Add a custom IDS signature (admin)
+      summary: Add live custom signature (admin)
       tags: [Signatures]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SignaturesSignature'}
       responses:
-        "200": { description: Signature added }
+        "200": {description: Signature added, content: {application/json: {schema: {$ref: '#/components/schemas/SignaturesSignature'}}}}
 
   /signatures/{id}:
     delete:
-      summary: Remove an IDS signature (admin)
+      summary: Delete live signature (admin)
       tags: [Signatures]
       parameters:
-        - $ref: "#/components/parameters/pathId"
+      - $ref: "#/components/parameters/pathId"
       responses:
-        "200": { description: Signature removed }
-        "404": { description: Signature not found }
+        "404": {description: Signature not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        '204':
+          description: Success
 
   /signatures/matches:
     get:
@@ -1809,7 +3045,12 @@ paths:
           description: Array of signature match events
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+              schema: {type: array, items: {$ref: '#/components/schemas/SignaturesMatch'}}
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: {type: integer, default: 100, minimum: 1}
 
   # ── Anomalies ──────────────────────────────────────────────────
   /anomalies:
@@ -1821,7 +3062,21 @@ paths:
           description: Array of anomaly events
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+              schema: {type: array, items: {$ref: '#/components/schemas/Anomaly'}}
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: {type: integer, default: 200, minimum: 1, maximum: 5000}
+    delete:
+      summary: Clear detected anomalies (admin)
+      tags: [Anomalies]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
 
   # ── Protocol Statistics ────────────────────────────────────────
   /stats/protocols:
@@ -1833,7 +3088,7 @@ paths:
           description: Per-protocol traffic counters
           content:
             application/json:
-              schema: { type: object, additionalProperties: { type: integer } }
+              schema: {type: array, items: {$ref: '#/components/schemas/ProtoStats'}}
 
   /stats/top-talkers:
     get:
@@ -1844,4 +3099,1509 @@ paths:
           description: Top talkers
           content:
             application/json:
-              schema: { type: array, items: { type: object } }
+              schema: {type: array, items: {$ref: '#/components/schemas/FlowStats'}}
+      parameters:
+      - name: n
+        in: query
+        required: false
+        schema: {type: integer, default: 10, minimum: 1, maximum: 1000}
+  /assets:
+    get:
+      summary: List candidate assets
+      tags: [Assets]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Asset'}, nullable: true}
+    post:
+      summary: Create asset (admin)
+      tags: [Assets]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - {$ref: '#/components/schemas/Asset'}
+              required: [id]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Asset'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /assets/{id}:
+    patch:
+      summary: Update asset (admin)
+      tags: [Assets]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Asset'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Asset'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      summary: Delete asset (admin)
+      tags: [Assets]
+      description: Stages the shared candidate; commit to apply.
+      responses:
+        '204':
+          description: Success
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+  /objects:
+    get:
+      summary: List candidate objects
+      tags: [Objects]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Object'}, nullable: true}
+    post:
+      summary: Create object (admin)
+      tags: [Objects]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - {$ref: '#/components/schemas/Object'}
+              required: [id]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Object'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /objects/{id}:
+    patch:
+      summary: Update object (admin)
+      tags: [Objects]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Object'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Object'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      summary: Delete object (admin)
+      tags: [Objects]
+      description: Stages the shared candidate; commit to apply.
+      responses:
+        '204':
+          description: Success
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+  /zones:
+    get:
+      summary: List candidate zones
+      tags: [Zones]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Zone'}, nullable: true}
+    post:
+      summary: Create zone (admin)
+      tags: [Zones]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - {$ref: '#/components/schemas/Zone'}
+              required: [name]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Zone'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /zones/{name}:
+    patch:
+      summary: Update zone (admin)
+      tags: [Zones]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Zone'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Zone'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      summary: Delete zone (admin)
+      tags: [Zones]
+      description: Stages the shared candidate; commit to apply.
+      responses:
+        '204':
+          description: Success
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+  /interfaces:
+    get:
+      summary: List candidate interfaces
+      tags: [Interfaces]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Interface'}, nullable: true}
+    post:
+      summary: Create interface (admin)
+      tags: [Interfaces]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - {$ref: '#/components/schemas/Interface'}
+              required: [name]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Interface'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /interfaces/{name}:
+    patch:
+      summary: Update interface (admin)
+      tags: [Interfaces]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Interface'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Interface'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      summary: Delete interface (admin)
+      tags: [Interfaces]
+      description: Stages the shared candidate; commit to apply.
+      responses:
+        '204':
+          description: Success
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+  /dataplane:
+    get:
+      summary: Get candidate dataplane settings
+      tags: [Dataplane]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneConfig'}
+    post:
+      summary: Replace dataplane settings (admin)
+      tags: [Dataplane]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DataPlaneConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /routing:
+    get:
+      summary: Get candidate routing settings
+      tags: [Routing]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoutingConfig'}
+    post:
+      summary: Replace routing settings (admin)
+      tags: [Routing]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RoutingConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoutingConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /firewall/nat:
+    get:
+      summary: Get candidate firewall nat settings
+      tags: [Firewall]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NATConfig'}
+    post:
+      summary: Replace firewall nat settings (admin)
+      tags: [Firewall]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NATConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NATConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /ids/rules:
+    get:
+      summary: Get candidate ids rules settings
+      tags: [Ids]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IDSConfig'}
+    post:
+      summary: Replace ids rules settings (admin)
+      tags: [Ids]
+      description: Stages enabled and ruleGroups; replaces the rule bank only when rules is non-null. Commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IDSConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IDSConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /services/av:
+    get:
+      summary: Get candidate services av settings
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AVConfig'}
+    post:
+      summary: Replace services av settings (admin)
+      tags: [Services]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AVConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AVConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /services/proxy/forward:
+    get:
+      summary: Get candidate services proxy forward settings
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
+    post:
+      summary: Replace services proxy forward settings (admin)
+      tags: [Services]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /services/proxy/reverse:
+    get:
+      summary: Get candidate services proxy reverse settings
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
+    post:
+      summary: Replace services proxy reverse settings (admin)
+      tags: [Services]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /interfaces/state:
+    get:
+      summary: List kernel interface state
+      tags: [Interfaces]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/InterfaceState'}}
+  /interfaces/assign:
+    post:
+      summary: Stage logical interface bindings (admin)
+      tags: [Interfaces]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InterfaceAssignRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interfaces: {type: array, items: {$ref: '#/components/schemas/Interface'}}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /interfaces/reconcile:
+    post:
+      summary: Replace kernel interfaces from running config (admin)
+      tags: [Interfaces]
+      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReconcileRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /routing/reconcile:
+    post:
+      summary: Replace kernel routing from running config (admin)
+      tags: [Routing]
+      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReconcileRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /routing/os:
+    get:
+      summary: Inspect kernel IPv4 routes
+      tags: [Routing]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OsRoutingSnapshot'}
+        '501':
+          description: OS routing view requires Linux
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /auth/session:
+    get:
+      summary: Inspect current session
+      tags: [Auth]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionResponse'}
+  /auth/me/password:
+    post:
+      summary: Change own password
+      tags: [Auth]
+      description: Requires current password; disabled in lab mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChangePasswordRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /users/{id}/password:
+    post:
+      summary: Set user password (admin)
+      tags: [Users]
+      description: Disabled in lab mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetPasswordRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+  /config/export:
+    get:
+      summary: Export running configuration including IDS bank
+      tags: [Config]
+      description: Secrets are redacted by default. Only admins may request redacted=false.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Config'}
+      parameters:
+      - name: redacted
+        in: query
+        required: false
+        schema: {type: string, default: 'true', enum: ["0", "false", "no", "1", "true", "yes"]}
+  /config/backups:
+    get:
+      summary: List accessible running configuration backups
+      tags: [Config]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/ConfigBackupInfo'}}
+    post:
+      summary: Back up running configuration (admin)
+      tags: [Config]
+      description: Includes the IDS bank from the same running snapshot. Non-admins can list/download only redacted backups.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfigBackupRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigBackupInfo'}
+  /config/backups/{id}:
+    get:
+      summary: Download running configuration backup
+      tags: [Config]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Config'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      summary: Delete configuration backup (admin)
+      tags: [Config]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+  /config/commit_confirmed:
+    post:
+      summary: Commit with automatic rollback unless confirmed (admin)
+      tags: [Config]
+      description: >
+        Same strict apply/recovery semantics as commit, including nft failures.
+        Success starts a rollback timer (60 seconds by default); failure restores
+        the pre-request running document, IDS bank, candidate, previous snapshots
+        and pending deadline, then attempts reapply. Failed reapply leaves runtime
+        synchronization uncertain and is exposed in health.
+        Confirm before expiry to retain this running document. Expiry restores
+        stored state and requests replay; a replay error is retried and exposed
+        in health, not converted into a successful runtime apply. A plain commit
+        cancels the timer and replaces its rollback baseline.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttl_seconds: {type: integer, format: int64, default: 60, description: Positive seconds; omitted or nonpositive uses 60; duration overflow is rejected}
+      responses:
+        '200':
+          description: Applied and awaiting confirmation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}
+            X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
+        '400':
+          description: Invalid request, overflowing TTL, preflight or candidate validation failure; no promotion or recovery fields
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        "500":
+          description: Runtime apply failed; inspect recovery outcomes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigApplyError'}
+  /config/confirm:
+    post:
+      summary: Confirm pending confirmed commit (admin)
+      description: >
+        Only cancels the pending rollback deadline; does not reapply runtime.
+        The committed header acknowledges confirmation, not a new runtime apply.
+      tags: [Config]
+      responses:
+        '200':
+          description: Confirmation recorded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}
+        '400':
+          description: Confirmation failed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /simulation:
+    get:
+      summary: Inspect simulation
+      tags: [Simulation]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationStatus'}
+    post:
+      summary: Start or stop synthetic traffic (admin)
+      tags: [Simulation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: {type: string, enum: [start, stop]}
+              required: [action]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulationStatus'}
+  /system/stats:
+    get:
+      summary: Inspect system stats
+      tags: [System]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SystemStatsResponse'}
+  /system/inspection:
+    get:
+      summary: Inspect system inspection
+      tags: [System]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InspectionResponse'}
+  /system/tls:
+    get:
+      summary: Inspect system tls
+      tags: [System]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TlsInfoResponse'}
+  /conntrack:
+    get:
+      summary: List conntrack
+      tags: [Conntrack]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/ConntrackEntry'}}
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: {type: integer, default: 200, minimum: 1}
+  /templates:
+    get:
+      summary: List templates
+      tags: [Templates]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/PolicyTemplate'}}
+  /conntrack/kill:
+    post:
+      summary: Delete a conntrack flow (admin)
+      tags: [Conntrack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConntrackDeleteRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /inventory/{ip}:
+    get:
+      summary: Get discovered asset
+      tags: [Inventory]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}
+      parameters:
+      - name: ip
+        in: path
+        required: true
+        schema: {type: string}
+  /events/{id}:
+    get:
+      summary: Get retained event by ID
+      tags: [Events]
+      description: Searches retained general and evidence banks; not durable history.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Event'}
+        '404':
+          description: Event not retained
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+  /dhcp/leases:
+    get:
+      summary: List live DHCP leases
+      tags: [Dhcp]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leases: {type: array, items: {$ref: '#/components/schemas/DHCPLease'}}
+  /services/vpn/wireguard/status:
+    get:
+      summary: Inspect live WireGuard state
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NetcfgWireGuardStatus'}
+      parameters:
+      - name: iface
+        in: query
+        required: false
+        schema: {type: string}
+  /dataplane/blocks/host:
+    post:
+      summary: Block an IPv4 host immediately (admin)
+      tags: [Dataplane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BlockHostRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /dataplane/blocks/flow:
+    post:
+      summary: Block an IPv4 flow immediately (admin)
+      tags: [Dataplane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BlockFlowRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /dataplane/ruleset:
+    get:
+      summary: Preview candidate ruleset and engine status (admin)
+      tags: [Dataplane]
+      description: Compiles candidate without applying it. engineStatus or engineStatusError is included when an engine is available.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: {$ref: '#/components/schemas/RulesSnapshot'}
+                  ruleset: {type: string}
+                  engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
+                  engineStatusError: {type: string}
+  /security/conduits:
+    get:
+      summary: Summarize running zone-to-zone policy
+      tags: [Security]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: {$ref: '#/components/schemas/ConduitResult'}}
+  /system/tls/cert:
+    post:
+      summary: Replace TLS certificate and key files (admin)
+      tags: [System]
+      description: Writes validated PEM artifacts under /data; does not change saved listener paths.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetTLSCertRequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /system/tls/trusted-ca:
+    post:
+      summary: Replace trusted CA PEM file (admin)
+      tags: [System]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetTrustedCARequest'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /ids/convert/sigma:
+    post:
+      summary: Convert Sigma YAML without persisting
+      tags: [Ids]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sigmaYAML: {type: string}
+              required: [sigmaYAML]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IDSRule'}
+  /ids/import:
+    post:
+      summary: Import rules into candidate bank (admin)
+      tags: [Ids]
+      description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported: {type: integer}
+                  skipped: {type: integer}
+                  total: {type: integer}
+                  format: {type: string}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, format: binary}
+                format: {type: string, enum: [suricata, snort, yara, sigma]}
+              required: [file]
+  /ids/export:
+    get:
+      summary: Export running IDS rules
+      tags: [Ids]
+      description: Downloads running IDS rules, not candidate rules.
+      responses:
+        '200':
+          description: Exported rule text
+          content:
+            text/plain:
+              schema: {type: string}
+            text/yaml:
+              schema: {type: string}
+      parameters:
+      - name: format
+        in: query
+        required: false
+        schema: {type: string, enum: [suricata, snort, yara, sigma], default: suricata}
+  /ids/backup:
+    get:
+      summary: Download running IDS rule bank
+      tags: [Ids]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/IDSRule'}}
+  /ids/restore:
+    post:
+      summary: Replace candidate IDS bank (admin)
+      tags: [Ids]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: array, items: {$ref: '#/components/schemas/IDSRule'}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  count: {type: integer}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /ids/sources:
+    get:
+      summary: List external rule source metadata
+      tags: [Ids]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/IDSRuleSource'}}
+  /pcap/list:
+    get:
+      summary: List captured/uploaded files
+      tags: [Pcap]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/PcapItem'}}
+  /pcap/upload:
+    post:
+      summary: Upload PCAP file (admin)
+      tags: [Pcap]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PcapItem'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, format: binary}
+              required: [file]
+  /pcap/download/{name}:
+    get:
+      summary: Download PCAP file
+      tags: [Pcap]
+      responses:
+        '200':
+          description: PCAP bytes
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+  /pcap/{name}:
+    delete:
+      summary: Delete PCAP file (admin)
+      tags: [Pcap]
+      responses:
+        '204':
+          description: Success
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+  /pcap/tag:
+    post:
+      summary: Tag a PCAP file (admin)
+      tags: [Pcap]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PcapTagRequest'}
+      responses:
+        '204':
+          description: Success
+  /pcap/replay:
+    post:
+      summary: Replay a PCAP file on an interface (admin)
+      tags: [Pcap]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PcapReplayRequest'}
+      responses:
+        '202':
+          description: Success
+  /templates/apply:
+    post:
+      summary: Stage policy template rules (admin)
+      tags: [Templates]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                mode: {type: string, enum: ['', learn, enforce]}
+              required: [name]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied: {type: string}
+                  ruleCount: {type: integer}
+                  mode: {type: string}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /firewall/ics-rules:
+    get:
+      summary: List candidate rules with ICS predicates
+      tags: [Firewall]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
+    post:
+      summary: Create ICS rule (admin)
+      tags: [Firewall]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirewallRule'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FirewallRule'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /firewall/ics-rules/{id}:
+    patch:
+      summary: Replace existing ICS rule (admin)
+      tags: [Firewall]
+      description: Replacement, not a merge; omitted ID is retained. Target must be an ICS rule. Stages the shared candidate; commit to
+        apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/FirewallRulePatch'
+              required:
+              - action
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FirewallRule'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+  /identities:
+    get:
+      summary: List runtime IP identity mappings
+      tags: [Identities]
+      description: Available when an identity resolver is configured.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mappings: {type: object, additionalProperties: {type: array, items: {type: string}}}
+    post:
+      summary: Set runtime IP identity mapping (admin)
+      tags: [Identities]
+      description: Immediate runtime update; available when an identity resolver is configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IdentityMapping'}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityMapping'}
+  /identities/{ip}:
+    delete:
+      summary: Delete runtime identity mapping (admin)
+      tags: [Identities]
+      description: Available when an identity resolver is configured.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: {type: string}
+      parameters:
+      - name: ip
+        in: path
+        required: true
+        schema: {type: string}
+  /cli/execute:
+    post:
+      summary: Execute a CLI command as the authenticated role
+      tags: [Cli]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                line: {type: string}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output: {type: string}
+                  error: {type: string}
+  /cli/commands:
+    get:
+      summary: List commands permitted for current role
+      tags: [Cli]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {type: string}}
+  /cli/complete:
+    get:
+      summary: Complete a CLI command line
+      tags: [Cli]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: array, items: {type: string}}
+      parameters:
+      - name: line
+        in: query
+        required: false
+        schema: {type: string}
+  /cli/ws:
+    get:
+      summary: Upgrade to interactive CLI WebSocket
+      tags: [Cli]
+      description: 'Requires same-host Origin and authentication. Client sends a command string or {line: string}; server sends JSON {output:
+        string, error?: string}.'
+      responses:
+        '101':
+          description: Success
+  /services/vpn/openvpn/profile:
+    post:
+      summary: Upload foreground OpenVPN profile and stage its path (admin)
+      tags: [Services]
+      description: Stages the shared candidate; commit to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                ovpn: {type: string}
+              required: [ovpn]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configPath: {type: string}
+                  vpn: {$ref: '#/components/schemas/VPNConfig'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+  /services/vpn/openvpn/clients:
+    get:
+      summary: List issued OpenVPN clients (admin)
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clients: {type: array, items: {type: string}}
+    post:
+      summary: Issue OpenVPN client credentials (admin)
+      tags: [Services]
+      description: Uses running managed-server settings; creates credential artifacts immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+              required: [name]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: {type: string}
+  /services/vpn/openvpn/clients/{name}:
+    get:
+      summary: Download OpenVPN client profile (admin)
+      tags: [Services]
+      responses:
+        '200':
+          description: Client profile with inline credentials
+          content:
+            application/x-openvpn-profile:
+              schema: {type: string}
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+  /services/av/update:
+    post:
+      summary: Start AV definition update (admin)
+      tags: [Services]
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusResponse'}
+  /services/av/defs:
+    get:
+      summary: List live custom AV definitions
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files: {type: array, items: {type: string}}
+                  path: {type: string}
+    post:
+      summary: Upload live AV definition (admin)
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  file: {type: string}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, format: binary}
+              required: [file]
+    delete:
+      summary: Delete live AV definition (admin)
+      tags: [Services]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  file: {type: string}
+      parameters:
+      - name: file
+        in: query
+        required: true
+        schema: {type: string}
+  /services/status:
+    get:
+      summary: Inspect live services
+      tags: [Services]
+      description: Service-manager status, or a status string of unavailable/unknown when no provider is configured.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
