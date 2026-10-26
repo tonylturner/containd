@@ -356,6 +356,7 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 		if ctx.DstZone != "" {
 			attrs["dstZone"] = ctx.DstZone
 		}
+		attrs = events.WithTags(attrs, ev.Tags(ctx))
 		logEvent := events.Event{
 			Kind:       "firewall.rule.hit",
 			Timestamp:  time.Now().UTC(),

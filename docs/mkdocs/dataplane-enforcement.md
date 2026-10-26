@@ -119,12 +119,36 @@ exclusions never lower a rule. Coverage appears in:
 Generic decoders still pass a packet whose payload they cannot parse; only
 IEC 104 fails closed on malformed traffic.
 
-## Actions and temporary blocks
+## Actions and rule order
 
-Firewall policy actions are `ALLOW` and `DENY`. The generic dynamic updater
-implements temporary host and flow blocks; enum names such as rate-limit or tag
-do not establish an implemented enforcement action. Native IDS matches produce
-alerts, not automatic IPS action.
+Any matching `ALLOW` wins; otherwise the first matching `DENY` or `RESET` by
+rule ID decides; otherwise the default (see
+[Actions and precedence](policy-model.md#actions-and-precedence)). The engine
+decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
+`ALLOW` is shadowed. The forward chain of the policy table runs in this order:
+
+1. `RATE_LIMIT` meters, by rule ID: every packet of a matching flow, established
+   or not, is counted against its 5-tuple's bucket and dropped over the limit.
+2. IEC 104 envelope steering and the NFQUEUE lines of ICS rules.
+3. The established/related accept and the DNAT accepts.
+4. `TAG` lines, by rule ID, which count matching connection openers and
+   continue.
+5. Every `ALLOW` line, by rule ID.
+6. Every `DENY` and `RESET` line, by rule ID. `RESET` lines end in
+   `reject with tcp reset` for TCP and `reject with icmpx admin-prohibited`
+   otherwise.
+7. The chain policy, the default action.
+
+Every line updates its rule's named counter, read through
+`GET /api/v1/firewall/counters`; a `RATE_LIMIT` rule has a second counter for
+its excess drops. Counters live in the policy table, so each apply restarts
+them. `TAG` has no kernel mark: IEC 104 owns mark mask `0x0f000000`, and a tag
+has no enforcement effect.
+
+## Temporary blocks
+
+The generic dynamic updater implements temporary host and flow blocks. Native
+IDS matches produce alerts, not automatic IPS action.
 
 Administrators can request temporary blocks through:
 

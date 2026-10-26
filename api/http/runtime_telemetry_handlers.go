@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
@@ -303,7 +304,7 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		if ents == nil {
-			ents = []conntrack.Entry{}
+			ents = []dpengine.TaggedConnection{}
 		}
 		c.JSON(http.StatusOK, ents)
 	}

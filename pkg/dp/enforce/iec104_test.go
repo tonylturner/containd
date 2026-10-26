@@ -57,7 +57,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 		c.QueueID = 100
 		c.NFLogGroup = 7
 		c.IEC104EnvelopeOpen = open
-		full, err := c.CompileFirewall(iecSnapshot())
+		full, err := compileWithoutCounters(c, iecSnapshot())
 		if err != nil {
 			t.Fatalf("compile: %v", err)
 		}
@@ -144,7 +144,7 @@ func TestIEC104EnvelopeSwitchGolden(t *testing.T) {
 // Without a queue the envelope cannot be inspected; the IEC rule compiles
 // like any other rule, as before.
 func TestCompileFirewallIEC104WithoutQueueIsUnchanged(t *testing.T) {
-	ruleset, err := NewCompiler().CompileFirewall(iecSnapshot())
+	ruleset, err := compileWithoutCounters(NewCompiler(), iecSnapshot())
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}

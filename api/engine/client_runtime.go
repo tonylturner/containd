@@ -213,7 +213,8 @@ func (c *HTTPClient) ClearBlocks(ctx context.Context) error {
 	return nil
 }
 
-func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+// ListConntrack lists kernel connections with their TAG labels.
+func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error) {
 	u := c.BaseURL + "/internal/conntrack"
 	if limit > 0 {
 		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
@@ -231,7 +232,7 @@ func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.
 		return nil, engineStatusError(resp, "engine conntrack status")
 	}
 	var out struct {
-		Entries []conntrack.Entry `json:"entries"`
+		Entries []dpengine.TaggedConnection `json:"entries"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err

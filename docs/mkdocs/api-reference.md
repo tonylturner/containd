@@ -274,7 +274,8 @@ complete query contract and retention bounds.
 `GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum
 5000) as a bare array, but **not necessarily the globally newest N**. Each runtime store
 keeps a separate count-bounded bank of its latest 1024 real
-`firewall.rule.hit` events whose `attributes.action` is exactly `DENY`.
+`firewall.rule.hit` events whose `attributes.action` is exactly `DENY` or
+`RESET`.
 Later DENYs evict older bank entries; ordinary telemetry does not. There is
 no age expiry. The bank survives configuration rebuilds, not process restarts,
 and is not a guarantee of a fixed number of hours under DENY floods.
@@ -295,6 +296,20 @@ to all protocols, including Modbus and DNP3, not only IEC104.
 `GET /api/v1/events/{id}` can find retained DENYs after the general ring has
 wrapped. `/api/v1/flows` still rolls up only the general event ring; prolonged
 DENY retention does not resurrect old flow groups.
+
+## Rule Counters and Flow Tags
+
+`GET /api/v1/firewall/counters` returns the kernel counters of the applied
+ruleset: `snapshotVersion`, `since` (the apply time; every apply restarts the
+counters at zero) and `rules`, one entry per firewall rule in configuration
+order with `ruleId`, `action`, `packets`, `bytes` and, for `RATE_LIMIT` rules,
+`excessDrops`. Logging need not be on. When enforcement is off, nothing is
+applied yet, the last apply failed or nftables cannot be read, the response is
+HTTP 502 with the reason; HTTP 503 means no live engine.
+
+Flows that `TAG` rules match carry their labels as a sorted `tags` array in
+event `attributes`, and each item of `GET /api/v1/conntrack` carries `tags`,
+derived from the connection's original tuple under the running ruleset.
 
 ## Forwarding Health and Commit Warnings
 

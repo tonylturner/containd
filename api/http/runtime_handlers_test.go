@@ -22,6 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
@@ -54,7 +55,7 @@ type runtimeMockEngine struct {
 	anomaliesResp       []anomaly.Anomaly
 	anomaliesErr        error
 	anomaliesCleared    bool
-	conntrackResp       []conntrack.Entry
+	conntrackResp       []dpengine.TaggedConnection
 	conntrackErr        error
 	conntrackDeleteReq  conntrack.KillRequest
 	wireGuardStatusResp netcfg.WireGuardStatus
@@ -151,7 +152,7 @@ func (m *runtimeMockEngine) ClearAnomalies(ctx context.Context) error {
 	return nil
 }
 
-func (m *runtimeMockEngine) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+func (m *runtimeMockEngine) ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error) {
 	return m.conntrackResp, m.conntrackErr
 }
 
@@ -399,7 +400,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	eng.protoStatsResp = []stats.ProtoStats{{Protocol: "modbus", PacketCount: 4}}
 	eng.topTalkersResp = []stats.FlowStats{{SrcIP: "10.0.0.1", DstIP: "10.0.0.2", Protocol: "tcp", Packets: 4}}
 	eng.anomaliesResp = []anomaly.Anomaly{{Type: "malformed_frame", Protocol: "modbus", Severity: "high"}}
-	eng.conntrackResp = []conntrack.Entry{{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}}
+	eng.conntrackResp = []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}, Tags: []string{"plc"}}}
 
 	s := NewServerWithEngine(&mockStore{}, nil, eng)
 
@@ -473,7 +474,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/conntrack?limit=5", nil)
 	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"dport":"502"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"dport":"502"`) || !strings.Contains(rec.Body.String(), `"tags":["plc"]`) {
 		t.Fatalf("conntrack list: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 

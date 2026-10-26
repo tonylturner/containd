@@ -290,7 +290,7 @@ func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 
 func conntrackHandler(dp *engine.Engine) http.HandlerFunc {
 	type resp struct {
-		Entries []conntrack.Entry `json:"entries"`
+		Entries []engine.TaggedConnection `json:"entries"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -306,7 +306,7 @@ func conntrackHandler(dp *engine.Engine) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			writeJSON(w, resp{Entries: entries})
+			writeJSON(w, resp{Entries: dp.TagConnections(entries)})
 			return
 		case http.MethodPost:
 			var req conntrack.KillRequest

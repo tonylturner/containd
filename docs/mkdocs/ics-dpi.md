@@ -160,6 +160,14 @@ instance/attribute/EPATH/MSP, S7 DB numbers, MMS named variables/domains, BACnet
 objects/properties, or OPC UA message/service/Node ID patterns. Decoder telemetry
 and IDS attributes are not additional firewall selector fields.
 
+ICS messages follow the firewall's precedence (see
+[Actions and precedence](policy-model.md#actions-and-precedence)): any matching
+`ALLOW` admits the message, whatever its position; otherwise the first matching
+`DENY` or `RESET` by rule ID denies it. An ICS `DENY` that overlaps any `ALLOW`,
+including a plain L3/L4 `ALLOW` on the same port, is therefore shadowed and
+never denies anything there; the ruleset warnings name such rules. `RESET`,
+`RATE_LIMIT` and `TAG` rules take no ICS protocol.
+
 ### IEC 104 fields and matching
 
 With `protocol: "iec104"`, use these fields instead of the generic selectors:
@@ -189,10 +197,11 @@ It excludes control commands/confirmations, counter interrogation, clock sync,
 reset process, timed test, malformed/unsupported events, and broadcast CA.
 
 IEC 104 rules define an L3/L4 inspection envelope. Any matching enforce-mode rule
-makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules in
-order, defaults to deny, and cannot be bypassed by a broad TCP/2404 allow rule or
-a generic allow default. `ALLOW` cannot match malformed or broadcast objects.
-ASDU predicates, identity, and schedules do not narrow the envelope itself.
+makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules: any
+matching IEC 104 `ALLOW` admits the object, otherwise the first matching IEC 104
+`DENY` by rule ID denies it, and no match is denied. A broad TCP/2404 allow rule
+or a generic allow default cannot bypass it. `ALLOW` cannot match malformed or
+broadcast objects. ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
 ## Learn Mode
 

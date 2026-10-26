@@ -17,8 +17,14 @@ func (s *Store) appendEvent(ev Event) {
 	s.appendGeneral(ev)
 }
 
+// isDeny reports a rule hit that denied the packet: DENY, or RESET, which
+// rejects it.
 func isDeny(ev Event) bool {
-	return ev.Kind == "firewall.rule.hit" && ev.Attributes["action"] == "DENY"
+	if ev.Kind != "firewall.rule.hit" {
+		return false
+	}
+	action := ev.Attributes["action"]
+	return action == "DENY" || action == "RESET"
 }
 
 // ListTelemetry includes the independent DENY and IEC incident banks. General-store consumers

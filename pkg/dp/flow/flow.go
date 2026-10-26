@@ -96,6 +96,9 @@ type State struct {
 	IdleTimeout time.Duration
 	HardTimeout time.Duration
 	LastAction  string
+	// Tags are the labels of the TAG rules that matched the connection
+	// when this direction's state was created; fixed for its lifetime.
+	Tags []string
 }
 
 func NewState(key Key, now time.Time) *State {
