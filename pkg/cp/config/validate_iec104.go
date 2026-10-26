@@ -193,10 +193,13 @@ func validateIEC104Activation(dp DataPlaneConfig, enforce []Rule) error {
 // match a flow of the rule's L3 scope. The engine checks both endpoints of
 // a flow, so an exclusion overlaps when it meets either side. An empty side
 // matches any address. VPN tokens resolve elsewhere, so they count as
-// overlapping. Domain exclusions never match at runtime.
+// overlapping. Domain exclusions cannot bypass IEC104 inspection: the engine
+// keeps port 2404 and its enforcement envelope inspected regardless of DNS/SNI.
 func dpiExclusionOverlapsRule(excl DPIExclusion, r Rule) bool {
 	var exclNet *net.IPNet
 	switch excl.Type {
+	case "domain":
+		return false
 	case "ip":
 		ip := net.ParseIP(strings.TrimSpace(excl.Value))
 		if ip == nil {

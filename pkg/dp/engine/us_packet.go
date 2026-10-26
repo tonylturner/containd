@@ -56,6 +56,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 	defer e.endStreamsOnClose(state, &parsed, pkt.TCP)
 
 	flowHash := state.Key.Hash()
+	e.observeDomainExclusions(state, &parsed)
 	shouldInspect := e.ShouldInspect(state, &parsed)
 	if cached, ok := e.verdictCache.Get(flowHash); ok {
 		if cached.Action != verdict.AllowContinue {

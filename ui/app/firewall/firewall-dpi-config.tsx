@@ -814,8 +814,11 @@ function DPIExclusionModal({
         </div>
 
         <div className="mt-3 text-[10px] text-[var(--text-dim)]">
-          IP and CIDR exclusions take effect after commit. Domain exclusions will
-          be supported when TLS interception is added.
+          Exclusions take effect after commit. Domains use visible TLS SNI or
+          observed DNS answers at the first client payload. Use example.com for
+          an exact name or *.example.com for subdomains only. DNS can exclude
+          other traffic sharing an IP. Domain exclusions never bypass IEC 104
+          inspection.
         </div>
 
         <div className="mt-4 flex justify-end gap-2">

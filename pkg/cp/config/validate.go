@@ -858,6 +858,9 @@ func validateRoutingRules(rulesCfg []PolicyRule) error {
 }
 
 func validateDataPlane(dp DataPlaneConfig) error {
+	if err := validateDomainExclusions(dp.DPIExclusions); err != nil {
+		return err
+	}
 	for _, name := range dp.CaptureInterfaces {
 		if name == "" {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")
