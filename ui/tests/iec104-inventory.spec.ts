@@ -60,7 +60,8 @@ test("inventory unavailable is not empty or zero, and Refresh retries", async ({
   // A failed refresh must hide previously loaded counters too.
   offline = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(panel.getByRole("status")).toContainText("unavailable");
+  // The loaded panel has its own status badges until the refresh lands.
+  await expect(panel.getByRole("status").filter({ hasText: "IEC 104 inventory unavailable" })).toBeVisible();
   await expect(panel).not.toContainText("3 attempted / 1 accepted");
 });
 
