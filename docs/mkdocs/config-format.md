@@ -292,6 +292,11 @@ connections to the original destination service and prevents reconnects for the
 interval. Neighbouring clients, services and transports remain unaffected.
 `durationSecs` is 1–3600 seconds, default 60. These are runtime operations, not
 candidate configuration changes, and require active nftables enforcement.
+Revocations never refuse management traffic: the management listeners stay
+reachable on the interfaces that grant management access, and the reserved
+management listener stays reachable, even when their tuples are revoked.
+Killing a management connection still deletes its kernel state, which can end
+that one connection.
 
 The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
 and counts/errors independently. Revocation is installed atomically before

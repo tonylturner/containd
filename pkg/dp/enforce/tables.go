@@ -5,6 +5,8 @@ package enforce
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // containd owns two nftables tables by name and never touches any other
@@ -85,8 +87,14 @@ var blocksChains = []struct{ name, hook string }{
 }
 
 // writeBlocksTable ensures the blocks table and rewrites its chains without
-// touching its set elements.
-func (c *Compiler) writeBlocksTable(buf *bytes.Buffer) {
+// touching its set elements. locals is the resolved local input of the
+// snapshot: management traffic is exempt from revocations.
+func (c *Compiler) writeBlocksTable(buf *bytes.Buffer, locals []rules.LocalServiceRule) error {
+	exemptIn, exemptOut, err := c.managementExemptions(locals)
+	if err != nil {
+		return err
+	}
+	exempt := map[string][]string{"input": exemptIn, "output": exemptOut}
 	table := BlocksTable(c.policyTable())
 	writeDynamicSets(buf, table)
 	buf.WriteString(fmt.Sprintf("add chain inet %s revocations\n", table))
@@ -101,6 +109,9 @@ func (c *Compiler) writeBlocksTable(buf *bytes.Buffer) {
 		buf.WriteString(fmt.Sprintf("add rule inet %s revocations %s\n", table, rule))
 	}
 	for _, ch := range blocksChains {
+		for _, rule := range exempt[ch.name] {
+			buf.WriteString(fmt.Sprintf("add rule inet %s %s %s\n", table, ch.name, rule))
+		}
 		buf.WriteString(fmt.Sprintf("add rule inet %s %s jump revocations\n", table, ch.name))
 	}
 	for _, rule := range []string{
@@ -110,6 +121,7 @@ func (c *Compiler) writeBlocksTable(buf *bytes.Buffer) {
 	} {
 		buf.WriteString(fmt.Sprintf("add rule inet %s forward %s\n", table, rule))
 	}
+	return nil
 }
 
 // dynamicSets returns the name and type of each set of the blocks table.

@@ -96,11 +96,23 @@ func (l *netnsLab) nft(t *testing.T, script string) {
 // test that started it ends.
 func (l *netnsLab) serveTarget(t *testing.T, addr string, port int) {
 	t.Helper()
-	server := exec.CommandContext(l.ctx, "ip", "netns", "exec", l.target, "python3", "-u", "-c", fmt.Sprintf(`import socket
+	l.serve(t, []string{"ip", "netns", "exec", l.target}, addr, port)
+}
+
+// serveLocal runs the same server in this namespace, the router's.
+func (l *netnsLab) serveLocal(t *testing.T, addr string, port int) {
+	t.Helper()
+	l.serve(t, nil, addr, port)
+}
+
+func (l *netnsLab) serve(t *testing.T, prefix []string, addr string, port int) {
+	t.Helper()
+	args := append(append([]string(nil), prefix...), "python3", "-u", "-c", fmt.Sprintf(`import socket
 s=socket.socket(); s.bind((%q,%d)); s.listen(); print('ready',flush=True)
 while True:
  c,a=s.accept(); c.sendall(a[0].encode()); c.close()
 `, addr, port))
+	server := exec.CommandContext(l.ctx, args[0], args[1:]...)
 	stdout, err := server.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +122,7 @@ while True:
 	}
 	t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
 	if !bufio.NewScanner(stdout).Scan() {
-		t.Fatal("target server did not start")
+		t.Fatal("server did not start")
 	}
 }
 

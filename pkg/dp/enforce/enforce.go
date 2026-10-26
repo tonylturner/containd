@@ -57,6 +57,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", errors.New("snapshot is nil")
 	}
 	table := c.policyTable()
+	locals, err := resolveLocalInput(snap)
+	if err != nil {
+		return "", err
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString(DeleteTable(table))
@@ -66,7 +70,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
 	}
-	if err := c.writeInputChain(&buf, snap); err != nil {
+	if err := c.writeInputChain(&buf, snap, locals); err != nil {
 		return "", err
 	}
 	if err := c.writeForwardChain(&buf, snap); err != nil {
@@ -79,7 +83,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 	buf.WriteString("}\n")
-	c.writeBlocksTable(&buf)
+	if err := c.writeBlocksTable(&buf, locals); err != nil {
+		return "", err
+	}
 	return buf.String(), nil
 }
 
@@ -112,7 +118,9 @@ func (c *Compiler) writeZoneIfaceSets(buf *bytes.Buffer, snap *rules.Snapshot) {
 	}
 }
 
-func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
+// writeInputChain emits the input chain; locals is snap's local input,
+// resolved by resolveLocalInput.
+func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot, locals []rules.LocalServiceRule) error {
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
@@ -123,19 +131,7 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
-	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
-	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
 	for _, lr := range locals {
-		if lr.RecoverUnbound {
-			live, err := mgmtpath.Devices()
-			if err != nil {
-				return fmt.Errorf("discover management bindings: %w", err)
-			}
-			lr.Ifaces, _ = mgmtpath.ResolveBindings(lr.Ifaces, lr.DeniedIfaces, live)
-			if len(lr.Ifaces) == 0 {
-				continue
-			}
-		}
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {
 			return err
