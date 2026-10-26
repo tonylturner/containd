@@ -23,6 +23,10 @@ func (a *scriptApplier) Apply(_ context.Context, script string) error {
 	return a.err
 }
 
+func (a *scriptApplier) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	return enforce.TableLayout{}, nil
+}
+
 func TestClearBlocksHandler(t *testing.T) {
 	applier := &scriptApplier{}
 	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: true, TableName: "fw", Applier: applier}})

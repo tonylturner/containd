@@ -70,8 +70,9 @@ func (l *netnsLab) run(t *testing.T, args ...string) string {
 	return string(out)
 }
 
-// apply compiles snap with c and installs it in this namespace. The tables
-// c owns are removed when the calling (sub)test ends.
+// apply compiles snap with c and installs it in this namespace as the
+// engine does, converging the live dynamic table. The tables c owns are
+// removed when the calling (sub)test ends.
 func (l *netnsLab) apply(t *testing.T, c *Compiler, snap *rules.Snapshot) {
 	t.Helper()
 	text, err := c.CompileFirewall(snap)
@@ -79,7 +80,11 @@ func (l *netnsLab) apply(t *testing.T, c *Compiler, snap *rules.Snapshot) {
 		t.Fatal(err)
 	}
 	assertDeclaredSets(t, text)
-	l.nft(t, text)
+	live, err := NewNftApplier().ReadTable(l.ctx, c.DynamicTable())
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.nft(t, c.InstallScript(live, "", text))
 	t.Cleanup(func() { l.nft(t, c.DeleteTables()) })
 }
 

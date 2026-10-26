@@ -59,8 +59,8 @@ func DeleteTable(name string) string {
 	return fmt.Sprintf("add table inet %s\ndelete table inet %s\n", name, name)
 }
 
-// dynamicTable is the name of c's dynamic table.
-func (c *Compiler) dynamicTable() string {
+// DynamicTable is the name of c's dynamic table.
+func (c *Compiler) DynamicTable() string {
 	if c.TableName == "" {
 		return defaultTableName
 	}
@@ -69,13 +69,13 @@ func (c *Compiler) dynamicTable() string {
 
 // policyTable is the name of the table c's rulesets replace.
 func (c *Compiler) policyTable() string {
-	return PolicyTable(c.dynamicTable())
+	return PolicyTable(c.DynamicTable())
 }
 
 // DeleteTables returns the script that removes both tables c owns, present
 // or not.
 func (c *Compiler) DeleteTables() string {
-	return DeleteTable(c.policyTable()) + DeleteTable(c.dynamicTable())
+	return DeleteTable(c.policyTable()) + DeleteTable(c.DynamicTable())
 }
 
 // RetireTables returns the script that removes the tables c installed when
@@ -83,7 +83,7 @@ func (c *Compiler) DeleteTables() string {
 // It must precede next's ruleset in one transaction: the new names can
 // coincide with an old table of the other role.
 func (c *Compiler) RetireTables(next *Compiler) string {
-	if c.dynamicTable() == next.dynamicTable() {
+	if c.DynamicTable() == next.DynamicTable() {
 		return ""
 	}
 	return c.DeleteTables()
@@ -93,7 +93,7 @@ func (c *Compiler) RetireTables(next *Compiler) string {
 // connection revocation, creating the empty sets if they do not exist yet.
 func (c *Compiler) ClearBlocks() string {
 	var buf bytes.Buffer
-	table := c.dynamicTable()
+	table := c.DynamicTable()
 	writeDynamicSets(&buf, table)
 	for _, set := range dynamicSets() {
 		buf.WriteString(fmt.Sprintf("flush set inet %s %s\n", table, set[0]))
@@ -122,11 +122,11 @@ func (c *Compiler) writeDynamicTable(buf *bytes.Buffer, locals []rules.LocalServ
 		return err
 	}
 	exempt := map[string][]string{"input": exemptIn, "output": exemptOut}
-	table := c.dynamicTable()
+	table := c.DynamicTable()
 	writeDynamicSets(buf, table)
 	buf.WriteString(fmt.Sprintf("add chain inet %s revocations\n", table))
 	for _, ch := range dynamicChains {
-		buf.WriteString(fmt.Sprintf("add chain inet %s %s { type filter hook %s priority -10; policy accept; }\n", table, ch.name, ch.hook))
+		buf.WriteString(fmt.Sprintf("add chain inet %s %s { type filter hook %s priority %d; policy accept; }\n", table, ch.name, ch.hook, dynamicChainPriority))
 	}
 	buf.WriteString(fmt.Sprintf("flush chain inet %s revocations\n", table))
 	for _, ch := range dynamicChains {

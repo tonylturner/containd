@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
@@ -68,6 +69,10 @@ type recordingApplier struct {
 func (r *recordingApplier) Apply(ctx context.Context, ruleset string) error {
 	r.ruleset = ruleset
 	return r.err
+}
+
+func (r *recordingApplier) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	return enforce.TableLayout{}, nil
 }
 
 func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {

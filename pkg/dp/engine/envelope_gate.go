@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -62,9 +63,10 @@ func (g *envelopeGate) sampleOpen(queue int) bool {
 }
 
 // apply compiles snap in the current envelope state and installs it. The
-// compiler's envelope state is set here and nowhere else. When comp owns
-// differently named tables than the installed ruleset, the same transaction
-// removes the installed ones; the returned ruleset is comp's alone.
+// compiler's envelope state is set here and nowhere else. The transaction
+// also converges comp's dynamic table from its live layout and, when comp
+// owns differently named tables than the installed ruleset, removes the
+// installed ones; the returned ruleset is comp's alone.
 func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applier enforce.Applier, snap *rules.Snapshot) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -77,11 +79,15 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	if applier == nil {
 		return compiled, errors.New("no applier configured")
 	}
+	live, err := applier.ReadTable(ctx, comp.DynamicTable())
+	if err != nil {
+		return compiled, fmt.Errorf("read nft table %s: %w", comp.DynamicTable(), err)
+	}
 	retire := ""
 	if g.comp != nil {
 		retire = g.comp.RetireTables(comp)
 	}
-	if err := applier.Apply(ctx, retire+compiled); err != nil {
+	if err := applier.Apply(ctx, comp.InstallScript(live, retire, compiled)); err != nil {
 		return compiled, err
 	}
 	g.comp, g.applier = comp, applier

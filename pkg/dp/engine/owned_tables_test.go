@@ -4,9 +4,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -139,5 +141,39 @@ func TestClearBlocksFlushesOnlyWhileEnforcing(t *testing.T) {
 	}
 	if _, n := nft.last(); n != 1 {
 		t.Fatal("clearing blocks without enforcement wrote nft")
+	}
+}
+
+func TestApplyConvergesTheLiveDynamicTable(t *testing.T) {
+	nft := &nftModel{live: enforce.TableLayout{Exists: true, Chains: []enforce.LiveChain{
+		{Name: "input", Type: "filter", Hook: "input", Policy: "drop"},
+	}}}
+	e := tableEngine(t, nft, true, "")
+	snap := rules.Snapshot{Default: rules.ActionDeny}
+	if err := e.ApplyRules(context.Background(), snap); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := e.compiler.CompileFirewall(&snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "flush chain inet containd input\ndelete chain inet containd input\n" + compiled
+	if got, _ := nft.last(); got != want {
+		t.Fatalf("apply = %q, want %q", got, want)
+	}
+	if st := e.RulesetStatus(); st.Ruleset != compiled {
+		t.Fatalf("status records %q, want the compiled ruleset", st.Ruleset)
+	}
+}
+
+func TestApplyFailsWhenTheDynamicTableCannotBeRead(t *testing.T) {
+	nft := &nftModel{readErr: errors.New("nft: permission denied")}
+	e := tableEngine(t, nft, true, "")
+	err := e.ApplyRules(context.Background(), rules.Snapshot{})
+	if err == nil || !strings.Contains(err.Error(), "read nft table containd") {
+		t.Fatalf("ApplyRules error = %v", err)
+	}
+	if _, n := nft.last(); n != 0 || e.CurrentRules() != nil || e.RulesetStatus().Error == "" {
+		t.Fatal("an unread table was written or the snapshot swapped")
 	}
 }

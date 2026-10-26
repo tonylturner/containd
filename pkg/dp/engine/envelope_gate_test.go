@@ -17,10 +17,12 @@ import (
 )
 
 // nftModel replays applied scripts like the kernel would for the envelope
-// chain of table containd_policy: replacing or deleting the table sets or removes
-// it, a switch replaces its rule.
+// chain of table containd_policy: replacing or deleting the table sets or
+// removes it, a switch replaces its rule.
 type nftModel struct {
 	mu       sync.Mutex
+	live     enforce.TableLayout // what ReadTable reports
+	readErr  error               // what ReadTable fails with
 	scripts  []string
 	envelope string // "", "drop" or "queue N"
 	failNext bool
@@ -46,6 +48,12 @@ func (m *nftModel) Apply(_ context.Context, script string) error {
 		m.envelope = envelopeState(script[i+len(add):])
 	}
 	return nil
+}
+
+func (m *nftModel) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.live, m.readErr
 }
 
 func envelopeState(rule string) string {

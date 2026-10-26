@@ -16,10 +16,16 @@ through `GET /api/v1/dataplane/ruleset` and check for apply errors.
 
 The engine owns only its own nftables tables, named after `dataplane.enforceTable`
 (default `containd`). Each apply replaces the policy table
-`inet <enforceTable>_policy` in one transaction; other tables in the namespace, such as Docker's embedded DNS
-rules or the DHCP redirect table `inet containd_dhcp`, are left untouched.
-Disabling enforcement deletes the tables the running engine installed. Renaming
-the table replaces the old tables with the new ones on the next apply.
+`inet <enforceTable>_policy` in one transaction and keeps the persistent table
+`inet <enforceTable>` (temporary blocks and revocations, below). Other tables in
+the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
+`inet containd_dhcp`, are left untouched. Everything else in
+`inet <enforceTable>`, such as the policy chains and sets an older containd
+version kept there, is removed on the next apply; flow blocks from an older
+version carry over with their remaining timeout. Disabling enforcement deletes
+the tables the running engine installed. Renaming the table replaces the old
+tables with the new ones on the next apply. A table name starts with a letter
+or underscore, followed by letters, digits, underscores and hyphens.
 
 nftables cannot evaluate identity or schedule predicates. On a rule it decides,
 an `ALLOW` with either predicate is not installed, and a `DENY` drops without

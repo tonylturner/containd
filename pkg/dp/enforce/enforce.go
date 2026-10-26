@@ -56,7 +56,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if snap == nil {
 		return "", errors.New("snapshot is nil")
 	}
-	if err := ValidateTableName(c.dynamicTable()); err != nil {
+	if err := ValidateTableName(c.DynamicTable()); err != nil {
 		return "", err
 	}
 	table := c.policyTable()
@@ -568,9 +568,11 @@ func validateCIDRList(sources []string) ([]string, error) {
 	return out, nil
 }
 
-// Applier installs an nftables ruleset.
+// Applier installs an nftables ruleset and reads the live layout of a
+// dynamic table, so an install can converge it (see InstallScript).
 type Applier interface {
 	Apply(ctx context.Context, ruleset string) error
+	ReadTable(ctx context.Context, table string) (TableLayout, error)
 }
 
 // NftApplier uses the system `nft` binary.
