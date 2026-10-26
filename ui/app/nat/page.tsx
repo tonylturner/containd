@@ -341,7 +341,7 @@ function PortForwardsCard({
   onSave: (cfg: NATConfig) => void;
 }) {
   const [items, setItems] = useState<PortForward[]>(nat.portForwards ?? []);
-  const [newIngress, setNewIngress] = useState("wan");
+  const [ingressChoice, setIngressChoice] = useState("");
   const [newProto, setNewProto] = useState<"tcp" | "udp">("tcp");
   const [newListen, setNewListen] = useState("");
   const [newDestIp, setNewDestIp] = useState("");
@@ -360,11 +360,20 @@ function PortForwardsCard({
     .filter((z) => z.value);
   zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
+  // The chosen ingress zone while it exists; otherwise the zone named "wan"
+  // if there is one, else none, and Add asks for a choice.
+  const hasZone = (name: string) => zoneOptions.some((z) => z.value === name);
+  const newIngress = hasZone(ingressChoice) ? ingressChoice : hasZone("wan") ? "wan" : "";
+
   const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
 
   // One banner serves the whole row, so each message names its field.
   async function add() {
     setError(null);
+    if (!newIngress) {
+      setError("Ingress zone is required.");
+      return;
+    }
     if (!newListen.trim()) {
       setError("Listen port is required.");
       return;
@@ -394,7 +403,7 @@ function PortForwardsCard({
     const pf: PortForward = {
       id,
       enabled: true,
-      ingressZone: newIngress.trim(),
+      ingressZone: newIngress,
       proto: newProto,
       listenPort: lp,
       destIp: newDestIp.trim(),
@@ -475,10 +484,16 @@ function PortForwardsCard({
         {isAdmin() && (
           <div className="grid gap-2 md:grid-cols-6">
             <select
+              aria-label="Ingress zone"
               value={newIngress}
-              onChange={(e) => setNewIngress(e.target.value)}
+              onChange={(e) => setIngressChoice(e.target.value)}
               className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             >
+              {!newIngress && (
+                <option value="" disabled>
+                  ingress: choose a zone
+                </option>
+              )}
               {zoneOptions.map((z) => (
                 <option key={z.value} value={z.value}>
                   ingress:{z.label}
