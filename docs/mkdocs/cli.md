@@ -1,10 +1,22 @@
-# CLI Design
+# CLI
 
-The CLI mirrors appliance-style workflows. Commands will call control-plane APIs/config store for configuration and show operations.
+Use `containd cli` or the `configure` symlink inside the appliance to open the
+interactive CLI and log in to management. The authenticated web console and
+admin SSH console expose the same commands. For the starter's default SSH port:
 
-## Current CLI
+```sh
+ssh -p 2222 containd@localhost
+```
 
-- Command registry in `pkg/cli` with appliance-style commands:
+Use `help`, `show help`, or `set help` to discover commands. Configuration
+commands stage candidate edits: review `show diff`, then `commit` or
+`commit confirmed [ttl_seconds]`. Use `confirm` to retain a confirmed commit and
+`rollback` to restore the previous running configuration. Listener changes can
+require a restart; committing does not rebind management sockets.
+
+## Command reference
+
+- Inspection and help:
   - `show version`
   - `help` / `show help` / `set help`
   - `show zones`
@@ -12,7 +24,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 - Local diagnostics:
   - `show ip route` (Linux only)
   - `show ip rule` (Linux only)
-  - `show neighbors` (Linux only; IPv4 ARP for now)
+  - `show neighbors` (Linux only; IPv4 ARP)
   - `diag ping <host> [count]`
   - `diag traceroute <host> [max_hops]`
   - `diag reach <src_iface> <dst_host|dst_ip|dst_iface> [tcp_port]` (legacy; TCP)
@@ -72,16 +84,22 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `import config <path>`
 - Backed by the management API and config store; exposed via SSH and the in-app console.
 
-## Auth (current)
+## Authentication
 
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
 Environment variables (common):
-- `CONTAIND_LAB_MODE=1` disables auth checks (lab/dev only).
-- `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification (required when not in lab mode).
+- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and disables
+  password changes. Protected API routes still require a bearer token or cookie.
+  With a JWT secret, the token must validate; without a secret, **any nonempty
+  token passes**. Lab requests receive admin access rather than ordinary session
+  and role enforcement. Use only in isolated, disposable environments; see
+  [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).
+- `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification. Compose requires
+  a non-empty value even for labs; follow [onboarding](docker-compose.md#quickstart).
 - `CONTAIND_COOKIE_SECURE=1` forces the `Secure` flag on the auth cookie (use when serving over HTTPS).
 
-Roles (current):
+Roles:
 - `admin` (full access)
 - `view` (read-only)
 
@@ -114,10 +132,11 @@ and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
 - `--direction <request|response>` — select the session half.
 - `--mode <learn|enforce>` — choose the rule's ICS mode.
 
-Example:
+Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
+single-point) in server responses for common address 1 and the selected IOAs:
 
 ```text
-set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 45,46 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
 ```
 
 `show firewall ics-rules` displays these IEC fields alongside the existing
