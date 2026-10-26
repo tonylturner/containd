@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine URL from the same listener setting, including with a reservation.
 - Update Next.js to 15.5.28 and PostCSS to 8.5.31, clearing the critical and
   high npm advisories in the UI build.
+- Upgrade the UI to Tailwind CSS 4.3.3 with no visual change. `npm audit`
+  now reports no vulnerabilities.
 
 ### Added
 
