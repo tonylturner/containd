@@ -132,6 +132,10 @@ ClamAV mode:
   The Compose files mount the named volume `clamav-db` there, so replacing
   the container does not download them again. A split deployment mounts such
   a volume on the engine service; management never uses the databases.
+  When the engine runs as root, each ClamAV apply gives the directory and
+  everything in it to the image's `clamav` account, so a volume kept from
+  an image whose account had another uid keeps working. Symbolic links are
+  re-owned, never followed.
 
 Applying AV fails, and the commit reports a `services:` warning, when the
 backend is missing, clamd exits or does not answer `PING` within three

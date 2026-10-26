@@ -355,18 +355,6 @@ func (m *AVManager) daemonAccount() (name string, uid, gid int, ok bool) {
 	return u.Username, uid, gid, true
 }
 
-// prepareDir creates dir and, when daemons run as their own account, gives
-// it to that account so clamd and FreshClam can write there.
-func (m *AVManager) prepareDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if _, uid, gid, ok := m.daemonAccount(); ok {
-		return os.Chown(dir, uid, gid)
-	}
-	return nil
-}
-
 func exitText(err error) string {
 	if err == nil {
 		return "ok"
