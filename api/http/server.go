@@ -314,6 +314,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
 		protected.POST("/pcap/analyze", requireAdmin(), analyzePCAPUploadHandler(engine))
 		protected.POST("/pcap/analyze/:name", requireAdmin(), analyzePCAPNameHandler(engine))
+		protected.GET("/diagnostics/iec104", iec104DiagnosticsHandler(engine))
 		protected.GET("/inventory", listInventoryHandler(engine))
 		protected.GET("/inventory/:ip", getInventoryAssetHandler(engine))
 		protected.DELETE("/inventory", requireAdmin(), clearInventoryHandler(engine))

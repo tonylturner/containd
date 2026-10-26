@@ -40,6 +40,53 @@ components:
       name: containd_token
       description: Session cookie set by login; cookie-authenticated browser writes require an allowed Origin.
   schemas:
+    IEC104Pressure:
+      type: object
+      description: Observational pressure; totals persist until the engine process restarts.
+      required: [heldPackets, heldBytes, oldestPendingSeconds, activeSessions, trackedSessions, limits, aborts, resetWorkerRejections, verdictFailures, injectorFailures]
+      properties:
+        heldPackets: { type: integer, minimum: 0 }
+        heldBytes: { type: integer, minimum: 0, description: Held payload bytes including retransmissions }
+        oldestPendingSeconds: { type: number, minimum: 0, description: Zero when no packet is held }
+        activeSessions: { type: integer, minimum: 0, description: Live incarnations including replacement handshakes; zero after capture shutdown }
+        trackedSessions: { type: integer, minimum: 0, description: Tuple slots including closed sessions and abort tombstones }
+        limits:
+          type: object
+          description: Fixed limits, not configurable settings
+          required: [heldPackets, heldPacketsPerSession, heldBytesPerSession, pendingSeconds, sessions, resetWorkerJobs]
+          properties:
+            heldPackets: { type: integer, enum: [256] }
+            heldPacketsPerSession: { type: integer, enum: [32] }
+            heldBytesPerSession: { type: integer, enum: [65536] }
+            pendingSeconds: { type: number, enum: [1] }
+            sessions: { type: integer, enum: [4096] }
+            resetWorkerJobs: { type: integer, enum: [256], description: Shared reset and dynamic-block worker queue }
+        aborts:
+          type: object
+          description: Session aborts plus fail-closed admission or steering rejections, per occurrence (not unique denied commands)
+          required: [deny, timeout, bound, midstream, fail_close, injector, stream, framing, transport, policy, queue, unhealthy]
+          additionalProperties: false
+          properties:
+            deny: { type: integer, format: int64, minimum: 0 }
+            timeout: { type: integer, format: int64, minimum: 0 }
+            bound: { type: integer, format: int64, minimum: 0 }
+            midstream: { type: integer, format: int64, minimum: 0 }
+            fail_close: { type: integer, format: int64, minimum: 0 }
+            injector: { type: integer, format: int64, minimum: 0 }
+            stream: { type: integer, format: int64, minimum: 0 }
+            framing: { type: integer, format: int64, minimum: 0 }
+            transport: { type: integer, format: int64, minimum: 0 }
+            policy: { type: integer, format: int64, minimum: 0 }
+            queue: { type: integer, format: int64, minimum: 0 }
+            unhealthy: { type: integer, format: int64, minimum: 0 }
+        injectorFailures: { type: integer, format: int64, minimum: 0, description: Failed TCP reset injection attempts }
+        resetWorkerRejections: { type: integer, format: int64, minimum: 0 }
+        verdictFailures:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Shared inline verdict failures plus rejected IEC holdback settlement requests; intentional queue closures are excluded
+
     IDSBankSummary:
       type: object
       required: [count, sha256]
@@ -1748,6 +1795,23 @@ components:
       schema: {type: string}
 
 paths:
+  /diagnostics/iec104:
+    get:
+      tags: [Diagnostics]
+      summary: Read IEC 104 holdback pressure and fixed limits
+      description: Separate from IEC enforcement health. Available to authenticated readers; engine unavailability is an error, never zero pressure.
+      responses:
+        "200":
+          description: Current pressure and process-lifetime totals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IEC104Pressure" }
+        "503":
+          description: Engine diagnostics unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   # ── Health (unauthenticated) ──────────────────────────────────────
   /health:
     get:

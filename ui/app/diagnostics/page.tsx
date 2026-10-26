@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
+import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -206,6 +207,7 @@ export default function DiagnosticsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        <div className="lg:col-span-2"><IECPressurePanel /></div>
         <Card title="Ping" padding="lg">
           <div className="grid gap-3 md:grid-cols-3">
             <input
