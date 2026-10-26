@@ -71,6 +71,11 @@ func (c *Config) Validate() error {
 	if err := validateServices(c.Services, c.Interfaces, c.Zones); err != nil {
 		return err
 	}
+	if c.Services.DHCP.Enabled {
+		if err := validateDHCPListenIfaceNames(c.Services.DHCP.ListenIfaces, c.Interfaces); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -239,6 +244,9 @@ func validateInterfaceIdentity(iface Interface, zoneSet map[string]struct{}, sta
 		return err
 	}
 	if err := validateInterfaceDeviceBinding(iface, state); err != nil {
+		return err
+	}
+	if err := validateKernelInterfaceName(iface); err != nil {
 		return err
 	}
 	if iface.Zone != "" {

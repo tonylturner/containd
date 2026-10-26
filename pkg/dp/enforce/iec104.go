@@ -65,7 +65,7 @@ func isIEC104Rule(e rules.Entry) bool {
 // action: the engine judges the content. These lines go before the
 // conntrack established accept and every ordinary accept, so neither
 // direction of an envelope session can bypass inspection.
-func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot) {
+func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot, zones zoneIndex) error {
 	entries := make([]rules.Entry, 0, len(snap.Firewall))
 	for _, e := range snap.Firewall {
 		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
@@ -74,10 +74,15 @@ func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot)
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		for _, line := range compileIEC104Steering(e, snap.ZoneIfaces) {
+		steering, err := compileIEC104Steering(e, zones)
+		if err != nil {
+			return err
+		}
+		for _, line := range steering {
 			lines(line)
 		}
 	}
+	return nil
 }
 
 // iec104EnvelopeVerdict is the one rule of IEC104EnvelopeChain: the marked
@@ -109,31 +114,29 @@ func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
 }
 
 // compileIEC104Steering returns the client-to-server and server-to-client
-// steering lines for one IEC104 rule, which count into the rule's counter.
-func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string) []string {
+// steering lines for one IEC104 rule, per address family, which count into
+// the rule's counter. A rule that matches nothing has none.
+func compileIEC104Steering(e rules.Entry, zones zoneIndex) ([]string, error) {
+	scopes, err := addrScopes(e)
+	if err != nil {
+		return nil, err
+	}
+	in, inOK := zones.clause("iifname", e.SourceZones)
+	out, outOK := zones.clause("oifname", e.DestZones)
+	if !inOK || !outOK {
+		return nil, nil
+	}
+	replyIn, _ := zones.clause("iifname", e.DestZones)
+	replyOut, _ := zones.clause("oifname", e.SourceZones)
 	verdict := counterStmt(e.ID) + " jump " + IEC104EnvelopeChain
-	steer := func(inZones, outZones []string, port string, src, dst []string) string {
-		parts := []string{}
-		if c := zoneClause("iifname", inZones, zoneIfaces); c != "" {
-			parts = append(parts, c)
-		}
-		if c := zoneClause("oifname", outZones, zoneIfaces); c != "" {
-			parts = append(parts, c)
-		}
-		parts = append(parts, port)
-		if len(src) > 0 {
-			parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(src, ", ")))
-		}
-		if len(dst) > 0 {
-			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(dst, ", ")))
-		}
-		return strings.Join(append(parts, verdict), " ")
-	}
 	port := strconv.Itoa(iec104Port)
-	return []string{
-		steer(e.SourceZones, e.DestZones, "tcp dport "+port, e.Sources, e.Destinations),
-		steer(e.DestZones, e.SourceZones, "tcp sport "+port, e.Destinations, e.Sources),
+	var lines []string
+	for _, s := range scopes {
+		lines = append(lines,
+			joinClauses(append(append([]string{in, out, "tcp dport " + port}, s.header(false)...), verdict)),
+			joinClauses(append(append([]string{replyIn, replyOut, "tcp sport " + port}, s.header(true)...), verdict)))
 	}
+	return lines, nil
 }
 
 // admitsIEC104Port reports whether a rule's protocol list matches TCP

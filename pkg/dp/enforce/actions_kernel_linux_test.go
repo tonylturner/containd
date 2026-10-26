@@ -78,6 +78,14 @@ while True:
  else:
   d,a=s.recvfrom(2048); f.write('dgram\n'); %s
 `, path, socketFamily(addr), proto, addr, port, proto, proto, answer)
+	l.runTarget(t, body)
+	return lineCounter(t, path)
+}
+
+// runTarget runs a Python server in the target namespace until the test
+// ends; it must print one line once it is ready.
+func (l *netnsLab) runTarget(t *testing.T, body string) {
+	t.Helper()
 	server := exec.CommandContext(l.ctx, "ip", "netns", "exec", l.target, "python3", "-u", "-c", body)
 	stdout, err := server.StdoutPipe()
 	if err != nil {
@@ -88,8 +96,12 @@ while True:
 	}
 	t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
 	if !bufio.NewScanner(stdout).Scan() {
-		t.Fatal("recorder did not start")
+		t.Fatal("target server did not start")
 	}
+}
+
+// lineCounter counts the lines a target server has written to path.
+func lineCounter(t *testing.T, path string) func() int {
 	return func() int {
 		data, err := os.ReadFile(path)
 		if err != nil && !os.IsNotExist(err) {
@@ -260,6 +272,55 @@ print(time.monotonic()-t)
 		t.Logf("established flow: %d of 40 datagrams passed in %.4fs", got, elapsed)
 		if limit := 5 + int(10*elapsed) + 1; got < 5 || got > limit {
 			t.Fatalf("established flow: target received %d of 40 in %.3fs, want 5 to %d", got, elapsed, limit)
+		}
+		if rc := lab.counts(t, c, snap)["police"]; rc.ExcessDrops == nil || *rc.ExcessDrops != uint64(40-got) {
+			t.Fatalf("excess counter = %v, want %d", rc.ExcessDrops, 40-got)
+		}
+	})
+
+	// Replies are metered too, each direction in its own bucket: a reply
+	// burst beyond the limit is dropped and counted as excess, and leaves
+	// the opener's direction its own tokens.
+	t.Run("rate limit replies", func(t *testing.T) {
+		snap := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
+			{ID: "allow", Action: rules.ActionAllow, Protocols: []rules.Protocol{{Name: "udp", Port: "18106"}}},
+			{ID: "police", Action: rules.ActionRateLimit, Protocols: []rules.Protocol{{Name: "udp", Port: "18106"}},
+				RateLimit: &rules.RateLimit{PacketsPerSecond: 1, Burst: 5}},
+		}}
+		c := NewCompiler()
+		lab.apply(t, c, snap)
+		path := filepath.Join(t.TempDir(), "received")
+		lab.runTarget(t, fmt.Sprintf(`import socket
+f=open(%q,'a',buffering=1)
+s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind((%q,18106))
+print('ready',flush=True)
+while True:
+ d,a=s.recvfrom(64); f.write('dgram\n')
+ if d==b'go':
+  for i in range(40): s.sendto(b'r',a)
+`, path, actTarget4))
+		seen := lineCounter(t, path)
+		out := lab.runClient(t, fmt.Sprintf(`import socket
+s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect((%q,18106)); s.send(b'go'); s.settimeout(0.5)
+n=0
+try:
+ while True: s.recv(64); n+=1
+except socket.timeout:
+ pass
+for i in range(4): s.send(b'x')
+print(n)
+`, actTarget4))
+		got, err := strconv.Atoi(out)
+		if err != nil {
+			t.Fatal(out)
+		}
+		time.Sleep(300 * time.Millisecond)
+		t.Logf("reply burst: %d of 40 datagrams passed; the target received %d", got, seen())
+		if got < 5 || got > 6 {
+			t.Fatalf("client received %d of 40 replies, want the burst of 5 (6 with a refill)", got)
+		}
+		if n := seen(); n != 5 {
+			t.Fatalf("target received %d datagrams, want all 5: the replies took the opener's tokens", n)
 		}
 		if rc := lab.counts(t, c, snap)["police"]; rc.ExcessDrops == nil || *rc.ExcessDrops != uint64(40-got) {
 			t.Fatalf("excess counter = %v, want %d", rc.ExcessDrops, 40-got)

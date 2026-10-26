@@ -28,6 +28,11 @@ import (
 // one that a conditional DENY's opened window covers stops. Only deciding
 // rules (rules.DecisionOrder) take part: effects never admit or stop a
 // connection.
+//
+// A queued conditional ALLOW (rechecksQueued) takes part too: its queue line
+// sees only the client's packets, which the engine decides, so the replies
+// and the server's own packets of its connections are rechecked against the
+// rule's predicates in the kernel.
 
 const (
 	conditionalScopeChain  = "conditional_scope"
@@ -39,6 +44,10 @@ type predicates struct {
 	snap       *rules.Snapshot
 	queueID    int
 	identities identityIndex
+	zones      zoneIndex
+	// recheck is set once writeRecheckChains has declared the recheck
+	// chains.
+	recheck bool
 }
 
 func newPredicates(snap *rules.Snapshot, queueID int) (*predicates, error) {
@@ -46,7 +55,11 @@ func newPredicates(snap *rules.Snapshot, queueID int) (*predicates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &predicates{snap: snap, queueID: queueID, identities: idx}, nil
+	zones, err := newZoneIndex(snap.ZoneIfaces)
+	if err != nil {
+		return nil, err
+	}
+	return &predicates{snap: snap, queueID: queueID, identities: idx, zones: zones}, nil
 }
 
 func conditional(e rules.Entry) bool {
@@ -57,6 +70,19 @@ func conditional(e rules.Entry) bool {
 // not queued to the engine.
 func (p *predicates) kernelDecided(e rules.Entry) bool {
 	return e.Action.Decides() && !queuedToEngine(e, p.queueID)
+}
+
+// rechecksQueued reports whether e is a conditional ALLOW queued to the
+// engine whose replies the kernel rechecks. IEC104 rules are not: their
+// steering queues both directions of a session to the engine.
+func (p *predicates) rechecksQueued(e rules.Entry) bool {
+	return queuedToEngine(e, p.queueID) && !isIEC104Rule(e) && e.Action == rules.ActionAllow && conditional(e)
+}
+
+// kernelGuarded reports whether the kernel evaluates e's predicates: on
+// e's own lines, or on the recheck of its connections' replies.
+func (p *predicates) kernelGuarded(e rules.Entry) bool {
+	return !queuedToEngine(e, p.queueID) || p.rechecksQueued(e)
 }
 
 // alternative is one predicate clause; family is the address family its
@@ -89,54 +115,53 @@ func (p *predicates) alternatives(e rules.Entry, ct bool) ([]alternative, error)
 	return out, nil
 }
 
-// clauses returns the clauses of alts.
-func clauses(alts []alternative) []string {
-	out := make([]string, 0, len(alts))
-	for _, a := range alts {
-		out = append(out, a.clause)
-	}
-	return out
-}
-
-// lineFamily returns the address family a compiled line is restricted to
-// by meta nfproto (RATE_LIMIT meter lines, see meterForms), -1 for none.
-func lineFamily(line string) int {
-	switch {
-	case strings.HasPrefix(line, "meta nfproto ipv4 "):
-		return 0
-	case strings.HasPrefix(line, "meta nfproto ipv6 "):
-		return 1
-	default:
-		return -1
-	}
-}
-
 // guard adds e's predicates to the lines compileEntry emitted for it, for
-// every action. A queued rule's lines are unchanged. RATE_LIMIT lines meter
-// both directions of established flows, so they match the connection's
-// opener from conntrack; every other line sees only a connection's first
-// packets, sent by the opener. A line restricted to one address family
-// takes only that family's identity clauses, and a predicate nothing
+// every action. A queued rule's lines are unchanged. A line that matches
+// both directions of a connection (ruleLine.ct) matches its opener from
+// conntrack; every other line sees only packets it takes for a
+// connection's first, sent by the opener. A line restricted to one address
+// family takes only that family's identity clauses, and a predicate nothing
 // satisfies leaves no line.
-func (p *predicates) guard(e rules.Entry, lines []string) ([]string, error) {
+func (p *predicates) guard(e rules.Entry, lines []ruleLine) ([]string, error) {
+	out := make([]string, 0, len(lines))
 	if queuedToEngine(e, p.queueID) || !conditional(e) {
-		return lines, nil
+		for _, l := range lines {
+			out = append(out, l.text)
+		}
+		return out, nil
 	}
-	alts, err := p.alternatives(e, e.Action == rules.ActionRateLimit)
+	alts, err := p.alternatives(e, false)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(lines)*len(alts))
-	for _, line := range lines {
-		fam := lineFamily(line)
-		for _, alt := range alts {
-			if fam >= 0 && alt.family >= 0 && alt.family != fam {
-				continue
-			}
-			out = append(out, strings.TrimSpace(alt.clause+" "+line))
+	ctAlts, err := p.alternatives(e, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range lines {
+		use := alts
+		if l.ct {
+			use = ctAlts
+		}
+		for _, alt := range inFamily(use, l.family) {
+			out = append(out, joinClauses([]string{alt.clause, l.text}))
 		}
 	}
 	return out, nil
+}
+
+// inFamily returns the alternatives a line restricted to family can take.
+func inFamily(alts []alternative, family int) []alternative {
+	if family == familyAny {
+		return alts
+	}
+	var out []alternative
+	for _, a := range alts {
+		if a.family < 0 || a.family == family {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // scheduleSets returns the time sets the rules nftables guards reference,
@@ -144,7 +169,7 @@ func (p *predicates) guard(e rules.Entry, lines []string) ([]string, error) {
 func (p *predicates) scheduleSets() []scheduleSet {
 	byName := map[string]scheduleSet{}
 	for _, e := range p.snap.Firewall {
-		if queuedToEngine(e, p.queueID) || !e.HasSchedulePredicate() {
+		if !p.kernelGuarded(e) || !e.HasSchedulePredicate() {
 			continue
 		}
 		// An invalid schedule fails CompileFirewall in alternatives.
@@ -166,7 +191,7 @@ func (p *predicates) writeSets(buf *bytes.Buffer, c *Compiler) error {
 	var ids []identitySet
 	seen := map[identitySet]bool{}
 	for _, e := range p.snap.Firewall {
-		if queuedToEngine(e, p.queueID) {
+		if !p.kernelGuarded(e) {
 			continue
 		}
 		for _, set := range p.identities.identitySets(e) {
@@ -189,29 +214,22 @@ func (p *predicates) writeSets(buf *bytes.Buffer, c *Compiler) error {
 	return nil
 }
 
-// rechecks reports whether established connections need deciding again:
-// some kernel-decided rule is conditional.
-func (p *predicates) rechecks() bool {
-	return slices.ContainsFunc(p.snap.Firewall, func(e rules.Entry) bool { return p.kernelDecided(e) && conditional(e) })
-}
-
-// writeRecheckJump sends established packets to the recheck, when needed.
-// It goes before the established accept of the forward chain.
+// writeRecheckJump sends established packets to the recheck, when
+// writeRecheckChains declared it. It goes before the established accept of
+// the forward chain.
 func (p *predicates) writeRecheckJump(buf *bytes.Buffer) {
-	if p.rechecks() {
+	if p.recheck {
 		buf.WriteString("    ct state established jump " + conditionalScopeChain + ";\n")
 	}
 }
 
 // writeRecheckChains declares the recheck chains, when needed: the scope
-// chain sends established packets in the scope of a conditional rule to the
-// policy chain, which decides the connection's original tuple as the
-// forward chain decides a new connection. return passes the packet on to
-// the established accept.
+// chain sends established packets in the scope of a conditional rule
+// (kernel-decided, or a queued ALLOW) to the policy chain, which decides
+// the connection's original tuple as the forward chain decides a new
+// connection. return passes the packet on to the established accept. No
+// conditional rule that can match anything, no recheck.
 func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
-	if !p.rechecks() {
-		return nil
-	}
 	var entries []rules.Entry
 	for _, i := range rules.DecisionOrder(p.snap.Firewall) {
 		entries = append(entries, p.snap.Firewall[i])
@@ -224,14 +242,28 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 			}
 		}
 	}
+	unguarded := []alternative{{family: familyAny}}
 	// Port forwards admit their connections ahead of every rule; the
-	// engine decides the connections of queued rules.
+	// engine decides the client messages of queued rules, and a queued
+	// conditional ALLOW admits the rest of its connections while its
+	// predicates hold.
 	policy = append(policy, "ct status dnat return")
 	for _, e := range entries {
 		if !queuedToEngine(e, p.queueID) || isIEC104Rule(e) {
 			continue
 		}
-		lines, err := p.ctLines(e, []string{""}, "return")
+		alts := unguarded
+		if p.rechecksQueued(e) {
+			lines, err := p.ctLines(e, unguarded, "goto "+conditionalPolicyChain)
+			if err != nil {
+				return err
+			}
+			add(&scope, lines)
+			if alts, err = p.alternatives(e, true); err != nil {
+				return err
+			}
+		}
+		lines, err := p.ctLines(e, alts, "return")
 		if err != nil {
 			return err
 		}
@@ -242,7 +274,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 			continue
 		}
 		if conditional(e) {
-			lines, err := p.ctLines(e, []string{""}, "goto "+conditionalPolicyChain)
+			lines, err := p.ctLines(e, unguarded, "goto "+conditionalPolicyChain)
 			if err != nil {
 				return err
 			}
@@ -252,12 +284,16 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		if err != nil {
 			return err
 		}
-		lines, err := p.ctLines(e, clauses(alts), recheckVerdict(e.Action))
+		lines, err := p.ctLines(e, alts, recheckVerdict(e.Action))
 		if err != nil {
 			return err
 		}
 		add(&policy, lines)
 	}
+	if len(scope) == 0 {
+		return nil
+	}
+	p.recheck = true
 	if p.snap.Default == rules.ActionAllow {
 		policy = append(policy, "return")
 	} else {
@@ -292,19 +328,16 @@ func recheckVerdict(a rules.Action) string {
 // ctLines lowers e's scope for an established packet of either direction:
 // the original tuple the forward chain saw on the connection's first packet,
 // read from conntrack (opener and post-DNAT server address and port), with
-// the zones swapped on replies. Each line carries one of alts.
-func (p *predicates) ctLines(e rules.Entry, alts []string, verdict string) ([]string, error) {
-	zoneIfaces := p.snap.ZoneIfaces
-	type direction struct {
-		clause  string
-		in, out []string
+// the zones swapped on replies (zoneIndex.ctDirections). Each line carries
+// one of alts in its address family. A rule that matches nothing has none.
+func (p *predicates) ctLines(e rules.Entry, alts []alternative, verdict string) ([]string, error) {
+	dirs, ok := p.zones.ctDirections(e)
+	if !ok {
+		return nil, nil
 	}
-	dirs := []direction{{"", e.SourceZones, e.DestZones}}
-	if len(e.SourceZones) > 0 || len(e.DestZones) > 0 {
-		dirs = []direction{
-			{"ct direction original", e.SourceZones, e.DestZones},
-			{"ct direction reply", e.DestZones, e.SourceZones},
-		}
+	scopes, err := addrScopes(e)
+	if err != nil {
+		return nil, err
 	}
 	protos := e.Protocols
 	if len(protos) == 0 {
@@ -317,16 +350,12 @@ func (p *predicates) ctLines(e rules.Entry, alts []string, verdict string) ([]st
 			if err != nil {
 				return nil, fmt.Errorf("entry %s: %w", e.ID, err)
 			}
-			parts := []string{d.clause, zoneClause("iifname", d.in, zoneIfaces), zoneClause("oifname", d.out, zoneIfaces), match}
-			if len(e.Sources) > 0 {
-				parts = append(parts, fmt.Sprintf("ct original ip saddr { %s }", strings.Join(e.Sources, ", ")))
-			}
-			if len(e.Destinations) > 0 {
-				parts = append(parts, fmt.Sprintf("ct reply ip saddr { %s }", strings.Join(e.Destinations, ", ")))
-			}
-			for _, alt := range alts {
-				for _, v := range verdictsFor(verdict, proto) {
-					out = append(out, joinClauses(append(append(append([]string(nil), parts...), alt), v...)))
+			for _, s := range scopes {
+				parts := append([]string{d.clause, d.in, d.out, match}, s.conntrack()...)
+				for _, alt := range inFamily(alts, s.family) {
+					for _, v := range verdictsFor(verdict, proto) {
+						out = append(out, joinClauses(append(append(append([]string(nil), parts...), alt.clause), v...)))
+					}
 				}
 			}
 		}

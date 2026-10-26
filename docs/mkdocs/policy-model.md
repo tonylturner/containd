@@ -13,7 +13,11 @@ engine runs:
 
 Zone firewall rules use the Linux nftables backend. Rules match zones,
 CIDRs/assets, transport/port ranges, and optional identity, schedule, and ICS
-predicates. Generic evaluation uses the firewall default action when nothing
+predicates. Sources and destinations may be IPv4 or IPv6 CIDRs, mixed in one
+rule: each address family matches its own addresses, so a rule whose sources
+are all IPv4 and destinations all IPv6 (or the reverse) matches nothing. A zone
+matches the interfaces assigned to it; a rule whose source or destination zones
+have no interfaces matches nothing. Generic evaluation uses the firewall default action when nothing
 decides. The default action is `ALLOW` or `DENY`; an omitted or empty default
 action means `DENY`.
 
@@ -59,12 +63,14 @@ decides an inspected ICS message drops it like `DENY` and blocks the flow.
 address, layer-4 protocol and, for TCP and UDP, both ports; on IPv4 and IPv6.
 `packetsPerSecond` is 1 to 1,000,000; `burst` is the bucket depth in packets, 0
 to 1,000,000, where 0 means `packetsPerSecond`. It meters every packet of a
-flow, established ones included, before NFQUEUE and IEC 104 steering. It never
+flow, established ones and replies included, before NFQUEUE and IEC 104
+steering: a flow is matched by its connection's original tuple, as its first
+packet was, and each direction has its own bucket. A packet without usable
+connection tracking state is matched as a connection's first packet. It never
 admits traffic. Each rule's meter tracks up to 65,536 tuples per address family
 and key; a tuple expires once idle long enough to refill its bucket, and while
 a meter is full, new tuples pass unmetered until entries expire. A rule with
-sources or destinations meters IPv4 only, because nftables matches rule
-addresses as IPv4.
+sources or destinations meters the address families they name.
 
 `TAG` labels are lower-case, 1 to 32 characters (`a-z`, `0-9`, `_`, `.`, `-`,
 starting with a letter or digit); a configuration uses at most 32 distinct
@@ -115,7 +121,8 @@ refills them as they run out, and again after a wall-clock step. If the engine
 stops planning, the windows fail closed when the plan runs out: a scheduled
 `ALLOW` stops matching and a scheduled `DENY` applies at all times. For ICS
 rules that NFQUEUE steers to the engine, the engine evaluates both predicates on
-each message.
+each client message, and nftables on the rest of the connection: replies and
+the server's own packets.
 
 The conditions also apply to established connections, in both directions.
 When a binding is removed or a window ends, a connection that only a
@@ -123,11 +130,17 @@ conditional `ALLOW` admitted stops passing. A connection that an unconditional
 `ALLOW` also admits keeps passing. When a scheduled `DENY` window opens, it
 stops the established connections it covers. The current policy decides those
 connections again by their original tuple, and connections outside the scope of
-any conditional rule keep the established fast path.
+any conditional rule keep the established fast path. This includes ICS
+connections steered to the engine: once a conditional ICS `ALLOW` no longer
+admits a connection, its replies and server packets stop too.
 
-A rule whose identities no bound address satisfies matches nothing. It is
-reported as a warning with its rule ID, the predicate `identity`, the action
-and the effect, in:
+### Rules that match nothing
+
+A rule matches nothing when no bound address satisfies its identities, when
+none of its source or destination zones has an interface, or when its sources
+and destinations share no address family. It is reported as a warning with its
+rule ID, the predicate (`identity`, `zone` with the `zones` concerned, or
+`addressFamily`), the action and the effect, in:
 
 - The firewall page's nftables ruleset preview, which lists the candidate's
   warnings.
