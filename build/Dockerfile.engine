@@ -20,7 +20,7 @@ RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
     -o /out/containd ./cmd/containd
 
 # Wolfi-based runtime with nftables (the only runtime dependency for the engine).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:08df5982c3d27e70a4ce1607e3bb9af09d746f8722cf135a7694afef879fc5a2
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7
 
 RUN apk update && apk add --no-cache nftables && rm -rf /var/cache/apk/*
 
