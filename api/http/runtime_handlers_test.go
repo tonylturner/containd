@@ -526,36 +526,36 @@ func TestRuntimeTelemetryFallbackAndUnavailablePaths(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/flows", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("flows without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("flows without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/protocols", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("proto stats without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("proto stats without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/top-talkers", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("top talkers without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("top talkers without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/anomalies", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("anomalies without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("anomalies without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/simulation", bytes.NewBufferString(`{"action":"start"}`))
 	req.Header.Set("Content-Type", "application/json")
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "simulation unavailable") {
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "simulation unavailable") {
 		t.Fatalf("simulation without engine: expected unavailable error, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -581,8 +581,12 @@ func TestRuntimeTelemetryGatewayErrorsAndStoreLoadFailures(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodGet, tc.path, nil)
 		s.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadGateway {
-			t.Fatalf("%s gateway error: expected 502, got %d body=%s", tc.name, rec.Code, rec.Body.String())
+		expected := http.StatusServiceUnavailable
+		if tc.name == "conntrack" {
+			expected = http.StatusBadGateway
+		}
+		if rec.Code != expected {
+			t.Fatalf("%s gateway error: expected %d, got %d body=%s", tc.name, expected, rec.Code, rec.Body.String())
 		}
 	}
 

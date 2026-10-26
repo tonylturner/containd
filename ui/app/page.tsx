@@ -48,6 +48,8 @@ export default function Home() {
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [clock, setClock] = useState("");
   const [simRunning, setSimRunning] = useState<boolean | null>(null);
+  const [simUnavailable, setSimUnavailable] = useState(false);
+  const [flowsUnavailable, setFlowsUnavailable] = useState(false);
   const [simToggling, setSimToggling] = useState(false);
 
   // Clock
@@ -67,9 +69,9 @@ export default function Home() {
       api.getDashboard(signal).then((r) => r && setData(r)).catch(() => {});
       api.listZones(signal).then((r) => r && setZones(r)).catch(() => {});
       api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
-      api.listFlows(100, signal).then((r) => r && setFlows(r)).catch(() => {});
+      api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
-      api.getSimulationStatus(signal).then((r) => r && setSimRunning(r.running)).catch(() => {});
+      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
       api.diffConfig().then((r) => {
         if (!r) return;
         const running = JSON.stringify(r.running ?? null);
@@ -94,11 +96,24 @@ export default function Home() {
       const r = simRunning
         ? await api.stopSimulation()
         : await api.startSimulation();
-      if (r) setSimRunning(r.running);
+      setSimUnavailable(r === null);
+      setSimRunning(r?.running ?? null);
     } finally {
       setSimToggling(false);
     }
   }, [simRunning]);
+
+  async function retrySimulation() {
+    const result = await api.getSimulationStatus();
+    setSimUnavailable(result === null);
+    setSimRunning(result?.running ?? null);
+  }
+
+  async function retryFlows() {
+    const result = await api.listFlows(100);
+    setFlowsUnavailable(result === null);
+    setFlows(result ?? []);
+  }
 
   const health = data?.health ?? null;
   const eventStats = data?.eventStats ?? null;
@@ -160,6 +175,7 @@ export default function Home() {
               />
             </Link>
           ))}
+          {simUnavailable && <div role="status" className="text-red-400">Simulation unavailable <button onClick={retrySimulation} className="ml-2 rounded-sm border border-red-500/30 px-2 py-1">Retry</button></div>}
           {simRunning !== null && (
             <button
               type="button"
@@ -237,11 +253,11 @@ export default function Home() {
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Network Pulse
             </h3>
-            <NetworkPulseStats flows={flows} eventStats={eventStats} />
+            {!flowsUnavailable && <NetworkPulseStats flows={flows} eventStats={eventStats} />}
           </div>
-          <div className="h-[220px]">
+          {flowsUnavailable ? <div role="status" className="p-4 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button></div> : <div className="h-[220px]">
             <NetworkPulseCanvas zones={zones} flows={flows} events={events} />
-          </div>
+          </div>}
         </div>
 
         {/* Zone Status — right column, spans 2 rows */}
@@ -289,7 +305,7 @@ export default function Home() {
               value={eventStats?.idsAlerts ?? 0}
               color="text-red-400"
             />
-            <TrafficCounter
+            {!flowsUnavailable && <TrafficCounter
               label="Active Flows"
               value={
                 flows.filter((f) => {
@@ -298,7 +314,7 @@ export default function Home() {
                 }).length
               }
               color="text-emerald-400"
-            />
+            />}
           </div>
         </div>
 

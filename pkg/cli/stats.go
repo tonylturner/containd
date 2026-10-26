@@ -16,7 +16,7 @@ func showStatsProtocols(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var result []stats.ProtoStats
 		if err := api.getJSON(ctx, "/api/v1/stats/protocols", &result); err != nil {
-			return err
+			return monitoringUnavailable(out, "Protocol statistics", err)
 		}
 		if out == nil {
 			return nil
@@ -54,7 +54,7 @@ func showStatsTopTalkers(api *API) Command {
 		path := fmt.Sprintf("/api/v1/stats/top-talkers?n=%d", n)
 		var result []stats.FlowStats
 		if err := api.getJSON(ctx, path, &result); err != nil {
-			return err
+			return monitoringUnavailable(out, "Top talkers", err)
 		}
 		if out == nil {
 			return nil

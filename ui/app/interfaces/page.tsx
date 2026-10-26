@@ -19,6 +19,7 @@ import { runtimeFor } from "../../lib/interface-addresses";
 export default function InterfacesPage() {
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const [ifaces, setIfaces] = useState<Interface[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [name, setName] = useState("");
@@ -78,11 +79,7 @@ export default function InterfacesPage() {
     setIfaces(i ?? []);
     setZones(z ?? []);
     setState(s ?? []);
-    if (s === null) {
-      setError(
-        "Unable to load interface runtime state from the engine (engine unreachable). Check CONTAIND_ENGINE_URL/NGFW_ENGINE_URL and restart.",
-      );
-    }
+    setRuntimeStatus(s === null ? "unavailable" : "ready");
   }
 
   const unboundConfigured = useMemo(() => {
@@ -320,18 +317,13 @@ export default function InterfacesPage() {
           {notice}
         </div>
       )}
-      {state.length === 0 && (
-        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
-          <div className="font-semibold">Interface runtime state unavailable</div>
-          <div className="mt-1 text-amber-400/90">
-            The UI cannot see OS/Docker-assigned addresses right now (the engine interface-state feed is empty). In the
-            current compose setup this usually means the management plane cannot reach the engine. Check{" "}
-            <span className="font-semibold">CONTAIND_ENGINE_URL</span> in <span className="font-semibold">.env</span>{" "}
-            (should be <span className="font-mono">http://127.0.0.1:8081</span> in shared-network-namespace mode) and then
-            restart.
-          </div>
+      {runtimeStatus === "unavailable" && (
+        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <p>Interface runtime state unavailable — the engine could not be reached. Link and address state is unknown.</p>
+          <button onClick={refresh} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
+      {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
       {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
         <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
           <div className="font-semibold">Interface bindings needed</div>

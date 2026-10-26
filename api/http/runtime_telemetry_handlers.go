@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
@@ -139,7 +138,7 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tc, ok := engine.(TelemetryClient)
 		if !ok || tc == nil {
-			c.JSON(http.StatusOK, []dpevents.FlowSummary{})
+			apiError(c, http.StatusServiceUnavailable, "engine flows unavailable")
 			return
 		}
 		limit := 200
@@ -150,7 +149,7 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		flows, err := tc.ListFlows(c.Request.Context(), limit)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine flows unavailable")
 			return
 		}
 		if flows == nil {
@@ -164,12 +163,12 @@ func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SimulationClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, engineclient.SimulationStatus{Running: false})
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		st, err := sc.SimulationStatus(c.Request.Context())
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		c.JSON(http.StatusOK, st)
@@ -180,7 +179,7 @@ func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SimulationClient)
 		if !ok || sc == nil {
-			apiError(c, http.StatusBadRequest, "simulation unavailable")
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		var req struct {
@@ -192,7 +191,7 @@ func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		st, err := sc.SimulationControl(c.Request.Context(), req.Action)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "synth"})
@@ -204,12 +203,12 @@ func protoStatsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(StatsClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []stats.ProtoStats{})
+			apiError(c, http.StatusServiceUnavailable, "engine protocol statistics unavailable")
 			return
 		}
 		result, err := sc.ListProtoStats(c.Request.Context())
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine protocol statistics unavailable")
 			return
 		}
 		if result == nil {
@@ -223,7 +222,7 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(StatsClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []stats.FlowStats{})
+			apiError(c, http.StatusServiceUnavailable, "engine top talkers unavailable")
 			return
 		}
 		n := 10
@@ -234,7 +233,7 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		result, err := sc.ListTopTalkers(c.Request.Context(), n)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine top talkers unavailable")
 			return
 		}
 		if result == nil {
@@ -248,7 +247,7 @@ func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ac, ok := engine.(AnomalyClient)
 		if !ok || ac == nil {
-			c.JSON(http.StatusOK, []anomaly.Anomaly{})
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		limit := 200
@@ -259,7 +258,7 @@ func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		anomalies, err := ac.ListAnomalies(c.Request.Context(), limit)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		if anomalies == nil {
@@ -273,11 +272,11 @@ func clearAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ac, ok := engine.(AnomalyClient)
 		if !ok || ac == nil {
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		if err := ac.ClearAnomalies(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

@@ -21,7 +21,7 @@ function FlowsInner() {
   const [error, setError] = useState<string | null>(null);
   const [showAVOnly, setShowAVOnly] = useState(false);
   const searchParams = useSearchParams();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const PAGE_SIZE = 100;
   const [showAll, setShowAll] = useState(false);
@@ -51,15 +51,15 @@ function FlowsInner() {
   const hasMore = filteredFlows.length > PAGE_SIZE && !showAll;
 
   async function manualRefresh() {
-    setError(null);
     setLoading(true);
     try {
       const list = await api.listFlows();
-      if (!list) { setError("Failed to load flows."); setLoading(false); return; }
+      if (!list) { setError("Flows unavailable — the engine could not be reached."); setLoading(false); return; }
+      setError(null);
       setFlows(list);
       setLoading(false);
     } catch {
-      setError("Failed to load flows.");
+      setError("Flows unavailable — the engine could not be reached.");
       setLoading(false);
     }
   }
@@ -70,20 +70,20 @@ function FlowsInner() {
     const controller = new AbortController();
 
     async function refresh() {
-      setError(null);
       setLoading(true);
       try {
         const list = await api.listFlows(200, controller.signal);
         if (!list) {
-          setError("Failed to load flows.");
+          setError("Flows unavailable — the engine could not be reached.");
           setLoading(false);
           return;
         }
+        setError(null);
         setFlows(list);
         setLoading(false);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setError("Failed to load flows.");
+        setError("Flows unavailable — the engine could not be reached.");
         setLoading(false);
       }
     }
@@ -123,11 +123,13 @@ function FlowsInner() {
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-          {error}
+        <div role="status" className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          <p>{error}</p>
+          <button onClick={manualRefresh} disabled={loading} className="mt-2 rounded-sm border border-amber-500/30 px-3 py-1 disabled:opacity-50">Retry</button>
         </div>
       )}
 
+      {!error && <>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text)]">
         <div className="w-full text-[var(--text-muted)]">
           Live flow summaries show active conversations and AV flags. Use Events for raw telemetry and Alerts for IDS investigations.
@@ -253,6 +255,7 @@ function FlowsInner() {
           )}
         </div>
       )}
+      </>}
     </Shell>
   );
 }

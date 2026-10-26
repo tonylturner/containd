@@ -15,7 +15,7 @@ func showAnomalies(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var anomalies []anomaly.Anomaly
 		if err := api.getJSON(ctx, "/api/v1/anomalies", &anomalies); err != nil {
-			return err
+			return monitoringUnavailable(out, "Anomalies", err)
 		}
 		if out == nil {
 			return nil
