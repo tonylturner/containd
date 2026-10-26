@@ -347,7 +347,7 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} vpnSpark={svcStatus?.sparkline ?? []} />
+      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} />
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}

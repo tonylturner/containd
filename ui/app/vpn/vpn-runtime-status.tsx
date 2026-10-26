@@ -3,18 +3,17 @@
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 
-import type { NormalizedVPNConfig, VPNServiceStatus } from "./vpn-shared";
+import type { VPNStatus } from "../../lib/api";
+import type { NormalizedVPNConfig } from "./vpn-shared";
 
 export function VPNRuntimeStatusCard({
   cfg,
   loading,
   svcStatus,
-  vpnSpark,
 }: {
   cfg: NormalizedVPNConfig;
   loading: boolean;
-  svcStatus: VPNServiceStatus | null;
-  vpnSpark: number[];
+  svcStatus: VPNStatus | null;
 }) {
   return (
     <div className="mb-4 rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
@@ -47,10 +46,10 @@ export function VPNRuntimeStatusCard({
             </>
           ) : null}
           <div className="md:col-span-2">
-            Rate: <span className="text-(--text)">{typeof (svcStatus as any)?.rate_per_min === "number" ? (svcStatus as any)?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+            Rate: <span className="text-(--text)">{(svcStatus?.rate_per_min ?? 0).toFixed(1)} / min</span>
           </div>
           <div className="md:col-span-2">
-            Errors: <span>{typeof (svcStatus as any)?.errors_rate_per_min === "number" ? (svcStatus as any)?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+            Errors: <span>{(svcStatus?.errors_rate_per_min ?? 0).toFixed(1)} / min</span>
           </div>
           <div className="md:col-span-2">
             OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span>
@@ -60,14 +59,16 @@ export function VPNRuntimeStatusCard({
               {svcStatus.openvpn_last_error}
             </div>
           ) : null}
-          <div className="md:col-span-2">
-            <Sparkline
-              values={vpnSpark}
-              color="var(--primary)"
-              background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-              title="Session activity trend"
-            />
-          </div>
+          {svcStatus?.sparkline.length ? (
+            <div className="md:col-span-2">
+              <Sparkline
+                values={svcStatus.sparkline}
+                color="var(--primary)"
+                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
+                title="VPN events per minute"
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </div>

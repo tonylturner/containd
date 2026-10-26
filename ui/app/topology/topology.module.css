@@ -151,12 +151,6 @@
 .nodeRowKey { color: var(--text-dim); }
 .nodeRowVal { color: var(--text-mid); text-align: right; }
 
-.sparkline {
-  display: flex; gap: 1px; align-items: flex-end;
-  height: 16px; margin-top: 4px;
-}
-.spark { flex: 1; border-radius: 1px 1px 0 0; min-width: 2px; opacity: .7; }
-
 /* ════════════════════════════════════════════════════════════════
    DETAIL PANEL
    ════════════════════════════════════════════════════════════════ */

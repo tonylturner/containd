@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext } from "react";
+import React from "react";
 import { Edge, Handle, Node, NodeProps, Position } from "reactflow";
 
 import {
@@ -71,7 +71,6 @@ export interface TopoNodeData {
   tx?: string;
   vlan?: number | null;
   desc?: string;
-  spark?: number[];
   selected?: boolean;
 }
 
@@ -93,13 +92,6 @@ export const STATUS_COLORS: Record<string, string> = {
   crit: "#ef4444",
   down: "#6b7280",
 };
-
-export const sparkStore: { data: Record<string, number[]>; tick: number } = {
-  data: {},
-  tick: 0,
-};
-
-export const SparkTickContext = createContext(0);
 
 const hStyle: React.CSSProperties = {
   opacity: 0,
@@ -144,7 +136,6 @@ function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
       <div className={s.nodeBody}>
         <NRow k="ip" v={data.ip || "\u2014"} />
         <NRow k="latency" v={data.latency || "\u2014"} />
-        <Spark nodeId={id} color="#06b6d4" />
       </div>
     </div>
   );
@@ -169,7 +160,6 @@ function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
         <NRow k="sessions" v={String(data.sessions ?? 0)} />
         <NRow k="cpu" v={`${data.cpu ?? 0}%`} />
         <NRow k="mem" v={`${data.mem ?? 0}%`} />
-        <Spark nodeId={id} color="#f59e0b" />
       </div>
     </div>
   );
@@ -182,8 +172,6 @@ function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
     st === "crit" ? s.accentRed : st === "warn" ? s.accentAmber : s.accentGreen;
   const nameCls =
     st === "crit" ? s.nameRed : st === "warn" ? s.nameAmber : s.nameGreen;
-  const sparkColor =
-    st === "crit" ? "#ef4444" : st === "warn" ? "#f59e0b" : "#22c55e";
   return (
     <div
       className={`${s.nodeCard} ${accentCls} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -201,7 +189,6 @@ function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
         <NRow k="subnet" v={<TopologyAddress address={data.address} fullAddrs={data.fullAddrs} />} />
         <NRow k="hosts" v={String(data.hosts ?? 0)} />
         <NRow k="flows" v={String(data.flows ?? 0)} />
-        <Spark nodeId={id} color={sparkColor} />
       </div>
     </div>
   );
@@ -212,28 +199,6 @@ function NRow({ k, v }: { k: string; v: React.ReactNode }) {
     <div className={s.nodeRow}>
       <span className={s.nodeRowKey}>{k}</span>
       <span className={s.nodeRowVal}>{v}</span>
-    </div>
-  );
-}
-
-function Spark({ nodeId, color }: { nodeId?: string; color: string }) {
-  useContext(SparkTickContext);
-  const data = nodeId ? sparkStore.data[nodeId] : undefined;
-  if (!data?.length) {
-    return null;
-  }
-  return (
-    <div className={s.sparkline}>
-      {data.map((v, i) => (
-        <div
-          key={i}
-          className={s.spark}
-          style={{
-            height: Math.max(2, Math.floor(v * 16)),
-            background: color,
-          }}
-        />
-      ))}
     </div>
   );
 }

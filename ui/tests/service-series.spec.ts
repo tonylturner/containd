@@ -57,6 +57,7 @@ const pages = [
   { path: "/system/services/dns/", charts: ["DNS events per minute"] },
   { path: "/proxies/", charts: ["Envoy events per minute", "Nginx events per minute"] },
   { path: "/system/services/av/", charts: ["Engine AV scans per minute"] },
+  { path: "/vpn/", charts: ["VPN events per minute"] },
 ];
 
 for (const { path, charts } of pages) {
@@ -77,11 +78,6 @@ for (const { path, charts } of pages) {
     await expect(page.locator("[title*='simulated'], [title*='trend']")).toHaveCount(0);
   });
 }
-
-test("the VPN runtime card charts the reported series", async ({ page }) => {
-  await open(page, "/vpn/", servicesStatus([4, 1, 0, 2]));
-  await expect(page.getByTitle("Session activity trend").locator(":scope > div")).toHaveCount(4);
-});
 
 test("the antivirus page reports an unreachable engine without runtime values", async ({ page }) => {
   await open(page, "/system/services/av/", { av: { available: false, error: "engine unavailable" } });
