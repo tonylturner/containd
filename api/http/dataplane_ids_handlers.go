@@ -72,17 +72,10 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 		if cov := coverage.Evaluate(&preview.Snapshot, cfg.DataPlane.CoverageSettings()); len(cov) > 0 {
 			resp["icsCoverage"] = cov
 		}
-		if engine != nil {
-			type rulesetStatusClient interface {
-				RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
-			}
-			if ec, ok := engine.(rulesetStatusClient); ok && ec != nil {
-				if st, err := ec.RulesetStatus(c.Request.Context()); err == nil {
-					resp["engineStatus"] = st
-				} else {
-					resp["engineStatusError"] = err.Error()
-				}
-			}
+		if st, err := engine.RulesetStatus(c.Request.Context()); err == nil {
+			resp["engineStatus"] = st
+		} else {
+			resp["engineStatusError"] = err.Error()
 		}
 		c.JSON(http.StatusOK, resp)
 	}
