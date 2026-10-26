@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { IDSRule } from "../../lib/api";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
-import { Pagination } from "../../components/TableControls";
+import { Pagination, SearchBar } from "../../components/TableControls";
 
 import {
   type AdvancedFilters,
@@ -157,24 +157,7 @@ export function RulesTable({
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] max-w-lg flex-1">
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search rules..."
-            className="input-industrial w-full py-1.5 pl-9 pr-3 text-sm"
-          />
-        </div>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search rules..." className="min-w-[200px] max-w-lg flex-1" />
         <button
           onClick={() => setAdvOpen(!advOpen)}
           className={`rounded-xs border px-3 py-1.5 text-xs transition-ui ${

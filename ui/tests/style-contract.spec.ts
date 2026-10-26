@@ -52,3 +52,26 @@ test("service navigation retains link colors, hover and subtle borders", async (
   await expect(dashboard).toHaveCSS("color", "rgb(226, 232, 240)");
   await expect(page.getByRole("link", { name: "Configure →" }).first()).toHaveCSS("color", "rgb(232, 213, 163)");
 });
+
+for (const [path, placeholder] of [
+  ["/identities", "Search addresses or identities..."],
+  ["/zones", "Search zones..."],
+  ["/audit", "Search audit log..."],
+  ["/alerts", "Search alerts by message, rule ID, IP..."],
+  ["/ids", "Search rules..."],
+] as const) {
+  test(`${path} search text starts clear of its icon`, async ({ page }) => {
+    await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] } }));
+    await page.route("**/api/v1/zones", (route) => route.fulfill({ json: [{ name: "ot" }] }));
+    await page.route("**/api/v1/audit", (route) => route.fulfill({ json: [] }));
+    await page.route("**/api/v1/events?*", (route) => route.fulfill({ json: [] }));
+    await page.route("**/api/v1/ids/rules", (route) => route.fulfill({ json: { enabled: true, rules: [{ id: "r1", title: "rule" }] } }));
+    await page.goto(path);
+    const input = page.getByPlaceholder(placeholder, { exact: true });
+    await expect(input).toHaveCSS("padding-left", "36px");
+    const icon = input.locator("xpath=preceding-sibling::*[local-name()='svg']");
+    const iconBox = (await icon.boundingBox())!;
+    const inputBox = (await input.boundingBox())!;
+    expect(iconBox.x + iconBox.width).toBeLessThan(inputBox.x + 36);
+  });
+}
