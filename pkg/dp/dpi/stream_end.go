@@ -52,12 +52,14 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 	return m.flowEnd(peer)
 }
 
-// FailStream fails the framed stream of a packet whose decoder panicked:
-// the buffered bytes are dropped and the stream stays failed, as after a
-// stream error, so they are never parsed again. Later packets that fail
-// closed get its StreamDecoderPanic error; the flow's end clears it. A flow
-// without a framing decoder holds no stream and is left alone.
-func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket) {
+// FailStream fails the framed stream of a packet with a StreamError of
+// kind: StreamDecoderPanic when its decoder panicked, StreamDenied when the
+// policy denied the connection. The buffered bytes are dropped and the
+// stream stays failed, as after a stream error, so nothing on it is parsed
+// again. Later packets that fail closed get its error; the flow's end
+// clears it. A flow without a framing decoder holds no stream and is left
+// alone.
+func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamErrKind) {
 	if m == nil || !m.reassembles(pkt) {
 		return
 	}
@@ -68,7 +70,7 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket) {
 		return
 	}
 	key, _, _ := streamKey(state, pkt)
-	m.reassembler.fail(key, &StreamError{Kind: StreamDecoderPanic, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
+	m.reassembler.fail(key, &StreamError{Kind: kind, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
 }
 
 // end handles a FIN or RST that the stream key's own direction sent at pos,

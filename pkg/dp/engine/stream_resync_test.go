@@ -316,3 +316,59 @@ func TestResyncMidStreamPickupDropsFirstCommand(t *testing.T) {
 		}
 	}
 }
+
+// decisionEvents counts the ics.decision events.
+func decisionEvents(e *Engine) int {
+	n := 0
+	for _, ev := range e.Events().List(0) {
+		if ev.Kind == eventfields.KindDecision {
+			n++
+		}
+	}
+	return n
+}
+
+// TestResyncDeniedStreamStaysDenied denies a command while the dynamic
+// block fails or stalls. Past the cached denial the retransmitted command
+// (bytes the stream already consumed) and every later packet of the
+// connection still drop, without another decision event or rule hit, until
+// the flow ends; the client's next connection is inspected as usual.
+func TestResyncDeniedStreamStaysDenied(t *testing.T) {
+	for _, mode := range []string{"failing", "stalled"} {
+		for _, p := range firstCommandProtocols() {
+			t.Run(mode+"/"+p.name, func(t *testing.T) {
+				f := newFCFlow(t, mode, p.port)
+				f.syn()
+				f.accept("read", p.read(1))
+				c := p.denied[0]
+				at := f.next
+				f.deny("denied", c.rule, c.frame)
+				hits, decisions := ruleHits(f.e, c.rule), decisionEvents(f.e)
+				for _, step := range []struct {
+					what    string
+					off     uint32
+					payload []byte
+				}{
+					{"retransmitted command", at, c.frame},
+					{"read after the command", f.next, p.read(2)},
+				} {
+					f.e.verdictCache = NewVerdictCache(time.Minute, 16)
+					if d := f.decide(step.off, ackPsh, step.payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
+						t.Fatalf("%s past the cached denial = %+v, want Drop by %s", step.what, d, reasonDPIDeny)
+					}
+				}
+				if got := ruleHits(f.e, c.rule); got != hits {
+					t.Fatalf("deny rule hits %d -> %d, want no new hit", hits, got)
+				}
+				if got := decisionEvents(f.e); got != decisions {
+					t.Fatalf("decision events %d -> %d, want none for the same denial", decisions, got)
+				}
+				f.e.sweepFlows(time.Now().Add(time.Hour))
+				f.client++
+				f.isn, f.next = 800000, 0
+				f.syn()
+				f.accept("read on the next connection", p.read(3))
+			})
+		}
+	}
+}

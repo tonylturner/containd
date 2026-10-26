@@ -4,12 +4,18 @@
 package engine
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"math/rand/v2"
 	"net"
+	"slices"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
 // TestStreamResyncKernelOutOfWindowRST runs in the first-command kernel
@@ -53,9 +59,35 @@ func TestStreamResyncKernelRestartPickup(t *testing.T) {
 	const src = "198.18.50.41"
 	c := dialFirstCommand(ctx, t, src)
 	c.read()
+	restartFirstCommandEngine(ctx, t, e, nil)
+
+	c.write(c.next(3, 0, 2))
+	c.expectSilence()
+	var conn net.Conn
+	err := inNetns(fcClientNS, func() (err error) {
+		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(src)}, Timeout: fcReplyWait}
+		conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(fcServerIP, "502"))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("reconnect from %s: %v", src, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	next := &fcClient{t: t, src: src, conn: conn.(*net.TCPConn), tid: 50}
+	next.read()
+	if fcs, _, _ := srv.seen(src); len(fcs) != 2 {
+		t.Fatalf("server answered FCs %v, want the read before the restart and the new connection's read", fcs)
+	}
+}
+
+// restartFirstCommandEngine replaces the running engine with a fresh one
+// under the same rules, as an engine restart does. A non-nil updater
+// replaces the nft dynamic-block updater.
+func restartFirstCommandEngine(ctx context.Context, t *testing.T, e *Engine, updater enforce.Updater) {
+	t.Helper()
 	snap := e.CurrentRules()
 	fresh, err := New(Config{
-		Enforce:      EnforceConfig{Enabled: true, TableName: "containd"},
+		Enforce:      EnforceConfig{Enabled: true, TableName: "containd", Updater: updater},
 		DPIEnabled:   true,
 		DPIMode:      "enforce",
 		NFQueueGroup: fcQueue,
@@ -73,23 +105,69 @@ func TestStreamResyncKernelRestartPickup(t *testing.T) {
 	if err := e.ApplyRules(ctx, *snap); err != nil {
 		t.Fatalf("apply rules again: %v", err)
 	}
+}
 
-	c.write(c.next(3, 0, 2))
+// failingUpdater refuses every dynamic block.
+type failingUpdater struct{}
+
+func (failingUpdater) BlockHostTemp(context.Context, net.IP, time.Duration) error {
+	return errors.New("nft: permission denied")
+}
+
+func (failingUpdater) BlockFlowTemp(context.Context, net.IP, net.IP, string, string, time.Duration) error {
+	return errors.New("nft: permission denied")
+}
+
+// TestStreamResyncKernelDeniedRetransmission denies a write while the nft
+// dynamic block fails. The client's stack keeps retransmitting the write;
+// the retransmissions after the 30 s userspace cached denial expired must
+// not reach the server either. Another client's reads, 5 s before and 27 s
+// after the write, run the reassembly idle sweep while the denied stream is
+// still recent, so that stream keeps the consumed history the
+// retransmission matches. It runs for about a minute.
+func TestStreamResyncKernelDeniedRetransmission(t *testing.T) {
+	ctx := newFirstCommandLab(t)
+	srv := startModbusRecorder(t)
+	e := startFirstCommandEngine(t, ctx)
+	restartFirstCommandEngine(ctx, t, e, failingUpdater{})
+
+	c := dialFirstCommand(ctx, t, "198.18.50.42")
+	other := dialFirstCommand(ctx, t, "198.18.50.43")
+	other.read() // the first idle sweep
+	time.Sleep(5 * time.Second)
+	c.read()
+	c.write(c.next(6, 1, 0x1234))
+	sent := time.Now()
 	c.expectSilence()
-	var conn net.Conn
-	err = inNetns(fcClientNS, func() (err error) {
-		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(src)}, Timeout: fcReplyWait}
-		conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(fcServerIP, "502"))
-		return err
-	})
+	raw, err := c.conn.SyscallConn()
 	if err != nil {
-		t.Fatalf("reconnect from %s: %v", src, err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	next := &fcClient{t: t, src: src, conn: conn.(*net.TCPConn), tid: 50}
-	next.read()
-	if fcs, _, _ := srv.seen(src); len(fcs) != 2 {
-		t.Fatalf("server answered FCs %v, want the read before the restart and the new connection's read", fcs)
+	swept := false
+	for {
+		if !swept && time.Since(sent) > 27*time.Second {
+			other.read()
+			swept = true
+		}
+		var info *unix.TCPInfo
+		var ierr error
+		if err := raw.Control(func(fd uintptr) {
+			info, ierr = unix.GetsockoptTCPInfo(int(fd), unix.IPPROTO_TCP, unix.TCP_INFO)
+		}); err != nil || ierr != nil {
+			t.Fatal(err, ierr)
+		}
+		// The first retransmission after 30 s plus a margin.
+		if time.Since(sent) > 35*time.Second && info.Total_retrans > 0 && time.Duration(info.Last_data_sent)*time.Millisecond < time.Since(sent)-30*time.Second {
+			break
+		}
+		if time.Since(sent) > 2*time.Minute {
+			t.Fatalf("no retransmission after the cached denial expired (%d retransmissions)", info.Total_retrans)
+		}
+		time.Sleep(time.Second)
+	}
+	time.Sleep(fcReplyWait) // the retransmission reaches the server at once, if at all
+	if fcs, _, regs := srv.seen(c.src); !slices.Equal(fcs, []uint8{3}) || regs != [8]uint16{} {
+		t.Fatalf("server received FCs %v, registers %v; want only the read", fcs, regs)
 	}
 }
 

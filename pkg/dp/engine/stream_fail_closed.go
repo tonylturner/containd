@@ -28,6 +28,12 @@ import (
 // before the flow does. Learn-only flows, packets that are not inline and
 // the IEC104 path keep passing such packets.
 //
+// A decoded denial of such a flow fails its stream too (dpi.StreamDenied):
+// the denied bytes were consumed, so without it their retransmission would
+// pass as a duplicate once the cached denial expired, if the dynamic block
+// failed or stalled. Every later packet of the connection drops until the
+// flow ends.
+//
 // A stream picked up mid-connection fails the same way, as an IEC104
 // session not observed from its SYN does: after an engine restart, after
 // the engine forgot an idle flow, or after the reassembly sweep dropped a
@@ -136,17 +142,7 @@ func failClosedReason(err error) string {
 // the cause. A mid-stream pickup gets no flow block, which would also stop
 // the client's next connection.
 func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket, scope *rules.Entry, reason, proto string, cause error) capture.Decision {
-	v := verdict.Verdict{Action: verdict.BlockFlowTemp, Reason: reason, TTL: dpiEnforceBlockTTL}
-	evalCtx := rules.EvalContext{
-		SrcIP: state.Key.OpenerIP(),
-		DstIP: state.Key.ServerIP(),
-		Proto: strings.ToLower(parsed.Proto),
-		Port:  strconv.Itoa(int(servicePort(state, parsed))),
-	}
-	e.verdictCache.Put(state.Key.Hash(), v)
-	if reason != failClosedMidStream {
-		e.afterDrop(tok, e.dynamicBlockJob(v, evalCtx))
-	}
+	e.denyFlow(tok, state, parsed, reason, reason != failClosedMidStream)
 	if proto == "" {
 		proto = strings.ToLower(scope.ICS.Protocol)
 	}
@@ -169,4 +165,37 @@ func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.Pa
 		},
 	})
 	return capture.Decision{Action: capture.Drop, Reason: reasonStreamFailClosed}
+}
+
+// stillDenied drops a packet of a connection the policy denied earlier.
+// Its stream stays failed (dpi.StreamDenied), so the retransmitted denied
+// command drops even after the cached denial expired, whatever the dynamic
+// block did. The denial was reported once; this renews the cached deny and
+// retries the flow block, without another event.
+func (e *Engine) stillDenied(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket) capture.Decision {
+	e.denyFlow(tok, state, parsed, reasonDPIDeny, true)
+	return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
+}
+
+// denyFlow caches the denial of the flow and, with block, installs the
+// dynamic flow block once the drop verdict is submitted.
+func (e *Engine) denyFlow(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket, reason string, block bool) {
+	v := verdict.Verdict{Action: verdict.BlockFlowTemp, Reason: reason, TTL: dpiEnforceBlockTTL}
+	e.verdictCache.Put(state.Key.Hash(), v)
+	if !block {
+		return
+	}
+	e.afterDrop(tok, e.dynamicBlockJob(v, rules.EvalContext{
+		SrcIP: state.Key.OpenerIP(),
+		DstIP: state.Key.ServerIP(),
+		Proto: strings.ToLower(parsed.Proto),
+		Port:  strconv.Itoa(int(servicePort(state, parsed))),
+	}))
+}
+
+// deniedStream reports the error of a stream whose connection the policy
+// denied.
+func deniedStream(err error) bool {
+	var se *dpi.StreamError
+	return errors.As(err, &se) && se.Kind == dpi.StreamDenied
 }
