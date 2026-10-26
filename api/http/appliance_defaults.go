@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -25,8 +26,7 @@ func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtp
 	t := true
 	def.System.Mgmt.EnableHTTP = &t
 	def.System.Mgmt.EnableHTTPS = &t
-	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+	def.System.Mgmt.TLSCertFile, def.System.Mgmt.TLSKeyFile = mgmttls.ResolveFiles(nil)
 	def.System.SSH.ListenAddr = ":2222"
 	def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 	if r != nil {

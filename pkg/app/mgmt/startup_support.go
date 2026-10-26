@@ -20,6 +20,7 @@ import (
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
@@ -283,10 +284,10 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 				next.System.Mgmt.EnableHTTPS = boolPtr(true)
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSCertFile) == "" {
-				next.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+				next.System.Mgmt.TLSCertFile, _ = mgmttls.ResolveFiles(next)
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSKeyFile) == "" {
-				next.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+				_, next.System.Mgmt.TLSKeyFile = mgmttls.ResolveFiles(next)
 			}
 			return nil
 		})

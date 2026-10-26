@@ -5,12 +5,16 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +23,7 @@ import (
 	"github.com/kballard/go-shellquote"
 
 	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -41,7 +46,13 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
-		ctx, reg := cliRegistryForRequest(c, store)
+		apiClient, err := cliAPIForRequest(c, store)
+		if err != nil {
+			c.JSON(http.StatusOK, resp{Error: err.Error()})
+			return
+		}
+		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
+		reg := cli.NewRegistry(store, apiClient)
 		var buf bytes.Buffer
 		if err := reg.ParseAndExecute(ctx, r.Line, &buf); err != nil {
 			c.JSON(http.StatusOK, resp{Output: buf.String(), Error: err.Error()})
@@ -53,7 +64,8 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 
 func cliCommandsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		_, reg := cliRegistryForRequest(c, store)
+		// Enumeration needs the API command set, but makes no API requests.
+		reg := cli.NewRegistry(store, &cli.API{})
 		role := cli.RoleView
 		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
 			role = cli.RoleAdmin
@@ -77,7 +89,8 @@ func cliCompleteHandler(store config.Store) gin.HandlerFunc {
 		if strings.HasSuffix(line, " ") {
 			tokens = append(tokens, "")
 		}
-		_, reg := cliRegistryForRequest(c, store)
+		// Enumeration needs the API command set, but makes no API requests.
+		reg := cli.NewRegistry(store, &cli.API{})
 		role := cli.RoleView
 		if strings.EqualFold(c.GetString(ctxRoleKey), string(cli.RoleAdmin)) {
 			role = cli.RoleAdmin
@@ -128,7 +141,7 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 		}
 		defer conn.Close()
 
-		ctx, reg := cliRegistryForRequest(c, store)
+		token := strings.TrimSpace(bearerOrCookie(c))
 		_ = conn.WriteJSON(resp{Output: "containd in-app CLI. Type 'show version'."})
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -146,8 +159,21 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 				_ = conn.WriteJSON(resp{Output: ""})
 				continue
 			}
+			// Re-read configuration and certificate for every command, including
+			// commands on an already established WebSocket after rotation.
+			apiClient, err := cliAPIForRequest(c, store)
+			if err != nil {
+				_ = conn.WriteJSON(resp{Error: err.Error()})
+				continue
+			}
+			// Preserve tokens refreshed by API responses across commands.
+			apiClient.Token = token
+			ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
+			reg := cli.NewRegistry(store, apiClient)
 			var buf bytes.Buffer
-			if err := reg.ParseAndExecute(ctx, line, &buf); err != nil {
+			err = reg.ParseAndExecute(ctx, line, &buf)
+			token = apiClient.Token
+			if err != nil {
 				_ = conn.WriteJSON(resp{Output: buf.String(), Error: err.Error()})
 				continue
 			}
@@ -156,7 +182,7 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context, *cli.Registry) {
+func cliAPIForRequest(c *gin.Context, store config.Store) (*cli.API, error) {
 	loopbackHostPort := func(addr string, defaultPort string) string {
 		addr = strings.TrimSpace(addr)
 		port := defaultPort
@@ -175,48 +201,35 @@ func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context,
 		return "127.0.0.1:" + port
 	}
 
-	// Prefer an in-process loopback URL rather than reusing the incoming
-	// request Host/scheme. This avoids:
-	// - HTTPS self-signed verification errors for internal calls
-	// - SSRF-style token exfiltration via crafted Host headers
-	baseURL := ""
-	var httpClient cli.HTTPClient
-	if cfg, err := store.Load(c.Request.Context()); err == nil && cfg != nil {
-		enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-		enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
-
-		httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-
-		// Always prefer HTTP for internal calls when enabled.
-		if enableHTTP {
-			baseURL = "http://" + loopbackHostPort(httpAddr, "8080")
-		} else if enableHTTPS {
-			baseURL = "https://" + loopbackHostPort(httpsAddr, "8443")
-			httpClient = &http.Client{
-				Timeout: 10 * time.Second,
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						MinVersion:         tls.VersionTLS13,
-						InsecureSkipVerify: true, // nosemgrep: problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification -- internal CLI calls target the local mgmt listener, which may use a self-signed appliance cert.
-					},
-				},
-			}
-		}
+	// Never derive an authenticated destination from request headers.
+	if store == nil {
+		return nil, errors.New("console: config store unavailable")
 	}
-	if baseURL == "" {
-		// Fallback (should be rare): infer from the request and keep the current Host.
-		scheme := "http"
-		if c.Request.TLS != nil {
-			scheme = "https"
+	cfg, err := store.Load(c.Request.Context())
+	if err != nil {
+		return nil, fmt.Errorf("console: load management config: %w", err)
+	}
+	if cfg == nil {
+		return nil, errors.New("console: management config unavailable")
+	}
+	enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
+	enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
+	var baseURL string
+	var httpClient cli.HTTPClient
+	// Always prefer HTTP for internal calls when enabled.
+	if enableHTTP {
+		addr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
+		baseURL = "http://" + loopbackHostPort(addr, "8080")
+	} else if enableHTTPS {
+		addr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+		baseURL = "https://" + loopbackHostPort(addr, "8443")
+		certFile, _ := mgmttls.ResolveFiles(cfg)
+		httpClient, err = consoleHTTPSClient(certFile)
+		if err != nil {
+			return nil, fmt.Errorf("console: %w", err)
 		}
-		if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
-			proto = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
-			if proto == "http" || proto == "https" {
-				scheme = proto
-			}
-		}
-		baseURL = scheme + "://" + c.Request.Host
+	} else {
+		return nil, errors.New("console: no management HTTP or HTTPS listener enabled")
 	}
 	apiClient := &cli.API{BaseURL: baseURL}
 	if httpClient != nil {
@@ -227,9 +240,73 @@ func cliRegistryForRequest(c *gin.Context, store config.Store) (context.Context,
 	if tok := strings.TrimSpace(bearerOrCookie(c)); tok != "" {
 		apiClient.Token = tok
 	}
-	ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
-	reg := cli.NewRegistry(store, apiClient)
-	return ctx, reg
+	return apiClient, nil
+}
+
+// consoleHTTPSClient trusts only the configured leaf, not the host's system CAs.
+// Use the certificate's own SAN as the verification name while dialing loopback;
+// an operator certificate need not contain 127.0.0.1. Normal TLS verification
+// (including validity and server usage) remains enabled, with an exact leaf pin
+// as an additional constraint even when the leaf is itself a CA.
+func consoleHTTPSClient(certFile string) (*http.Client, error) {
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, fmt.Errorf("read management TLS certificate %q: %w", certFile, err)
+	}
+	var leaf *x509.Certificate
+	for len(bytes.TrimSpace(data)) > 0 {
+		data = bytes.TrimSpace(data)
+		if !bytes.HasPrefix(data, []byte("-----BEGIN CERTIFICATE-----")) {
+			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
+		}
+		block, rest := pem.Decode(data)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse management TLS certificate %q: %w", certFile, err)
+		}
+		if leaf == nil {
+			leaf = cert
+		}
+		data = rest
+	}
+	if leaf == nil {
+		return nil, fmt.Errorf("parse management TLS certificate %q: no certificates", certFile)
+	}
+	var name string
+	if len(leaf.DNSNames) > 0 {
+		name = leaf.DNSNames[0]
+	} else if len(leaf.IPAddresses) > 0 {
+		name = leaf.IPAddresses[0].String()
+	} else {
+		return nil, fmt.Errorf("management TLS certificate %q has no DNS or IP subject alternative name", certFile)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		// Do not forward bearer tokens through redirects, even to another port
+		// on the same hostname or to an HTTP endpoint.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errors.New("console: management API redirect refused")
+		},
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS13,
+				RootCAs:    roots,
+				ServerName: name,
+				VerifyConnection: func(state tls.ConnectionState) error {
+					if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, leaf.Raw) {
+						return errors.New("console: management TLS certificate does not match configured leaf")
+					}
+					return nil
+				},
+			},
+		},
+	}, nil
 }
 
 func matchCommandTokens(tokens []string, available []string) (string, []string) {
