@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template -- renders Envoy/Nginx config, not HTML.
 	"time"
 
@@ -54,6 +54,8 @@ type ProxyManager struct {
 	lastCfg        config.ProxyConfig
 	envoyCmd       *exec.Cmd
 	nginxCmd       *exec.Cmd
+	envoyDone      <-chan struct{}
+	nginxDone      <-chan struct{}
 	lastEnvoyError string
 	lastNginxError string
 	lastEnvoyStart time.Time
@@ -171,7 +173,9 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
 	if m.Supervise {
-		m.ensureProcesses(ctx, cfg)
+		if err := m.ensureProcesses(ctx, cfg); err != nil {
+			return err
+		}
 	}
 	m.syncAccessTailers(cfg)
 	return nil
@@ -318,17 +322,19 @@ func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReversePr
 	return nil
 }
 
-func (m *ProxyManager) ensureProcesses(ctx context.Context, cfg config.ProxyConfig) {
+func (m *ProxyManager) ensureProcesses(ctx context.Context, cfg config.ProxyConfig) error {
+	var errs []error
 	if cfg.Forward.Enabled {
 		m.startOrRestartEnvoy(ctx)
 	} else {
-		m.stopEnvoy()
+		errs = append(errs, m.stopEnvoy())
 	}
 	if cfg.Reverse.Enabled {
 		m.startOrRestartNginx(ctx)
 	} else {
-		m.stopNginx()
+		errs = append(errs, m.stopNginx())
 	}
+	return errors.Join(errs...)
 }
 
 func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
@@ -346,8 +352,10 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		return
 	}
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
-		_ = m.envoyCmd.Process.Signal(os.Interrupt)
-		time.Sleep(50 * time.Millisecond)
+		if err := stopManagedProcess(m.envoyCmd.Process, m.envoyDone); err != nil {
+			m.lastEnvoyError = err.Error()
+			return
+		}
 	}
 	// Use background context so envoy outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
@@ -361,6 +369,8 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		return
 	}
 	m.envoyCmd = cmd
+	done := make(chan struct{})
+	m.envoyDone = done
 	m.lastEnvoyError = ""
 	m.lastEnvoyStart = time.Now().UTC()
 	m.lastEnvoyExit = ""
@@ -368,6 +378,7 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	pid := cmd.Process.Pid
 	go func(cmd *exec.Cmd, pid int) {
 		err := cmd.Wait()
+		close(done)
 		exit := "exited"
 		if err != nil {
 			exit = err.Error()
@@ -383,15 +394,19 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 	}(cmd, pid)
 }
 
-func (m *ProxyManager) stopEnvoy() {
+func (m *ProxyManager) stopEnvoy() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
-		_ = m.envoyCmd.Process.Signal(os.Interrupt)
+		if err := stopManagedProcess(m.envoyCmd.Process, m.envoyDone); err != nil {
+			m.lastEnvoyError = err.Error()
+			return err
+		}
 		m.emit("service.envoy.stopped", map[string]any{"pid": m.envoyCmd.Process.Pid, "count": 1})
 	}
 	m.envoyCmd = nil
 	m.lastEnvoyStop = time.Now().UTC()
+	return nil
 }
 
 func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
@@ -413,7 +428,10 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		return
 	}
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
-		stopManagedProcess(m.nginxCmd.Process)
+		if err := stopManagedProcess(m.nginxCmd.Process, m.nginxDone); err != nil {
+			m.lastNginxError = err.Error()
+			return
+		}
 	}
 	// Use background context so nginx outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
@@ -427,6 +445,8 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		return
 	}
 	m.nginxCmd = cmd
+	done := make(chan struct{})
+	m.nginxDone = done
 	m.lastNginxError = ""
 	m.lastNginxStart = time.Now().UTC()
 	m.lastNginxExit = ""
@@ -434,6 +454,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	pid := cmd.Process.Pid
 	go func(cmd *exec.Cmd, pid int) {
 		err := cmd.Wait()
+		close(done)
 		exit := "exited"
 		if err != nil {
 			exit = err.Error()
@@ -449,25 +470,19 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 	}(cmd, pid)
 }
 
-func (m *ProxyManager) stopNginx() {
+func (m *ProxyManager) stopNginx() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
-		stopManagedProcess(m.nginxCmd.Process)
+		if err := stopManagedProcess(m.nginxCmd.Process, m.nginxDone); err != nil {
+			m.lastNginxError = err.Error()
+			return err
+		}
 		m.emit("service.nginx.stopped", map[string]any{"pid": m.nginxCmd.Process.Pid, "count": 1})
 	}
 	m.nginxCmd = nil
 	m.lastNginxStop = time.Now().UTC()
-}
-
-func stopManagedProcess(proc *os.Process) {
-	if proc == nil {
-		return
-	}
-	_ = proc.Signal(syscall.SIGTERM)
-	time.Sleep(200 * time.Millisecond)
-	_ = proc.Kill()
-	time.Sleep(50 * time.Millisecond)
+	return nil
 }
 
 func (m *ProxyManager) Status() map[string]any {

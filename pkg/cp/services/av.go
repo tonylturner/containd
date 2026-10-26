@@ -31,6 +31,7 @@ type AVManager struct {
 	icap           *ICAPClient
 	clamdPath      string
 	clamdCmd       *exec.Cmd
+	clamdDone      <-chan struct{}
 	clamdLastStart time.Time
 	clamdLastStop  time.Time
 	clamdLastExit  string
@@ -121,7 +122,11 @@ func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
 	m.customDefsPath = cfg.ClamAV.CustomDefsPath
 	m.mu.Unlock()
 	if cfg.Enabled {
-		m.probe(ctx, cfg)
+		if err := m.probe(ctx, cfg); err != nil {
+			return err
+		}
+	} else if err := m.stopClamd(); err != nil {
+		return err
 	}
 	m.emit("service.av.updated", map[string]any{
 		"enabled": cfg.Enabled,
@@ -204,7 +209,7 @@ func (m *AVManager) emit(kind string, attrs map[string]any) {
 	m.log.Infow("av event", "kind", kind, "attrs", attrs)
 }
 
-func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) {
+func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) error {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
 	if mode == "" {
 		mode = "icap"
@@ -212,7 +217,7 @@ func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) {
 	switch mode {
 	case "icap":
 		m.testICAP(ctx, cfg.ICAP)
-		m.stopClamd()
+		return m.stopClamd()
 	case "clamav":
 		m.startClamd(ctx, cfg.ClamAV)
 		if m.clamd != nil {
@@ -220,6 +225,7 @@ func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) {
 		}
 		m.startFreshclam(cfg.ClamAV)
 	}
+	return nil
 }
 
 func (m *AVManager) testICAP(ctx context.Context, cfg config.ICAPConfig) {
@@ -606,31 +612,40 @@ func (m *AVManager) startClamd(ctx context.Context, cfg config.ClamAVConfig) {
 		return
 	}
 	m.clamdCmd = cmd
+	done := make(chan struct{})
+	m.clamdDone = done
 	m.lastError = ""
 	m.clamdLastStart = time.Now().UTC()
 	m.emit("service.av.clamav_started", map[string]any{"pid": cmd.Process.Pid})
 	go func() {
 		err := cmd.Wait()
+		close(done)
 		exit := "ok"
 		if err != nil {
 			exit = err.Error()
 		}
 		m.mu.Lock()
-		m.clamdLastExit = exit
-		m.clamdLastStop = time.Now().UTC()
-		m.clamdCmd = nil
+		if m.clamdCmd == cmd {
+			m.clamdLastExit = exit
+			m.clamdLastStop = time.Now().UTC()
+			m.clamdCmd = nil
+		}
 		m.mu.Unlock()
 		m.emit("service.av.clamav_exited", map[string]any{"exit": exit})
 	}()
 }
 
-func (m *AVManager) stopClamd() {
+func (m *AVManager) stopClamd() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.clamdCmd != nil && m.clamdCmd.Process != nil {
-		_ = m.clamdCmd.Process.Signal(os.Interrupt)
+		if err := stopManagedProcess(m.clamdCmd.Process, m.clamdDone); err != nil {
+			m.lastError = err.Error()
+			return err
+		}
 		m.clamdLastStop = time.Now().UTC()
 		m.emit("service.av.clamav_stopped", map[string]any{"pid": m.clamdCmd.Process.Pid})
 	}
 	m.clamdCmd = nil
+	return nil
 }
