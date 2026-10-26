@@ -558,6 +558,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   502 now return 503. The UI views and CLI `show` commands that use them show
   "unavailable" with a retry, distinct from empty. `show system` labels
   listener settings as saved configuration and shows the HSTS default.
+- `GET /api/v1/anomalies` and `show anomalies` list the protocol anomalies the
+  engine detected, and `DELETE /api/v1/anomalies` clears them. Before,
+  management never reached the engine's anomaly detector: the list was always
+  empty and a clear did nothing.
 - Discovered ICS assets, their peers and station addresses have fixed caps
   with counted overflow.
 - Complete the management OpenAPI route reference and guard it against the

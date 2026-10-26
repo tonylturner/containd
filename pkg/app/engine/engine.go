@@ -216,6 +216,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/diagnostics/iec104", iec104PressureHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
+	mux.HandleFunc("/internal/anomalies", anomaliesHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/firewall/counters", ruleCountersHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
