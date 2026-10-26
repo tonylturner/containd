@@ -227,8 +227,16 @@ func (p *peer) command(t *testing.T, line string) string {
 	return reply
 }
 
-// Run in one disposable container with NET_ADMIN, SYS_ADMIN and nft/ip installed.
-// Namespace creation/setns requires SYS_ADMIN in addition to NET_ADMIN.
+// Run in one disposable container with NET_ADMIN, SYS_ADMIN and nft/ip
+// installed. Namespace creation/setns requires SYS_ADMIN in addition to
+// NET_ADMIN, and the test needs IPv4 and IPv6 forwarding, which Docker sets
+// only with --sysctl:
+//
+//	GOOS=linux CGO_ENABLED=0 go test -c -o build/conntrack.test ./pkg/dp/conntrack
+//	docker run --rm --privileged --sysctl net.ipv4.ip_forward=1 \
+//	  --sysctl net.ipv6.conf.all.forwarding=1 -e CONTAIND_NETNS_KERNEL_TEST=1 \
+//	  -v "$PWD/build:/w" alpine:3.21 sh -c \
+//	  'apk add -q nftables iproute2 conntrack-tools && /w/conntrack.test -test.run Kernel -test.v'
 func TestKernelConntrackKill(t *testing.T) {
 	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" {
 		t.Skip("opt-in isolated kernel test")

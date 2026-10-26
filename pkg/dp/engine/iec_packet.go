@@ -120,6 +120,8 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, boo
 		return t.tombstonePacketLocked(s, dir, pkt, now)
 	case s.state == iecClosed:
 		return t.closedPacketLocked(s, dir, pkt, now)
+	case reopensLocked(s, dir, pkt):
+		return t.reopenLocked(s, dir, pkt, now)
 	default:
 		res := t.livePacketLocked(s, dir, pkt, state, now)
 		_, res.decision.Notify = t.inventoryTokens[pkt.Token]
@@ -314,7 +316,36 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 	return accepted(reasonIECClosed), true
 }
 
-// handshakeLocked follows the SYN and SYN-ACK of a live incarnation.
+// reopensLocked reports a client SYN that starts a new connection on the
+// tuple of an established incarnation: a new ISN, no payload, and the
+// handshake mark, so connection tracking no longer holds the old
+// connection.
+func reopensLocked(s *iecSession, dir int, pkt capture.Packet) bool {
+	return s.state == iecEstablished && dir == iecDirClient && isSYN(pkt.TCP.Flags) &&
+		pkt.TCP.Seq != s.dirs[iecDirClient].isn && len(pkt.Payload) == 0 && handshakeMarked(pkt)
+}
+
+// reopenLocked ends an established incarnation whose tuple a new
+// connection's SYN reopens. An enforce incarnation aborts: the SYN drops,
+// both endpoints are reset, and the client's retransmitted SYN opens the
+// next incarnation from the tombstone. A learn incarnation closes, and the
+// SYN opens the next one at once.
+func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
+	if s.mode == "enforce" {
+		return droppedWith(reasonIECAbort, t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)), true
+	}
+	acts := t.closeLocked(s, now)
+	res, ok := t.closedPacketLocked(s, dir, pkt, now)
+	res.acts.merge(acts)
+	return res, ok
+}
+
+// handshakeLocked follows the SYN and SYN-ACK of a live incarnation. A
+// client SYN with a new ISN sent into an established incarnation, as a
+// client that lost its connection and reconnects from the same port
+// sends, passes and changes nothing: the server answers it with a
+// challenge ACK, and the RST the client sends in reply closes the
+// incarnation (rstLocked).
 func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
 	if len(pkt.Payload) > 0 {
@@ -326,7 +357,10 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 		if seq == c2s.isn {
 			return accepted(reasonIECAccept)
 		}
-		if s.dirs[iecDirSrv] == nil && opens(s.mode, pkt) {
+		if s.dirs[iecDirSrv] != nil {
+			return accepted(reasonIECEstablishedSYN)
+		}
+		if opens(s.mode, pkt) {
 			s.dirs[iecDirClient] = newIECDir(seq) // the client retried with a new ISN
 			return accepted(reasonIECAccept)
 		}
@@ -397,8 +431,12 @@ func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) {
 	d.frames = d.frames[i:]
 }
 
-// rstLocked handles an endpoint RST: a bare RST closes the session after
-// its pending data is dropped; a RST with data is dropped and aborts.
+// rstLocked handles an endpoint RST. A RST with data is dropped and aborts.
+// A bare RST passes, but closes the session, after its pending data is
+// dropped, only at the sequence number its receiver expects next: the end
+// of what was forwarded to it (RFC 5961). Its receiver ignores any other,
+// or answers it with a challenge ACK, which a closed sender answers with a
+// RST at that sequence number.
 func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	if len(pkt.Payload) > 0 {
 		if s.mode == "enforce" {
@@ -407,6 +445,9 @@ func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now tim
 		res := accepted(reasonIECClosed)
 		res.acts.merge(t.closeLocked(s, now))
 		return res
+	}
+	if pkt.TCP.Seq != forwardedSeq(s.dirs[dir]) {
+		return accepted(reasonIECAccept)
 	}
 	res := accepted(reasonIECClosed)
 	res.decision.Resolved = t.dropHeldLocked(s, -1)

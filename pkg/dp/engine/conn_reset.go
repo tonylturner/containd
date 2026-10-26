@@ -11,8 +11,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -36,6 +34,36 @@ func observedResets(src, dst netip.AddrPort, tcp capture.TCPMeta) (toReceiver, t
 		return toReceiver, session.Reset{}, false
 	}
 	return toReceiver, session.Reset{Src: dst, Dst: src, Seq: tcp.Ack}, true
+}
+
+// connReset is the reset state of a connection the engine closed, per
+// target endpoint (index iecDirClient or iecDirSrv).
+type connReset struct {
+	targets [2]resetTarget
+}
+
+type resetTarget struct {
+	valid   bool
+	r       session.Reset
+	sent    time.Time
+	retries int
+}
+
+// challenge answers a challenge ACK (RFC 5961) that target from sent after
+// its reset: any of its packets that carries ACK and no RST. The reset
+// goes again at the ACK number, at most iecResetRetries times, within
+// iecResetWindow of the last one. It returns the reset to send.
+func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (session.Reset, bool) {
+	if c == nil || tcp.Flags&capture.TCPFlagACK == 0 || tcp.Flags&capture.TCPFlagRST != 0 {
+		return session.Reset{}, false
+	}
+	tr := &c.targets[from]
+	if !tr.valid || tr.sent.IsZero() || tr.retries >= iecResetRetries || now.Sub(tr.sent) > iecResetWindow || tcp.Ack == tr.r.Seq {
+		return session.Reset{}, false
+	}
+	tr.retries++
+	tr.r.Seq = tcp.Ack
+	return tr.r, true
 }
 
 // sendRST sends one reset. A failure makes enforcement unhealthy.
@@ -65,45 +93,4 @@ func (t *iecTable) deleteConntrack(client, server netip.AddrPort, what string) {
 	if err != nil && t.onError != nil {
 		t.onError(errors.New(what + ": conntrack delete: " + err.Error()))
 	}
-}
-
-// closePickedUp closes the connection of an inline flow whose stream has
-// just failed as picked up mid-connection, as midstreamLocked closes an
-// IEC104 session: the resets observedResets gives for the dropped packet
-// are sent once its drop verdict is submitted. The opposite direction's
-// stream fails as picked up too, so that nothing of the old connection
-// passes and both directions start again at the next handshake. Without a
-// ready injector, and for IPv6, which the injector cannot reset, the
-// connection's packets only drop.
-func (e *Engine) closePickedUp(pkt capture.Packet, state *flow.State) {
-	t := e.iec
-	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
-	dst, okDst := addrPort(pkt.DstIP, pkt.DstPort)
-	if !okSrc || !okDst || !pkt.TCP.Valid || !t.health.injectorReady() {
-		return
-	}
-	e.flowMu.Lock()
-	rev := e.flows[state.Key.Reversed().Hash()]
-	e.flowMu.Unlock()
-	if rev != nil {
-		e.dpiMgr.FailStream(rev, &dpi.ParsedPacket{Proto: "tcp", FailClosed: true}, dpi.StreamMidStream)
-	}
-	client, server := src, dst
-	if state.Key.Dir == flow.DirReverse {
-		client, server = dst, src
-	}
-	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
-	resets := []session.Reset{toReceiver}
-	if hasSender {
-		resets = append(resets, toSender)
-	}
-	what := "picked-up connection " + client.String() + " > " + server.String()
-	e.afterDrop(pkt.Token, func() {
-		for _, r := range resets {
-			if err := t.sendRST(r); err != nil && t.onError != nil {
-				t.onError(errors.New(what + ": " + err.Error()))
-			}
-		}
-		t.deleteConntrack(client, server, what)
-	})
 }

@@ -79,7 +79,11 @@ see [Config Format](config-format.md). In an enforce envelope an IEC 104
 session starts only at a SYN of a handshake that the kernel's connection
 tracking has not seen complete. A SYN sent into an established connection
 starts none; a connection the engine did not see from its SYN is dropped and
-reset at both endpoints.
+reset at both endpoints. A client that lost an established session and
+reconnects from the same source port recovers as described below for other
+ICS protocols. A RST without payload closes a session only at the sequence
+number its receiver expects next; any other passes and the session stays
+inspected.
 
 With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
 closed when its stream cannot be inspected: a conflicting overlap, a
@@ -87,8 +91,8 @@ retransmission that differs from or predates the bytes the engine kept,
 malformed framing, reassembly limits, a decoder fault, or a SYN with payload
 that does not start the connection's stream (reason `stream_resync`). The
 packet is dropped and the connection blocked like a decoded denial, without
-restarting inspection. Only a FIN or RST that the receiver accepts in window ends the
-connection's stream early. After a denied command, the connection drops every
+restarting inspection. Only a FIN or RST that the receiver accepts in window
+ends the connection's stream early. After a denied command, the connection drops every
 later packet until it ends, so a retransmission of the command never reaches
 the device, even when the flow block could not be installed.
 
@@ -99,9 +103,14 @@ a data-plane configuration change, connections idle longer than the engine's
 handshake while the engine still follows the old one. No flow block is
 installed. The engine resets the connection once, at both endpoints, and
 drops its later packets, so the client reconnects at once and its next
-connection is inspected from its first byte. Without the reset injector, or
-for IPv6, the connection is only dropped. Learn-mode flows and packets without
-an inline verdict still pass.
+connection is inspected from its first byte. An endpoint that answers its
+reset with a challenge ACK gets it again at that ACK's sequence number, up
+to three times within a second, as IEC 104 sessions do. Without the reset
+injector, or for IPv6, the connection is only dropped. A reset that fails
+makes the `iec104Enforcement` health object unhealthy while such a rule is
+loaded, even without an IEC 104 envelope (`active` stays false); the
+`enforce_unhealthy` session event still describes IEC 104 envelopes only.
+Learn-mode flows and packets without an inline verdict still pass.
 
 Inspection starts only at a SYN of a handshake that the kernel's connection
 tracking has not seen complete. A SYN without payload sent into an

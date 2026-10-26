@@ -51,19 +51,6 @@ type abortTxn struct {
 	trigger string
 }
 
-// iecReset is the reset state of an aborted session, per target endpoint
-// (index iecDirClient or iecDirSrv).
-type iecReset struct {
-	targets [2]resetTarget
-}
-
-type resetTarget struct {
-	valid   bool
-	r       session.Reset
-	sent    time.Time
-	retries int
-}
-
 var targetNames = [2]string{"client", "server"}
 
 // abortLocked begins the abort transaction: it marks the incarnation
@@ -157,12 +144,12 @@ func dirLetter(dir int) byte {
 // resetTargets computes one RST per endpoint: for target X, seq is the end
 // of the last byte forwarded to X. Without both ISNs the
 // connection was never established and nothing is reset.
-func resetTargets(s *iecSession) *iecReset {
+func resetTargets(s *iecSession) *connReset {
 	c2s, s2c := s.dirs[iecDirClient], s.dirs[iecDirSrv]
 	if c2s == nil || s2c == nil {
-		return &iecReset{}
+		return &connReset{}
 	}
-	return &iecReset{targets: [2]resetTarget{
+	return &connReset{targets: [2]resetTarget{
 		iecDirClient: {valid: true, r: session.Reset{Src: s.server, Dst: s.client, Seq: forwardedSeq(s2c)}},
 		iecDirSrv:    {valid: true, r: session.Reset{Src: s.client, Dst: s.server, Seq: forwardedSeq(c2s)}},
 	}}
@@ -252,20 +239,13 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 	t.emit([]events.Event{s.sessionEvent(outcome, extra, now)})
 }
 
-// challengeLocked answers a challenge ACK (RFC 5961) from a reset target:
-// it retries at the ACK number, at most iecResetRetries times within
-// iecResetWindow of the first reset.
+// challengeLocked answers a challenge ACK from a reset target of an aborted
+// session (connReset.challenge).
 func (t *iecTable) challengeLocked(s *iecSession, from int, pkt capture.Packet, now time.Time) iecActions {
-	if s.reset == nil || pkt.TCP.Flags&capture.TCPFlagACK == 0 || pkt.TCP.Flags&capture.TCPFlagRST != 0 {
+	r, ok := s.reset.challenge(from, pkt.TCP, now)
+	if !ok {
 		return iecActions{}
 	}
-	tr := &s.reset.targets[from]
-	if !tr.valid || tr.sent.IsZero() || tr.retries >= iecResetRetries || now.Sub(tr.sent) > iecResetWindow || pkt.TCP.Ack == tr.r.Seq {
-		return iecActions{}
-	}
-	tr.retries++
-	tr.r.Seq = pkt.TCP.Ack
-	r := tr.r
 	return iecActions{jobs: []func(){func() { t.sendReset(s, from, r) }}}
 }
 

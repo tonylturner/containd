@@ -123,12 +123,17 @@ func TestPickupResetOnce(t *testing.T) {
 			}
 			c := p.denied[0]
 			f.deny("denied on the next connection", c.rule, c.frame)
+			time.Sleep(50 * time.Millisecond)
+			if got := len(f.inj.Resets()); got != 2 {
+				t.Fatalf("%d resets, want none for the next connection", got)
+			}
 		})
 	}
 }
 
 // TestPickupResetFailureIsUnhealthy keeps dropping a picked-up connection
-// whose resets fail and reports the failure.
+// whose resets fail and reports the failure: in engine health while an
+// enforce ICS rule is loaded, though no IEC104 envelope is.
 func TestPickupResetFailureIsUnhealthy(t *testing.T) {
 	f := newResetFlow(t, 502)
 	reported := make(chan error, 8)
@@ -141,6 +146,13 @@ func TestPickupResetFailureIsUnhealthy(t *testing.T) {
 	f.e.iec.health.mu.Unlock()
 	if !strings.Contains(reason, "operation not permitted") || len(reported) != 2 {
 		t.Fatalf("reset fault %q, %d errors reported; want both failed resets reported", reason, len(reported))
+	}
+	if st := f.e.IEC104Enforcement(); st.Active || st.Healthy || st.Reason != reason {
+		t.Fatalf("health %+v, want unhealthy by %q without an active envelope", st, reason)
+	}
+	f.e.LoadRules(learnPolicy())
+	if st := f.e.IEC104Enforcement(); !st.Healthy {
+		t.Fatalf("health %+v under learn rules, want healthy", st)
 	}
 }
 
@@ -197,5 +209,36 @@ func TestReconnectOnSamePortAfterLostConnection(t *testing.T) {
 				t.Fatalf("resets %+v for a connection the client ended", got)
 			}
 		})
+	}
+}
+
+// TestPickupResetAnswersChallengeACK resets a picked-up connection whose
+// server ignores the RST at the read's sequence number: its challenge ACKs
+// get the reset again at their ACK number, at most iecResetRetries times.
+// A packet at the reset's own sequence number, or a RST, gets none.
+func TestPickupResetAnswersChallengeACK(t *testing.T) {
+	f := newResetFlow(t, 502)
+	const clientSeq, serverSeq = 7000, resyncServerISN + 1
+	f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, clientSeq, serverSeq, ackPsh, modbusADU(1, 3, 0, 2))), "modbus-read", 0)
+	f.waitResets(2)
+	client, server := f.endpoints()
+	f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil))    // at the reset's sequence number
+	f.handle(f.segment(true, serverSeq, clientSeq+40, capture.TCPFlagRST, nil)) // a RST
+	for i := range uint32(iecResetRetries + 2) {
+		f.handle(f.segment(true, serverSeq, clientSeq+12+i, capture.TCPFlagACK, nil)) // challenge ACKs
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(f.inj.Resets()) < 2+iecResetRetries && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	got := f.inj.Resets()[2:]
+	want := []session.Reset{
+		{Src: client, Dst: server, Seq: clientSeq + 12},
+		{Src: client, Dst: server, Seq: clientSeq + 13},
+		{Src: client, Dst: server, Seq: clientSeq + 14},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resets after the challenge ACKs %+v, want %+v", got, want)
 	}
 }
