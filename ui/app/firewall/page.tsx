@@ -221,9 +221,11 @@ export default function FirewallPage() {
         api.listInterfaceState(),
         api.getRouting(),
       ]);
-      const wanIface = pickWanIface(ifs ?? []);
+      if (states === null) throw new Error("Interface state unavailable — WAN address discovery failed; no quick-start changes were staged.");
+      if (ifs === null) throw new Error("Interface configuration unavailable — WAN discovery failed; no quick-start changes were staged.");
+      const wanIface = pickWanIface(ifs);
       if (!wanIface) throw new Error("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
-      const wanState = (states ?? []).find((s) => s.name === wanIface.name) ?? null;
+      const wanState = states.find((s) => s.name === (wanIface.device?.trim() || wanIface.name)) ?? null;
       const wanCIDR = pickWanCIDR(wanState);
       if (!wanCIDR) {
         throw new Error(

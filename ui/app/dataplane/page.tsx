@@ -44,6 +44,7 @@ export default function PcapPage() {
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [ifaceStateStatus, setIfaceStateStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [ifaceStates, setIfaceStates] = useState<InterfaceState[]>([]);
   const [state, setState] = useState<SaveState>("idle");
   const [notice, setNotice] = useState<string | null>(null);
@@ -116,7 +117,7 @@ export default function PcapPage() {
   useEffect(() => {
     api.listInterfaces().then((list) => setIfaces(list ?? []));
     api.listZones().then((list) => setZones(list ?? []));
-    api.listInterfaceState().then((list) => setIfaceStates(list ?? []));
+    void refreshInterfaceState();
   }, []);
   useEffect(() => {
     refresh();
@@ -128,6 +129,12 @@ export default function PcapPage() {
     }, 8000);
     return () => clearInterval(timer);
   }, []);
+
+  async function refreshInterfaceState() {
+    const list = await api.listInterfaceState();
+    setIfaceStates(list ?? []);
+    setIfaceStateStatus(list === null ? "unavailable" : "ready");
+  }
 
   const ifaceOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -182,23 +189,20 @@ export default function PcapPage() {
   }, [ifaces, zones]);
 
   useEffect(() => {
+    if (ifaceStateStatus !== "ready") return;
     setSettings((prev) => {
-      const existing = new Map((prev.forwardTargets ?? []).map((t) => [t.interface ?? "", t]));
-      const next = ifaceOptions.map((iface) => {
-        const current = existing.get(iface.value);
-        return (
-          current ?? {
-            interface: iface.value,
-            enabled: false,
-            host: "",
-            port: 9000,
-            proto: "udp" as const,
-          }
-        );
-      });
-      return { ...prev, forwardTargets: next };
+      // Discovery adds choices; it must never delete saved forwarding targets.
+      const existing = new Set((prev.forwardTargets ?? []).map((target) => target.interface));
+      const added = ifaceOptions.filter((iface) => !existing.has(iface.value)).map((iface) => ({
+        interface: iface.value,
+        enabled: false,
+        host: "",
+        port: 9000,
+        proto: "udp" as const,
+      }));
+      return { ...prev, forwardTargets: [...(prev.forwardTargets ?? []), ...added] };
     });
-  }, [ifaceOptions]);
+  }, [ifaceOptions, ifaceStateStatus]);
 
   const bpfPreview = useMemo(() => {
     const clauses: string[] = [];
@@ -214,7 +218,7 @@ export default function PcapPage() {
     if ((settings.interfaces ?? []).length === 0 && (settings.zones ?? []).length === 0) {
       issues.push("Select at least one interface or zone to capture.");
     }
-    if (captureIfaceOptions.length === 0 && zoneOptions.length === 0) {
+    if (ifaceStateStatus === "ready" && captureIfaceOptions.length === 0 && zoneOptions.length === 0) {
       issues.push("No firewall interfaces are bound to OS devices. Set device bindings on the Interfaces page.");
     }
     for (const selectedZone of settings.zones ?? []) {
@@ -224,7 +228,7 @@ export default function PcapPage() {
         issues.push(`Zone "${selectedZone}" has no configured interfaces.`);
       }
     }
-    if (ifaceStates.length > 0) {
+    if (ifaceStateStatus === "ready") {
       const available = new Set(ifaceStates.map((i) => i.name));
       const deviceByLogical = new Map(
         ifaces.map((iface) => [iface.name, iface.device?.trim() || iface.name]),
@@ -265,7 +269,7 @@ export default function PcapPage() {
       issues.push("Port filters apply only to TCP and UDP.");
     }
     return issues;
-  }, [settings, ifaces, ifaceStates, captureIfaceOptions.length, zoneOptions]);
+  }, [settings, ifaces, ifaceStates, ifaceStateStatus, captureIfaceOptions.length, zoneOptions]);
   const isRunning = status?.running ?? false;
   const canStart = canEdit && status !== null && configIssues.length === 0 && state === "idle" && !isRunning;
   const captureSummary = useMemo(() => {
@@ -484,6 +488,14 @@ export default function PcapPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {ifaceStateStatus === "unavailable" && (
+        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <p>Interface runtime state unavailable — the engine could not be reached. Device discovery is unknown; saved capture settings are unchanged.</p>
+          <button onClick={refreshInterfaceState} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+        </div>
+      )}
+      {ifaceStateStatus === "ready" && ifaceStates.length === 0 && <p role="status" className="mb-4 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
+
       {notice && (
         <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
           {notice}

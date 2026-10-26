@@ -50,6 +50,7 @@ export default function VPNPage() {
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<InterfaceState | null>(null);
+  const [interfaceStateStatus, setInterfaceStateStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [wgStatus, setWgStatus] = useState<WireGuardStatus | null>(null);
   const [svcStatus, setSvcStatus] = useState<VPNServiceStatus | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -127,7 +128,8 @@ export default function VPNPage() {
         setZones(zonesResp ?? []);
         setInterfaces(ifacesResp ?? []);
         const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
-        setRuntime((states ?? []).find((s) => s.name === ifName) ?? null);
+        setInterfaceStateStatus(states === null ? "unavailable" : "ready");
+        setRuntime(states === null ? null : states.find((s) => s.name === ifName) ?? null);
         try {
           setWgStatus(await api.getWireGuardStatus(ifName));
         } catch {
@@ -389,10 +391,10 @@ export default function VPNPage() {
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge tone={cfg.wireguard.enabled ? "ok" : "off"}>{cfg.wireguard.enabled ? "enabled" : "disabled"}</Badge>
               <Badge
-                tone={runtime?.up ? "ok" : runtime ? "warn" : "off"}
-                title={runtime ? "Kernel interface state" : "Kernel interface not present"}
+                tone={interfaceStateStatus === "unavailable" ? "warn" : runtime?.up ? "ok" : runtime ? "warn" : "off"}
+                title={interfaceStateStatus !== "ready" ? "Kernel interface state unknown" : runtime ? "Kernel interface state" : "Kernel interface not present"}
               >
-                {runtime ? (runtime.up ? "link up" : "link down") : "not present"}
+                {interfaceStateStatus === "unavailable" ? "interface state unavailable" : interfaceStateStatus === "loading" ? "Loading…" : runtime ? (runtime.up ? "link up" : "link down") : "not present"}
               </Badge>
               <Badge tone={wgStatus ? "ok" : "off"} title="WireGuard netlink API reachability">
                 {wgStatus ? "api ok" : "api n/a"}
@@ -564,6 +566,8 @@ export default function VPNPage() {
           peerCount={(cfg.wireguard.peers ?? []).length}
           peerNameByKey={peerNameByKey}
           runtime={runtime}
+          interfaceStateStatus={interfaceStateStatus}
+          onRetry={() => { void refresh({ silent: true }); }}
           wgStatus={wgStatus}
         />
 

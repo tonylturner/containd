@@ -6,7 +6,6 @@ import { Edge, Handle, Node, NodeProps, Position } from "reactflow";
 import {
   api,
   type FirewallRule,
-  type FlowSummary,
   type Interface,
   type OSRoutingSnapshot,
   type RoutingConfig,
@@ -397,7 +396,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     api.listEvents(),
     api.getSystemStats().catch(() => null),
   ]);
-  if (!running) return null;
+  if (!running || ifaceState === null || flows === null) return null;
   const zones = running.zones;
   const ifaces = running.interfaces;
   const routing = running.routing;
@@ -406,13 +405,13 @@ export async function buildTopology(): Promise<TopoResult | null> {
   const zoneSubnet: Record<string, string> = {};
   const zoneAddresses: Record<string, { address: InterfaceAddresses; fullAddrs: string[] }> = {};
   for (const ifc of ifaces || []) {
-    const address = interfaceAddresses(ifc, ifaceState || []);
+    const address = interfaceAddresses(ifc, ifaceState);
     if (ifc.zone && address.addrs.length &&
         (!zoneSubnet[ifc.zone] || (address.source === "config" && zoneAddresses[ifc.zone]?.address.source !== "config"))) {
       zoneSubnet[ifc.zone] = address.addrs[0];
       zoneAddresses[ifc.zone] = {
         address,
-        fullAddrs: (address.source === "config" ? ifc.addresses : runtimeFor(ifc, ifaceState || [])?.addrs) || [],
+        fullAddrs: (address.source === "config" ? ifc.addresses : runtimeFor(ifc, ifaceState)?.addrs) || [],
       };
     }
   }
@@ -435,7 +434,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
       }
     }
   }
-  for (const fl of (flows as FlowSummary[]) || []) {
+  for (const fl of flows) {
     for (const ip of [fl.srcIp, fl.dstIp]) {
       if (!ip) {
         continue;
@@ -452,7 +451,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
   }
 
   const zoneFlowCount: Record<string, { rx: number; tx: number }> = {};
-  for (const fl of (flows as FlowSummary[]) || []) {
+  for (const fl of flows) {
     for (const [zn, sub] of Object.entries(zoneSubnet)) {
       if (fl.srcIp && ipInCidr(fl.srcIp, sub)) {
         (zoneFlowCount[zn] ??= { rx: 0, tx: 0 }).tx += fl.eventCount || 1;
@@ -464,8 +463,8 @@ export async function buildTopology(): Promise<TopoResult | null> {
   }
 
   const builtIfaces: BuiltIface[] = ((ifaces as Interface[]) || []).map((ifc) => {
-    const st = runtimeFor(ifc, ifaceState || []);
-    const address = interfaceAddresses(ifc, ifaceState || []);
+    const st = runtimeFor(ifc, ifaceState);
+    const address = interfaceAddresses(ifc, ifaceState);
     const zfc = ifc.zone ? zoneFlowCount[ifc.zone] : undefined;
     const rxStr = zfc ? `${zfc.rx} pkts` : "0 pkts";
     const txStr = zfc ? `${zfc.tx} pkts` : "0 pkts";
@@ -604,7 +603,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     mem: stats?.memory?.usagePercent != null
       ? Math.round(stats.memory.usagePercent)
       : 0,
-    sessions: ((flows as FlowSummary[]) || []).length,
+    sessions: flows.length,
     interfaces: builtIfaces,
     routes: builtRoutes,
     rules: builtRules,

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -47,9 +48,15 @@ func (m *memStore) MutateCandidate(ctx context.Context, edit func(*config.Config
 	if err := json.Unmarshal(blob, &next); err != nil {
 		return err
 	}
+	bank := next.IDS.Rules
+	next.IDS.Rules = nil
 	if err := edit(&next); err != nil {
 		return err
 	}
+	if next.IDS.Rules != nil {
+		return errors.New("bank-free candidate edit supplied IDS rules")
+	}
+	next.IDS.Rules = bank
 	return m.SaveCandidate(ctx, &next)
 }
 
@@ -74,6 +81,54 @@ func (m *memStore) LoadIDSRules(ctx context.Context) ([]config.IDSRule, error) {
 	return nil, nil
 }
 func (m *memStore) Close() error { return nil }
+
+func TestMemStoreBankFreeCandidateEdits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		rules   []config.IDSRule
+		editErr error
+		wantErr string
+	}{
+		{name: "ordinary edit retains bank"},
+		{name: "reject explicit empty bank", rules: []config.IDSRule{}, wantErr: "bank-free candidate edit supplied IDS rules"},
+		{name: "reject replacement bank", rules: []config.IDSRule{{ID: "replacement"}}, wantErr: "bank-free candidate edit supplied IDS rules"},
+		{name: "failed callback leaves candidate unchanged", editErr: errors.New("edit failed"), wantErr: "edit failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.System.Hostname = "before"
+			cfg.IDS.Rules = []config.IDSRule{{ID: "retained", Labels: map[string]string{"source": "saved"}}}
+			store := &memStore{cfg: cfg}
+			err := store.MutateCandidate(context.Background(), func(next *config.Config) error {
+				if next.IDS.Rules != nil {
+					t.Fatal("bank-free callback received IDS rules")
+				}
+				next.System.Hostname = "after"
+				next.IDS.Rules = tc.rules
+				return tc.editErr
+			})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if store.cfg.System.Hostname != "after" {
+					t.Fatal("ordinary edit was not saved")
+				}
+			} else {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("error = %v, want %q", err, tc.wantErr)
+				}
+				if store.cfg.System.Hostname != "before" {
+					t.Fatal("failed edit changed candidate")
+				}
+			}
+			bank := store.cfg.IDS.Rules
+			if len(bank) != 1 || bank[0].ID != "retained" || bank[0].Labels["source"] != "saved" {
+				t.Fatalf("bank changed: %+v", bank)
+			}
+		})
+	}
+}
 
 func TestShowVersion(t *testing.T) {
 	reg := NewRegistry(&memStore{}, nil)

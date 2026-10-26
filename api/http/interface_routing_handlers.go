@@ -29,13 +29,16 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 func interfaceStateHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if engine == nil {
-			c.JSON(http.StatusOK, []config.InterfaceState{})
+			apiError(c, http.StatusServiceUnavailable, "engine interface state unavailable")
 			return
 		}
 		st, err := engine.ListInterfaceState(c.Request.Context())
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine interface state unavailable")
 			return
+		}
+		if st == nil {
+			st = []config.InterfaceState{}
 		}
 		c.JSON(http.StatusOK, st)
 	}

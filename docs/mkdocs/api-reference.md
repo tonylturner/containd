@@ -35,6 +35,18 @@ it in both directions, including optional identity routes and delegated audit
 registration. Optional routes require their corresponding server integration.
 The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 
+## Monitoring Availability
+
+Flows, protocol/top-talker statistics, anomalies, learning profiles and rule
+generation and apply, signatures and matches, interface runtime state and simulation
+return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
+when the required engine capability is missing or its call fails. The same
+convention applies to anomaly/learning clears, signature writes and simulation
+control: unavailable operations never report a successful clear or change.
+A reachable backend with no observations still returns `200` with an empty
+array; a reachable stopped simulation returns `200` with `running: false`.
+Retry unavailable requests rather than interpreting them as empty or stopped.
+
 ## Staged Configuration
 
 All persisted configuration edits stage into one shared candidate, including

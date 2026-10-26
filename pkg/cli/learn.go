@@ -34,7 +34,7 @@ func showLearnProfiles(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var profiles []learnedProfileJSON
 		if err := api.getJSON(ctx, "/api/v1/learn/profiles", &profiles); err != nil {
-			return err
+			return monitoringUnavailable(out, "Learning profiles", err)
 		}
 		if out == nil {
 			return nil
@@ -73,7 +73,7 @@ func showLearnRules(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		rules, err := postAndDecodeRules(ctx, api, "/api/v1/learn/generate")
 		if err != nil {
-			return err
+			return monitoringUnavailable(out, "Generated learning rules", err)
 		}
 		return renderLearnRules(out, rules)
 	}

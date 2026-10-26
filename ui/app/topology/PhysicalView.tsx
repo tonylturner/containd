@@ -211,24 +211,31 @@ export default function PhysicalView() {
           api.getSystemInspection(signal).catch(() => null),
           fetchHealth(signal).catch(() => null),
           api.getRunningConfig(signal),
-          api.listInterfaceState(signal).catch(() => []),
-          api.listFlows(200, signal).catch(() => []),
+          api.listInterfaceState(signal),
+          api.listFlows(200, signal),
           api.getServicesStatus(signal).catch(() => null),
         ]);
       if (!running) throw new Error("Running configuration unavailable");
+      if (ifaceState === null || flows === null) {
+        setData(null);
+        setError("Physical topology unavailable — interface runtime state or flows could not be read from the engine.");
+        setLoading(false);
+        return;
+      }
       setData({
         stats: stats as SystemStats | null,
         inspection: inspection as SystemInspection | null,
         health,
         interfaces: running?.interfaces || [],
-        ifaceState: (ifaceState as InterfaceState[]) || [],
-        flows: (flows as FlowSummary[]) || [],
+        ifaceState,
+        flows,
         services: services as ServicesStatus | null,
       });
       setError(null);
       setLoading(false);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
+      setData(null);
       setError("Failed to load physical view data.");
       setLoading(false);
     }

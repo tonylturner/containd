@@ -12,6 +12,7 @@ import { Card } from "../../components/Card";
 
 export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
+  const [flowStatus, setFlowStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [services, setServices] = useState<Record<string, unknown> | null>(null);
 
@@ -26,6 +27,7 @@ export default function MonitoringOverviewPage() {
           api.getServicesStatus(controller.signal),
         ]);
         setFlows(f ?? []);
+        setFlowStatus(f === null ? "unavailable" : "ready");
         setEvents(e ?? []);
         setServices(s);
       } catch (e) {
@@ -43,6 +45,12 @@ export default function MonitoringOverviewPage() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
+
+  async function retryFlows() {
+    const result = await api.listFlows(200);
+    setFlows(result ?? []);
+    setFlowStatus(result === null ? "unavailable" : "ready");
+  }
 
   const alertCount = events.filter(
     (ev) => ev.proto === "ids" && ev.kind === "alert",
@@ -217,9 +225,13 @@ export default function MonitoringOverviewPage() {
         {" "}
         for setup, policy workflow, and config state.
       </div>
+      {flowStatus === "unavailable" && <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+        Flows unavailable — the engine could not be reached.
+        <button onClick={retryFlows} className="ml-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+      </div>}
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Flows">
-          <div className="text-3xl font-bold text-[var(--text)]">{flows.length}</div>
+          <div className="text-3xl font-bold text-[var(--text)]">{flowStatus === "ready" ? flows.length : flowStatus === "loading" ? "Loading…" : "Unavailable"}</div>
           <Link href="/flows/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
             View flows →
           </Link>
@@ -339,10 +351,10 @@ export default function MonitoringOverviewPage() {
           </div>
         </Card>
         <Card title="Top Applications">
-          {appSeries.length === 0 && (
+          {flowStatus === "ready" && appSeries.length === 0 && (
             <div className="text-sm text-[var(--text-muted)]">No flow apps yet.</div>
           )}
-          {appSeries.length > 0 && (
+          {flowStatus === "ready" && appSeries.length > 0 && (
             <div className="space-y-2 text-xs text-[var(--text)]">
               {appSeries.map((row) => (
                 <div key={row.app} className="space-y-1">
@@ -365,22 +377,22 @@ export default function MonitoringOverviewPage() {
           <div className="space-y-3 text-xs text-[var(--text)]">
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Sources</span>
-              <span className="text-[var(--text)]">{endpointStats.srcCount}</span>
+              <span className="text-[var(--text)]">{flowStatus === "ready" ? endpointStats.srcCount : "Unknown"}</span>
             </div>
             <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
-                style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
+                style={{ width: `${flowStatus === "ready" ? endpointStats.srcPct : 0}%`, background: "var(--teal)" }}
               />
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Destinations</span>
-              <span className="text-[var(--text)]">{endpointStats.dstCount}</span>
+              <span className="text-[var(--text)]">{flowStatus === "ready" ? endpointStats.dstCount : "Unknown"}</span>
             </div>
             <div className="h-2 w-full rounded-full bg-[var(--surface)]">
               <div
                 className="h-2 rounded-full"
-                style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}
+                style={{ width: `${flowStatus === "ready" ? endpointStats.dstPct : 0}%`, background: "var(--orange)" }}
               />
             </div>
           </div>

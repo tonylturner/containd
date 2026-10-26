@@ -2780,6 +2780,11 @@ paths:
         in: query
         schema: {type: integer, default: 200, maximum: 5000}
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Array of flow summaries
           content:
@@ -3015,6 +3020,11 @@ paths:
       summary: List learned ICS traffic profiles
       tags: [Learn]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Array of learned traffic profiles
           content:
@@ -3028,6 +3038,11 @@ paths:
       summary: Generate suggested firewall rules (admin)
       tags: [Learn]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Generated allowlist rules
           content:
@@ -3039,10 +3054,15 @@ paths:
       summary: Stage learned rules (admin)
       tags: [Learn]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; no rules staged.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: 'Rules staged, or no rules to apply (no staging header for the no-op).', content: {application/json: {schema: {
                   type: object, properties: {status: {type: string}, count: {type: integer}, rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}}}}},
           headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
-        "400": {description: Learn mode not available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Generated rules or candidate configuration failed validation, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
   /learn:
@@ -3050,8 +3070,12 @@ paths:
       summary: Clear all learned traffic profiles (admin)
       tags: [Learn]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: Learned data cleared, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
-        "400": {description: Learn mode not available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── ICS Inventory ──────────────────────────────────────────────
   /inventory:
@@ -3107,6 +3131,11 @@ paths:
       summary: List loaded IDS signatures
       tags: [Signatures]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Array of signatures
           content:
@@ -3121,6 +3150,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/SignaturesSignature'}
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: Signature added, content: {application/json: {schema: {$ref: '#/components/schemas/SignaturesSignature'}}}}
 
   /signatures/{id}:
@@ -3130,6 +3164,11 @@ paths:
       parameters:
       - $ref: "#/components/parameters/pathId"
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404": {description: Signature not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
@@ -3139,6 +3178,11 @@ paths:
       summary: List signature match events
       tags: [Signatures]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Array of signature match events
           content:
@@ -3156,6 +3200,11 @@ paths:
       summary: List detected protocol anomalies
       tags: [Anomalies]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Array of anomaly events
           content:
@@ -3170,6 +3219,11 @@ paths:
       summary: Clear detected anomalies (admin)
       tags: [Anomalies]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
           description: Success
           content:
@@ -3182,6 +3236,11 @@ paths:
       summary: Protocol traffic breakdown
       tags: [Statistics]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Per-protocol traffic counters
           content:
@@ -3193,6 +3252,11 @@ paths:
       summary: Top source/destination pairs by traffic volume
       tags: [Statistics]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
           description: Top talkers
           content:
@@ -3665,6 +3729,11 @@ paths:
       summary: List kernel interface state
       tags: [Interfaces]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
           description: Success
           content:
@@ -3931,6 +4000,11 @@ paths:
       summary: Inspect simulation
       tags: [Simulation]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
           description: Success
           content:
@@ -3949,6 +4023,11 @@ paths:
                 action: {type: string, enum: [start, stop]}
               required: [action]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; not an empty or stopped state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
           description: Success
           content:

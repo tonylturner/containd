@@ -176,7 +176,7 @@ func showFlows(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var flows []dpevents.FlowSummary
 		if err := api.getJSON(ctx, "/api/v1/flows", &flows); err != nil {
-			return err
+			return monitoringUnavailable(out, "Flows", err)
 		}
 		if out == nil {
 			return nil
@@ -303,7 +303,10 @@ func showInterfacesAPI(api *API) Command {
 			return err
 		}
 		var state []config.InterfaceState
-		_ = api.getJSON(ctx, "/api/v1/interfaces/state", &state)
+		stateErr := api.getJSON(ctx, "/api/v1/interfaces/state", &state)
+		if stateErr != nil {
+			return monitoringUnavailable(out, "Interface runtime state", stateErr)
+		}
 		stateByName := map[string]config.InterfaceState{}
 		for _, st := range state {
 			stateByName[st.Name] = st
@@ -324,8 +327,6 @@ func showInterfacesAPI(api *API) Command {
 			if effectiveDev != "" {
 				if st, ok := stateByName[effectiveDev]; ok && len(st.Addrs) > 0 {
 					osAddrs = strings.Join(st.Addrs, ",")
-				} else if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
-					osAddrs = strings.Join(a, ",")
 				}
 			}
 			t.addRow(
@@ -351,7 +352,7 @@ func showInterfacesStateAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var state []config.InterfaceState
 		if err := api.getJSON(ctx, "/api/v1/interfaces/state", &state); err != nil {
-			return err
+			return monitoringUnavailable(out, "Interface runtime state", err)
 		}
 		if out == nil {
 			return nil

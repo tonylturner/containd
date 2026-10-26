@@ -73,7 +73,7 @@ function TopologyInner() {
     try {
       const result = await buildTopology();
       if (!result) {
-        setTopoError("Failed to load topology data. Check API connectivity.");
+        setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
         return;
       }
 
@@ -90,7 +90,7 @@ function TopologyInner() {
       setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      setTopoError("Failed to load topology data. Check API connectivity.");
+      setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
   }, []);
 
@@ -174,8 +174,8 @@ function TopologyInner() {
         </div>
         <div className={s.topbarRight}>
           <div className={s.statusChip}>
-            <div className={s.chipDot} style={{ background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "#22c55e" }}>ALL NOMINAL</span>
+            <div className={s.chipDot} style={{ background: topoError ? "#ef4444" : "#22c55e" }} />
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: topoError ? "#ef4444" : "#22c55e" }}>{topoError ? "UNAVAILABLE" : "ALL NOMINAL"}</span>
           </div>
           <div className={s.statusChip}>
             <span style={{ color: "#4a4030" }}>LAST SYNC</span>
@@ -189,7 +189,7 @@ function TopologyInner() {
       </div>
 
       {/* Error banner */}
-      {topoError && (
+      {currentView === "logical" && topoError && (
         <div role="alert" style={{ margin: "8px 12px 0", padding: "8px 14px", fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 2 }}>
           {topoError}
           <button onClick={() => fetchData()} style={{ marginLeft: 12, color: "#f59e0b", background: "transparent", border: "1px solid rgba(245,158,11,0.3)", padding: "2px 10px", cursor: "pointer", fontFamily: "var(--mono)", fontSize: 9 }}>Retry</button>
@@ -201,7 +201,7 @@ function TopologyInner() {
         <PhysicalView />
       ) : currentView === "security" ? (
         <SecurityView />
-      ) : (
+      ) : topoError ? null : (
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
             <SparkTickContext.Provider value={sparkTick}>
