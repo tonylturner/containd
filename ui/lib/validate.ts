@@ -148,7 +148,9 @@ export function parseIdentityLabels(
 
 /**
  * Longest zone name in bytes: enforcement names each zone's interface set
- * zone_<hex name>, and nftables names are at most 255 bytes.
+ * zone_<hex name>, and nftables names are at most 255 bytes. Equals the
+ * engine's MaxZoneNameBytes; pkg/dp/enforce/zones_limit_test.go fails when
+ * they differ.
  */
 export const MAX_ZONE_NAME_BYTES = 125;
 
@@ -157,10 +159,10 @@ const ZONE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Validates a zone name. The server refuses a blank name, leading or
- * trailing whitespace, and more than 125 bytes of UTF-8; the UI also keeps
- * names to letters, digits, dash and underscore, because a name with '/'
- * cannot be updated or deleted through /zones/{name} and other characters
- * hurt the CLI. Returns null if valid.
+ * trailing whitespace, and more than MAX_ZONE_NAME_BYTES of UTF-8; the UI
+ * also keeps names to letters, digits, dash and underscore, because a name
+ * with '/' cannot be updated or deleted through /zones/{name} and other
+ * characters hurt the CLI. Returns null if valid.
  */
 export function validateZoneName(name: string): string | null {
   if (name.trim() === "") return "Zone name is required.";
