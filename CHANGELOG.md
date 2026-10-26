@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Upgrade the Go toolchain and both Docker builders to 1.26.10 to fix
   CVE-2026-111943 in `crypto/x509`.
+- Update the pinned Wolfi base image so the runtime images ship the fixed
+  `ca-certificates-bundle` (CVE-2026-111943) and brotli libraries
+  (CVE-2026-111497).
+
+### Changed
+
+- IEC 104 diagnostics name the supported type set: unsupported types report
+  `type N is not in the supported IEC 104 type set`, and the
+  `IEC104-MALFORMED` / `IEC104-UNSUPPORTED` signature descriptions state the
+  actual checks.
+
+### Removed
+
+- The Roadmap and Audit Baseline documentation pages. They held internal
+  planning material; Secure by Design now lists the known security gaps
+  directly.
 
 ### Fixed
 
