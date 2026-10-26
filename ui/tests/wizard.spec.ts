@@ -48,7 +48,7 @@ test("the publish-service wizard rejects a non-IPv4 server address at the server
   await page.getByPlaceholder("e.g. 443").fill("443");
   const next = page.getByRole("button", { name: "Next", exact: true });
 
-  for (const bad of ["192.0.2", "192.0.2.256", "server.local", "2001:db8::5"]) {
+  for (const bad of ["192.0.2", "192.0.2.256", "192.0.2.05", "server.local", "2001:db8::5"]) {
     await ip.fill(bad);
     await expect(page.getByRole("alert").filter({ hasText: `"${bad}" is not a valid IPv4 address` })).toBeVisible();
     await expect(ip).toHaveAttribute("aria-invalid", "true");
