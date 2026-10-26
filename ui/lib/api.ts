@@ -86,7 +86,7 @@ export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 export type {
   AVStatus, DHCPStatus, DNSStatus, NTPStatus, ProxyStatus, ProxyTelemetryStatus,
-  ServiceMeter, ServicesStatus, SyslogStatus, VPNStatus,
+  ServiceMeter, ServicesStatus, SyslogAuditForwarder, SyslogAuditStatus, SyslogStatus, VPNStatus,
 } from "./api-service-status";
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";

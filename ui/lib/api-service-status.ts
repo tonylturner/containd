@@ -18,6 +18,35 @@ export type ServiceMeter = {
   errors_rate_per_min: number;
 };
 
+/** Audit delivery of one forwarder, as of its last flush. */
+export type SyslogAuditForwarder = {
+  /** Destination, as proto://address:port. */
+  forwarder: string;
+  /** ID of the last audit record it accepted. */
+  last_id: number;
+  /** Audit records not yet sent to it. */
+  backlog: number;
+  last_error: string;
+  /** Empty before its first delivery. */
+  last_sent: string;
+};
+
+/**
+ * Audit records forwarded over the syslog forwarders, oldest first, each
+ * forwarder resuming from its own durable cursor.
+ */
+export type SyslogAuditStatus = {
+  enabled: boolean;
+  sent_total: number;
+  failed_total: number;
+  last_error: string;
+  /** Empty before the first flush. */
+  last_flush: string;
+  /** Records not yet sent, summed over the forwarders. */
+  backlog: number;
+  forwarders: SyslogAuditForwarder[];
+};
+
 export type SyslogStatus = ServiceMeter & {
   configured_forwarders: number;
   format: string;
@@ -31,6 +60,8 @@ export type SyslogStatus = ServiceMeter & {
   batch_limit: number;
   hit_limit: boolean;
   flush_interval_sec: number;
+  /** Absent from a management plane that does not forward audit records. */
+  audit?: SyslogAuditStatus;
 };
 
 export type DNSStatus = ServiceMeter & {
