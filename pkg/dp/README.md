@@ -1,18 +1,10 @@
 # Data Plane Packages
 
-Skeleton for capture, flow tracking, enforcement, DPI/ICS decoders, IDS, and engine coordination.
-
-Current subpackages:
-- `capture`: AF_PACKET capture worker (Linux) with interface validation; NFQUEUE steering planned.
-- `engine`: orchestrates capture, immutable rule snapshots, and verdict application.
-- `flow`: flow/session tracking primitives.
-- `rules`: compiled firewall snapshot structures and evaluator (zones/CIDRs/proto/port, plus ICS/identity predicates).
-- `verdict`: verdict/action model used by enforcement paths.
-- `enforce`: nftables compile/apply path (baseline enforcement + dynamic sets).
-- `dpi`: selective inspection framework with protocol decoders and event emission.
-- `ics`: OT protocol decoders (Modbus/TCP today).
-- `ids`: IDS rules engine over DPI events.
-- `itdpi`: IT metadata decoders for DNS/TLS/HTTP and related protocols.
-- `events`: in-memory event/flow store for UI/API consumption.
-- `pcap`: capture/replay/forwarding helpers for diagnostics and sensors.
-- `netcfg`: netlink helpers for interfaces, routes, and policy routing.
+The dataplane packages implement Linux AF_PACKET and NFQUEUE capture
+(`capture`), packet-path coordination (`engine`), flow tracking and rule/verdict
+evaluation, nftables enforcement (`enforce`), stream inspection (`dpi`),
+industrial protocol decoders (`ics`), IT metadata decoders (`itdpi`), IDS
+evaluation, event storage, PCAP diagnostics, and network configuration
+(`netcfg`). See [Dataplane](../../docs/mkdocs/dataplane.md),
+[Enforcement](../../docs/mkdocs/dataplane-enforcement.md), and
+[ICS DPI](../../docs/mkdocs/ics-dpi.md) for behavior and limitations.

@@ -4,7 +4,7 @@ set -euo pipefail
 # containd IEC 60870-5-104 Linux truth harness.
 #
 # Brings up the two-endpoint compose (lib60870 RTU + control centre on two
-# disposable networks, branch-built containd firewall routing between them,
+# disposable networks, locally built containd firewall routing between them,
 # loopback-only management), routes the endpoints through the firewall, and
 # runs every enforcement assertion. The proof of plant state is the RTU's own
 # state file and command confirmations, never a timeout.
@@ -15,24 +15,23 @@ set -euo pipefail
 #   FAIL             a baseline (non-gated) assertion failed: a harness,
 #                    routing or monitoring defect that is independent of IEC
 #                    enforcement.
-#   GATE-FAIL        an assertion that needs IEC104 enforcement failed. In
-#                    the integrated engine, these indicate a
-#                    regression: forbidden commands or malformed traffic were
+#   GATE-FAIL        an assertion that needs IEC104 enforcement failed:
+#                    forbidden commands or malformed traffic were
 #                    not prevented as required.
-#   NOT-IMPLEMENTED  an enforcement assertion this harness cannot drive yet.
+#   NOT-IMPLEMENTED  the requested freshness window is too short for acceptance.
 # Exit status: 0 every assertion passed (acceptance); 1 a FAIL (or a fatal
 # setup error); 3 the baseline passed but GATE-FAIL or NOT-IMPLEMENTED remain.
 # "Passed with skips" is not acceptance.
 #
 # The telemetry freshness check runs for IEC104_FRESHNESS_SECONDS (default
-# 660, more than 10 minutes); a shorter value records NOT-IMPLEMENTED.
+# 660, more than 10 minutes); a value below 600 records NOT-IMPLEMENTED.
 #
-# Requirements: docker compose, jq, curl, python3. Builds the branch firewall
+# Requirements: docker compose, jq, curl, python3. Builds the local firewall
 # image and the GPLv3 endpoint image if they are absent. The default endpoint
 # tag hashes its build context, including the Dockerfile's pinned dependencies.
 # Uses a unique compose project and ephemeral loopback ports, so it never
-# touches another smoke stack's containers, networks or volumes. Everything it
-# creates is torn down on exit.
+# touches another smoke stack's containers, networks or volumes. Its containers,
+# networks and volumes are removed on exit; built images remain for reuse.
 
 endpoint_source_hash() {
   python3 - "$ROOT/test/iec104/endpoint" <<'PY'

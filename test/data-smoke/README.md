@@ -15,7 +15,7 @@ If you want to pre-populate the directory before starting the container,
 run the helper script:
 
 ```sh
-./generate.sh
+bash test/data-smoke/generate.sh
 ```
 
 **Do not commit private keys or database files to the repository.**
@@ -24,8 +24,10 @@ run the helper script:
 
 `scripts/smoke-forward.sh` and `scripts/smoke-dpi.sh` default to compose
 project `deploy`, subnets `172.30.0.0/24` (wan) and `172.31.0.0/24` (lan),
-host ports 18080/18081 and the shared `containd/containd:dev` image. Two
-runs on one Docker host collide on all four. For an isolated run, write an
+host ports 18080 (HTTP), 18081 (engine), 18443 (HTTPS) and 12222 (SSH),
+the shared `test/data-smoke` data directory, and the
+`containd/containd:dev` image. Two runs on one Docker host can collide on
+these resources. For an isolated run, write an
 override that moves them and point the scripts at it:
 
 | Variable | Meaning |
@@ -37,10 +39,14 @@ override that moves them and point the scripts at it:
 | `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports); without it, `smoke-dpi.sh` recreates the containers, because a reused stack keeps the earlier run's dynamic blocks |
 
 The override replaces the engine image, networks, addresses, ports and the
-`/data` bind with `!override` (Docker Compose 2.24 or later), for example
+`/data` bind with `!override` ([Docker Compose 2.24.4 or later](https://github.com/compose-spec/compose-spec/blob/main/13-merge.md#replace-value)), for example
 `image: containd/containd:<run-tag>`, `ports: !override ["127.0.0.1::8081",
 "127.0.0.1::18080"]`, one `ipv4_address` per service in the new subnets,
-and `networks.<name>.ipam: !override` with the new subnet. Bring the stack
+and `networks.<name>.ipam: !override` with the new subnet. Replace the
+**entire** ports list (the example publishes only HTTP and engine) and set a
+non-empty `CONTAIND_JWT_SECRET` in the override's engine environment, for
+example a value generated with `openssl rand -hex 32`. Use a separate data
+directory for the `/data` bind. Bring the stack
 up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
 -f <override> up -d`, read the ports with `docker compose ... port engine
 18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then

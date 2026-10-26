@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Print starter Compose connection endpoints. Usage: scripts/containd-connect [service]
+# Requires Docker Compose and a running service (default: containd).
 set -euo pipefail
 
 service="${1:-containd}"
@@ -13,7 +15,7 @@ ps_out="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" ps -q
 cid="$(printf '%s\n' "$ps_out" | tr -d '\r' | grep -E '^[0-9a-f]{12,64}$' | head -n 1 || true)"
 if [[ -z "${cid}" ]]; then
   echo "Service '${service}' is not running."
-  echo "Start it with: docker compose up -d"
+  echo "Start it with: scripts/containd up"
   exit 1
 fi
 
