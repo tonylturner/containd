@@ -239,22 +239,14 @@ export default function SyslogPage() {
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />
             </div>
-          ) : (
+          ) : status?.sparkline.length ? (
             <Sparkline
-              values={[
-                (status?.configured_forwarders ?? 0) + 2,
-                5,
-                7,
-                (cfg.forwarders?.length ?? 0) + 4,
-                9,
-                6,
-                10,
-              ]}
+              values={status.sparkline}
               color="var(--primary)"
               background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-              title="Recent forwarding volume (simulated)"
+              title="Syslog events per minute"
             />
-          )}
+          ) : null}
           {!loading && typeof status?.rate_per_min === "number" ? (
             <p className="mt-2 text-xs text-(--text-muted)">
               Rate: {status?.rate_per_min.toFixed(1)} / min

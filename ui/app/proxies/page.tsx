@@ -11,6 +11,7 @@ import {
   type ForwardProxyConfig,
   type ReverseProxyConfig,
   type ReverseProxySite,
+  type ServicesStatus,
 } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
@@ -27,7 +28,7 @@ export default function ProxiesPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const confirm = useConfirm();
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<ServicesStatus | null>(null);
   const [forward, setForward] = useState<ForwardProxyConfig>({
     enabled: false,
     listenPort: 3128,
@@ -58,8 +59,7 @@ export default function ProxiesPage() {
     setLoading(true);
     setError(null);
     try {
-      const svc = (await api.getServicesStatus()) as any;
-      setStatus(svc?.proxy ?? null);
+      setStatus(await api.getServicesStatus());
       const fp = await api.getForwardProxy();
       if (fp) {
         setForward({
@@ -111,24 +111,11 @@ export default function ProxiesPage() {
     () => (forward.allowedDomains ?? []).join(", "),
     [forward.allowedDomains],
   );
-  const forwardSpark = useMemo(() => {
-    if (Array.isArray(status?.envoy?.sparkline) && status.envoy.sparkline.length) {
-      return status.envoy.sparkline as number[];
-    }
-    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
-      return status.sparkline as number[];
-    }
-    return [8, 11, 12, forward.enabled ? 18 : 10, 16, 14, 20];
-  }, [status, forward.enabled]);
-  const reverseSpark = useMemo(() => {
-    if (Array.isArray(status?.nginx?.sparkline) && status.nginx.sparkline.length) {
-      return status.nginx.sparkline as number[];
-    }
-    if (Array.isArray(status?.sparkline) && status.sparkline.length) {
-      return status.sparkline as number[];
-    }
-    return [4, 6, 9, reverse.sites?.length ? 14 : 8, 12, 10, 15];
-  }, [status, reverse.sites?.length]);
+  // Envoy and nginx report their own access-log meters next to the proxy
+  // service entry.
+  const proxy = status?.proxy;
+  const envoy = status?.envoy;
+  const nginx = status?.nginx;
 
   async function onSaveForward() {
     if (!canEdit) return;
@@ -252,34 +239,36 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {status?.envoy_running ? "yes" : "no"}{" "}
-                {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
+                Live running: {proxy?.envoy_running ? "yes" : "no"}{" "}
+                {proxy?.envoy_pid ? `(pid ${proxy.envoy_pid})` : ""}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {typeof status?.envoy?.rate_per_min === "number" ? status?.envoy?.rate_per_min.toFixed(1) : "0.0"} / min
+                Rate: {(envoy?.rate_per_min ?? 0).toFixed(1)} / min
               </p>
               <p className="text-xs">
-                Errors: {typeof status?.envoy?.errors_rate_per_min === "number" ? status?.envoy?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+                Errors: {(envoy?.errors_rate_per_min ?? 0).toFixed(1)} / min
               </p>
               <p className="text-xs text-(--text-dim)">
                 Telemetry: access logs when enabled.
               </p>
-              {status?.envoy_last_error ? (
+              {proxy?.envoy_last_error ? (
                 <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {status.envoy_last_error}
+                  {proxy.envoy_last_error}
                 </div>
               ) : null}
               <p className="mt-2 text-xs text-(--text-muted)">
-                Last start: {status?.envoy_last_start ? String(status.envoy_last_start) : "n/a"}
+                Last start: {proxy?.envoy_last_start || "n/a"}
               </p>
-              <div className="mt-4">
-                <Sparkline
-                  values={forwardSpark}
-                  color="var(--primary)"
-                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                  title="Recent forward proxy requests"
-                />
-              </div>
+              {envoy?.sparkline.length ? (
+                <div className="mt-4">
+                  <Sparkline
+                    values={envoy.sparkline}
+                    color="var(--primary)"
+                    background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                    title="Envoy events per minute"
+                  />
+                </div>
+              ) : null}
             </>
           )}
         </Card>
@@ -297,34 +286,36 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {status?.nginx_running ? "yes" : "no"}{" "}
-                {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
+                Live running: {proxy?.nginx_running ? "yes" : "no"}{" "}
+                {proxy?.nginx_pid ? `(pid ${proxy.nginx_pid})` : ""}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {typeof status?.nginx?.rate_per_min === "number" ? status?.nginx?.rate_per_min.toFixed(1) : "0.0"} / min
+                Rate: {(nginx?.rate_per_min ?? 0).toFixed(1)} / min
               </p>
               <p className="text-xs">
-                Errors: {typeof status?.nginx?.errors_rate_per_min === "number" ? status?.nginx?.errors_rate_per_min.toFixed(1) : "0.0"} / min
+                Errors: {(nginx?.errors_rate_per_min ?? 0).toFixed(1)} / min
               </p>
               <p className="text-xs text-(--text-dim)">
                 Telemetry: access logs from published apps.
               </p>
-              {status?.nginx_last_error ? (
+              {proxy?.nginx_last_error ? (
                 <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {status.nginx_last_error}
+                  {proxy.nginx_last_error}
                 </div>
               ) : null}
               <p className="mt-2 text-xs text-(--text-muted)">
-                Last start: {status?.nginx_last_start ? String(status.nginx_last_start) : "n/a"}
+                Last start: {proxy?.nginx_last_start || "n/a"}
               </p>
-              <div className="mt-4">
-                <Sparkline
-                  values={reverseSpark}
-                  color="var(--purple)"
-                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
-                  title="Recent reverse proxy requests"
-                />
-              </div>
+              {nginx?.sparkline.length ? (
+                <div className="mt-4">
+                  <Sparkline
+                    values={nginx.sparkline}
+                    color="var(--purple)"
+                    background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
+                    title="Nginx events per minute"
+                  />
+                </div>
+              ) : null}
             </>
           )}
         </Card>

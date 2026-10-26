@@ -14,7 +14,7 @@ import {
   type Interface,
   type InterfaceState,
   type WireGuardStatus,
-  type ServicesStatus,
+  type VPNStatus,
 } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
@@ -32,7 +32,6 @@ import {
   normalize,
   PEMField,
   type FieldIssue,
-  type VPNServiceStatus,
 } from "./vpn-shared";
 import { OpenVPNEditorCard } from "./vpn-openvpn-editor";
 import { VPNRuntimeStatusCard } from "./vpn-runtime-status";
@@ -52,7 +51,7 @@ export default function VPNPage() {
   const [runtime, setRuntime] = useState<InterfaceState | null>(null);
   const [interfaceStateStatus, setInterfaceStateStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [wgStatus, setWgStatus] = useState<WireGuardStatus | null>(null);
-  const [svcStatus, setSvcStatus] = useState<VPNServiceStatus | null>(null);
+  const [svcStatus, setSvcStatus] = useState<VPNStatus | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
@@ -136,9 +135,7 @@ export default function VPNPage() {
           setWgStatus(null);
         }
         try {
-          const st = (await api.getServicesStatus()) as ServicesStatus | null;
-          const vpn = (st as any)?.vpn ?? null;
-          setSvcStatus(vpn as VPNServiceStatus);
+          setSvcStatus((await api.getServicesStatus())?.vpn ?? null);
         } catch {
           setSvcStatus(null);
         }
@@ -192,18 +189,6 @@ export default function VPNPage() {
     }
     return out;
   }, [cfg.wireguard.peers]);
-  const vpnSpark = useMemo(
-    () => [
-      3,
-      (wgStatus?.peers?.length ?? 1) + 2,
-      5,
-      (svcStatus?.openvpn_running ? 6 : 3) + (wgStatus?.peers?.length ?? 0),
-      8,
-      (wgStatus?.peers?.length ?? 1) + 4,
-      7,
-    ],
-    [wgStatus?.peers?.length, svcStatus?.openvpn_running],
-  );
   const interfaceOptions = useMemo(() => {
     return (interfaces ?? [])
       .map((iface) => {
@@ -362,7 +347,7 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} vpnSpark={vpnSpark} />
+      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} vpnSpark={svcStatus?.sparkline ?? []} />
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}

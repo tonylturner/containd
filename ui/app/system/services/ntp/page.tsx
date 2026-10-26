@@ -60,10 +60,6 @@ export default function NTPPage() {
     () => (cfg.servers ?? []).join("\n"),
     [cfg.servers],
   );
-  const ntpSpark = useMemo(
-    () => [2, 3, 5, (cfg.servers?.length ?? 1) + 4, 6, 5, 7],
-    [cfg.servers],
-  );
 
   async function onSave() {
     if (!canEdit) return;
@@ -163,14 +159,16 @@ export default function NTPPage() {
                 {status.last_error}
               </div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={ntpSpark}
-                color="var(--teal)"
-                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                title="NTP sync trend (simulated)"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--teal)"
+                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                  title="NTP events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>

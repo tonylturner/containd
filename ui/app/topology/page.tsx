@@ -47,8 +47,6 @@ import { DetailContent } from "./topology-detail";
 import {
   buildTopology,
   nodeTypes,
-  sparkStore,
-  SparkTickContext,
   type TopoNodeData,
 } from "./topology-shared";
 
@@ -65,7 +63,6 @@ function TopologyInner() {
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
-  const [sparkTick, setSparkTick] = useState(0);
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
@@ -78,11 +75,6 @@ function TopologyInner() {
       }
 
       setTopoError(null);
-
-      // Merge sparkline history into shared store (not on node data)
-      for (const n of result.nodes) {
-        if (!sparkStore.data[n.id]) sparkStore.data[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
-      }
 
       nodeDataRef.current = result.nodeDataMap;
       setNodes(result.nodes);
@@ -117,24 +109,6 @@ function TopologyInner() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [fetchData, fitView]);
-
-  // ── Sparkline traffic simulation ──
-  // Mutate sparkStore data in-place; Spark components re-render via
-  // SparkTickContext without causing ReactFlow node object replacement.
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (document.hidden) return;
-      const hist = sparkStore.data;
-      for (const id of Object.keys(hist)) {
-        hist[id].shift();
-        hist[id].push(Math.max(0.05, Math.min(1, hist[id][hist[id].length - 1] + (Math.random() - 0.5) * 0.2)));
-      }
-      sparkStore.tick += 1;
-      // Bump state to propagate via context — does NOT touch ReactFlow nodes
-      setSparkTick((t) => t + 1);
-    }, 2000);
-    return () => clearInterval(iv);
-  }, []);
 
   // ── Update selection highlight on nodes ──
   useEffect(() => {
@@ -204,7 +178,6 @@ function TopologyInner() {
       ) : topoError ? null : (
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
-            <SparkTickContext.Provider value={sparkTick}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -236,7 +209,6 @@ function TopologyInner() {
                 style={{ background: "#0a0e0a", border: "1px solid rgba(245,158,11,0.14)", borderRadius: 0 }}
               />
             </ReactFlow>
-            </SparkTickContext.Provider>
 
             {/* Legend overlay */}
             <div className={s.canvasLegend}>

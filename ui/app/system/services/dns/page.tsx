@@ -65,10 +65,6 @@ export default function DNSPage() {
     () => (cfg.upstreamServers ?? []).join("\n"),
     [cfg.upstreamServers],
   );
-  const dnsSpark = useMemo(
-    () => [4, 8, 6, (cfg.upstreamServers?.length ?? 1) + 6, 12, 9, 14],
-    [cfg.upstreamServers],
-  );
 
   async function onSave() {
     if (!canEdit) return;
@@ -176,14 +172,16 @@ export default function DNSPage() {
                 {status.last_error}
               </div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={dnsSpark}
-                color="var(--primary)"
-                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                title="Resolver query trend"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--primary)"
+                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                  title="DNS events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>

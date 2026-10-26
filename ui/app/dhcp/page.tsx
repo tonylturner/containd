@@ -238,14 +238,16 @@ export default function DHCPPage() {
             {status?.note ? (
               <div className="md:col-span-2 text-xs text-(--text-muted)">{status.note}</div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={[3, 6, 5, leases.length || 4, 7, 9, Math.max(leases.length, 5)]}
-                color="var(--teal)"
-                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                title="Lease churn (simulated trend)"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--teal)"
+                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                  title="DHCP events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>

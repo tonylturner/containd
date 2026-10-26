@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import type { DHCPConfig } from "../lib/api";
 
+// The event meter every management service status entry carries.
+const idleMeter = {
+  sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0,
+};
+
 for (const stored of [undefined, false, true]) {
   test(`DHCP authority ${String(stored)} loads, saves and refreshes`, async ({ page }) => {
     let config: DHCPConfig = { enabled: false, ...(stored === undefined ? {} : { authoritative: stored }) };
@@ -19,7 +24,7 @@ for (const stored of [undefined, false, true]) {
       const data = path.endsWith("/auth/me") || path.endsWith("/auth/session")
         ? { id: "admin-1", username: "containd", role: "admin" }
         : path.endsWith("/dhcp/leases") ? { leases: [] }
-          : path.endsWith("/services/status") ? { dhcp: { enabled: false } }
+          : path.endsWith("/services/status") ? { dhcp: { enabled: false, ...idleMeter }, av: { available: false, error: "engine unavailable" } }
             : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
       await route.fulfill({ json: data });
     });

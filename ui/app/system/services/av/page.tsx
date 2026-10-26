@@ -264,14 +264,16 @@ export default function AVPage() {
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
             <div>Block TTL: <span className="text-(--text)">{status.block_ttl || 600}s</span></div>
             <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
-            <div className="md:col-span-3">
-              <Sparkline
-                values={status?.sparkline ?? []}
-                color="var(--purple)"
-                background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                title="Engine AV scans per minute"
-              />
-            </div>
+            {status.sparkline.length ? (
+              <div className="md:col-span-3">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--purple)"
+                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
+                  title="Engine AV scans per minute"
+                />
+              </div>
+            ) : null}
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
           </div>
