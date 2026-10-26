@@ -11,7 +11,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -182,26 +181,10 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// cliAPIForRequest is the API client of an in-app console command: it calls
+// the management listener this process has bound on loopback, never a
+// destination derived from the request.
 func cliAPIForRequest(c *gin.Context, store config.Store) (*cli.API, error) {
-	loopbackHostPort := func(addr string, defaultPort string) string {
-		addr = strings.TrimSpace(addr)
-		port := defaultPort
-		if addr == "" {
-			return "127.0.0.1:" + port
-		}
-		if strings.HasPrefix(addr, ":") {
-			if p := strings.TrimSpace(strings.TrimPrefix(addr, ":")); p != "" {
-				port = p
-			}
-			return "127.0.0.1:" + port
-		}
-		if _, p, err := net.SplitHostPort(addr); err == nil && strings.TrimSpace(p) != "" {
-			port = strings.TrimSpace(p)
-		}
-		return "127.0.0.1:" + port
-	}
-
-	// Never derive an authenticated destination from request headers.
 	if store == nil {
 		return nil, errors.New("console: config store unavailable")
 	}
@@ -212,24 +195,24 @@ func cliAPIForRequest(c *gin.Context, store config.Store) (*cli.API, error) {
 	if cfg == nil {
 		return nil, errors.New("console: management config unavailable")
 	}
-	enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-	enableHTTPS := cfg.System.Mgmt.EnableHTTPS == nil || *cfg.System.Mgmt.EnableHTTPS
+	// Listener settings bind at startup, so the saved configuration can
+	// name a listener that is not bound yet. Management serves each bound
+	// port on 127.0.0.1 too.
+	bound := config.BoundManagementListeners()
 	var baseURL string
 	var httpClient cli.HTTPClient
-	// Always prefer HTTP for internal calls when enabled.
-	if enableHTTP {
-		addr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		baseURL = "http://" + loopbackHostPort(addr, "8080")
-	} else if enableHTTPS {
-		addr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-		baseURL = "https://" + loopbackHostPort(addr, "8443")
+	// Always prefer HTTP for internal calls when it is bound.
+	if port := bound.HTTP.Port(); port != 0 {
+		baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+	} else if port := bound.HTTPS.Port(); port != 0 {
+		baseURL = fmt.Sprintf("https://127.0.0.1:%d", port)
 		certFile, _ := mgmttls.ResolveFiles(cfg)
 		httpClient, err = consoleHTTPSClient(certFile)
 		if err != nil {
 			return nil, fmt.Errorf("console: %w", err)
 		}
 	} else {
-		return nil, errors.New("console: no management HTTP or HTTPS listener enabled")
+		return nil, errors.New("console: no management HTTP or HTTPS listener bound")
 	}
 	apiClient := &cli.API{BaseURL: baseURL}
 	if httpClient != nil {

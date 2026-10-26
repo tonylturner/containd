@@ -1593,6 +1593,12 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
+      description: >-
+        The listen addresses and enabled flags are those management binds when it
+        starts with the saved configuration: CONTAIND_MGMT_ADDR and
+        CONTAIND_MGMT_HTTPS_ADDR take precedence over the saved addresses, then
+        the defaults :8080 and :8443 apply. A saved listener change binds at the
+        next start.
       properties:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}

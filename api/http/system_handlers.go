@@ -51,17 +51,16 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
-		httpAddr := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-		httpEnabled := boolDefault(cfg.System.Mgmt.EnableHTTP, true)
-		httpsEnabled := boolDefault(cfg.System.Mgmt.EnableHTTPS, true)
+		// The listeners management binds when it starts with this
+		// configuration, under this process's environment.
+		listeners := config.EffectiveManagementListeners(cfg)
 		certFile, keyFile := mgmttls.ResolveFiles(cfg)
 
 		resp := tlsInfoResponse{
-			HTTPListenAddr:  httpAddr,
-			HTTPSListenAddr: httpsAddr,
-			HTTPEnabled:     httpEnabled,
-			HTTPSEnabled:    httpsEnabled,
+			HTTPListenAddr:  listeners.HTTP.Addr,
+			HTTPSListenAddr: listeners.HTTPS.Addr,
+			HTTPEnabled:     listeners.HTTP.Enabled,
+			HTTPSEnabled:    listeners.HTTPS.Enabled,
 			CertFile:        certFile,
 			KeyFile:         keyFile,
 		}
