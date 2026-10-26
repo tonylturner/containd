@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-10-26
+
 ### Security
 
 - In IEC 104 envelopes a segment carrying both SYN and RST no longer opens, establishes or closes a session: every session and every enforce envelope drops it, and learn mode no longer starts a session at it.
@@ -1535,7 +1537,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.34...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.35...HEAD
+[0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/tonylturner/containd/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/tonylturner/containd/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/tonylturner/containd/compare/v0.1.31...v0.1.32
