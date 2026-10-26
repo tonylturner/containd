@@ -5,7 +5,7 @@ import type {
   IOARange,
   Protocol,
   RuleSchedule,
-} from "./api";
+} from "./api-firewall";
 
 function asList(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;

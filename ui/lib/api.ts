@@ -52,8 +52,18 @@ export {
 export type {
   RulesetEngineStatus,
   RulesetPreview,
-  RuleWarning,
 } from "./api-dataplane";
+export type {
+  FirewallRule,
+  FirewallRulePatch,
+  ICSPredicate,
+  IEC104Class,
+  IOARange,
+  Protocol,
+  RulePreview,
+  RuleSchedule,
+  RuleWarning,
+} from "./api-firewall";
 export type {
   ICSCoverageReason,
   ICSCoverageReport,
@@ -63,7 +73,6 @@ export type {
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
-export type { FirewallRulePatch, RulePreview } from "./api-network";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 export type {
@@ -73,6 +82,7 @@ export type {
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
+import { firewallAPI } from "./api-firewall";
 import { networkAPI } from "./api-network";
 import { policyAPI } from "./api-policy";
 import { authAPI } from "./api-auth";
@@ -80,6 +90,7 @@ import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
 import { fetchWithSession } from "./api-core";
+import type { FirewallRule } from "./api-firewall";
 import {
   normalizeICSEnforcementHealth,
   type ICSEnforcementHealth,
@@ -263,59 +274,6 @@ export type OSRoute = {
 export type OSRoutingSnapshot = {
   routes: OSRoute[];
   defaultRoute?: OSRoute;
-};
-
-export type Protocol = {
-  name: string;
-  port?: string;
-};
-
-export type ICSPredicate = {
-  protocol?: string;
-  functionCode?: number[];
-  unitId?: number;
-  addresses?: string[];
-  objectClasses?: number[];
-  readOnly?: boolean;
-  writeOnly?: boolean;
-  direction?: "request" | "response";
-  mode?: "enforce" | "learn";
-  // IEC 60870-5-104 fields (protocol "iec104"). A missing field is a
-  // wildcard; an empty list is a validation error, so never send [].
-  typeIds?: number[];
-  classes?: IEC104Class[];
-  ca?: number[];
-  ioa?: IOARange[];
-};
-
-export type IEC104Class = "monitor" | "control" | "system" | "unknown";
-
-/** Closed IEC 104 information object address range, 0..16777215. */
-export type IOARange = {
-  start: number;
-  end: number;
-};
-
-export type FirewallRule = {
-  id: string;
-  description?: string;
-  sourceZones?: string[];
-  destZones?: string[];
-  sources?: string[];
-  destinations?: string[];
-  protocols?: Protocol[];
-  ics?: ICSPredicate;
-  identities?: string[];
-  schedule?: RuleSchedule;
-  action: "ALLOW" | "DENY";
-  log?: boolean;
-};
-
-export type RuleSchedule = {
-  daysOfWeek?: string[];
-  startTime?: string;
-  endTime?: string;
-  timezone?: string;
 };
 
 export type NATConfig = {
@@ -983,6 +941,7 @@ export const api = {
 
   ...configAPI,
   ...networkAPI,
+  ...firewallAPI,
   ...policyAPI,
   ...dataplaneAPI,
   ...servicesAPI,
