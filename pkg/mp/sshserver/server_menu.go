@@ -157,7 +157,7 @@ func (s *interactiveSession) menuResetPassword() {
 		s.writeLn("error: " + err.Error())
 		return
 	}
-	pw, ok := s.ask("New password (blank to cancel): ")
+	pw, ok := s.askNewPassword("New password (blank to cancel): ")
 	if !ok {
 		return
 	}
@@ -457,7 +457,7 @@ func (s *interactiveSession) wizardPromptPassword() bool {
 		s.writeLn("password step skipped: " + err.Error())
 		return true
 	}
-	v, ok := s.ask("Set a new password for this user now? (blank to skip): ")
+	v, ok := s.askNewPassword("New password for this user (blank to skip): ")
 	if !ok {
 		s.writeLn("Wizard cancelled.")
 		return false
@@ -559,39 +559,6 @@ func shellEscape(s string) string {
 		return "'" + s + "'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-func readLineInteractive(r *bufio.Reader, echo io.Writer) (string, bool) {
-	var buf []byte
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return "", false
-		}
-		if b == 0x04 && len(buf) == 0 {
-			return "", false
-		}
-		if b == 0x03 {
-			return "\x03", true
-		}
-		if b == '\n' || b == '\r' {
-			writeTTY(echo, "\n")
-			break
-		}
-		if b == 0x08 || b == 0x7f {
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-				writeRaw(echo, "\b \b")
-			}
-			continue
-		}
-		if b < 0x20 {
-			continue
-		}
-		buf = append(buf, b)
-		writeRaw(echo, string([]byte{b}))
-	}
-	return string(buf), true
 }
 
 func writeTTY(w io.Writer, s string) {
