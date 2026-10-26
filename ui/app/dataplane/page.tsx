@@ -26,6 +26,7 @@ import {
   type Zone,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { formatEndpoint } from "../../lib/endpoint";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { SavedPcapsCard, ReplayCard } from "./pcap-library";
 import {
@@ -318,7 +319,7 @@ export default function PcapPage() {
   const enabledForwarding = useMemo(() => {
     return (settings.forwardTargets ?? [])
       .filter((t) => t.enabled && t.host)
-      .map((t) => `${t.interface} → ${t.host}:${t.port ?? ""}`.trim());
+      .map((t) => `${t.interface} → ${formatEndpoint(t.host, t.port)}`.trim());
   }, [settings.forwardTargets]);
   const runningSince = useMemo(() => {
     if (!status?.startedAt) return "—";

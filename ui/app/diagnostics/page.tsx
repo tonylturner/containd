@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
 import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
+import { formatEndpoint } from "../../lib/endpoint";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
@@ -745,7 +746,7 @@ export default function DiagnosticsPage() {
                     }
                     confirm.open({
                       title: "Block Flow",
-                      message: `Block flow ${blockFlowSrc.trim()} -> ${blockFlowDst.trim()}:${blockFlowPort.trim()} (${blockFlowProto})?`,
+                      message: `Block flow ${blockFlowSrc.trim()} -> ${formatEndpoint(blockFlowDst.trim(), blockFlowPort.trim())} (${blockFlowProto})?`,
                       confirmLabel: "Block",
                       variant: "warning",
                       onConfirm: async () => {
@@ -761,7 +762,7 @@ export default function DiagnosticsPage() {
                           ttlSeconds: Number.isFinite(ttl) ? ttl : undefined,
                         });
                         if (!res.ok) setBlockErr(res.error || "Failed to apply flow block.");
-                        else setBlockMsg(`Blocked flow ${blockFlowSrc.trim()} -> ${blockFlowDst.trim()}:${blockFlowPort.trim()}.`);
+                        else setBlockMsg(`Blocked flow ${blockFlowSrc.trim()} -> ${formatEndpoint(blockFlowDst.trim(), blockFlowPort.trim())}.`);
                         setBusy(null);
                       },
                     });

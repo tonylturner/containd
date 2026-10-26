@@ -333,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The sessions, NAT, policy wizard, diagnostics (block flow) and dataplane (forward targets) pages format endpoints like the events and flows pages: a missing or zero port shows the address alone, and an IPv6 address with a port is bracketed (`[2001:db8::5]:502`).
 - Syslog RFC 5424 events and the web UI (events, flows, alerts, dashboard) show an endpoint without a port when the event has none, as for ICMP and ICMPv6 rule hits, and bracket an IPv6 address that has a port (`[2001:db8::1]:2404`). Before, syslog printed `addr:0` and the UI printed `addr:`.
 - Firewall rule hits logged through NFLOG for ICMP and ICMPv6 packets now carry their source and destination addresses and transport `icmp` or `icmpv6`, without ports.
 - SSH is recorded as a bound management listener only after its socket binds. A failed SSH bind leaves SSH off with a listener fault instead of reporting it enabled; HTTP and HTTPS are unaffected.
