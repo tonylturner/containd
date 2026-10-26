@@ -53,3 +53,42 @@ func TestResolveInterfaceRefsMapsLogicalNamesToDevices(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveRoutingIfacesMapsGatewayLogicalNamesToDevices(t *testing.T) {
+	routing := config.RoutingConfig{
+		Gateways: []config.Gateway{
+			{Name: "wan-gw", Address: "192.0.2.1", Iface: "wan"},
+			{Name: "lab-gw", Address: "198.51.100.1", Iface: "eth9"},
+			{Name: "any-gw", Address: "203.0.113.1"},
+		},
+		Routes: []config.StaticRoute{{Dst: "default", Gateway: "wan-gw"}},
+	}
+	ifaces := []config.Interface{{Name: "wan", Device: "eth0"}}
+
+	got := resolveRoutingIfaces(routing, ifaces)
+
+	want := map[string]string{"wan-gw": "eth0", "lab-gw": "eth9", "any-gw": ""}
+	for _, gw := range got.Gateways {
+		if gw.Iface != want[gw.Name] {
+			t.Fatalf("gateway %s: expected iface %q, got %q", gw.Name, want[gw.Name], gw.Iface)
+		}
+	}
+	if got.Routes[0].Iface != "" {
+		t.Fatalf("expected a route without iface to keep using its gateway's iface, got %q", got.Routes[0].Iface)
+	}
+	if routing.Gateways[0].Iface != "wan" {
+		t.Fatalf("expected caller's gateways to stay unchanged, got %q", routing.Gateways[0].Iface)
+	}
+}
+
+func TestResolveRoutingIfacesMapsGatewaysWithoutRoutes(t *testing.T) {
+	routing := config.RoutingConfig{
+		Gateways: []config.Gateway{{Name: "wan-gw", Address: "192.0.2.1", Iface: "wan"}},
+	}
+
+	got := resolveRoutingIfaces(routing, []config.Interface{{Name: "wan", Device: "eth0"}})
+
+	if got.Gateways[0].Iface != "eth0" {
+		t.Fatalf("expected gateway iface to resolve to eth0 without routes, got %q", got.Gateways[0].Iface)
+	}
+}
