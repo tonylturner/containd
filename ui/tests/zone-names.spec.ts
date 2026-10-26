@@ -4,7 +4,9 @@ import { MAX_ZONE_NAME_BYTES, validateZoneName } from "../lib/validate";
 
 // The server refuses a zone name that is blank, has leading or trailing
 // whitespace, or is longer than 125 bytes of UTF-8. The zone form refuses
-// the same names before saving and shows the server's error if one returns.
+// those names before saving, also keeps names to letters, digits, dash and
+// underscore (a '/' breaks /zones/{name}), and shows the server's error if
+// one still returns.
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
@@ -38,16 +40,19 @@ const nameField = (page: Page) => page.getByLabel("Zone name", { exact: true });
 const create = (page: Page) => page.getByRole("button", { name: "Create", exact: true });
 const nameError = (page: Page) => page.getByRole("alert", { name: "Zone name error" });
 
-// "a" plus 62 two-byte characters: 125 bytes in 63 characters.
-const atLimit = "a" + "é".repeat(62);
-// 63 two-byte characters: 126 bytes in 63 characters.
-const overLimit = "é".repeat(63);
+const IDENTIFIER = "Only letters, numbers, dash, and underscore allowed (no spaces).";
+const atLimit = "z".repeat(125);
+const overLimit = "z".repeat(126);
+// "a" plus 62 two-byte characters: 125 bytes, but not an identifier.
+const multibyte = "a" + "é".repeat(62);
 
 for (const [label, value, message] of [
   ["blank", "   ", "Zone name is required."],
   ["leading whitespace", " ot", "Zone name cannot start or end with a space."],
   ["trailing whitespace", "ot ", "Zone name cannot start or end with a space."],
-  ["over 125 bytes", overLimit, "Zone name is 126 bytes; the limit is 125 bytes"],
+  ["over 125 bytes", overLimit, "Zone name is 126 bytes; the limit is 125 bytes."],
+  ["multibyte", multibyte, IDENTIFIER],
+  ["slash", "ot/cell", IDENTIFIER],
 ] as const) {
   test(`a ${label} zone name is refused before saving`, async ({ page }) => {
     const posts = await openZones(page);
@@ -59,7 +64,7 @@ for (const [label, value, message] of [
   });
 }
 
-test("a multibyte zone name at exactly 125 bytes is saved as typed", async ({ page }) => {
+test("a zone name of exactly 125 bytes is saved as typed", async ({ page }) => {
   const posts = await openZones(page);
   await nameField(page).fill(atLimit);
   await expect(nameError(page)).toHaveCount(0);
@@ -78,13 +83,13 @@ test("a name the server still refuses shows the server's error", async ({ page }
   expect(posts).toHaveLength(1);
 });
 
-test("zone name rules count UTF-8 bytes, not characters", () => {
+test("zone name rules", () => {
   expect(new TextEncoder().encode(atLimit).length).toBe(MAX_ZONE_NAME_BYTES);
-  expect(atLimit.length).toBe(63);
   expect(validateZoneName(atLimit)).toBeNull();
-  expect(validateZoneName("z".repeat(125))).toBeNull();
-  expect(validateZoneName("z".repeat(126))).toContain("126 bytes");
+  expect(validateZoneName("ot_cell-1")).toBeNull();
+  expect(validateZoneName(overLimit)).toBe("Zone name is 126 bytes; the limit is 125 bytes.");
+  expect(validateZoneName(multibyte)).toBe(IDENTIFIER);
+  expect(validateZoneName("ot.cell")).toBe(IDENTIFIER);
   expect(validateZoneName("ot ")).toContain("start or end with a space");
-  expect(validateZoneName("ot.cell-1")).toBeNull();
   expect(validateZoneName("")).toBe("Zone name is required.");
 });
