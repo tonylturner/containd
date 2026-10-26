@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { api, apiURL, isAdmin, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
+import { SkeletonList } from "../../components/Skeleton";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -105,6 +106,8 @@ function protoBadgeClass(proto: string): string {
 export default function TemplatesPage() {
   const canEdit = isAdmin();
   const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
+  // Until the first answer the list is unknown, not empty.
+  const [loading, setLoading] = useState(true);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -114,6 +117,7 @@ export default function TemplatesPage() {
     const [t, z] = await Promise.all([fetchTemplates(), api.listZones()]);
     setTemplates(t);
     setZones(z ?? []);
+    setLoading(false);
   }
 
   useConfigRefresh(refresh);
@@ -164,7 +168,9 @@ export default function TemplatesPage() {
       </Card>
 
       {/* Template cards */}
-      {templates === null ? (
+      {loading ? (
+        <SkeletonList rows={3} />
+      ) : templates === null ? (
         <Card>
           <p role="alert" aria-label="Templates unavailable" className="text-sm text-red-400">
             ICS templates unavailable: the server did not return a template list.

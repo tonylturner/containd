@@ -15,6 +15,7 @@ import {
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
+import { SkeletonList } from "../../components/Skeleton";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
 import { validateIPv4, validatePort } from "../../lib/validate";
@@ -30,11 +31,16 @@ function zoneName(zones: Zone[], name: string): string {
   return match ? zoneLabel(match) : name;
 }
 
+const UNAVAILABLE = "NAT settings unavailable — the server did not return the NAT configuration and zones.";
+
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
+  // Until the first answer the settings are unknown, not disabled or empty.
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -69,8 +75,16 @@ export default function NATPage() {
 
   async function refresh() {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
-    setZones(z ?? []);
-    setNat(n ?? { enabled: false });
+    // Saving from stand-in settings would overwrite the real ones, so an
+    // unavailable answer hides the cards until the next success.
+    if (z && n) {
+      setLoadError(null);
+      setZones(z);
+      setNat(n);
+    } else {
+      setLoadError(UNAVAILABLE);
+    }
+    setLoading(false);
   }
 
   useConfigRefresh(refresh);
@@ -96,7 +110,7 @@ export default function NATPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      <TipsBanner tips={tips} className="mb-4" />
+      {!loading && !loadError && <TipsBanner tips={tips} className="mb-4" />}
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -108,6 +122,11 @@ export default function NATPage() {
         </div>
       )}
 
+      {loadError ? (
+        <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {loadError}
+        </div>
+      ) : loading ? <SkeletonList rows={4} /> : <>
       <NATCard
         zones={zones}
         nat={nat}
@@ -149,6 +168,7 @@ export default function NATPage() {
           refresh();
         }}
       />
+      </>}
     </Shell>
   );
 }
