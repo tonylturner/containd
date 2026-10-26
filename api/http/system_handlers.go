@@ -25,25 +25,38 @@ import (
 )
 
 type tlsInfoResponse struct {
+	// HTTPListenAddr, HTTPSListenAddr, HTTPEnabled and HTTPSEnabled are the
+	// listeners management binds when it next starts with this
+	// configuration.
 	HTTPListenAddr  string `json:"httpListenAddr,omitempty"`
 	HTTPSListenAddr string `json:"httpsListenAddr,omitempty"`
 	HTTPEnabled     bool   `json:"httpEnabled"`
 	HTTPSEnabled    bool   `json:"httpsEnabled"`
+	// BoundHTTPListenAddr and BoundHTTPSListenAddr are the addresses of the
+	// listeners management has bound now; empty when that listener is not
+	// bound.
+	BoundHTTPListenAddr  string `json:"boundHttpListenAddr,omitempty"`
+	BoundHTTPSListenAddr string `json:"boundHttpsListenAddr,omitempty"`
 
 	// CertFile and KeyFile are the files the HTTPS listener serves when
-	// management next starts with this configuration.
-	CertFile string `json:"certFile,omitempty"`
-	KeyFile  string `json:"keyFile,omitempty"`
-	// ServedCertFile and ServedKeyFile are the files the bound HTTPS
-	// listener serves now; empty when no HTTPS listener is bound.
-	ServedCertFile string `json:"servedCertFile,omitempty"`
-	ServedKeyFile  string `json:"servedKeyFile,omitempty"`
-
+	// management next starts with this configuration, and the Cert fields
+	// describe that certificate.
+	CertFile     string   `json:"certFile,omitempty"`
+	KeyFile      string   `json:"keyFile,omitempty"`
 	CertSubject  string   `json:"certSubject,omitempty"`
 	CertIssuer   string   `json:"certIssuer,omitempty"`
 	CertNotAfter string   `json:"certNotAfter,omitempty"`
 	CertDNSNames []string `json:"certDnsNames,omitempty"`
 	CertIPs      []string `json:"certIps,omitempty"`
+
+	// ServedCertFile and ServedKeyFile are the files the bound HTTPS
+	// listener serves now, and the ServedCert fields describe that
+	// certificate; all empty when no HTTPS listener is bound. All file
+	// paths are cleaned, so equal strings name the same file.
+	ServedCertFile     string `json:"servedCertFile,omitempty"`
+	ServedKeyFile      string `json:"servedKeyFile,omitempty"`
+	ServedCertSubject  string `json:"servedCertSubject,omitempty"`
+	ServedCertNotAfter string `json:"servedCertNotAfter,omitempty"`
 }
 
 func getTLSHandler(store config.Store) gin.HandlerFunc {
@@ -61,36 +74,78 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 		// The listeners management binds when it starts with this
 		// configuration, under this process's environment.
 		listeners := config.EffectiveManagementListeners(cfg)
+		bound := config.BoundManagementListeners()
 		certFile, keyFile := mgmttls.ResolveFiles(cfg)
 		served := currentServedManagement()
 
 		resp := tlsInfoResponse{
-			HTTPListenAddr:  listeners.HTTP.Addr,
-			HTTPSListenAddr: listeners.HTTPS.Addr,
-			HTTPEnabled:     listeners.HTTP.Enabled,
-			HTTPSEnabled:    listeners.HTTPS.Enabled,
-			CertFile:        certFile,
-			KeyFile:         keyFile,
-			ServedCertFile:  served.CertFile,
-			ServedKeyFile:   served.KeyFile,
+			HTTPListenAddr:       listeners.HTTP.Addr,
+			HTTPSListenAddr:      listeners.HTTPS.Addr,
+			HTTPEnabled:          listeners.HTTP.Enabled,
+			HTTPSEnabled:         listeners.HTTPS.Enabled,
+			BoundHTTPListenAddr:  boundAddr(bound.HTTP),
+			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
+			CertFile:             cleanFilePath(certFile),
+			KeyFile:              cleanFilePath(keyFile),
+			ServedCertFile:       cleanFilePath(served.CertFile),
+			ServedKeyFile:        cleanFilePath(served.KeyFile),
 		}
 
-		if certDER, err := readFirstCertDER(certFile); err == nil && len(certDER) > 0 {
-			if cert, err := x509.ParseCertificate(certDER); err == nil && cert != nil {
-				resp.CertSubject = cert.Subject.String()
-				resp.CertIssuer = cert.Issuer.String()
-				resp.CertNotAfter = cert.NotAfter.UTC().Format(time.RFC3339Nano)
-				resp.CertDNSNames = append([]string(nil), cert.DNSNames...)
-				for _, ip := range cert.IPAddresses {
-					if ip != nil {
-						resp.CertIPs = append(resp.CertIPs, ip.String())
-					}
+		if cert := readCertificate(resp.CertFile); cert != nil {
+			resp.CertSubject = cert.Subject.String()
+			resp.CertIssuer = cert.Issuer.String()
+			resp.CertNotAfter = formatNotAfter(cert)
+			resp.CertDNSNames = append([]string(nil), cert.DNSNames...)
+			for _, ip := range cert.IPAddresses {
+				if ip != nil {
+					resp.CertIPs = append(resp.CertIPs, ip.String())
 				}
 			}
+		}
+		// The bound listener reloads its files at the next handshake after
+		// they change, so the file is what it serves.
+		if cert := readCertificate(resp.ServedCertFile); cert != nil {
+			resp.ServedCertSubject = cert.Subject.String()
+			resp.ServedCertNotAfter = formatNotAfter(cert)
 		}
 
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+// boundAddr is the address of a bound listener; empty when it is not bound.
+func boundAddr(l config.ManagementListener) string {
+	if !l.Enabled {
+		return ""
+	}
+	return l.Addr
+}
+
+// cleanFilePath cleans a file path as sameFilePath compares it; empty stays
+// empty.
+func cleanFilePath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+// readCertificate is the first certificate of a PEM file; nil when the file
+// is missing or holds none.
+func readCertificate(path string) *x509.Certificate {
+	der, err := readFirstCertDER(path)
+	if err != nil {
+		return nil
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil
+	}
+	return cert
+}
+
+func formatNotAfter(cert *x509.Certificate) string {
+	return cert.NotAfter.UTC().Format(time.RFC3339Nano)
 }
 
 type setTLSCertRequest struct {
@@ -194,7 +249,7 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 }
 
 func sameFilePath(a, b string) bool {
-	return filepath.Clean(a) == filepath.Clean(b)
+	return cleanFilePath(a) == cleanFilePath(b)
 }
 
 type setTrustedCARequest struct {

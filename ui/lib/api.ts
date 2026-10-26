@@ -393,22 +393,30 @@ export type MFAEnrollResponse = {
 };
 
 export type TLSInfo = {
+  /** Listeners management binds at the next start. */
   httpListenAddr?: string;
   httpsListenAddr?: string;
   httpEnabled: boolean;
   httpsEnabled: boolean;
-  /** Files the HTTPS listener serves from the next start; the certificate
-   * fields describe this certificate. */
+  /** Listeners management has bound now; absent when not bound. */
+  boundHttpListenAddr?: string;
+  boundHttpsListenAddr?: string;
+  /** Files the HTTPS listener serves from the next start; the cert fields
+   * describe this certificate. */
   certFile?: string;
   keyFile?: string;
-  /** Files the bound HTTPS listener serves now; absent when none is bound. */
-  servedCertFile?: string;
-  servedKeyFile?: string;
   certSubject?: string;
   certIssuer?: string;
   certNotAfter?: string;
   certDnsNames?: string[];
   certIps?: string[];
+  /** Files and certificate the bound HTTPS listener serves now; absent when
+   * none is bound. All file paths are cleaned, so equal strings name the
+   * same file. */
+  servedCertFile?: string;
+  servedKeyFile?: string;
+  servedCertSubject?: string;
+  servedCertNotAfter?: string;
 };
 
 /** Result of a management certificate upload: status "updated" when the

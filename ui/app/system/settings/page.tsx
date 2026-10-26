@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
@@ -12,7 +12,7 @@ import {
   setPersistCLIHistory,
   setShowTips,
 } from "../../../lib/prefs";
-import { certUploadNotice, tlsFilesView } from "./tls-view";
+import { certUploadNotice, tlsView } from "./tls-view";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
@@ -37,15 +37,7 @@ export default function SystemSettingsPage() {
     setPersistHistory(getPersistCLIHistory());
   }, []);
 
-  const certSummary = useMemo(() => {
-    if (!tlsInfo?.certNotAfter) return "—";
-    try {
-      return new Date(tlsInfo.certNotAfter).toLocaleString();
-    } catch {
-      return tlsInfo.certNotAfter;
-    }
-  }, [tlsInfo?.certNotAfter]);
-  const files = tlsFilesView(tlsInfo);
+  const view = tlsView(tlsInfo);
 
   async function readFileText(f: File): Promise<string> {
     return await f.text();
@@ -129,16 +121,10 @@ export default function SystemSettingsPage() {
           </div>
 
           <div className="mt-4 space-y-1 text-sm">
-            <Row label="HTTP" value={tlsInfo ? (tlsInfo.httpEnabled ? "enabled" : "disabled") : "—"} />
-            <Row label="HTTP listen" value={tlsInfo?.httpListenAddr ?? "—"} />
-            <Row label="HTTPS" value={tlsInfo ? (tlsInfo.httpsEnabled ? "enabled" : "disabled") : "—"} />
-            <Row label="HTTPS listen" value={tlsInfo?.httpsListenAddr ?? "—"} />
-            <Row label="Served cert file" value={files.servedCert} />
-            <Row label="Served key file" value={files.servedKey} />
-            <Row label={files.pending ? "Cert file (next start)" : "Cert file"} value={files.savedCert} />
-            <Row label={files.pending ? "Key file (next start)" : "Key file"} value={files.savedKey} />
-            <Row label={files.pending ? "Cert expires (next start)" : "Cert expires"} value={certSummary} />
-            {files.pendingNote && <p className="pt-1 text-xs text-amber">{files.pendingNote}</p>}
+            {view.rows.map((row) => (
+              <Row key={row.label} label={row.label} value={row.value} />
+            ))}
+            {view.note && <p className="pt-1 text-xs text-amber">{view.note}</p>}
           </div>
 
           <div className="mt-5 grid gap-2">

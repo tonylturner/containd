@@ -1,43 +1,67 @@
 import type { ApiResult, TLSCertUpload, TLSInfo } from "../../../lib/api";
 
+export type TLSRow = { label: string; value: string };
+
 /**
- * The management certificate files: the ones the bound HTTPS listener
- * serves now and the saved ones it serves from the next start. `pending`
- * is set when the next start serves files other than the served ones,
- * with `pendingNote` saying why.
+ * The Management HTTPS readout: what the bound listeners serve now, plus a
+ * "(next start)" row wherever the next management start serves something
+ * else. `note` says why the certificate files differ. The API cleans file
+ * paths, so equal strings name the same file.
  */
-export type TLSFilesView = {
-  servedCert: string;
-  servedKey: string;
-  savedCert: string;
-  savedKey: string;
-  pending: boolean;
-  pendingNote?: string;
-};
+export type TLSView = { rows: TLSRow[]; note?: string };
 
 const noListener = "no HTTPS listener bound";
 
-export function tlsFilesView(info: TLSInfo | null): TLSFilesView {
+/** Formats an RFC 3339 time for display; the raw value when unreadable. */
+export function formatTLSTime(value: string | undefined): string {
+  if (!value) return "—";
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? value : at.toLocaleString();
+}
+
+function listenerRows(label: string, bound: string | undefined, enabled: boolean, addr: string | undefined): TLSRow[] {
+  const now = bound || "";
+  const next = enabled ? addr || "" : "";
+  const rows = [{ label, value: now || "not bound" }];
+  if (now !== next) rows.push({ label: `${label} (next start)`, value: next || "disabled" });
+  return rows;
+}
+
+export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSView {
   if (!info) {
-    return { servedCert: "—", servedKey: "—", savedCert: "—", savedKey: "—", pending: false };
+    return { rows: ["HTTP listen", "HTTPS listen", "Cert file", "Key file", "Cert expires"].map((label) => ({ label, value: "—" })) };
   }
-  const bound = Boolean(info.servedCertFile || info.servedKeyFile);
-  const view: TLSFilesView = {
-    servedCert: bound ? info.servedCertFile || "—" : noListener,
-    servedKey: bound ? info.servedKeyFile || "—" : noListener,
-    savedCert: info.certFile || "—",
-    savedKey: info.keyFile || "—",
-    pending: false,
-  };
+  const rows = [
+    ...listenerRows("HTTP listen", info.boundHttpListenAddr, info.httpEnabled, info.httpListenAddr),
+    ...listenerRows("HTTPS listen", info.boundHttpsListenAddr, info.httpsEnabled, info.httpsListenAddr),
+  ];
+  const bound = Boolean(info.servedCertFile);
+  if (bound) {
+    rows.push(
+      { label: "Cert file", value: info.servedCertFile || "—" },
+      { label: "Key file", value: info.servedKeyFile || "—" },
+      { label: "Cert subject", value: info.servedCertSubject || "—" },
+      { label: "Cert expires", value: formatTime(info.servedCertNotAfter) },
+    );
+  } else {
+    rows.push({ label: "Cert file", value: noListener }, { label: "Key file", value: noListener });
+  }
   // Saved files matter only when the next start binds HTTPS.
-  if (!info.httpsEnabled) return view;
-  if (!bound) {
-    return { ...view, pending: true, pendingNote: "No HTTPS listener is bound; the saved files are served from the next management start." };
+  let note: string | undefined;
+  if (info.httpsEnabled && !bound) {
+    note = "No HTTPS listener is bound; the saved files are served from the next management start.";
+  } else if (info.httpsEnabled && (info.servedCertFile !== info.certFile || info.servedKeyFile !== info.keyFile)) {
+    note = "The saved files differ from the served ones; they are served from the next management start.";
   }
-  if (info.servedCertFile !== info.certFile || info.servedKeyFile !== info.keyFile) {
-    return { ...view, pending: true, pendingNote: "The saved files differ from the served ones; they are served from the next management start." };
+  if (note) {
+    rows.push(
+      { label: "Cert file (next start)", value: info.certFile || "—" },
+      { label: "Key file (next start)", value: info.keyFile || "—" },
+      { label: "Cert subject (next start)", value: info.certSubject || "—" },
+      { label: "Cert expires (next start)", value: formatTime(info.certNotAfter) },
+    );
   }
-  return view;
+  return note ? { rows, note } : { rows };
 }
 
 export type Notice = { kind: "error" | "warning" | "status"; text: string };
