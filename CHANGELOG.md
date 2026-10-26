@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Commit, commit-confirmed and rollback now fail on every firewall ruleset or
+  dataplane configuration apply error, including nft permission failures. The
+  warning-only nft failure path is removed. Auxiliary infrastructure warnings
+  remain best-effort; imports still stage only.
+- Health reports general firewall state separately as `enforcement: {state,
+  reason}` (`enforcing`, `disabled`, `unavailable` or `unknown`), including
+  persisted replay/recovery failures. Protocol-specific `iec104Enforcement` is
+  unchanged. Confirmed-commit TTLs that overflow a duration are rejected
+  rather than promoting without a timer.
+
+### Fixed
+
+- Failed runtime applies restore the pre-request running config and IDS bank,
+  previous/pending state and candidate, then reapply the restored snapshot using
+  an independent recovery context. JSON errors report restore/reapply outcomes;
+  failed recovery is visible in health. Boot and expiry replay no longer treat
+  nft failures as success.
+- Keep liveness responsive during commits and recovery with a deadline-bounded
+  running metadata/fault snapshot and one shared observation timeout. Brief
+  store contention does not hide real state; contention past the budget or
+  unreadable state reports `unknown` without exposing an unapplied document.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security
@@ -19,15 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Commit, commit-confirmed and rollback now fail on every firewall ruleset or
-  dataplane configuration apply error, including nft permission failures. The
-  warning-only nft failure path is removed. Auxiliary infrastructure warnings
-  remain best-effort; imports still stage only.
-- Health reports general firewall state separately as `enforcement: {state,
-  reason}` (`enforcing`, `disabled`, `unavailable` or `unknown`), including
-  persisted replay/recovery failures. Protocol-specific `iec104Enforcement` is
-  unchanged. Confirmed-commit TTLs that overflow a duration are rejected
-  rather than promoting without a timer.
 - IEC 104 diagnostics name the supported type set: unsupported types report
   `type N is not in the supported IEC 104 type set`, and the
   `IEC104-MALFORMED` / `IEC104-UNSUPPORTED` signature descriptions state the
@@ -41,15 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Failed runtime applies restore the pre-request running config and IDS bank,
-  previous/pending state and candidate, then reapply the restored snapshot using
-  an independent recovery context. JSON errors report restore/reapply outcomes;
-  failed recovery is visible in health. Boot and expiry replay no longer treat
-  nft failures as success.
-- Keep liveness responsive during commits and recovery with a deadline-bounded
-  running metadata/fault snapshot and one shared observation timeout. Brief
-  store contention does not hide real state; contention past the budget or
-  unreadable state reports `unknown` without exposing an unapplied document.
 - Allow IEC 104 reconnects on retained aborted or closed tuples when the
   session table is full, without exceeding the tracking limit.
 - Bound IEC 104 learn-mode session tracking to the shared 4,096-entry
