@@ -22,6 +22,6 @@ func newWorker(dir, iface string, cfg config.PCAPConfig) *worker {
 	return &worker{dir: dir, iface: iface, cfg: cfg}
 }
 
-func (w *worker) run(ctx context.Context, mgr *Manager) error {
+func (w *worker) run(ctx context.Context, mgr *Manager, _ *captureRun, _ *captureTask) error {
 	return errors.New("pcap capture is only supported on linux")
 }

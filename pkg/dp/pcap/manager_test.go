@@ -5,11 +5,16 @@ package pcap
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -145,4 +150,146 @@ func TestMetaHelpers(t *testing.T) {
 	if got.Name != meta.Name || got.Interface != meta.Interface || len(got.Tags) != 1 || got.Tags[0] != "ot" {
 		t.Fatalf("unexpected meta roundtrip: %#v", got)
 	}
+}
+
+func TestManagerCaptureOutlivesStartRequestContext(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(t.TempDir())
+	// Model the initiating request being canceled after Start returns. Start
+	// has no request-context parameter, so the manager-owned worker context is
+	// unaffected.
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	started := make(chan struct{})
+	mgr.workerRunner = func(ctx context.Context, run *captureRun, task *captureTask) error {
+		if !mgr.workerStarted(run, task) {
+			return nil
+		}
+		close(started)
+		<-ctx.Done()
+		return nil
+	}
+
+	if err := mgr.Start(config.PCAPConfig{Interfaces: []string{"eth0"}}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("capture worker did not start")
+	}
+
+	cancelRequest()
+	if !errors.Is(requestCtx.Err(), context.Canceled) {
+		t.Fatalf("request context error = %v, want cancellation", requestCtx.Err())
+	}
+	if status := mgr.Status(); !status.Running {
+		t.Fatalf("capture stopped with its initiating request context: %#v", status)
+	}
+	if err := mgr.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if status := mgr.Status(); status.Running {
+		t.Fatalf("capture still running after Stop: %#v", status)
+	}
+}
+
+func TestWorkerExitClearsRunningAndRecordsError(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(t.TempDir())
+	workerStarted := make(chan struct{})
+	exitWorker := make(chan struct{})
+	workerErr := errors.New("capture socket failed")
+	mgr.workerRunner = func(ctx context.Context, run *captureRun, task *captureTask) error {
+		if !mgr.workerStarted(run, task) {
+			return nil
+		}
+		close(workerStarted)
+		<-exitWorker
+		return workerErr
+	}
+
+	if err := mgr.Start(config.PCAPConfig{Interfaces: []string{"eth0"}}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-workerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("capture worker did not start")
+	}
+	if status := mgr.Status(); !status.Running {
+		t.Fatalf("expected running worker before exit: %#v", status)
+	}
+	close(exitWorker)
+
+	waitForStatus(t, mgr, func(status Status) bool {
+		return !status.Running && status.LastError == workerErr.Error()
+	})
+	if err := mgr.Stop(); err != nil {
+		t.Fatalf("Stop after natural worker exit: %v", err)
+	}
+}
+
+func TestManagerStopAndRestartAreRaceFree(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(t.TempDir())
+	var starts atomic.Int32
+	started := make(chan struct{}, 2)
+	mgr.workerRunner = func(ctx context.Context, run *captureRun, task *captureTask) error {
+		if !mgr.workerStarted(run, task) {
+			return nil
+		}
+		starts.Add(1)
+		started <- struct{}{}
+		<-ctx.Done()
+		return nil
+	}
+
+	cfg := config.PCAPConfig{Interfaces: []string{"eth0"}}
+	if err := mgr.Start(cfg); err != nil {
+		t.Fatalf("initial Start: %v", err)
+	}
+	<-started
+
+	var stops sync.WaitGroup
+	stops.Add(2)
+	for range 2 {
+		go func() {
+			defer stops.Done()
+			if err := mgr.Stop(); err != nil {
+				t.Errorf("concurrent Stop: %v", err)
+			}
+		}()
+	}
+	stops.Wait()
+
+	if err := mgr.Start(cfg); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("restarted capture worker did not start")
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("worker starts = %d, want 2", starts.Load())
+	}
+	if err := mgr.Stop(); err != nil {
+		t.Fatalf("Stop after restart: %v", err)
+	}
+}
+
+func waitForStatus(t *testing.T, mgr *Manager, done func(Status) bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if status := mgr.Status(); done(status) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("manager did not reach expected status: %#v", mgr.Status())
 }
