@@ -13,6 +13,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
+import { zoneLabel, zoneName } from "../../lib/zones";
 
 const criticalityVariant = (c: string) =>
   c === "CRITICAL" ? "error" as const
@@ -36,8 +37,6 @@ export default function AssetsPage() {
   const [zone, setZone] = useState("");
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
-
-  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   async function refresh() {
     setInventoryRefresh((key) => key + 1);
@@ -228,7 +227,7 @@ export default function AssetsPage() {
                 <td className="px-4 py-3 text-(--text)">{a.alias || "\u2014"}</td>
                 <td className="px-4 py-3 text-(--text)">{a.type || "\u2014"}</td>
                 <td className="px-4 py-3 text-(--text)">
-                  {a.zone ? zoneLabel(zones.find((z) => z.name === a.zone) ?? { name: a.zone }) : "\u2014"}
+                  {a.zone ? zoneName(zones, a.zone) : "\u2014"}
                 </td>
                 <td className="px-4 py-3 text-(--text)">
                   {(a.ips ?? []).join(", ") || "\u2014"}
@@ -308,7 +307,6 @@ function EditAssetModal({
   );
   const [tags, setTags] = useState((asset.tags ?? []).join(", "));
   const [description, setDescription] = useState(asset.description ?? "");
-  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   function save() {
     onSave({

@@ -27,6 +27,7 @@ import {
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { formatEndpoint } from "../../lib/endpoint";
+import { zoneLabel } from "../../lib/zones";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { SavedPcapsCard, ReplayCard } from "./pcap-library";
 import {
@@ -184,7 +185,7 @@ export default function PcapPage() {
         );
     return configured.map((zone) => ({
       value: zone.name,
-      label: zone.alias ? `${zone.alias} (${zone.name})` : zone.name,
+      label: zoneLabel(zone),
     }));
   }, [ifaces, zones]);
 
