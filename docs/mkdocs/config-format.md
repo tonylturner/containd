@@ -203,6 +203,7 @@ Notes:
 - Config backups are stored beside the config DB in `config-backups/` (normally `/data/config-backups/` in Compose) and can be created redacted or full (admin-only for unredacted).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
+  - `enforceTable` names the nftables `inet` policy table (default `containd`); the engine also owns `<enforceTable>_blocks` for temporary blocks and connection revocations. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. `containd_dhcp` is reserved for the DHCP redirect table.
 - `routing` configures kernel routing when applying running config:
   - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
     selects main; explicit tables use IDs 1–252.

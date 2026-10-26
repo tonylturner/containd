@@ -649,9 +649,9 @@ components:
         httpDownload: {type: boolean}
         httpUpload: {type: boolean}
         icap: {$ref: '#/components/schemas/ICAPConfig'}
-        maxSizeBytes: {type: integer}
+        maxSizeBytes: {type: integer, minimum: 0, maximum: 104857600, description: Largest payload sent to the scanner; 0 means no limit}
         mode: {type: string}
-        timeoutSec: {type: integer}
+        timeoutSec: {type: integer, minimum: 0, maximum: 300, description: Per-scan and per-probe deadline in seconds; 0 selects 5}
       type: object
     Anomaly:
       properties:
@@ -682,8 +682,8 @@ components:
       properties:
         customDefsPath: {type: string}
         freshclamEnabled: {type: boolean}
-        socketPath: {type: string}
-        updateSchedule: {type: string}
+        socketPath: {type: string, description: clamd socket; empty selects /run/clamav/clamd.sock}
+        updateSchedule: {type: string, description: 'FreshClam interval as a positive Go duration such as 4h; empty selects 6h. Cron syntax is rejected.'}
       type: object
     Config:
       properties:
@@ -809,7 +809,12 @@ components:
         dpiMock: {type: boolean}
         dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
-        enforceTable: {type: string}
+        enforceTable:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,247}$'
+          description: >-
+            nftables policy table (inet family); the engine also owns <enforceTable>_blocks for
+            dynamic blocks. Empty selects containd; containd_dhcp is reserved for the DHCP redirect table.
         enforcement: {type: boolean}
         nflogGroup: {type: integer}
         nfqueueGroup: {type: integer}

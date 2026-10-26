@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -869,16 +870,20 @@ func validateDataPlane(dp DataPlaneConfig) error {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")
 		}
 	}
-	if dp.EnforceTable == "" {
-		return nil
+	// The engine also owns inet <enforceTable>_blocks, and nft limits table
+	// names to 255 bytes. containd_dhcp is the DHCP redirect table.
+	if t := dp.EnforceTable; t != "" && !enforceTableName.MatchString(t) {
+		return fmt.Errorf("dataplane.enforceTable %q must start with a letter or '_', continue with letters, digits, '_' or '-', and have at most 248 characters", t)
 	}
-	for _, r := range dp.EnforceTable {
-		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return fmt.Errorf("dataplane.enforceTable has invalid char %q", r)
-		}
+	if dp.EnforceTable == "containd_dhcp" {
+		return errors.New("dataplane.enforceTable containd_dhcp is reserved for the DHCP redirect table")
 	}
 	return nil
 }
+
+// enforceTableName is the unquoted table name nft parses: a leading digit
+// or '-' is a syntax error.
+var enforceTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,247}$`)
 
 func validatePCAP(p PCAPConfig) error {
 	if err := validatePCAPInterfaces(p); err != nil {

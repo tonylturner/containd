@@ -112,13 +112,13 @@ return `503` and the status `av` entry reports `"available": false`.
 ClamAV mode:
 
 - The engine renders `clamd.conf` from the settings: clamd listens only on
-  `clamav.socketPath` (required in clamav mode; the images prepare
-  `/run/clamav/clamd.sock`) and loads every database in `/var/lib/clamav`. clamd restarts only when that rendered
-  configuration changes.
+  `clamav.socketPath` (default `/run/clamav/clamd.sock`, which the images
+  prepare) and loads every database in `/var/lib/clamav`. clamd restarts only
+  when that rendered configuration changes.
 - clamd needs at least one signature database before it starts. With
   `freshclamEnabled`, FreshClam runs once when enabled and then every
-  `updateSchedule` (a Go duration such as `4h`; default `6h`; cron syntax is
-  rejected). A successful download reloads clamd, or starts it if it was
+  `updateSchedule` (a positive Go duration such as `4h`; default `6h`).
+  Staging rejects any other value, including cron syntax. A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
 - `POST /services/av/update` queues an immediate run on the same schedule and
   returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
@@ -139,9 +139,11 @@ clamd with the full official database can take longer to load; the status
 
 Scanning:
 
-- `timeoutSec` bounds every scan and probe (default 5 s); `maxSizeBytes`
-  rejects larger payloads before they are sent (0 = no limit). Both apply to
-  ClamAV and ICAP, and resetting either to 0 restores the default.
+- `timeoutSec` bounds every scan and probe (default 5 s, at most 300);
+  `maxSizeBytes` rejects larger payloads before they are sent (0 = no limit,
+  at most 104857600, clamd's default stream limit of 100 MiB). Both apply to
+  ClamAV and ICAP, and resetting either to 0 restores the default. Staging
+  rejects negative or larger values.
 - Scan failures follow `failPolicy`: `closed` reports `error`, `open` reports
   `bypass`; `failOpenIcs` forces `bypass` for ICS tasks. Only a malware
   verdict triggers a temporary flow block.
