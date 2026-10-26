@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/compile"
@@ -27,7 +28,7 @@ func RecoverySnapshot(stored *config.Config, r *mgmtpath.Reservation) rules.Snap
 
 // ApplyBootConfig shares the promotion/replay lock so a delayed recovery apply
 // can never overwrite a newer safe commit, rollback or reset.
-func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) (warnings []string, applyErr error) {
+func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	runningConfigApplyMu.Lock()
 	defer runningConfigApplyMu.Unlock()
 	err := config.CheckManagementBootFault(ctx, store)
@@ -37,31 +38,54 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	if !errors.Is(err, config.ErrManagementBootFault) {
 		return nil, err
 	}
+	return nil, applyRecoveryLocked(ctx, store, engine)
+}
+
+// reenterRecoveryLocked completes a running-state transition that failed
+// at runtime from management recovery. The store restored the refused
+// configuration without reapplying it (config.ApplyError.Recovery); the
+// engine gets the recovery ruleset again, and its outcome is the
+// transition's reapply result. Callers hold runningConfigApplyMu.
+func reenterRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient, transitionErr error) {
+	var failure *config.ApplyError
+	if !errors.As(transitionErr, &failure) || !failure.Recovery {
+		return
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	failure.ReapplyError = applyRecoveryLocked(recoveryCtx, store, engine)
+}
+
+// applyRecoveryLocked applies management recovery to the engine: the
+// fail-closed dataplane and RecoverySnapshot. Callers hold
+// runningConfigApplyMu.
+func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient) (applyErr error) {
 	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if engine == nil {
-		return nil, errors.New("recovery engine unavailable")
+		return errors.New("recovery engine unavailable")
 	}
 	r := config.ReservationForStore(store)
 	var stored *config.Config
 	if r == nil {
 		// Never drop transit with an INPUT chain that also drops management.
+		var err error
 		if stored, err = store.Load(ctx); err != nil {
-			return nil, fmt.Errorf("recovery management access: %w", err)
+			return fmt.Errorf("recovery management access: %w", err)
 		}
 	}
 	dp := config.DataPlaneConfig{Enforcement: true}
 	if err := config.ValidateManagementDataPlane(dp, r); err != nil {
-		return nil, err
+		return err
 	}
 	if err := engine.Configure(ctx, dp); err != nil {
-		return nil, fmt.Errorf("recovery dataplane: %w", err)
+		return fmt.Errorf("recovery dataplane: %w", err)
 	}
 	// Unlike normal best-effort infrastructure apply, a failure here must not
 	// be downgraded to a warning or reported as successful recovery.
 	if err := engine.ApplyRules(ctx, RecoverySnapshot(stored, r)); err != nil {
-		return nil, fmt.Errorf("recovery ruleset: %w", err)
+		return fmt.Errorf("recovery ruleset: %w", err)
 	}
-	return nil, nil
+	return nil
 }
 
 // Recovery states. Applied, pending and failed derive from what the engine

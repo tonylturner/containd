@@ -135,7 +135,10 @@ configuration through the engine API: enforcement on, no capture interfaces, DPI
 stored interfaces, routing, zones, rules, NAT or services, and default deny.
 Recovery retries if the engine is unavailable. Staging alone does not clear the
 fault: a validated commit or rollback resumes normal apply; factory reset also
-recovers. A later boot whose binding rediscovery resolves the conflict clears
+recovers. A commit, rollback or factory reset that fails at runtime while the
+fault holds restores the stored state, boot fault included, and management
+pushes the recovery configuration again; the refused configuration is never
+reapplied. A later boot whose binding rediscovery resolves the conflict clears
 the persisted fault as well.
 
 #### Without a reservation

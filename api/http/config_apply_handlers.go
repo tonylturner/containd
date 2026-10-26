@@ -69,6 +69,7 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			attempt++
 			return err
 		})
+		reenterRecoveryLocked(c.Request.Context(), store, engine, err)
 		if err != nil {
 			var failure *config.ApplyError
 			if errors.As(err, &failure) {

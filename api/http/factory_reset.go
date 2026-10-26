@@ -77,6 +77,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			attempt++
 			return err
 		})
+		reenterRecoveryLocked(ctx, cfgStore, engine, err)
 		if err != nil {
 			factoryResetApplyError(c, err)
 			return
