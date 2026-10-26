@@ -333,7 +333,7 @@ func TestMalformedAndProfile(t *testing.T) {
 		{"role: client sends 1", cli, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 1"},
 		{"role: server activates 46", srv, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: server sent control type 46 with cause 6"},
 		{"role: server deactivates 100", srv, iFrame(0, 0, asdu(100, 1, cotDeact, 0, 1, cat(ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: server sent system type 100 with cause 8"},
-		{"unsupported 2", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 2 has no B descriptor"},
+		{"unsupported 2", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 2 is not in the supported IEC 104 type set"},
 		{"unsupported 104", cli, iFrame(0, 0, asdu(104, 1, cotAct, 0, 1, cat(ioa(0), []byte{0xAA, 0x55})...)), eventfields.KindUnsupported, "type 104"},
 		{"unsupported 106", cli, iFrame(0, 0, asdu(106, 1, cotAct, 0, 1, cat(ioa(0), []byte{0, 0})...)), eventfields.KindUnsupported, "type 106"},
 		{"unsupported 255", srv, iFrame(0, 0, asdu(255, 0, 0, 0, 0)), eventfields.KindUnsupported, "type 255"},

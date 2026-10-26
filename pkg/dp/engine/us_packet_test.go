@@ -165,7 +165,7 @@ func TestInvalidPacketDecision(t *testing.T) {
 func TestFlowPathRecordsEventsBeforeError(t *testing.T) {
 	e := recordEngine(t)
 	if d := e.handlePacket(recordPacket(0, capture.TCPFlagPSH, "GOODBAD!")); d.Action != capture.Accept {
-		t.Fatalf("decision = %+v, want Accept (spec §4.2)", d)
+		t.Fatalf("decision = %+v, want Accept while recording events before the stream error", d)
 	}
 	var kinds []string
 	for _, ev := range e.Events().List(10) {

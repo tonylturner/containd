@@ -69,7 +69,7 @@ func iec104Signatures() []Signature {
 		{
 			ID:          "IEC104-MALFORMED",
 			Name:        "IEC 104 Malformed APDU",
-			Description: "An IEC 104 APDU violates the framing, layout, B profile or role rules.",
+			Description: "An IEC 104 APDU violates containd's framing, layout, object-count or sender-role restrictions.",
 			Severity:    "medium",
 			Protocol:    "iec104",
 			Conditions: []Condition{
@@ -80,7 +80,7 @@ func iec104Signatures() []Signature {
 		{
 			ID:          "IEC104-UNSUPPORTED",
 			Name:        "IEC 104 Unsupported Type",
-			Description: "An IEC 104 ASDU carries a Type ID outside the B profile.",
+			Description: "An IEC 104 ASDU carries a Type ID outside containd's supported IEC 104 type set.",
 			Severity:    "low",
 			Protocol:    "iec104",
 			Conditions: []Condition{

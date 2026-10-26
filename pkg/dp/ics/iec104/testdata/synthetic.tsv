@@ -68,10 +68,10 @@ c_rp_na_1	c	request	680e0000000069010600010000000001	101 7.3.4 C_RP_NA_1 QRP 1
 c_ts_ta_1	c	request	6816000000006b0106000100000000341229090f09070b1a	104 time-tagged C_TS_TA_1 TSC+CP56Time2a
 edge_ioa	s	response,response,response,response	681a0000000003040300020000000001ffff000100000102ffffff02	101 7.2.5 IOA 0, 65535, 65536, 16777215; CA 2
 malformed_dco_state_0	c	malformed	680e000000002e0106000100d1070080	101 7.2.6 DCO state 0 is not permitted
-profile_server_activates	s	malformed	680e000000002e0106000100d1070001	B profile (spec 7.3): server-originated command
-profile_client_monitor	c	malformed	680e0000000003010300010001000001	B profile (spec 7.3): monitor type from client
-profile_sq_command	c	malformed	680e000000002e810600010001000001	B profile (spec 7.2): command with SQ=1
-unsupported_type_2	s	unsupported	680e0000000002010300010001000001	101 7.3.1 Type 2 has no B descriptor
+profile_server_activates	s	malformed	680e000000002e0106000100d1070001	containd rejects a server-originated control command with activation cause 6
+profile_client_monitor	c	malformed	680e0000000003010300010001000001	containd rejects monitor-direction types sent by the client
+profile_sq_command	c	malformed	680e000000002e810600010001000001	containd requires commands to use SQ=0 and one information object
+unsupported_type_2	s	unsupported	680e0000000002010300010001000001	101 7.3.1 Type 2 is not in the supported IEC 104 type set
 unsupported_c_cd_na_1	c	unsupported	680f000000006a01060001000000000000	101 7.3.4 C_CD_NA_1 is not used in 104
 frame_bad_start	c	frame_error	670407000000	104 cl.5 start octet must be 0x68
 frame_bad_length	c	frame_error	68020700	104 cl.5 length octet 4..253

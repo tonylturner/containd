@@ -228,7 +228,7 @@ func TestIEC104Envelope(t *testing.T) {
 		wantIn   bool
 		wantMode string
 	}{
-		{"no IEC rules (milestone A, US)", []Entry{l4}, "enforce", session, false, ""},
+		{"L4 rule alone creates no IEC104 inspection envelope", []Entry{l4}, "enforce", session, false, ""},
 		{"enforce rule", []Entry{l4, enforceRule}, "learn", session, true, "enforce"},
 		{"rule learn beats global enforce", []Entry{learnRule}, "enforce", session, true, "learn"},
 		{"blank rule mode inherits global", []Entry{inherit}, "Enforce", session, true, "enforce"},

@@ -144,7 +144,7 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 	// The same policy is rejected before save when the decoder is off.
 	cfg.DataPlane.DPIICSProtocols["iec104"] = false
 	if _, err := CompileSnapshot(&cfg); err == nil || !strings.Contains(err.Error(), "dpiIcsProtocols.iec104") {
-		t.Fatalf("compile with the decoder off err = %v, want E3 rejection", err)
+		t.Fatalf("compile with the decoder off err = %v, want rejection of enforce policy without an enabled IEC104 decoder", err)
 	}
 }
 

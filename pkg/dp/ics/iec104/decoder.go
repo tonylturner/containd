@@ -196,7 +196,7 @@ func (dc dirContext) iFrameEvents(base map[string]any, asdu []byte) []dpi.Event 
 		if roleErr != nil {
 			return dc.single(eventfields.KindMalformed, base, roleErr)
 		}
-		return dc.single(eventfields.KindUnsupported, base, fmt.Errorf("type %d has no B descriptor", h.typeID))
+		return dc.single(eventfields.KindUnsupported, base, fmt.Errorf("type %d is not in the supported IEC 104 type set", h.typeID))
 	}
 	base[eventfields.KeyIsWrite] = isWrite(dc.direction, h.typeID)
 	if h.count == 0 {

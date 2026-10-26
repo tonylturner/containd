@@ -135,15 +135,15 @@ fail() {
 }
 
 # gate_fail records an assertion requiring IEC104 enforcement that did not
-# pass. Any occurrence after integration means acceptance has not been met.
+# pass. Any occurrence means acceptance has not been met.
 gate_fail() {
   local name=$1 detail=${2:-}
   GATE_FAIL_COUNT=$((GATE_FAIL_COUNT + 1))
-  log "GATE  $name${detail:+ — $detail}  (expected-fail until L1-L4 merge)"
+  log "GATE  $name${detail:+ — $detail}  (IEC104 enforcement assertion failed)"
   record "$name" GATE-FAIL "$detail" true
 }
 
-# gate_pass records a gated assertion that unexpectedly passed (good in Phase 2).
+# gate_pass records an IEC104 enforcement assertion that passed.
 gate_pass() {
   local name=$1 detail=${2:-}
   PASS_COUNT=$((PASS_COUNT + 1))
@@ -431,9 +431,9 @@ EU_POLICY=$(echo "$BASELINE" | jq \
 EU_APPLIED=0
 if apply_config "$EU_POLICY" "EU enforce policy"; then
   EU_APPLIED=1
-  gate_pass "EU enforce policy (§12.4) is accepted and applied"
+  gate_pass "Scoped IEC104 enforce policy is accepted and applied"
 else
-  gate_fail "EU enforce policy (§12.4) is accepted and applied" "management API or engine rejected it"
+  gate_fail "Scoped IEC104 enforce policy is accepted and applied" "management API or engine rejected it"
   # Fall back to the L4 baseline so the remaining assertions still run.
   apply_config "$BASELINE" "L4 baseline (restore)" || fatal "could not restore the L4 baseline"
   compose exec -T cc ip route replace default via "$FW_CC_IP" >/dev/null 2>&1 || true
@@ -811,7 +811,7 @@ fi
 
 if ((FRESHNESS_SECONDS < 600)); then
   not_implemented "spontaneous telemetry stays fresh for more than 10 minutes" \
-    "IEC104_FRESHNESS_SECONDS=$FRESHNESS_SECONDS is shorter than the spec's 10 minutes; rerun with the default"
+    "IEC104_FRESHNESS_SECONDS=$FRESHNESS_SECONDS is shorter than the required 10-minute telemetry window; rerun with the default"
 else
   log "Watching control-centre telemetry freshness for ${FRESHNESS_SECONDS}s..."
   stale=""
@@ -843,7 +843,7 @@ log "---------------------------------------------------------------"
 log "IEC104 harness: $PASS_COUNT passed, $FAIL_COUNT failed, $GATE_FAIL_COUNT gate-failed, $NOT_IMPL_COUNT not implemented"
 log "Full results: $RESULTS_FILE"
 if [[ "$GATE_FAIL_COUNT" -gt 0 ]]; then
-  log "Gate assertions failing (they need the integrated L1-L4 engine):"
+  log "Failed IEC104 enforcement assertions:"
   jq -r '.assertions[] | select(.status=="GATE-FAIL") | "  - " + .name' "$RESULTS_FILE"
 fi
 if [[ "$NOT_IMPL_COUNT" -gt 0 ]]; then
@@ -859,5 +859,5 @@ if [[ "$GATE_FAIL_COUNT" -gt 0 || "$NOT_IMPL_COUNT" -gt 0 ]]; then
   log "ACCEPTANCE NOT MET: baseline passed; gate or unimplemented assertions remain."
   exit 3
 fi
-log "ACCEPTANCE MET: every §10.2 assertion passed."
+log "ACCEPTANCE MET: every IEC104 traffic, enforcement and telemetry assertion passed."
 exit 0
