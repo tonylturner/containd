@@ -40,6 +40,19 @@ export type IOARange = {
   end: number;
 };
 
+/**
+ * ALLOW, DENY and RESET decide: any matching ALLOW admits the packet,
+ * otherwise the first matching DENY or RESET by rule ID decides, otherwise
+ * the default action. RATE_LIMIT and TAG are effects that never admit.
+ */
+export type RuleAction = "ALLOW" | "DENY" | "RESET" | "RATE_LIMIT" | "TAG";
+
+/** Packet policer per directional 5-tuple; burst 0 means packetsPerSecond. */
+export type RateLimit = {
+  packetsPerSecond: number;
+  burst?: number;
+};
+
 export type FirewallRule = {
   id: string;
   description?: string;
@@ -51,7 +64,11 @@ export type FirewallRule = {
   ics?: ICSPredicate;
   identities?: string[];
   schedule?: RuleSchedule;
-  action: "ALLOW" | "DENY";
+  action: RuleAction;
+  /** Required for RATE_LIMIT, forbidden otherwise. */
+  rateLimit?: RateLimit;
+  /** Required for TAG, forbidden otherwise. */
+  tag?: string;
   log?: boolean;
 };
 
@@ -62,20 +79,35 @@ export type RuleSchedule = {
   timezone?: string;
 };
 
-/**
- * A firewall rule PATCH body: an omitted key keeps the stored value, and
- * `ics: null` removes the rule's ICS predicate.
- */
-export type FirewallRulePatch = Partial<Omit<FirewallRule, "ics">> & {
-  ics?: ICSPredicate | null;
+/** An ICS predicate patch; `mode: ""` clears a stored mode so it inherits. */
+export type ICSPredicatePatch = Omit<ICSPredicate, "mode"> & {
+  mode?: ICSPredicate["mode"] | "";
 };
 
-// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
-// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
+/**
+ * A firewall rule PATCH body. An omitted key keeps the stored value and
+ * nested objects merge, so a cleared field is sent empty: `null` removes the
+ * ICS predicate, rate limit or schedule.
+ */
+export type FirewallRulePatch = Partial<
+  Omit<FirewallRule, "ics" | "rateLimit" | "schedule">
+> & {
+  ics?: ICSPredicatePatch | null;
+  rateLimit?: RateLimit | null;
+  schedule?: RuleSchedule | null;
+};
+
+/**
+ * A firewall rule that does not act as written: its identities match no
+ * bound address (`predicate: "identity"`), so it matches nothing, or it is a
+ * DENY or RESET rule that an ALLOW matching all of its traffic shadows
+ * (`shadowedBy`).
+ */
 export type RuleWarning = {
   ruleId: string;
-  predicate: "identity" | "schedule";
-  action: "ALLOW" | "DENY";
+  predicate?: "identity";
+  shadowedBy?: string;
+  action: RuleAction;
   message: string;
 };
 

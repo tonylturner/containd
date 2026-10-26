@@ -19,6 +19,7 @@ import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
+import { RulePrecedenceNote } from "../firewall/firewall-rule-table";
 import {
   formatICSMode,
   PROTOCOL_KEYS,
@@ -219,6 +220,7 @@ export default function ICSPolicyPage() {
 
       {/* -- Rules table ------------------------------------------------- */}
       {Object.keys(protoCounts).length > 0 && <ICSCoverageNotice view={coverage.view} />}
+      <RulePrecedenceNote />
       <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">

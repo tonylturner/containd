@@ -39,6 +39,7 @@ import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
+import { tagsInUse } from "./firewall-rule-policy";
 import { useICSCoverage } from "../ics/use-ics-coverage";
 
 // This page should own firewall page orchestration and top-level state.
@@ -439,7 +440,14 @@ export default function FirewallPage() {
 
       <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
 
-      {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
+      {isAdmin() && (
+        <CreateRuleForm
+          zones={zones}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules)}
+          onCreate={onCreate}
+        />
+      )}
 
       <div className="mt-6">
         {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
@@ -465,6 +473,8 @@ export default function FirewallPage() {
         <EditRuleModal
           zones={zones}
           rule={editing}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules, editing.id)}
           onClose={() => setEditing(null)}
           onSave={(patch) => onUpdate(editing.id, patch)}
         />

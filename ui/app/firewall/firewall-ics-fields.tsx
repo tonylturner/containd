@@ -6,6 +6,7 @@ import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
+import { formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
 
 // The ICS predicate part of the firewall rule forms: its fields and the
@@ -13,7 +14,7 @@ import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils
 
 export function ICSPredicateFields({
   protocol, onProtocolChange,
-  mode, onModeChange,
+  mode, onModeChange, globalMode,
   functionCodes, onFunctionCodesChange,
   addresses, onAddressesChange,
   unitId, onUnitIdChange,
@@ -23,7 +24,9 @@ export function ICSPredicateFields({
   iec, onIecChange,
 }: {
   protocol: string; onProtocolChange: (v: string) => void;
-  mode: string; onModeChange: (v: "enforce" | "learn") => void;
+  mode: ICSModeSelection; onModeChange: (v: ICSModeSelection) => void;
+  /** The global DPI mode an empty rule mode inherits. */
+  globalMode: string | undefined;
   functionCodes: string; onFunctionCodesChange: (v: string) => void;
   addresses: string; onAddressesChange: (v: string) => void;
   unitId: string; onUnitIdChange: (v: string) => void;
@@ -46,7 +49,8 @@ export function ICSPredicateFields({
         </div>
         <div>
           <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Rule Mode</label>
-          <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
+          <select aria-label="Rule Mode" value={mode} onChange={(e) => onModeChange(e.target.value as ICSModeSelection)} className="input-industrial w-full">
+            <option value="">Inherit global ({formatICSMode(undefined, globalMode).effectiveMode === "enforce" ? "enforce" : "learning"})</option>
             <option value="learn">Learning (passive)</option>
             <option value="enforce">Enforcement (after commit)</option>
           </select>
@@ -161,7 +165,8 @@ type RuleICSInput = {
   objectClasses: string;
   readOnly: boolean;
   writeOnly: boolean;
-  mode: "enforce" | "learn";
+  mode: ICSModeSelection;
+  globalMode?: ICSMode;
   iec: IEC104Draft;
   action: FirewallRule["action"];
   existing?: ICSPredicate;
@@ -172,7 +177,7 @@ export function buildRuleICS(
 ): { ok: true; ics: ICSPredicate | undefined } | { ok: false; error: string } {
   if (!input.enabled) return { ok: true, ics: undefined };
   if (input.protocol === "iec104") {
-    return buildIEC104RuleICS(input.iec, input.mode, input.action, input.existing);
+    return buildIEC104RuleICS(input.iec, input.mode, input.action, input.existing, input.globalMode);
   }
   return { ok: true, ics: buildICSPredicate(input) };
 }
@@ -198,7 +203,7 @@ function buildICSPredicate({
     addresses: addresses.split(",").map((s) => s.trim()).filter(Boolean),
     readOnly,
     writeOnly,
-    mode,
+    ...(mode ? { mode } : {}),
   };
   if (icsMeta.showUnitId && unitId.trim()) {
     const uid = Number(unitId.trim());

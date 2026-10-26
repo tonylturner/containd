@@ -9,29 +9,139 @@ import {
   api,
   type FirewallRule,
   type FirewallRulePatch,
+  type ICSPredicate,
+  type ICSPredicatePatch,
   type Protocol,
   type RulePreview,
   type Zone,
 } from "../../lib/api";
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { iec104DraftFrom, type IEC104Draft } from "../ics/iec104";
+import type { ICSMode, ICSModeSelection } from "../ics/ics-shared";
 import { zoneLabel } from "./firewall-utils";
 import { ICSPredicateFields, buildRuleICS } from "./firewall-ics-fields";
+import {
+  actionTakesICS,
+  buildPolicy,
+  policyDraftFrom,
+  type PolicyDraft,
+  type PolicyFields,
+} from "./firewall-rule-policy";
+import { RulePolicyFields } from "./firewall-rule-policy-fields";
 import { RuleImpactSummary } from "./firewall-rule-warnings";
+
+const LOG_HELP =
+  "Logs matching traffic as firewall.rule.hit events. A RATE_LIMIT rule logs the packets it drops over the limit; a TAG rule logs the connections it labels.";
+
+type ICSDraft = {
+  enabled: boolean;
+  protocol: string;
+  functionCodes: string;
+  addresses: string;
+  unitId: string;
+  objectClasses: string;
+  readOnly: boolean;
+  writeOnly: boolean;
+  mode: ICSModeSelection;
+  iec: IEC104Draft;
+};
+
+// A new filter starts from example values; an existing one keeps its own,
+// so editing never narrows a predicate the user did not touch.
+function icsDraftFrom(ics: ICSPredicate | undefined, mode: ICSModeSelection): ICSDraft {
+  const existing = !!ics?.protocol;
+  return {
+    enabled: existing,
+    protocol: ics?.protocol ?? "modbus",
+    functionCodes: existing ? (ics?.functionCode ?? []).join(", ") : "3,16",
+    addresses: existing ? (ics?.addresses ?? []).join(", ") : "0-100",
+    unitId: ics?.unitId?.toString() ?? "",
+    objectClasses: (ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
+    readOnly: ics?.readOnly ?? false,
+    writeOnly: ics?.writeOnly ?? false,
+    mode,
+    iec: iec104DraftFrom(ics),
+  };
+}
+
+type Built<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** The action, conditions and ICS predicate a form stages. */
+function buildRuleParts(
+  policy: PolicyDraft,
+  ics: ICSDraft,
+  tagsInUse: string[],
+  globalMode: ICSMode | undefined,
+  existing?: ICSPredicate,
+): Built<{ fields: PolicyFields; ics: ICSPredicate | undefined }> {
+  const fields = buildPolicy(policy, tagsInUse);
+  if (!fields.ok) return fields;
+  if (ics.enabled && !actionTakesICS(fields.value.action)) {
+    return { ok: false, error: `${fields.value.action} rules take no ICS protocol; turn off the ICS filter.` };
+  }
+  const built = buildRuleICS({ ...ics, action: fields.value.action, existing, globalMode });
+  if (!built.ok) return built;
+  return { ok: true, value: { fields: fields.value, ics: built.ics } };
+}
+
+function ICSToggle({ draft, onChange }: { draft: ICSDraft; onChange: (d: ICSDraft) => void }) {
+  return (
+    <>
+      <label className="flex items-center gap-2 text-sm text-(--text)">
+        <input type="checkbox" checked={draft.enabled} onChange={(e) => onChange({ ...draft, enabled: e.target.checked })} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
+        ICS Protocol Filter
+        <InfoTip label="Adds OT/ICS-aware matching to an ALLOW or DENY rule." />
+      </label>
+      <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+      <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
+    </>
+  );
+}
+
+function ICSDraftFields({ draft, onChange, globalMode }: { draft: ICSDraft; onChange: (d: ICSDraft) => void; globalMode: string | undefined }) {
+  if (!draft.enabled) return null;
+  const set = (patch: Partial<ICSDraft>) => onChange({ ...draft, ...patch });
+  return (
+    <ICSPredicateFields
+      protocol={draft.protocol} onProtocolChange={(protocol) => set({ protocol })}
+      mode={draft.mode} onModeChange={(mode) => set({ mode })} globalMode={globalMode}
+      functionCodes={draft.functionCodes} onFunctionCodesChange={(functionCodes) => set({ functionCodes })}
+      addresses={draft.addresses} onAddressesChange={(addresses) => set({ addresses })}
+      unitId={draft.unitId} onUnitIdChange={(unitId) => set({ unitId })}
+      objectClasses={draft.objectClasses} onObjectClassesChange={(objectClasses) => set({ objectClasses })}
+      readOnly={draft.readOnly} onReadOnlyChange={(readOnly) => set({ readOnly })}
+      writeOnly={draft.writeOnly} onWriteOnlyChange={(writeOnly) => set({ writeOnly })}
+      iec={draft.iec} onIecChange={(iec) => set({ iec })}
+    />
+  );
+}
+
+function NoZonesHint({ zones }: { zones: Zone[] }) {
+  if (zones.length > 0) return null;
+  return (
+    <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
+      No zones yet.{" "}<Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">Create a zone</Link> to target policies.
+    </div>
+  );
+}
 
 export function EditRuleModal({
   zones,
   rule,
+  globalMode,
+  tagsInUse,
   onClose,
   onSave,
 }: {
   zones: Zone[];
   rule: FirewallRule;
+  globalMode: ICSMode | undefined;
+  /** Distinct TAG labels of the other rules. */
+  tagsInUse: string[];
   onClose: () => void;
   onSave: (patch: FirewallRulePatch) => void;
 }) {
   const [description, setDescription] = useState(rule.description ?? "");
-  const [action, setAction] = useState<"ALLOW" | "DENY">(rule.action);
   const [log, setLog] = useState(rule.log ?? false);
   const [srcZone, setSrcZone] = useState((rule.sourceZones ?? [])[0] ?? "");
   const [dstZone, setDstZone] = useState((rule.destZones ?? [])[0] ?? "");
@@ -39,67 +149,66 @@ export function EditRuleModal({
   const [destinations, setDestinations] = useState((rule.destinations ?? []).join(", "));
   const [proto, setProto] = useState((rule.protocols ?? [])[0]?.name ?? "tcp");
   const [port, setPort] = useState((rule.protocols ?? [])[0]?.port ?? "");
-  const [icsEnabled, setIcsEnabled] = useState(!!rule.ics?.protocol);
-  const [icsProtocol, setIcsProtocol] = useState(rule.ics?.protocol ?? "modbus");
-  const [functionCodes, setFunctionCodes] = useState((rule.ics?.functionCode ?? []).join(", ") || "3,16");
-  const [addresses, setAddresses] = useState((rule.ics?.addresses ?? []).join(", ") || "0-100");
-  const [icsUnitId, setIcsUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
-  const [objectClasses, setObjectClasses] = useState((rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "));
-  const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
-  const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
-  const [mode, setMode] = useState<"enforce" | "learn">(rule.ics?.mode ?? "learn");
-  const [iec, setIec] = useState<IEC104Draft>(() => iec104DraftFrom(rule.ics));
+  const [policy, setPolicy] = useState(() => policyDraftFrom(rule));
+  // An empty ICS mode inherits the global mode; keep it empty.
+  const [ics, setIcs] = useState(() => icsDraftFrom(rule.ics, rule.ics?.mode ?? ""));
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  function buildPatch(): FirewallRulePatch | null {
+  function build(): { patch: FirewallRulePatch; preview: FirewallRule } | null {
     setError(null);
-    const ics = buildRuleICS({
-      enabled: icsEnabled,
-      protocol: icsProtocol,
-      functionCodes,
-      addresses,
-      unitId: icsUnitId,
-      objectClasses,
-      readOnly,
-      writeOnly,
-      mode,
-      iec,
-      action,
-      existing: rule.ics,
-    });
-    if (!ics.ok) {
-      setError(ics.error);
+    const parts = buildRuleParts(policy, ics, tagsInUse, globalMode, rule.ics);
+    if (!parts.ok) {
+      setError(parts.error);
       return null;
     }
-    // The PATCH keeps every omitted key, so a cleared field sends its empty
-    // value and a disabled ICS filter sends null.
-    return {
+    const { fields } = parts.value;
+    // Rule updates merge, so a stored mode is cleared with an empty one.
+    let icsPatch: ICSPredicatePatch | null = parts.value.ics ?? null;
+    if (icsPatch && ics.mode === "" && rule.ics?.mode) icsPatch = { ...icsPatch, mode: "" };
+    const base = {
       description: description.trim(),
-      action,
+      action: fields.action,
       log,
       sourceZones: srcZone ? [srcZone] : [],
       destZones: dstZone ? [dstZone] : [],
       sources: splitCSV(sources) ?? [],
       destinations: splitCSV(destinations) ?? [],
       protocols: buildProtocols(proto, port),
-      ics: ics.ics ?? null,
+      identities: fields.identities,
+    };
+    // The PATCH keeps every omitted key, so a cleared field sends its empty
+    // value and a removed predicate, rate limit or schedule sends null.
+    return {
+      patch: {
+        ...base,
+        rateLimit: fields.rateLimit ?? null,
+        tag: fields.tag ?? "",
+        schedule: fields.schedule ?? null,
+        ics: icsPatch,
+      },
+      preview: {
+        ...base,
+        id: rule.id,
+        rateLimit: fields.rateLimit,
+        tag: fields.tag,
+        schedule: fields.schedule,
+        ics: parts.value.ics,
+      },
     };
   }
 
   function save() {
-    const patch = buildPatch();
-    if (patch) onSave(patch);
+    const built = build();
+    if (built) onSave(built.patch);
   }
 
-  // Previews the edited rule, including the identities and schedule this form
-  // does not edit: their warnings explain an inactive ALLOW rule.
   async function previewImpact() {
-    const patch = buildPatch();
-    if (!patch) return;
+    const built = build();
+    if (!built) return;
     setPreviewing(true);
-    const res = await api.previewFirewallRule({ ...rule, ...patch, ics: patch.ics ?? undefined });
+    const res = await api.previewFirewallRule(built.preview);
     setPreviewing(false);
     if (!res.ok) {
       setPreview(null);
@@ -111,7 +220,7 @@ export function EditRuleModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-(--surface) px-4 animate-fade-in">
-      <div className="w-full max-w-2xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
+      <div className="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-(--text)">Edit rule {rule.id}</h2>
           <button onClick={onClose} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Close</button>
@@ -123,23 +232,15 @@ export function EditRuleModal({
             <option value="">Source zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          {zones.length === 0 && (
-            <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
-              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">Create a zone</Link> to target policies.
-            </div>
-          )}
+          <NoZonesHint zones={zones} />
           <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
             <option value="">Dest zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="input-industrial">
-            <option value="ALLOW">ALLOW</option>
-            <option value="DENY">DENY</option>
-          </select>
           <label className="flex items-center gap-2 text-sm text-(--text)">
             <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
             Log hits
-            <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
+            <InfoTip label={LOG_HELP} />
           </label>
           <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
           <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
@@ -149,28 +250,14 @@ export function EditRuleModal({
             <option value="icmp">icmp</option>
           </select>
           <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-            ICS Protocol Filter
-            <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
-          </label>
-          <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-          <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
         </div>
 
-        {icsEnabled && (
-          <ICSPredicateFields
-            protocol={icsProtocol} onProtocolChange={setIcsProtocol}
-            mode={mode} onModeChange={setMode}
-            functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
-            addresses={addresses} onAddressesChange={setAddresses}
-            unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
-            objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
-            readOnly={readOnly} onReadOnlyChange={setReadOnly}
-            writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
-            iec={iec} onIecChange={setIec}
-          />
-        )}
+        <RulePolicyFields draft={policy} onChange={setPolicy} />
+
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <ICSToggle draft={ics} onChange={setIcs} />
+        </div>
+        <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
 
         {preview && <RuleImpactSummary preview={preview} />}
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
@@ -186,10 +273,20 @@ export function EditRuleModal({
   );
 }
 
-export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (rule: FirewallRule) => void }) {
+export function CreateRuleForm({
+  zones,
+  globalMode,
+  tagsInUse,
+  onCreate,
+}: {
+  zones: Zone[];
+  globalMode: ICSMode | undefined;
+  /** Distinct TAG labels of the existing rules. */
+  tagsInUse: string[];
+  onCreate: (rule: FirewallRule) => Promise<void>;
+}) {
   const [id, setId] = useState("");
   const [description, setDescription] = useState("");
-  const [action, setAction] = useState<"ALLOW" | "DENY">("ALLOW");
   const [log, setLog] = useState(false);
   const [srcZone, setSrcZone] = useState("");
   const [dstZone, setDstZone] = useState("");
@@ -197,16 +294,9 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
   const [destinations, setDestinations] = useState("");
   const [proto, setProto] = useState("tcp");
   const [port, setPort] = useState("502");
-  const [icsEnabled, setIcsEnabled] = useState(false);
-  const [icsProtocol, setIcsProtocol] = useState("modbus");
-  const [functionCodes, setFunctionCodes] = useState("3,16");
-  const [addresses, setAddresses] = useState("0-100");
-  const [icsUnitId, setIcsUnitId] = useState("");
-  const [objectClasses, setObjectClasses] = useState("");
-  const [readOnly, setReadOnly] = useState(false);
-  const [writeOnly, setWriteOnly] = useState(false);
-  const [mode, setMode] = useState<"enforce" | "learn">("learn");
-  const [iec, setIec] = useState<IEC104Draft>(() => iec104DraftFrom(undefined));
+  const [policy, setPolicy] = useState(() => policyDraftFrom());
+  // New ICS filters start in learning mode, the safe default.
+  const [ics, setIcs] = useState(() => icsDraftFrom(undefined, "learn"));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -216,37 +306,19 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
       setError("Rule ID is required.");
       return;
     }
-    if (sources.trim()) {
-      const srcErr = validateIPOrCIDRList(sources);
-      if (srcErr) {
-        setError("Source: " + srcErr);
+    for (const [label, value] of [["Source", sources], ["Destination", destinations]] as const) {
+      const err = value.trim() ? validateIPOrCIDRList(value) : null;
+      if (err) {
+        setError(`${label}: ${err}`);
         return;
       }
     }
-    if (destinations.trim()) {
-      const dstErr = validateIPOrCIDRList(destinations);
-      if (dstErr) {
-        setError("Destination: " + dstErr);
-        return;
-      }
-    }
-    const ics = buildRuleICS({
-      enabled: icsEnabled,
-      protocol: icsProtocol,
-      functionCodes,
-      addresses,
-      unitId: icsUnitId,
-      objectClasses,
-      readOnly,
-      writeOnly,
-      mode,
-      iec,
-      action,
-    });
-    if (!ics.ok) {
-      setError(ics.error);
+    const parts = buildRuleParts(policy, ics, tagsInUse, globalMode);
+    if (!parts.ok) {
+      setError(parts.error);
       return;
     }
+    const { fields } = parts.value;
     const rule: FirewallRule = {
       id: id.trim(),
       description: description.trim() || undefined,
@@ -255,8 +327,12 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
       sources: splitCSV(sources),
       destinations: splitCSV(destinations),
       protocols: buildProtocols(proto, port),
-      ics: ics.ics,
-      action,
+      identities: fields.identities.length > 0 ? fields.identities : undefined,
+      schedule: fields.schedule,
+      ics: parts.value.ics,
+      action: fields.action,
+      rateLimit: fields.rateLimit,
+      tag: fields.tag,
       log: log || undefined,
     };
     setSaving(true);
@@ -281,11 +357,7 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
           <option value="">Source zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
-        {zones.length === 0 && (
-          <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
-            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">Create a zone</Link> to target policies.
-          </div>
-        )}
+        <NoZonesHint zones={zones} />
         <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
           <option value="">Dest zone (any)</option>
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
@@ -301,37 +373,19 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
           <option value="icmp">icmp</option>
         </select>
         <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-        <select value={action} onChange={(e) => setAction(e.target.value as "ALLOW" | "DENY")} className="input-industrial">
-          <option value="ALLOW">ALLOW</option>
-          <option value="DENY">DENY</option>
-        </select>
         <label className="flex items-center gap-2 text-sm text-(--text)">
           <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
           Log hits
-          <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
+          <InfoTip label={LOG_HELP} />
         </label>
-        <label className="flex items-center gap-2 text-sm text-(--text)">
-          <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-          ICS Protocol Filter
-          <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
-        </label>
-        <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-        <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
       </div>
 
-      {icsEnabled && (
-        <ICSPredicateFields
-          protocol={icsProtocol} onProtocolChange={setIcsProtocol}
-          mode={mode} onModeChange={setMode}
-          functionCodes={functionCodes} onFunctionCodesChange={setFunctionCodes}
-          addresses={addresses} onAddressesChange={setAddresses}
-          unitId={icsUnitId} onUnitIdChange={setIcsUnitId}
-          objectClasses={objectClasses} onObjectClassesChange={setObjectClasses}
-          readOnly={readOnly} onReadOnlyChange={setReadOnly}
-          writeOnly={writeOnly} onWriteOnlyChange={setWriteOnly}
-          iec={iec} onIecChange={setIec}
-        />
-      )}
+      <RulePolicyFields draft={policy} onChange={setPolicy} />
+
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <ICSToggle draft={ics} onChange={setIcs} />
+      </div>
+      <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
 
       <div className="mt-3 flex items-center justify-between">
         {error && <p className="text-sm text-red-400">{error}</p>}
