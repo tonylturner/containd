@@ -141,7 +141,8 @@ Domain files currently include:
 - `ui/lib/api-normalize.ts` (response normalizers)
 
 Shared hooks live in `ui/hooks/` (`useHealth.ts` is the one health store that
-the shell banner and pages subscribe to).
+the shell banner and pages subscribe to; `useSaveAction.ts` runs one save at
+a time and owns pending state, toasts and the state line for settings pages).
 
 Placement rules:
 - session/base URL/auth state only in `api-core.ts`
