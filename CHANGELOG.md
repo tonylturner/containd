@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committing it is refused unless an admin has a usable authorized key, so the
   setting cannot lock out SSH management. Committed SSH authentication
   settings apply to new logins without a restart.
+- Replace the deprecated `xterm` terminal packages with the maintained
+  `@xterm/xterm` 6 and `@xterm/addon-fit` releases.
 
 ### Fixed
 
