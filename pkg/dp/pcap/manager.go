@@ -22,15 +22,29 @@ import (
 const defaultDir = "/data/pcaps"
 
 type Manager struct {
-	mu      sync.Mutex
-	dir     string
-	cfg     config.PCAPConfig
-	running bool
-	started time.Time
-	lastErr string
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	workers map[string]*worker
+	mu           sync.Mutex
+	dir          string
+	cfg          config.PCAPConfig
+	run          *captureRun
+	interfaces   []string
+	started      time.Time
+	lastErr      string
+	workerRunner func(context.Context, *captureRun, *captureTask) error
+}
+
+type captureRun struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	workers   int
+	completed int
+	active    int
+	stopping  bool
+}
+
+type captureTask struct {
+	worker  *worker
+	started bool
 }
 
 func NewManager(dir string) *Manager {
@@ -53,77 +67,98 @@ func (m *Manager) Config() config.PCAPConfig {
 	return m.cfg
 }
 
-func (m *Manager) Start(ctx context.Context, cfg config.PCAPConfig) error {
+// Start begins a capture whose lifetime is owned by this manager. The owner
+// must call Stop when its lifecycle ends; an HTTP request context does not
+// govern the capture lifetime.
+func (m *Manager) Start(cfg config.PCAPConfig) error {
+	cfg = normalizeConfig(cfg)
+	ifaces := uniqueStrings(cfg.Interfaces)
+	if len(ifaces) == 0 {
+		return errors.New("pcap requires at least one interface")
+	}
+	cfg.Interfaces = ifaces
+
 	m.mu.Lock()
-	if m.running {
+	if m.run != nil {
 		m.mu.Unlock()
 		return errors.New("pcap capture already running")
 	}
-	cfg = normalizeConfig(cfg)
-	if len(cfg.Interfaces) == 0 {
-		m.mu.Unlock()
-		return errors.New("pcap requires at least one interface")
-	}
-	m.cfg = cfg
-	m.lastErr = ""
-	m.started = time.Now().UTC()
-	runCtx, cancel := context.WithCancel(ctx)
-	m.cancel = cancel
-	m.running = true
-	m.workers = make(map[string]*worker)
 	m.mu.Unlock()
 
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		m.setError(err)
-		_ = m.Stop()
 		return err
 	}
 
-	ifaces := uniqueStrings(cfg.Interfaces)
-	for _, iface := range ifaces {
-		w := newWorker(m.dir, iface, cfg)
-		m.mu.Lock()
-		m.workers[iface] = w
+	m.mu.Lock()
+	if m.run != nil {
 		m.mu.Unlock()
-		m.wg.Add(1)
-		go func(w *worker) {
-			defer m.wg.Done()
-			if err := w.run(runCtx, m); err != nil {
-				m.setError(err)
-			}
-		}(w)
+		return errors.New("pcap capture already running")
 	}
+	m.cfg = cfg
+	m.lastErr = ""
+	m.started = time.Now().UTC()
+	runCtx, cancel := context.WithCancel(context.Background())
+	run := &captureRun{
+		ctx:     runCtx,
+		cancel:  cancel,
+		workers: len(ifaces),
+	}
+	m.run = run
+	m.interfaces = append(m.interfaces[:0], ifaces...)
+	tasks := make([]*captureTask, 0, len(ifaces))
+	for _, iface := range ifaces {
+		tasks = append(tasks, &captureTask{worker: newWorker(m.dir, iface, cfg)})
+	}
+	run.wg.Add(len(tasks))
+	runner := m.workerRunner
+	m.mu.Unlock()
 
+	if runner == nil {
+		runner = func(ctx context.Context, run *captureRun, task *captureTask) error {
+			return task.worker.run(ctx, m, run, task)
+		}
+	}
+	for _, task := range tasks {
+		go func(task *captureTask) {
+			defer run.wg.Done()
+			err := runner(run.ctx, run, task)
+			m.workerExited(run, task, err)
+		}(task)
+	}
 	return nil
 }
 
 func (m *Manager) Stop() error {
 	m.mu.Lock()
-	if !m.running {
+	run := m.run
+	if run == nil {
 		m.mu.Unlock()
 		return nil
 	}
-	cancel := m.cancel
-	m.running = false
-	m.cancel = nil
-	m.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if !run.stopping {
+		run.stopping = true
+		run.cancel()
 	}
-	m.wg.Wait()
+	m.mu.Unlock()
+	run.wg.Wait()
+
+	m.mu.Lock()
+	if m.run == run {
+		m.run = nil
+	}
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ifaces := make([]string, 0, len(m.workers))
-	for k := range m.workers {
-		ifaces = append(ifaces, k)
-	}
+	ifaces := append([]string(nil), m.interfaces...)
 	sort.Strings(ifaces)
+	running := m.run != nil && m.run.active > 0
 	return Status{
-		Running:    m.running,
+		Running:    running,
 		Interfaces: ifaces,
 		StartedAt:  m.started,
 		LastError:  m.lastErr,
@@ -287,7 +322,47 @@ func (m *Manager) setError(err error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.run != nil {
+		return
+	}
 	m.lastErr = err.Error()
+}
+
+func (m *Manager) workerStarted(run *captureRun, task *captureTask) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.run != run || run.stopping || run.ctx.Err() != nil {
+		return false
+	}
+	task.started = true
+	run.active++
+	return true
+}
+
+func (m *Manager) workerExited(run *captureRun, task *captureTask, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if task.started {
+		run.active--
+		task.started = false
+	}
+	if err != nil && run.ctx.Err() == nil && m.run == run {
+		m.lastErr = err.Error()
+	}
+	run.completed++
+	if run.completed == run.workers && m.run == run {
+		run.cancel()
+		m.run = nil
+	}
+}
+
+func (m *Manager) requestStop(run *captureRun) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.run == run && !run.stopping {
+		run.stopping = true
+		run.cancel()
+	}
 }
 
 func normalizeConfig(cfg config.PCAPConfig) config.PCAPConfig {

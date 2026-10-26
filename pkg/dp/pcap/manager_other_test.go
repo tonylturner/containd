@@ -19,20 +19,20 @@ func TestManagerLifecycleOnUnsupportedPlatform(t *testing.T) {
 	t.Parallel()
 
 	mgr := NewManager(t.TempDir())
-	if err := mgr.Start(context.Background(), config.PCAPConfig{}); err == nil {
+	if err := mgr.Start(config.PCAPConfig{}); err == nil {
 		t.Fatal("expected Start to reject empty interface set")
 	}
-	if err := mgr.Start(context.Background(), config.PCAPConfig{Interfaces: []string{"eth1", "eth1", "eth2"}}); err != nil {
+	if err := mgr.Start(config.PCAPConfig{Interfaces: []string{"eth1", "eth1", "eth2"}}); err != nil {
 		t.Fatalf("Start: %v", err)
-	}
-	if err := mgr.Start(context.Background(), config.PCAPConfig{Interfaces: []string{"eth3"}}); err == nil {
-		t.Fatal("expected second Start while running to fail")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		status := mgr.Status()
 		if strings.Contains(status.LastError, "only supported on linux") {
+			if status.Running {
+				t.Fatalf("expected worker exit to clear running, got %#v", status)
+			}
 			if len(status.Interfaces) != 2 || status.Interfaces[0] != "eth1" || status.Interfaces[1] != "eth2" {
 				t.Fatalf("unexpected status interfaces: %#v", status.Interfaces)
 			}
@@ -44,7 +44,7 @@ func TestManagerLifecycleOnUnsupportedPlatform(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if err := mgr.Stop(); err != nil {
-		t.Fatalf("Stop: %v", err)
+		t.Fatalf("Stop after natural worker exit: %v", err)
 	}
 	if status := mgr.Status(); status.Running {
 		t.Fatalf("expected manager to be stopped, got %#v", status)
@@ -61,7 +61,10 @@ func TestReplayAndWorkerStubs(t *testing.T) {
 	if got := w.iface; got != "eth0" {
 		t.Fatalf("worker iface = %q", got)
 	}
-	if err := w.run(context.Background(), NewManager(t.TempDir())); err == nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &captureRun{ctx: ctx, cancel: cancel}
+	if err := w.run(ctx, NewManager(t.TempDir()), run, &captureTask{worker: w}); err == nil {
 		t.Fatal("expected worker.run to fail on non-linux")
 	}
 }

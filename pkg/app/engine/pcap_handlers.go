@@ -52,7 +52,7 @@ func pcapConfigHandler(mgr *pcap.Manager, ownership *ownershipManager) http.Hand
 			if wasRunning {
 				_ = mgr.Stop()
 				if cfg.Enabled {
-					if err := mgr.Start(r.Context(), cfg); err != nil {
+					if err := mgr.Start(cfg); err != nil {
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
@@ -93,7 +93,7 @@ func pcapStartHandler(mgr *pcap.Manager, ownership *ownershipManager) http.Handl
 			}
 			cfg = resolved
 		}
-		if err := mgr.Start(r.Context(), cfg); err != nil {
+		if err := mgr.Start(cfg); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
