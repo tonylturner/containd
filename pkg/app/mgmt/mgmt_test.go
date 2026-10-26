@@ -117,7 +117,7 @@ func TestResolveMgmtListenerConfigAndBuildServers(t *testing.T) {
 	cfg.System.Mgmt.HSTSMaxAgeSeconds = -1
 
 	t.Setenv("CONTAIND_ALLOWED_ORIGINS", "https://ui.example")
-	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg)
+	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg, nil)
 	if err != nil {
 		t.Fatalf("resolveMgmtListenerConfig: %v", err)
 	}

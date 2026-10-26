@@ -26,6 +26,8 @@ export type ManagementReservation = {
   guard?: { active: boolean; error?: string; faults: number; lastFault?: { reason: string } };
   rollbackFault?: string;
   bootFault?: string;
+  recovery?: string;
+  listenerFaults?: string[] | null;
 };
 
 export const consoleAPI = {

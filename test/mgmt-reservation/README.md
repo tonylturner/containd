@@ -18,11 +18,16 @@ substrate rejection, and deterministic NIC-renumber restart with no fault. The
 fixture entrypoint renames only its own container NICs before starting containd.
 The script then injects a legacy custom-row/listener conflict directly into its
 private config DB (the API correctly refuses such edits), restarts, and requires
-reserved health/login, one boot-fault event and no engine ruleset apply, including
-a second check after several replay intervals. It records the absent containd
-firewall table (Docker DNS NAT chains remain); fault mode is not fail-closed
-enforcement. Finally, safe commit and factory reset must each clear the fault; reset leaves exactly one unaddressed
-reserved binding. Unsafe address changes are rejected
+reserved health/login, one boot-fault event and an applied minimal recovery
+ruleset. Two additional isolated transit peers route through the appliance:
+a narrow normal-mode allow proves new TCP works, fault-mode restart must drop
+new TCP, and a safe commit must restore it. A second recovery check after replay
+intervals requires the same applied timestamp (no apply spam). Engine status and
+the operator API must confirm the actual recovery ruleset. Factory reset also
+clears recovery and leaves one unaddressed reserved binding. Finally a stored,
+valid but unbindable HTTPS address must produce a visible optional-listener boot
+fault without removing reserved HTTP access. The fixture uses SSH port 18222
+inside its namespace; it publishes no ports. Unsafe address changes are rejected
 at candidate staging, before an invalid commit can exist; store tests separately
 prove legacy unsafe candidates cannot be promoted.
 
@@ -32,3 +37,10 @@ Default subnets are `10.217.0.0/24` through `10.217.7.0/24`; set
 `MGMT_SMOKE_PREFIX=10.218` if those are already allocated. Never reuse the
 RangerDanger subnets or ports. A subnet collision is an error, not permission to
 remove an existing network.
+
+The two transit bridges disable masquerading rather than using Docker's
+`internal` host filter, which drops routed cross-subnet frames even when the
+appliance allows them. The fixture removes default routes in the appliance and
+both transit peers, and installs only explicit peer routes via the appliance;
+there is no outside route or direct cross-network peer attachment. The other
+six bridges remain Docker-internal.

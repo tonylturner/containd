@@ -23,4 +23,5 @@ while [ "$i" -lt 8 ]; do
   ip link set "$name" up
   i=$((i + 1))
 done
+ip route flush default
 exec /usr/bin/containd "$@"

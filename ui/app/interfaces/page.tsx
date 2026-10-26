@@ -292,8 +292,18 @@ export default function InterfacesPage() {
           {reservation.bootFault && (
             <div role="status" className="mt-2 text-amber-400">
               <p className="font-semibold">Configuration apply paused</p>
+              <p>{reservation.recovery || "recovery pending: ruleset not verified"}</p>
               <p>{reservation.bootFault}</p>
               <p>Reserved management remains available. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.</p>
+            </div>
+          )}
+          {!!reservation.listenerFaults?.length && (
+            <div role="status" className="mt-2 text-amber-400">
+              <p className="font-semibold">Optional listener boot faults</p>
+              <p>Reserved HTTP management remains available. Correct the listener settings and restart to restore these listeners.</p>
+              <ul className="list-disc pl-5">
+                {reservation.listenerFaults.map((fault, index) => <li key={index}>{fault}</li>)}
+              </ul>
             </div>
           )}
           {reservation.rollbackFault && <p className="mt-1 text-amber-400">{reservation.rollbackFault}</p>}

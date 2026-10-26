@@ -169,9 +169,13 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 // ManagementGuardHealth provider; absent identity disables identity endpoints.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	var guardHealth ManagementGuardHealth
+	var listenerFaults ManagementListenerFaults
 	for _, opt := range opts {
 		if provider, ok := opt.(ManagementGuardHealth); ok {
 			guardHealth = provider
+		}
+		if provider, ok := opt.(ManagementListenerFaults); ok {
+			listenerFaults = provider
 		}
 	}
 	r := gin.New()
@@ -231,7 +235,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/auth/me/mfa/enable", rateLimitSensitive(), enableMyMFAHandler(userStore))
 		protected.POST("/auth/me/mfa/disable", rateLimitSensitive(), disableMyMFAHandler(userStore))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
-		protected.GET("/system/management-reservation", managementReservationHandler(store, guardHealth))
+		protected.GET("/system/management-reservation", managementReservationHandler(store, guardHealth, engine, listenerFaults))
 		protected.GET("/system/stats", systemStatsHandler())
 		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
