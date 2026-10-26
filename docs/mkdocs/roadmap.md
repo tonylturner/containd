@@ -50,8 +50,9 @@ protecting containerized workloads**.
 
 | Release | Content | State |
 |---|---|---|
-| 0.1.32 | Current `main` and `:latest` | Released |
-| 0.1.33 | IEC 104 monitor types 5, 7, 9, 11, 15, 21, and 30–37; reserved management path; staged configuration with a global commit bar; base-path assets; engine-owned rule preview; IEC evidence retention and query; release gate (1.11); S7 and RDP X.224 wire-byte fixes; transport accounting once per packet; capture-derived IEC 104 regression corpus; imported rules without executable content no longer alert on every event | Release candidate on `iec104`; merges to `main` after readiness testing |
+| 0.1.32 | Previous stable release | Released |
+| 0.1.33 | IEC 104 monitor types 5, 7, 9, 11, 15, 21, and 30–37; reserved management path; staged configuration with a global commit bar; base-path assets; engine-owned rule preview; IEC evidence retention and query; release gate (1.11); S7 and RDP X.224 wire-byte fixes; transport accounting once per packet; capture-derived IEC 104 regression corpus; imported rules without executable content no longer alert on every event | Released on `main`; current `:latest` |
+| 0.1.34 | Go 1.26.10 security update; bounded IEC 104 learn-mode tracking; security scan fixes | Hotfix pending validation and release |
 
 `:latest` moves only after a complete work effort is tested and merged to
 `main`. Older RangerDanger releases pull `:latest`.

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-26
+
+### Security
+
+- Upgrade the Go toolchain and both Docker builders to 1.26.10 to fix
+  CVE-2026-111943 in `crypto/x509`.
+
+### Fixed
+
+- Bound IEC 104 learn-mode session tracking to the shared 4,096-entry
+  table. Connections that cannot be tracked are accepted without stream
+  inspection and reported as `ics.session` untracked/bound events.
+  Enforce-mode midstream traffic can no longer bypass the table limit.
+- Keep firewall rule patches as raw JSON until concrete rule validation,
+  preserving nested schedule patches without deserializing to `interface{}`.
+  Parse PCAP ports as checked unsigned 16-bit values and construct envelope
+  gate callbacks outside the mutex's critical section.
+
 ## [0.1.33] - 2026-10-25
 
 ### Added
