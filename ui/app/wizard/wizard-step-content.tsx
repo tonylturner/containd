@@ -4,6 +4,7 @@ import type React from "react";
 
 import type { Zone } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
+import { zoneLabel } from "../../lib/zones";
 
 import {
   CARDS,
@@ -12,7 +13,6 @@ import {
   serverIpError,
   serverPortError,
   type WizardId,
-  zoneLabel,
 } from "./wizard-shared";
 
 type WizardStepContentProps = {

@@ -19,17 +19,7 @@ import { SkeletonList } from "../../components/Skeleton";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
 import { validateIPv4, validatePort } from "../../lib/validate";
-
-/* ── helpers ───────────────────────────────────────────────────── */
-
-function zoneLabel(zone: Zone): string {
-  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
-}
-
-function zoneName(zones: Zone[], name: string): string {
-  const match = zones.find((z) => z.name === name);
-  return match ? zoneLabel(match) : name;
-}
+import { zoneLabel, zoneName } from "../../lib/zones";
 
 const UNAVAILABLE = "NAT settings unavailable — the server did not return the NAT configuration and zones.";
 
