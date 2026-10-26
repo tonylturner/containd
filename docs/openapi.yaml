@@ -4758,6 +4758,37 @@ paths:
           description: Engine unavailable or unable to compile candidate; no ruleset returned
         '503':
           description: No engine with ruleset preview support is configured; no ruleset returned
+  /dataplane/ruleset/status:
+    get:
+      summary: Status of the installed ruleset
+      tags: [Dataplane]
+      description: >-
+        Readable by any authenticated user. Reports the engine's installed ruleset without compiling the
+        candidate and without the ruleset text, which stays with the admin-only GET /dataplane/ruleset:
+        the failed apply and the schedule planner state behind degraded enforcement health.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/EngineRulesetStatus'
+                - type: object
+                  required: [installed]
+                  description: ruleset is never present.
+                  properties:
+                    installed: {type: boolean, description: Whether a ruleset is in force; false before the first successful apply and while enforcement is disabled.}
+        '502':
+          description: The engine did not report its ruleset status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: No engine is configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /security/conduits:
     get:
       summary: Summarize running zone-to-zone policy
