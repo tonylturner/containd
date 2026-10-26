@@ -195,15 +195,8 @@ export function ConfigSummaryCard({
         <Stat label="IDS rules" value={idsRuleCount} />
         <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2">
           <span className="text-(--text)">DPI mode</span>
-          <span
-            className={
-              dpiMode === "enforce"
-                ? "text-emerald-400"
-                : dpiMode === "learn"
-                  ? ""
-                  : "text-(--text-muted)"
-            }
-          >
+          {/* A mode is a preference, not proof of enforcement: never green. */}
+          <span className={dpiMode === "enforce" || dpiMode === "learn" ? "" : "text-(--text-muted)"}>
             {dpiMode}
           </span>
         </div>

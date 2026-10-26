@@ -48,6 +48,25 @@ export async function getJSONWithStatus<T>(
   }
 }
 
+/** GET that surfaces the server's error message instead of a bare null. */
+export async function getJSONResult<T>(path: string): Promise<ApiResult<T>> {
+  try {
+    const res = await fetchWithSession(path, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: (await res.json()) as T };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
+  }
+}
+
 export async function postJSON<T>(
   path: string,
   payload: unknown,

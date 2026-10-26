@@ -5,6 +5,7 @@ import {
   postJSONResult,
 } from "./api-request";
 import { normalizeFirewallRule, normalizeFirewallRules } from "./api-normalize";
+import { normalizeICSCoverageRule, type ICSCoverageRule } from "./api-ics-coverage";
 
 import type {
   ApiResult,
@@ -35,6 +36,8 @@ export type RulePreview = {
   time_range: { start: string; end: string } | null;
   total_events: number;
   warnings?: RuleWarning[];
+  /** The candidate's ICS coverage under the running settings; absent without an ICS protocol. */
+  icsCoverage?: ICSCoverageRule;
 };
 
 export const networkAPI = {
@@ -108,8 +111,12 @@ export const networkAPI = {
     return { ...result, data: normalizeFirewallRule(result.data) };
   },
   // Matches the rule in isolation against recent events; stages nothing.
-  previewFirewallRule: (r: FirewallRule) =>
-    postJSONResult<RulePreview>("/api/v1/firewall/rules/preview", r),
+  previewFirewallRule: async (r: FirewallRule): Promise<ApiResult<RulePreview>> => {
+    const res = await postJSONResult<RulePreview>("/api/v1/firewall/rules/preview", r);
+    if (!res.ok) return res;
+    const icsCoverage = normalizeICSCoverageRule(res.data?.icsCoverage) ?? undefined;
+    return { ...res, data: { ...res.data, icsCoverage } };
+  },
   deleteFirewallRule: (id: string) =>
     deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),

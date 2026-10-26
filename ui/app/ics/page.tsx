@@ -21,33 +21,16 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
 import {
   formatICSMode,
-  type ICSMode,
   PROTOCOL_KEYS,
   PROTOCOLS,
   protoMeta,
 } from "./ics-shared";
 import { summarizeIEC104 } from "./iec104";
-import { IEC104HealthStatus } from "./iec104-health";
+import { IEC104HealthIndicator, useHealth } from "./iec104-health";
+import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
+import { useICSCoverage } from "./use-ics-coverage";
 
 /* -- Page ----------------------------------------------------------------- */
-
-function ICSModeBadge({
-  ruleMode,
-  globalMode,
-}: {
-  ruleMode?: ICSMode;
-  globalMode?: ICSMode;
-}) {
-  const mode = formatICSMode(ruleMode, globalMode);
-  return (
-    <StatusBadge
-      variant={mode.effectiveMode === "learn" ? "warning" : "success"}
-      dot
-    >
-      {mode.label}
-    </StatusBadge>
-  );
-}
 
 export default function ICSPolicyPage() {
   const toast = useToast();
@@ -60,6 +43,9 @@ export default function ICSPolicyPage() {
     captureInterfaces: [],
     dpiMock: false,
   });
+  const coverage = useICSCoverage();
+  const health = useHealth();
+  const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
   async function refresh() {
     setError(null);
@@ -118,7 +104,10 @@ export default function ICSPolicyPage() {
       title="ICS / OT Protocol Filters"
       actions={
         <button
-          onClick={refresh}
+          onClick={() => {
+            void refresh();
+            void coverage.reload();
+          }}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
@@ -135,19 +124,26 @@ export default function ICSPolicyPage() {
       <Card title="Candidate DPI Settings" className="mb-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-(--text)">
-            ICS protocol filters require DPI to be enabled with at least one capture interface configured.
+            ICS protocol filters need DPI enabled. Enforce needs an NFQUEUE group, which inspects
+            routed traffic inline and needs no capture interface; capture interfaces only observe.
           </div>
           <StatusBadge variant={(dpiConfig.dpiEnabled ?? false) ? "success" : "neutral"} dot>
             {(dpiConfig.dpiEnabled ?? false) ? "DPI Enabled" : "DPI Disabled"}
           </StatusBadge>
+        </div>
+        <div className="mt-2 text-xs text-(--text-muted)">
+          {queueGroup > 0
+            ? `Inline inspection: NFQUEUE group ${queueGroup}`
+            : "Inline inspection: off \u2014 no NFQUEUE group, so ICS rules can only monitor"}
         </div>
         {(dpiConfig.captureInterfaces ?? []).length > 0 && (
           <div className="mt-2 text-xs text-(--text-muted)">
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
         )}
-        <div className="mt-3">
-          <IEC104HealthStatus />
+        <div className="mt-3 space-y-2">
+          <ICSEnforcementIndicator health={health?.icsEnforcement} />
+          <IEC104HealthIndicator health={health?.iec104Enforcement} />
         </div>
         <div className="mt-2">
           <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
@@ -222,6 +218,7 @@ export default function ICSPolicyPage() {
       </div>
 
       {/* -- Rules table ------------------------------------------------- */}
+      {Object.keys(protoCounts).length > 0 && <ICSCoverageNotice view={coverage.view} />}
       <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
@@ -241,13 +238,14 @@ export default function ICSPolicyPage() {
               </th>
               <th className="px-4 py-3">R/W</th>
               <th className="px-4 py-3">Mode</th>
+              <th className="px-4 py-3">Coverage</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {icsRules.length === 0 && (
               <tr>
-                <td className="px-4 py-8" colSpan={8}>
+                <td className="px-4 py-8" colSpan={9}>
                   <EmptyState
                     title={`No ICS filters${filterProto !== "all" ? ` for ${protoMeta(filterProto).label}` : ""} configured`}
                     description="Create firewall rules with ICS protocol filters to monitor and control industrial traffic."
@@ -295,10 +293,12 @@ export default function ICSPolicyPage() {
                       : "R/W"}
                 </td>
                 <td className="px-4 py-3 text-(--text)">
-                  <ICSModeBadge
-                    ruleMode={r.ics?.mode}
-                    globalMode={dpiConfig.dpiMode}
-                  />
+                  <StatusBadge variant="neutral">
+                    {formatICSMode(r.ics?.mode, dpiConfig.dpiMode).label}
+                  </StatusBadge>
+                </td>
+                <td className="px-4 py-3 text-(--text)">
+                  <ICSCoverageCell view={coverage.view} ruleId={r.id} />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button

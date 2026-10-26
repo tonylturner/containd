@@ -1,4 +1,5 @@
 import type { RulePreview, RuleWarning } from "../../lib/api";
+import { ICSCoverageSection } from "../ics/ics-coverage";
 
 /** Rule predicates the dataplane resolves toward denial. */
 export function RuleWarningList({ warnings }: { warnings?: RuleWarning[] }) {
@@ -24,6 +25,7 @@ export function RuleImpactSummary({ preview }: { preview: RulePreview }) {
       <p className="text-sm text-(--text)">
         {preview.match_count} of {preview.total_events} recent events match this rule on its own.
       </p>
+      <ICSCoverageSection coverage={preview.icsCoverage} />
       <RuleWarningList warnings={preview.warnings} />
     </div>
   );
