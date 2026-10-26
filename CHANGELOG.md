@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Complete the management OpenAPI route reference and guard it against the
+  registered router, including optional identity and audit endpoints.
+- Document staged dataplane settings, session and lab authentication, filtered
+  event queries, and binary environment names separately from Compose inputs.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security
