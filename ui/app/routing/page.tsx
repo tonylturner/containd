@@ -33,6 +33,7 @@ export default function RoutingPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [interfaceStateUnavailable, setInterfaceStateUnavailable] = useState(false);
   const [detecting, setDetecting] = useState(false);
 
   const confirm = useConfirm();
@@ -242,13 +243,19 @@ export default function RoutingPage() {
     setNotice(null);
     try {
       const [ifs, states] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
-      const wanIface = pickWanIface(ifs ?? []);
+      setInterfaceStateUnavailable(states === null);
+      if (states === null) return;
+      if (ifs === null) {
+        setError("Interface configuration unavailable.");
+        return;
+      }
+      const wanIface = pickWanIface(ifs);
       if (!wanIface) {
         setError("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
         return;
       }
       const wanDev = effectiveDev(wanIface);
-      const wanState = (states ?? []).find((s) => s.name === wanDev) ?? null;
+      const wanState = states.find((s) => s.name === wanDev) ?? null;
       const wanCIDR = pickWanCIDR(wanState);
       if (!wanCIDR) {
         setError(
@@ -409,6 +416,13 @@ export default function RoutingPage() {
       {!canEdit && (
         <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
+        </div>
+      )}
+
+      {interfaceStateUnavailable && (
+        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <p>Interface runtime state unavailable — the engine could not be reached. Auto WAN setup cannot determine the WAN address; no routing changes were staged.</p>
+          <button onClick={autoWanDefaultRoute} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
 
