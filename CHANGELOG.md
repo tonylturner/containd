@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stopped period), N(S)/N(R) gaps, backward steps or ACKs of unsent frames,
   and TESTFR act without con within t1. Alerts carry the session ID and show
   their evidence in Events and Alerts. They never change firewall decisions.
+- The IEC 104 Linux smoke (`scripts/smoke-iec104.sh`) also checks live
+  inventory counts, APCI alerts and settled holdback-pressure gauges against
+  their Prometheus series.
 
 ### Changed
 
