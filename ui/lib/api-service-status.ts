@@ -67,7 +67,7 @@ export type NTPStatus = ServiceMeter & {
   ntpd_name: string;
   running: boolean;
   pid: number;
-  /** The zero time when the daemon never started or stopped. */
+  /** Empty when the NTP daemon never started or stopped. */
   last_start: string;
   last_stop: string;
   last_exit: string;
@@ -82,7 +82,7 @@ export type ProxyStatus = ServiceMeter & {
   nginx_running: boolean;
   envoy_pid: number;
   nginx_pid: number;
-  /** The zero time when the proxy never started or stopped. */
+  /** Empty when the proxy never started or stopped. */
   envoy_last_start: string;
   nginx_last_start: string;
   envoy_last_stop: string;

@@ -139,7 +139,7 @@ export default function NTPPage() {
             <div>
               Last start:{" "}
               <span className="text-(--text)">
-                {status?.last_start ?? "n/a"}
+                {status?.last_start || "never"}
               </span>
             </div>
             <div>
