@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,6 @@ import (
 	"github.com/kballard/go-shellquote"
 
 	"github.com/tonylturner/containd/pkg/cli"
-	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -45,7 +45,7 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
-		apiClient, err := cliAPIForRequest(c, store)
+		apiClient, err := cliAPIForRequest(c)
 		if err != nil {
 			c.JSON(http.StatusOK, resp{Error: err.Error()})
 			return
@@ -158,9 +158,9 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 				_ = conn.WriteJSON(resp{Output: ""})
 				continue
 			}
-			// Re-read configuration and certificate for every command, including
+			// Re-read the served certificate for every command, including
 			// commands on an already established WebSocket after rotation.
-			apiClient, err := cliAPIForRequest(c, store)
+			apiClient, err := cliAPIForRequest(c)
 			if err != nil {
 				_ = conn.WriteJSON(resp{Error: err.Error()})
 				continue
@@ -181,42 +181,48 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+var servedManagementCertificate atomic.Pointer[string]
+
+// SetServedManagementCertificate records the certificate file the HTTPS
+// listener this process's management has bound serves, which the console
+// pins; "" records that no HTTPS listener is bound. Management records it
+// with config.SetBoundManagementListeners.
+func SetServedManagementCertificate(certFile string) {
+	servedManagementCertificate.Store(&certFile)
+}
+
+func servedCertificate() string {
+	if certFile := servedManagementCertificate.Load(); certFile != nil {
+		return *certFile
+	}
+	return ""
+}
+
 // cliAPIForRequest is the API client of an in-app console command: it calls
 // the management listener this process has bound on loopback, never a
-// destination derived from the request.
-func cliAPIForRequest(c *gin.Context, store config.Store) (*cli.API, error) {
-	if store == nil {
-		return nil, errors.New("console: config store unavailable")
-	}
-	cfg, err := store.Load(c.Request.Context())
-	if err != nil {
-		return nil, fmt.Errorf("console: load management config: %w", err)
-	}
-	if cfg == nil {
-		return nil, errors.New("console: management config unavailable")
-	}
+// destination derived from the request, and pins the certificate that
+// listener serves, never one named by the saved settings.
+func cliAPIForRequest(c *gin.Context) (*cli.API, error) {
 	// Listener settings bind at startup, so the saved configuration can
-	// name a listener that is not bound yet. Management serves each bound
-	// port on 127.0.0.1 too.
+	// name a listener or certificate that is not bound. Management serves
+	// each bound port on 127.0.0.1 too.
 	bound := config.BoundManagementListeners()
-	var baseURL string
-	var httpClient cli.HTTPClient
+	apiClient := &cli.API{}
 	// Always prefer HTTP for internal calls when it is bound.
 	if port := bound.HTTP.Port(); port != 0 {
-		baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+		apiClient.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 	} else if port := bound.HTTPS.Port(); port != 0 {
-		baseURL = fmt.Sprintf("https://127.0.0.1:%d", port)
-		certFile, _ := mgmttls.ResolveFiles(cfg)
-		httpClient, err = consoleHTTPSClient(certFile)
+		certFile := servedCertificate()
+		if certFile == "" {
+			return nil, errors.New("console: the bound HTTPS listener recorded no certificate")
+		}
+		client, err := consoleHTTPSClient(certFile)
 		if err != nil {
 			return nil, fmt.Errorf("console: %w", err)
 		}
+		apiClient.BaseURL, apiClient.Client = fmt.Sprintf("https://127.0.0.1:%d", port), client
 	} else {
 		return nil, errors.New("console: no management HTTP or HTTPS listener bound")
-	}
-	apiClient := &cli.API{BaseURL: baseURL}
-	if httpClient != nil {
-		apiClient.Client = httpClient
 	}
 	// Pass through the caller's bearer token so in-app console commands
 	// can access the same protected endpoints as the UI session.
@@ -226,7 +232,7 @@ func cliAPIForRequest(c *gin.Context, store config.Store) (*cli.API, error) {
 	return apiClient, nil
 }
 
-// consoleHTTPSClient trusts only the configured leaf, not the host's system CAs.
+// consoleHTTPSClient trusts only the served leaf, not the host's system CAs.
 // Use the certificate's own SAN as the verification name while dialing loopback;
 // an operator certificate need not contain 127.0.0.1. Normal TLS verification
 // (including validity and server usage) remains enabled, with an exact leaf pin
@@ -283,7 +289,7 @@ func consoleHTTPSClient(certFile string) (*http.Client, error) {
 				ServerName: name,
 				VerifyConnection: func(state tls.ConnectionState) error {
 					if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, leaf.Raw) {
-						return errors.New("console: management TLS certificate does not match configured leaf")
+						return errors.New("console: management TLS certificate does not match its certificate file")
 					}
 					return nil
 				},

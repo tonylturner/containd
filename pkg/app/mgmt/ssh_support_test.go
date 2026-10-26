@@ -9,10 +9,12 @@ import (
 	"crypto/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -167,10 +169,45 @@ func TestSSHBaseURL(t *testing.T) {
 		}
 	}
 	// No default port stands in for an address without one.
-	for _, addr := range []string{"", "10.10.10.10"} {
-		if got, err := sshBaseURL(addr, ""); err == nil {
-			t.Errorf("sshBaseURL(%q) = %q, want an error", addr, got)
-		}
+	if got, err := sshBaseURL("10.10.10.10", ""); err == nil {
+		t.Errorf("sshBaseURL without a port = %q, want an error", got)
+	}
+	// No HTTP listener served: SSH names why it has none to call.
+	if got, err := sshBaseURL("", ""); err == nil || !strings.Contains(err.Error(), "management HTTP listener is disabled") {
+		t.Errorf("sshBaseURL without HTTP = %q, %v; want the disabled HTTP listener named", got, err)
+	}
+}
+
+// With HTTP off and HTTPS on, under an environment certificate override,
+// SSH stays off with a fault that says why, instead of calling the HTTP
+// port that management never bound, and the bound record does not claim it.
+func TestSSHStaysOffWithoutHTTP(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CONTAIND_TLS_CERT_FILE", filepath.Join(dir, "env.crt"))
+	t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "env.key"))
+	t.Setenv("CONTAIND_SSH_ADDR", "127.0.0.1:0")
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.EnableHTTP = new(false)
+	cfg.System.Mgmt.EnableHTTPS = new(true)
+	listener, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil)
+	if err != nil || listener.enableHTTP || !listener.enableHTTPS {
+		t.Fatalf("listeners = %+v, %v", listener, err)
+	}
+	httpAddr, loopbackAddr := listener.servedHTTP()
+	if httpAddr != "" || loopbackAddr != "" {
+		t.Fatalf("servedHTTP = %q, %q with HTTP off", httpAddr, loopbackAddr)
+	}
+	var faults []error
+	sshAddr, enabled := startSSH(context.Background(), zap.NewNop().Sugar(), cfg, nil, nil, nil, httpAddr, loopbackAddr, nil,
+		func(err error) { faults = append(faults, err) })
+	if enabled || sshAddr != "" {
+		t.Fatalf("SSH started on %q without an HTTP listener to call", sshAddr)
+	}
+	if len(faults) != 1 || !strings.Contains(faults[0].Error(), "ssh disabled: the management HTTP listener is disabled") {
+		t.Fatalf("faults = %v", faults)
+	}
+	if served := listener.served(); served.SSH.Enabled || served.HTTP.Enabled || !served.HTTPS.Enabled {
+		t.Fatalf("bound record = %+v", served)
 	}
 }
 

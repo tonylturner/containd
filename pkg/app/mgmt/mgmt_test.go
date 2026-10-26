@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -244,5 +245,34 @@ func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
 	}
 	if len(running.Firewall.Rules) != 1 || !slices.Equal(running.Firewall.Rules[0].ICS.Addresses, []string{"0x0100", "0x01G0"}) {
 		t.Fatalf("boot rewrote the stored rules: %+v", running.Firewall.Rules)
+	}
+}
+
+// The certificate recorded for the console is the one the HTTPS listener
+// serves: an environment override, generated when missing, rather than the
+// saved setting; none when HTTPS is not served.
+func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
+	dir := t.TempDir()
+	envCert := filepath.Join(dir, "env.crt")
+	t.Setenv("CONTAIND_TLS_CERT_FILE", envCert)
+	t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "env.key"))
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "saved.crt")
+	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "saved.key")
+	cfg.System.Mgmt.EnableHTTP = boolPtr(false)
+	listener, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listener.servedCertificate(); got != envCert {
+		t.Fatalf("served certificate = %q, want %q", got, envCert)
+	}
+	if _, err := os.Stat(envCert); err != nil {
+		t.Fatalf("served certificate not generated: %v", err)
+	}
+	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
+	cfg.System.Mgmt.EnableHTTP = boolPtr(true)
+	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedCertificate() != "" {
+		t.Fatalf("served certificate without HTTPS = %q, %v", listener.servedCertificate(), err)
 	}
 }
