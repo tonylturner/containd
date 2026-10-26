@@ -295,6 +295,9 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/dataplane/ruleset") {
     return json(rulesetPreview);
   }
+  if (pathname === "/api/v1/dataplane/ruleset/status") {
+    return json({ installed: true, appliedAt: "2026-10-26T06:00:00Z", snapshotVersion: "v1" });
+  }
   if (
     pathname === "/api/v1/assets" ||
     pathname === "/api/v1/objects" ||

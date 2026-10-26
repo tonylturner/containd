@@ -24,6 +24,7 @@ export {
 export {
   fetchDataPlane,
   getICSCoverage,
+  getInstalledRulesetStatus,
   getRulesetPreview,
   setDataPlane,
 } from "./api-dataplane";
@@ -50,7 +51,7 @@ export type {
   PcapTagRequest,
 } from "./api-pcap";
 export type {
-  RulesetEngineStatus,
+  InstalledRulesetStatus,
   RulesetPreview,
   SchedulePlannerStatus,
 } from "./api-dataplane";

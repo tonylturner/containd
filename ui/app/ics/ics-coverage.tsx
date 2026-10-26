@@ -68,7 +68,7 @@ export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
       ))}
       {loaded?.applyError && (
         <div role="status" className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
-          The last apply failed: {loaded.applyError}. Applied coverage describes the rules still in force from before it.
+          The last apply failed, so applied coverage describes the rules still in force from before it. The enforcement status shows why it failed.
         </div>
       )}
       {loaded?.appliedAt && (
