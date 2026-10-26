@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The web console and SSH CLI sessions call a management listener on 127.0.0.1 only through a socket management itself bound. A failed loopback or HTTPS bind, or a reserved-endpoint fallback after a failed wildcard bind, no longer sends bearer tokens to another process holding that port. With no bound listener reachable on 127.0.0.1 the console reports it and SSH stays off with a listener fault.
 - In IEC 104 envelopes a RST without payload closes a session only at the
   sequence number its receiver expects next. A forged or stale RST no longer
   makes the engine stop following a live connection.
@@ -329,6 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HTTP redirects to HTTPS only when the HTTPS listener bound.
+- SSH exec requests report exit status 0 on success and 1 on a failed or empty command, and the appliance shell reports 0 when it closes, so OpenSSH clients no longer exit 255.
 - In an IEC 104 enforce envelope, the server's RST refusing a client's SYN (for example, a station that does not listen on 2404) now reaches the client, which fails at once instead of retrying its SYN until it times out. Every other packet before the SYN-ACK, apart from the client's SYN, is still dropped.
 - An IEC 104 client that lost its connection without closing it, for example
   by restarting, reconnects at once from the same source port in an enforce
