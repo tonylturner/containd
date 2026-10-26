@@ -76,3 +76,38 @@ test("the firewall node shows effects apart from deny and real hit counts", asyn
   await expect(rule("deny-out")).toContainText("—");
   expect(errors).toEqual([]);
 });
+
+test("topology reads health from the shared poll, not its own snapshot fetches", async ({ page }) => {
+  let healthRequests = 0;
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/health") healthRequests++;
+    const data: Record<string, unknown> = {
+      "/api/v1/auth/me": { id: "admin", username: "containd", role: "admin" },
+      "/api/v1/auth/session": { id: "admin", username: "containd", role: "admin" },
+      "/api/v1/health": { status: "ok", component: "fw-lab-7", build: "9.9.9", time: new Date(Date.now() - 3 * 3600_000).toISOString() },
+      "/api/v1/config": {
+        zones: [{ name: "it" }],
+        interfaces: [{ name: "lan1", device: "eth0", zone: "it", addresses: ["192.0.2.1/24"] }],
+        routing: { gateways: [], routes: [], rules: [] },
+        firewall: { rules: [] },
+      },
+      "/api/v1/config/diff": { changed: false, changedSections: [] },
+      "/api/v1/interfaces/state": [],
+      "/api/v1/flows": [],
+      "/api/v1/events": [],
+    };
+    await route.fulfill({ json: data[path] ?? {} });
+  });
+  await page.goto("/topology/");
+  await page.locator('.react-flow__node[data-id="fw-main"]').click();
+  // Without system stats, uptime falls back to the time health reports.
+  await expect(page.getByText("fw-lab-7", { exact: true })).toBeVisible();
+  await expect(page.getByText("9.9.9", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^0d 3h \d+m$/)).toBeVisible();
+  const afterLogical = healthRequests;
+  await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+  await expect(page.getByText("9.9.9").first()).toBeVisible();
+  // Loading the physical snapshot adds no health fetch.
+  expect(healthRequests).toBe(afterLogical);
+});

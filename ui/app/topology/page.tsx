@@ -38,14 +38,13 @@ const SecurityView = dynamic(() => import("./SecurityView"), {
   loading: () => <div style={{ padding: 24, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading security view...</div>,
 });
 import { Shell } from "../../components/Shell";
-import {
-  type FlowSummary,
-} from "../../lib/api";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
+import { useHealth } from "../../hooks/useHealth";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
   buildTopology,
+  withHealth,
   nodeTypes,
   type TopoNodeData,
 } from "./topology-shared";
@@ -63,6 +62,7 @@ function TopologyInner() {
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
+  const health = useHealth();
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
@@ -132,7 +132,8 @@ function TopologyInner() {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 
-  const selectedData = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selected = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selectedData = selected ? withHealth(selected, health) : null;
 
   return (
     <div className={s.page}>
