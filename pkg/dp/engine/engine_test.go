@@ -96,7 +96,7 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatalf("apply rules: %v", err)
 	}
-	if !strings.Contains(applier.ruleset, "table inet containd {\n") {
+	if !strings.Contains(applier.ruleset, "table inet containd_policy {\n") {
 		t.Fatalf("expected compiled ruleset to be applied, got %q", applier.ruleset)
 	}
 	if got := e.CurrentRules(); got == nil || got.Version != "2" {

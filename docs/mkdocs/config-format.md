@@ -307,6 +307,6 @@ each step even on HTTP 200. ICMP and other protocols are visible but cannot be
 killed through this port-based API.
 
 Revocations are kernel runtime state in the nftables table
-`inet <enforceTable>_blocks`, not persisted configuration. They survive commits
+`inet <enforceTable>`, not persisted configuration. They survive commits
 and expire after their interval. Disabling enforcement or renaming
 `enforceTable` removes them, and a recreated container starts without them.

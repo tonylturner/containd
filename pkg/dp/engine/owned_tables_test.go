@@ -130,7 +130,7 @@ func TestClearBlocksFlushesOnlyWhileEnforcing(t *testing.T) {
 	if err := e.ClearBlocks(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := nft.last(); got != e.compiler.ClearBlocks() || !strings.Contains(got, "flush set inet fw_blocks block_hosts") {
+	if got, _ := nft.last(); got != e.compiler.ClearBlocks() || !strings.Contains(got, "flush set inet fw block_hosts") {
 		t.Fatalf("clear = %q", got)
 	}
 	off := tableEngine(t, nft, false, "fw")

@@ -17,8 +17,8 @@ var tableRef = regexp.MustCompile(`(?m)(?:^|\s)(?:table|chain|set|rule|element) 
 
 func TestCompileFirewallTouchesOnlyOwnedTables(t *testing.T) {
 	for _, tc := range []struct{ table, policy, blocks string }{
-		{"", "containd", "containd_blocks"},
-		{"fw", "fw", "fw_blocks"},
+		{"", "containd_policy", "containd"},
+		{"fw", "fw_policy", "fw"},
 	} {
 		c := NewCompiler()
 		c.TableName = tc.table
@@ -38,14 +38,14 @@ func TestCompileFirewallTouchesOnlyOwnedTables(t *testing.T) {
 		if !strings.HasPrefix(text, DeleteTable(tc.policy)+"table inet "+tc.policy+" {\n") {
 			t.Fatalf("table %q: policy table is not replaced atomically:\n%s", tc.table, text)
 		}
-		// The blocks table and its elements are kept: no delete or flush of
-		// either set.
-		for _, keep := range []string{"delete table inet " + tc.blocks, "flush set", "flush table"} {
+		// The dynamic table and its elements are kept: no delete or flush of
+		// any set.
+		for _, keep := range []string{"delete table inet " + tc.blocks + "\n", "flush set", "flush table"} {
 			if strings.Contains(text, keep) {
 				t.Fatalf("table %q: apply discards temporary blocks (%q):\n%s", tc.table, keep, text)
 			}
 		}
-		policy := text[:strings.Index(text, "add table inet "+tc.blocks)]
+		policy := text[:strings.Index(text, "add table inet "+tc.blocks+"\n")]
 		if strings.Contains(policy, "@block_") || strings.Contains(policy, "@revoke") {
 			t.Fatalf("table %q: policy table references dynamic sets:\n%s", tc.table, policy)
 		}
@@ -65,11 +65,11 @@ func TestCompileFirewallTouchesOnlyOwnedTables(t *testing.T) {
 
 func TestRetireTablesOnlyOnRename(t *testing.T) {
 	old, same, renamed := NewCompiler(), NewCompiler(), NewCompiler()
-	renamed.TableName = "containd_blocks"
+	renamed.TableName = "containd_policy"
 	if got := old.RetireTables(same); got != "" {
 		t.Fatalf("same tables retired: %q", got)
 	}
-	want := DeleteTable("containd") + DeleteTable("containd_blocks")
+	want := DeleteTable("containd_policy") + DeleteTable("containd")
 	if got := old.RetireTables(renamed); got != want {
 		t.Fatalf("retire = %q, want %q", got, want)
 	}
@@ -82,25 +82,25 @@ func TestClearBlocksFlushesEveryDynamicSet(t *testing.T) {
 	c := NewCompiler()
 	c.TableName = "fw"
 	text := c.ClearBlocks()
-	for _, want := range []string{"add table inet fw_blocks\n", "flush set inet fw_blocks block_hosts\n", "flush set inet fw_blocks block_flows\n",
-		"flush set inet fw_blocks revoke4\n", "flush set inet fw_blocks revoke6\n", "flush set inet fw_blocks revoke_service4\n", "flush set inet fw_blocks revoke_service6\n"} {
+	for _, want := range []string{"add table inet fw\n", "flush set inet fw block_hosts\n", "flush set inet fw block_flows\n",
+		"flush set inet fw revoke4\n", "flush set inet fw revoke6\n", "flush set inet fw revoke_service4\n", "flush set inet fw revoke_service6\n"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "inet fw ") || strings.Contains(text, "delete") {
+	if strings.Contains(text, "fw_policy") || strings.Contains(text, "delete") {
 		t.Fatalf("clearing blocks touches the policy table or deletes:\n%s", text)
 	}
 }
 
-func TestNftUpdaterTargetsBlocksTable(t *testing.T) {
+func TestNftUpdaterTargetsDynamicTable(t *testing.T) {
 	u := NewNftUpdater("fw")
 	host := strings.Join(u.buildBlockHostArgs(net.ParseIP("10.1.2.3"), time.Second), " ")
 	flow := strings.Join(u.buildBlockFlowArgs(net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"), "tcp", "502", 0), " ")
-	if !strings.HasPrefix(host, "add element inet fw_blocks block_hosts ") || !strings.HasPrefix(flow, "add element inet fw_blocks block_flows ") {
+	if !strings.HasPrefix(host, "add element inet fw block_hosts ") || !strings.HasPrefix(flow, "add element inet fw block_flows ") {
 		t.Fatalf("host=%q flow=%q", host, flow)
 	}
-	if got := NewNftUpdater("").TableName; got != "containd_blocks" {
-		t.Fatalf("default blocks table = %q", got)
+	if got := NewNftUpdater("").TableName; got != "containd" {
+		t.Fatalf("default dynamic table = %q", got)
 	}
 }

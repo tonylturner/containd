@@ -15,8 +15,8 @@ capture or seeing decoded events does not prove that firewall policy is installe
 through `GET /api/v1/dataplane/ruleset` and check for apply errors.
 
 The engine owns only its own nftables tables, named after `dataplane.enforceTable`
-(default `containd`). Each apply replaces the policy table `inet <enforceTable>`
-in one transaction; other tables in the namespace, such as Docker's embedded DNS
+(default `containd`). Each apply replaces the policy table
+`inet <enforceTable>_policy` in one transaction; other tables in the namespace, such as Docker's embedded DNS
 rules or the DHCP redirect table `inet containd_dhcp`, are left untouched.
 Disabling enforcement deletes the tables the running engine installed. Renaming
 the table replaces the old tables with the new ones on the next apply.
@@ -61,8 +61,8 @@ Administrators can request temporary blocks through:
 - `POST /api/v1/dataplane/blocks/host`
 - `POST /api/v1/dataplane/blocks/flow`
 
-Temporary blocks and connection revocations live in their own nftables table,
-`inet <enforceTable>_blocks` (default `inet containd_blocks`; sets `block_hosts`,
+Temporary blocks and connection revocations live in the persistent nftables
+table `inet <enforceTable>` (default `inet containd`; sets `block_hosts`,
 `block_flows`, `revoke4`, `revoke6`, `revoke_service4` and `revoke_service6`).
 They act before the policy table's rules, including on established connections,
 and they persist across commits until their timeouts expire. Revocations skip

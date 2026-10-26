@@ -53,7 +53,7 @@ func resolveLocalInput(snap *rules.Snapshot) ([]rules.LocalServiceRule, error) {
 // managementExemptions returns the rules that let management traffic pass
 // the revocation chain: requests to the reserved management listener and to
 // each management listener on the interfaces it serves, and their replies.
-// They accept only within the blocks table, so the policy table still
+// They accept only within the dynamic table, so the policy table still
 // decides the traffic; a revocation can never refuse management access
 // from the management network.
 func (c *Compiler) managementExemptions(locals []rules.LocalServiceRule) (input, output []string, err error) {

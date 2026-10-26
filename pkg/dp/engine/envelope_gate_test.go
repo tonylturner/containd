@@ -17,7 +17,7 @@ import (
 )
 
 // nftModel replays applied scripts like the kernel would for the envelope
-// chain of table containd: replacing or deleting the table sets or removes
+// chain of table containd_policy: replacing or deleting the table sets or removes
 // it, a switch replaces its rule.
 type nftModel struct {
 	mu       sync.Mutex
@@ -34,14 +34,14 @@ func (m *nftModel) Apply(_ context.Context, script string) error {
 		return errors.New("nft: netlink busy")
 	}
 	m.scripts = append(m.scripts, script)
-	if strings.Contains(script, enforce.DeleteTable("containd")) {
+	if strings.Contains(script, enforce.DeleteTable("containd_policy")) {
 		m.envelope = ""
 		if i := strings.Index(script, "chain iec104_envelope {\n    "); i >= 0 {
 			m.envelope = envelopeState(script[i+len("chain iec104_envelope {\n    "):])
 		}
 		return nil
 	}
-	const add = "add rule inet containd iec104_envelope "
+	const add = "add rule inet containd_policy iec104_envelope "
 	if i := strings.Index(script, add); i >= 0 {
 		m.envelope = envelopeState(script[i+len(add):])
 	}

@@ -71,7 +71,7 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 
 func nftList(t *testing.T, chain string) string {
 	t.Helper()
-	out, err := exec.Command("nft", "list", "chain", "inet", "containd", chain).CombinedOutput()
+	out, err := exec.Command("nft", "list", "chain", "inet", PolicyTable(""), chain).CombinedOutput()
 	if err != nil {
 		t.Fatalf("list %s: %v: %s", chain, err, out)
 	}

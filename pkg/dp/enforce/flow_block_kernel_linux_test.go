@@ -38,7 +38,7 @@ func TestKernelFlowBlockProtocolKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := exec.CommandContext(ctx, "nft", "list", "set", "inet", "containd_blocks", "block_flows").CombinedOutput()
+	out, err := exec.CommandContext(ctx, "nft", "list", "set", "inet", "containd", "block_flows").CombinedOutput()
 	if err != nil {
 		t.Fatalf("list block_flows: %v: %s", err, out)
 	}

@@ -14,7 +14,7 @@ import (
 // chainRules lists the rules a blocks-table script adds to chain, in order.
 func chainRules(text, chain string) []string {
 	var out []string
-	prefix := "add rule inet containd_blocks " + chain + " "
+	prefix := "add rule inet containd " + chain + " "
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, prefix) {
 			out = append(out, strings.TrimPrefix(line, prefix))

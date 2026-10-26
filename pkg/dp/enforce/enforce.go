@@ -50,7 +50,7 @@ func NewCompiler() *Compiler {
 }
 
 // CompileFirewall builds the nft script for the snapshot: one transaction
-// that replaces the policy table and ensures the blocks table (see
+// that replaces the policy table and ensures the dynamic table (see
 // tables.go). No other table in the namespace is touched.
 func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if snap == nil {
@@ -83,7 +83,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 	buf.WriteString("}\n")
-	if err := c.writeBlocksTable(&buf, locals); err != nil {
+	if err := c.writeDynamicTable(&buf, locals); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
@@ -149,8 +149,8 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
-	// Revocations and temporary blocks act in the blocks table's earlier
-	// forward chain, before anything below (see writeBlocksTable).
+	// Revocations and temporary blocks act in the dynamic table's earlier
+	// forward chain, before anything below (see writeDynamicTable).
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -606,14 +606,17 @@ type Updater interface {
 // NftUpdater uses the system `nft` binary to update the block sets.
 type NftUpdater struct {
 	Path string
-	// TableName is the blocks table that holds the sets.
+	// TableName is the dynamic table that holds the sets.
 	TableName string
 }
 
-// NewNftUpdater returns an updater for the blocks table paired with
-// policyTable.
-func NewNftUpdater(policyTable string) *NftUpdater {
-	return &NftUpdater{Path: "nft", TableName: BlocksTable(policyTable)}
+// NewNftUpdater returns an updater for the dynamic table named table
+// (default containd).
+func NewNftUpdater(table string) *NftUpdater {
+	if table == "" {
+		table = defaultTableName
+	}
+	return &NftUpdater{Path: "nft", TableName: table}
 }
 
 func (u *NftUpdater) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error {

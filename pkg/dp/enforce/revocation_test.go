@@ -15,21 +15,21 @@ func TestRevocationRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Revocations live in the blocks table, whose input, forward and output
+	// Revocations live in the dynamic table, whose input, forward and output
 	// chains run before the policy table's and jump to them before any
 	// other rule. The policy table neither declares nor references them.
-	policy := text[:strings.Index(text, "add table inet containd_blocks")]
+	policy := text[:strings.Index(text, "add table inet containd\n")]
 	if strings.Contains(policy, "revoke") || strings.Contains(policy, "revocations") {
 		t.Fatalf("policy table holds revocation state:\n%s", policy)
 	}
 	for _, chain := range []string{"input", "forward", "output"} {
-		hook := "add chain inet containd_blocks " + chain + " { type filter hook " + chain + " priority -10; policy accept; }\n"
-		first := "add rule inet containd_blocks " + chain + " "
+		hook := "add chain inet containd " + chain + " { type filter hook " + chain + " priority -10; policy accept; }\n"
+		first := "add rule inet containd " + chain + " "
 		if !strings.Contains(text, hook) || !strings.HasPrefix(text[strings.Index(text, first):], first+"jump revocations\n") {
 			t.Fatalf("revocation ordering in %s:\n%s", chain, text)
 		}
 	}
-	if strings.Index(text, "add rule inet containd_blocks forward jump revocations") > strings.Index(text, "@block_hosts drop") {
+	if strings.Index(text, "add rule inet containd forward jump revocations") > strings.Index(text, "@block_hosts drop") {
 		t.Fatalf("revocations must precede blocks:\n%s", text)
 	}
 	for _, key := range []string{"ct state { invalid, untracked } ip saddr", "revocations tcp flags & rst == rst return\n", "ct original ip saddr", "ct original ip6 saddr", "@revoke_service4", "@revoke_service6", "@revoke4 reject with tcp reset", "@revoke6 drop"} {
@@ -51,8 +51,8 @@ func TestRevocationNATKeys(t *testing.T) {
 				t.Fatalf("missing tuple: %s", s)
 			}
 			for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
-				if !strings.HasPrefix(line, "add element inet containd_blocks revoke") {
-					t.Fatalf("revocation outside the blocks table: %s", line)
+				if !strings.HasPrefix(line, "add element inet containd revoke") {
+					t.Fatalf("revocation outside the dynamic table: %s", line)
 				}
 			}
 			if (scope == "client-service") != strings.Contains(s, "revoke_service") {
