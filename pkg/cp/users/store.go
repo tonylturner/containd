@@ -228,19 +228,16 @@ func ensureDefaultAdmin(ctx context.Context, db userDB) error {
 	// raised when the seeded password is the well-known default
 	// `containd`, except in lab mode where the canonical credential is
 	// pinned by design (workshop docs, lab YAMLs, and SSH-on-:2222 all
-	// expect `containd/containd`). The HTTP password-change endpoints
-	// also lock in lab mode (see api/http/auth_handlers.go and
-	// users_handlers.go), so this flag would never be cleared in lab
-	// deployments anyway — clearing it at seed time keeps the API
-	// responses consistent with the enforcement.
-	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
+	// expect `containd/containd`). SetPassword refuses every change in
+	// lab mode, so the flag could never be cleared there; leaving it
+	// unset keeps the API responses consistent with the enforcement.
 	_, err := insertUser(ctx, db, User{
 		Username:           username,
 		FirstName:          "Default",
 		LastName:           "Admin",
 		Role:               "admin",
 		Email:              "",
-		MustChangePassword: password == "containd" && !lab,
+		MustChangePassword: password == "containd" && !LabMode(),
 	}, password, true)
 	return err
 }
@@ -453,7 +450,12 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetPassword replaces a user's password. It is the single entry point for
+// password changes and returns ErrPasswordChangeLabMode in lab mode.
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {
+	if err := CheckPasswordChange(); err != nil {
+		return err
+	}
 	if err := validatePassword(password); err != nil {
 		return err
 	}

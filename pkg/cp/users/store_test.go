@@ -202,6 +202,7 @@ func TestPasswordValidation(t *testing.T) {
 }
 
 func TestSetPassword(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -214,13 +215,15 @@ func TestSetPassword(t *testing.T) {
 	}
 
 	// Valid password
-	err = s.SetPassword(ctx, u.ID, storeCredential("frank-reset"))
-	if err == nil {
-		// verify it changed
-		got, _ := s.GetByID(ctx, u.ID)
-		if got.MustChangePassword {
-			t.Fatal("mustChangePassword should be cleared after SetPassword")
-		}
+	if err := s.SetPassword(ctx, u.ID, storeCredential("frank-reset")); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	got, err := s.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.MustChangePassword {
+		t.Fatal("mustChangePassword should be cleared after SetPassword")
 	}
 
 	// Nonexistent user

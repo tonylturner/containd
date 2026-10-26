@@ -89,8 +89,9 @@ require a restart; committing does not rebind management sockets.
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
 Environment variables (common):
-- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and disables
-  password changes. Protected API routes still require a bearer token or cookie.
+- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and refuses
+  every password change, including the SSH menu reset and the wizard's password
+  step. Protected API routes still require a bearer token or cookie.
   With a JWT secret, the token's signature and expiry are validated without a
   session lookup. Without a secret, **any nonempty token passes**. Factory reset
   does not revoke lab web/API tokens in either case. Lab requests receive admin
@@ -150,7 +151,8 @@ Existing sessions remain open. If keys later disappear, passwords stay disabled;
 restore the keys or change the SSH policy through HTTP management. A wizard
 password change writes the user store immediately, rather than waiting for a
 config commit. A rejected password or store error stops the wizard and is not
-reported or audited as a successful change.
+reported or audited as a successful change. In lab mode the wizard prints why
+password changes are refused, skips its password step and continues.
 
 `set system ssh host-key-rotation <days>` accepts 0 (disabled) through 36500.
 The server checks host-key age at startup and every minute while running.
