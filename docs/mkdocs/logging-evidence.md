@@ -1,92 +1,55 @@
 # Logging and Intrusion Evidence
 
-containd is meant to help operators understand what happened, not just enforce policy.
+## Evidence sources and storage
 
-## Built-in Evidence Sources
+- Administrative audit records persist in SQLite. `CONTAIND_AUDIT_DB` defaults
+  to `data/audit.db` for the binary; the container deployment uses `/data/audit.db`.
+- Firewall, DPI, IDS, AV, proxy, and service events are exposed through
+  `GET /api/v1/events`. Engine event history is bounded and in memory, not an
+  audit database or a durable delivery queue.
+- Management and engine application logs go to stdout. Embedded service managers
+  also configure JSON files under `/data/logs/`: `proxy.log`, `dns.log`, `ntp.log`,
+  `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
+  depend on a writable directory; generic `NewService` application loggers do not
+  configure a file path. `CONTAIND_LOG_FILE=0` disables configured file sinks.
+- `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
-Relevant built-in sources include:
+File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
+library defaults for configured files, not a guarantee of complete retention.
+`CONTAIND_LOG_LEVEL` and `CONTAIND_LOG_LEVEL_<SERVICE>` control application log
+levels. CLI queries include `show audit` and `show events`; see
+[API Reference](api-reference.md) for wire contracts.
 
-- **audit log** for administrative and sensitive management actions
-- **events** for firewall, DPI, IDS, AV, proxy, and service activity
-- **service/runtime logs** from the management and service processes
-- **syslog forwarding** and **event export** for off-box handling
-- **Prometheus metrics** for operational monitoring and trend detection
+## Off-box forwarding
 
-## What containd Logs by Default
+Two working syslog paths are distinct:
 
-By default, the appliance records:
+- **Service event forwarder**: `services.syslog.forwarders` sends polled engine
+  and service telemetry over UDP or TCP. `services.syslog.format` selects JSON or
+  RFC5424 output. Retries/backoff and status counters expose failures; this is
+  best-effort forwarding, not a durable acknowledged stream. Bounded polling,
+  mixed event-source IDs, and failures can leave gaps. Audit database rows are
+  not automatically part of this telemetry feed.
+- **Application logger sink**: `CONTAIND_LOG_SYSLOG_ADDR` and
+  `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
+  The default protocol is UDP; TCP and Unix sockets are also supported. These
+  logs are not the complete DPI event stream. Verify reception at the collector.
 
-- administrative actions in the audit database (`CONTAIND_AUDIT_DB`, default `/data/audit.db`)
-- runtime events exposed through `/api/v1/events`
-- service and management logs on stdout, with optional rotating file logs under `/data/logs/`
+The top-level `export` configuration and `pkg/dp/export` CEF/JSON/Syslog library
+are **not wired into the runtime**. Setting that configuration does not export
+DPI events to a SIEM or to a file/UDP/TCP target. Do not use it as an evidence
+preservation mechanism. Use the working syslog paths for their documented
+sources and retrieve event queries explicitly for other evidence.
 
-Structured application logging uses the shared logging layer in [`pkg/common/logging`](https://github.com/tonylturner/containd/blob/main/pkg/common/logging/logging.go). Default file rotation settings are:
+## Retention checklist
 
-- 20 MB per file
-- 5 backups
-- 7 days retention
-
-These defaults are for convenience, not a universal compliance statement.
-
-## Key APIs and Outputs
-
-- `GET /api/v1/audit` — administrative audit records
-- `GET /api/v1/events` — normalized security and telemetry events
-- `GET /metrics` — Prometheus metrics
-- service-specific status and event surfaces in the System and Monitoring pages
-
-For CLI users:
-
-- `show audit`
-- `show events`
-
-## Off-box Forwarding
-
-For stronger environments, containd should not be the only place logs live.
-
-Recommended pattern:
-
-1. Forward normalized events or syslog to an external collector.
-2. Preserve config backups and the audit database during upgrades.
-3. Export or snapshot relevant evidence before destructive lab resets.
-4. Use metrics to detect health regressions even when you are not tailing logs directly.
-
-Relevant controls already present:
-
-- service syslog forwarders under `services.syslog`
-- event export in CEF, JSON, and Syslog formats
-- optional remote syslog sink for structured logs via `CONTAIND_LOG_SYSLOG_ADDR` and `CONTAIND_LOG_SYSLOG_PROTO`
-
-## Recommended Lab Posture
-
-For classroom and lab use, a good minimum posture is:
-
-- keep audit logging enabled
-- forward syslog/events when the lab design allows it
-- preserve evidence for the duration of the exercise
-- review audit and event timelines as part of the teaching workflow
-
-This matters because containd is often used to teach secure operations. A lab that drops all evidence on the floor teaches the wrong habit.
-
-## Recommended Production-style Posture
-
-For more serious deployments or longer-lived labs:
-
-- treat audit and event data as operational records
-- forward evidence off-box
-- preserve evidence through upgrades
-- define your own retention period based on organizational needs
-- review authentication, password change, MFA, config commit, and service failure events regularly
-
-## Current Gaps and Limits
-
-containd provides useful evidence surfaces, but operators still need to decide:
-
-- where long-term retention lives
-- which logs are authoritative in their environment
-- whether external SIEM / log management is required
-
-The project documents the built-in capabilities, but evidence handling policy remains an operator responsibility.
+1. Choose an external collector and retention period; test delivery and inspect
+   forwarder status rather than assuming an empty collector means no activity.
+2. Preserve audit databases and configuration backups through upgrades.
+3. Retrieve relevant event pages before process restarts, bounded-cache eviction,
+   or destructive lab resets. Pagination cannot recover already lost events.
+4. Review authentication, config commits, and service failures alongside packet
+   evidence. Metrics can reveal health regressions but cannot reconstruct events.
 
 ## Bounded IEC 104 incident evidence
 
@@ -113,9 +76,9 @@ more than 32 evidence rows loses its oldest retained rows. The firewall bank
 still evicts only on DENY overflow. No age expiry or durable retention applies;
 configuration rebuilds preserve stores, process restarts do not. Already-evicted
 decoded context cannot be recovered. Small priority-selected pages can omit
-context: narrow by session and use a sufficiently large page. Export evidence
-off-box for a complete, durable record; this bounded cache cannot promise an
-unlimited session history.
+context: narrow by session and use a sufficiently large page. Retrieve and
+preserve evidence off-box before eviction or restart; the built-in cache and best-effort syslog forwarding cannot promise a complete, durable
+session history.
 
 
 ## Search a session before applying the page limit
@@ -144,8 +107,8 @@ engine evidence and service rows before limiting. It returns:
 
 Limits are 1–5000 (default 500); invalid limits/bounds return 400. `query=1`
 requests a chronological query page without narrowing. With no query/filter
-parameters, `?limit=N` still returns the **bare event array** expected by
-RangerDanger and other existing callers, with evidence-priority selection.
+parameters, `?limit=N` still returns the legacy **bare event array**, with
+evidence-priority selection.
 The engine endpoint `/internal/events` and management client share this contract.
 
 `historyTruncated` conservatively warns of possible gaps: any general or protected

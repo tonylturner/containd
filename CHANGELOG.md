@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binding and engine API exposure guidance; consolidate lab and WSL setup links.
 - Correct CLI lab authentication and IEC 104 monitoring examples, service runtime
   ownership, and the importable configuration example; test its schema and validation.
+- Correct DPI protocol coverage, supported rule predicates, learn-mode and PCAP
+  behavior, IDS conversion, and the distinction between nftables enforcement and
+  experimental eBPF code.
+- Document working log sinks and unwired SIEM export, the unauthenticated engine
+  API boundary, authentication limits, and published CSAF advisories; align runtime
+  package provenance and image-verification examples with the release workflow.
 
 ### Removed
 
