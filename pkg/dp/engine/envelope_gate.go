@@ -108,8 +108,9 @@ func (g *envelopeGate) own(group uint16) {
 func (e *Engine) bindGate() {
 	health := e.iec.health
 	e.hooks.gate, e.hooks.group = e.gate, e.nfqueueGroup
+	fault := func(reason string) { health.fault(faultSteering, reason) }
+	ok := func() { health.clear(faultSteering) }
 	e.gate.mu.Lock()
-	e.gate.fault = func(reason string) { health.fault(faultSteering, reason) }
-	e.gate.ok = func() { health.clear(faultSteering) }
+	e.gate.fault, e.gate.ok = fault, ok
 	e.gate.mu.Unlock()
 }
