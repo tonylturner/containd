@@ -12,58 +12,66 @@ import (
 // ManagementLocalInput derives the management listener INPUT allows from the
 // stored interface access grants. It is shared by the compiled policy and by
 // management recovery, which keeps exactly this access when it drops transit.
+//
+// Each listener is admitted on the port it binds under cfg at the next start
+// (config.EffectiveManagementListeners) and, when that differs, on the port
+// this process's management has bound (config.BoundManagementListeners):
+// listener settings bind only at startup, so a committed listener change
+// must keep admitting the sockets that serve until the restart.
 func ManagementLocalInput(cfg *config.Config) []rules.LocalServiceRule {
-	httpAddr := cfg.System.Mgmt.HTTPListenAddr
-	if strings.TrimSpace(httpAddr) == "" {
-		httpAddr = cfg.System.Mgmt.ListenAddr
-	}
-	httpEnabled := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-	httpsEnabled := strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) != ""
-	if cfg.System.Mgmt.EnableHTTPS != nil {
-		httpsEnabled = *cfg.System.Mgmt.EnableHTTPS
-	}
+	next := config.EffectiveManagementListeners(cfg)
+	bound := config.BoundManagementListeners()
 	listeners := []struct {
-		id      string
-		port    int
-		enabled bool
-		access  func(config.InterfaceAccess) bool
+		id          string
+		next, bound config.ManagementListener
+		access      func(config.InterfaceAccess) bool
 	}{
-		{"auto-allow-mgmt-http", listenPortOrDefault(httpAddr, 8080), httpEnabled,
+		{"auto-allow-mgmt-http", next.HTTP, bound.HTTP,
 			func(a config.InterfaceAccess) bool { return granted(a.Mgmt) && granted(a.HTTP) }},
-		{"auto-allow-mgmt-https", listenPortOrDefault(cfg.System.Mgmt.HTTPSListenAddr, 8443), httpsEnabled,
+		{"auto-allow-mgmt-https", next.HTTPS, bound.HTTPS,
 			func(a config.InterfaceAccess) bool { return granted(a.Mgmt) && granted(a.HTTPS) }},
-		{"auto-allow-ssh", listenPortOrDefault(cfg.System.SSH.ListenAddr, 2222), true,
+		{"auto-allow-ssh", next.SSH, bound.SSH,
 			func(a config.InterfaceAccess) bool { return granted(a.SSH) }},
 	}
 	var out []rules.LocalServiceRule
 	for _, listener := range listeners {
-		if !listener.enabled || listener.port == 0 {
-			continue
+		port := listener.next.Port()
+		if port != 0 {
+			out = appendListenerInput(out, cfg, listener.id, port, listener.access)
 		}
-		rule := rules.LocalServiceRule{ID: listener.id, Proto: "tcp", Port: listener.port}
-		for _, iface := range cfg.Interfaces {
-			device := strings.TrimSpace(iface.Device)
-			if listener.access(iface.Access) {
-				rule.RecoverUnbound = true
-				if device != "" {
-					rule.Ifaces = append(rule.Ifaces, device)
-				}
-			} else {
-				// Legacy/virtual rows may name a kernel device directly. Never
-				// let recovery override their explicit access denial either.
-				if device == "" {
-					device = strings.TrimSpace(iface.Name)
-				}
-				if device != "" {
-					rule.DeniedIfaces = append(rule.DeniedIfaces, device)
-				}
-			}
-		}
-		if rule.RecoverUnbound {
-			out = append(out, rule)
+		if served := listener.bound.Port(); served != 0 && served != port {
+			out = appendListenerInput(out, cfg, listener.id+"-bound", served, listener.access)
 		}
 	}
 	return out
+}
+
+// appendListenerInput appends the allow of port on the interfaces whose
+// access grants the listener, when any does.
+func appendListenerInput(out []rules.LocalServiceRule, cfg *config.Config, id string, port int, access func(config.InterfaceAccess) bool) []rules.LocalServiceRule {
+	rule := rules.LocalServiceRule{ID: id, Proto: "tcp", Port: port}
+	for _, iface := range cfg.Interfaces {
+		device := strings.TrimSpace(iface.Device)
+		if access(iface.Access) {
+			rule.RecoverUnbound = true
+			if device != "" {
+				rule.Ifaces = append(rule.Ifaces, device)
+			}
+		} else {
+			// Legacy/virtual rows may name a kernel device directly. Never
+			// let recovery override their explicit access denial either.
+			if device == "" {
+				device = strings.TrimSpace(iface.Name)
+			}
+			if device != "" {
+				rule.DeniedIfaces = append(rule.DeniedIfaces, device)
+			}
+		}
+	}
+	if !rule.RecoverUnbound {
+		return out
+	}
+	return append(out, rule)
 }
 
 func granted(value *bool) bool { return value == nil || *value }

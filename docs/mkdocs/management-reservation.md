@@ -151,9 +151,10 @@ apply as above. Management keeps serving with the stored listener settings.
 Stored services and runtime configuration are not replayed. The engine gets the
 recovery ruleset. Without a reservation, that ruleset also keeps the
 management listener INPUT allows compiled from the stored interface access, so
-management stays reachable exactly where it was. It admits the appliance
-default listeners (HTTP 8080, HTTPS 8443, SSH 2222) on the same interfaces as
-well. Management can depend on a static address that containd assigned and
+management stays reachable exactly where it was. It admits the listeners
+management has bound on the same interfaces as well; after a listener
+fallback (below) those are the appliance default listeners (HTTP 8080, HTTPS
+8443, SSH 2222). Management can depend on a static address that containd assigned and
 that a new container's interfaces lack, so once the recovery ruleset is
 applied, management also restores the stored static addresses of the
 physical interfaces whose devices that ruleset admits management on: the
@@ -200,11 +201,28 @@ Without a reservation, an HTTP/HTTPS bind failure of the stored listener
 settings puts the appliance into recovery on the default listeners (see
 above); SSH remains best effort. Correct stored listener settings and restart
 to restore the optional or stored listener: an ordinary commit does not rebind
-sockets, so commit listener changes only together with a restart.
+sockets, so listener changes take effect at the next restart.
 Management HTTP, legacy HTTP, HTTPS and SSH listener values are structurally
 validated at staging/commit/import: empty (default), `host:port` or `:port`, with
 numeric ports 1–65535. Validation does not require the host address to be local;
 bind availability is a runtime check.
+
+## Management listener INPUT
+
+The compiled INPUT chain admits each management listener on the port
+management binds for it, on the interfaces whose access grants it. The address
+comes from `CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR` or
+`CONTAIND_SSH_ADDR` first, then the stored setting (`httpListenAddr`, then
+the legacy `listenAddr`; `httpsListenAddr`; `system.ssh.listenAddr`), then the
+default (HTTP `:8080`, HTTPS `:8443`, SSH `:2222`). HTTP and HTTPS are served
+unless `enableHTTP` or `enableHTTPS` is false. Until a restart binds a
+committed listener change, INPUT also keeps admitting the listeners
+management has bound, so the commit cannot lock management out of the
+sockets that still serve. In split mode the engine compiles ruleset previews
+with its own environment and without the management process's bound
+listeners: give both processes the same listener variables, and expect a
+preview to omit the bound listeners while a listener change waits for a
+restart.
 
 ## Faults and visibility
 

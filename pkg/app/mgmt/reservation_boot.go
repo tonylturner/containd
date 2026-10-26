@@ -8,7 +8,6 @@ import (
 	"time"
 
 	httpapi "github.com/tonylturner/containd/api/http"
-	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -22,16 +21,18 @@ func validateReservedEnvironment(r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
-	if addr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", ""); addr != "" {
-		if err := r.ValidateListen(addr); err != nil {
-			return fmt.Errorf("CONTAIND_MGMT_ADDR: %w", err)
+	httpAddr := config.ProcessEnv(config.EnvManagementHTTPAddr)
+	if httpAddr != "" {
+		if err := r.ValidateListen(httpAddr); err != nil {
+			return fmt.Errorf("%s: %w", config.EnvManagementHTTPAddr, err)
 		}
+	} else {
+		httpAddr = fmt.Sprintf(":%d", r.Port)
 	}
-	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", fmt.Sprintf(":%d", r.Port))
-	for _, key := range []string{"CONTAIND_MGMT_HTTPS_ADDR", "CONTAIND_SSH_ADDR"} {
-		addr := common.EnvTrimmed(key, "")
+	for _, key := range []string{config.EnvManagementHTTPSAddr, config.EnvSSHAddr} {
+		addr := config.ProcessEnv(key)
 		conflict := config.ManagementListenerOverlaps(addr, r)
-		if key == "CONTAIND_MGMT_HTTPS_ADDR" {
+		if key == config.EnvManagementHTTPSAddr {
 			conflict = config.ManagementListenerConflictsHTTP(addr, httpAddr, true, r)
 		}
 		if conflict {
@@ -44,8 +45,8 @@ func validateReservedEnvironment(r *mgmtpath.Reservation) error {
 // A disjoint SSH env bind can still collide with a wildcard HTTP socket. Check
 // that only once the effective (possibly boot-only) HTTP bind is known.
 func validateReservedBootEnvironment(cfg *config.Config, r *mgmtpath.Reservation) error {
-	if config.ManagementListenerConflictsHTTP(common.EnvTrimmed("CONTAIND_SSH_ADDR", ""), resolveHTTPAddr(cfg), false, r) {
-		return fmt.Errorf("CONTAIND_SSH_ADDR conflicts with reserved management path HTTP socket")
+	if config.ManagementListenerConflictsHTTP(config.ProcessEnv(config.EnvSSHAddr), config.EffectiveManagementListeners(cfg).HTTP.Addr, false, r) {
+		return fmt.Errorf("%s conflicts with reserved management path HTTP socket", config.EnvSSHAddr)
 	}
 	return nil
 }

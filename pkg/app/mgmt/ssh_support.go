@@ -147,17 +147,11 @@ func configureSSHPolicy(store config.Store, userStore users.Store) {
 
 func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr string) sshRuntimeConfig {
 	rt := sshRuntimeConfig{
-		sshAddr:       common.EnvTrimmed("CONTAIND_SSH_ADDR", ""),
+		sshAddr:       config.EffectiveManagementListeners(cfg).SSH.Addr,
 		authKeysDir:   common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", ""),
 		hostKeyPath:   common.Env("CONTAIND_SSH_HOST_KEY", ""),
 		bootstrapKey:  common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY", ""),
 		bootstrapUser: common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_USER", ""),
-	}
-	if rt.sshAddr == "" && cfg != nil && cfg.System.SSH.ListenAddr != "" {
-		rt.sshAddr = cfg.System.SSH.ListenAddr
-	}
-	if rt.sshAddr == "" {
-		rt.sshAddr = ":2222"
 	}
 	if rt.authKeysDir == "" && cfg != nil && cfg.System.SSH.AuthorizedKeysDir != "" {
 		rt.authKeysDir = cfg.System.SSH.AuthorizedKeysDir

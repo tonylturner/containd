@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -193,11 +194,12 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 		t.Fatalf("recovery leaked stored input: dp=%+v snap=%+v engine=%d services=%d", engine.dp, snap, engine.mutations, services.mutations)
 	}
 	// Without a reservation, stored management access is the only way in:
-	// the stored listeners, then the default listeners management falls
-	// back to (here HTTPS, which the stored config leaves to its default).
+	// the stored listeners, HTTPS included, which the stored config leaves
+	// to its default.
 	stored := compile.ManagementLocalInput(cfg)
-	if len(snap.LocalInput) != len(stored)+1 || !reflect.DeepEqual(snap.LocalInput[:len(stored)], stored) ||
-		snap.LocalInput[len(stored)].ID != "auto-allow-mgmt-https" || snap.LocalInput[len(stored)].Port != 8443 {
+	if !reflect.DeepEqual(snap.LocalInput, stored) || !slices.ContainsFunc(stored, func(r rules.LocalServiceRule) bool {
+		return r.ID == "auto-allow-mgmt-https" && r.Port == 8443
+	}) {
 		t.Fatalf("recovery management input = %+v", snap.LocalInput)
 	}
 
@@ -262,9 +264,10 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 }
 
 // Without a reservation, recovery admits management on the stored
-// listeners and on the default listeners management binds when the stored
-// ones cannot be bound, both only where stored access grants management.
-func TestRecoverySnapshotAdmitsDefaultListeners(t *testing.T) {
+// listeners and on the listeners management has bound, the appliance
+// defaults after a listener fallback, both only where stored access grants
+// management.
+func TestRecoverySnapshotAdmitsBoundListeners(t *testing.T) {
 	f := false
 	stored := config.DefaultConfig()
 	stored.System.Mgmt.HTTPListenAddr = "192.0.2.50:9090"
@@ -272,15 +275,24 @@ func TestRecoverySnapshotAdmitsDefaultListeners(t *testing.T) {
 		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
 		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 	}
-	ports := map[int]rules.LocalServiceRule{}
-	for _, rule := range RecoverySnapshot(stored, nil).LocalInput {
-		if rule.ID == "auto-allow-mgmt-http" {
-			ports[rule.Port] = rule
+	httpPorts := func() map[int]rules.LocalServiceRule {
+		ports := map[int]rules.LocalServiceRule{}
+		for _, rule := range RecoverySnapshot(stored, nil).LocalInput {
+			if strings.HasPrefix(rule.ID, "auto-allow-mgmt-http") && !strings.HasPrefix(rule.ID, "auto-allow-mgmt-https") {
+				ports[rule.Port] = rule
+			}
 		}
+		return ports
 	}
-	for _, port := range []int{9090, 8080} {
+	if ports := httpPorts(); len(ports) != 1 || ports[9090].ID != "auto-allow-mgmt-http" {
+		t.Fatalf("recovery HTTP management input before any bind = %+v", ports)
+	}
+	config.SetBoundManagementListeners(config.EffectiveManagementListeners(WithApplianceListeners(stored, nil)))
+	t.Cleanup(func() { config.SetBoundManagementListeners(config.ManagementListeners{}) })
+	ports := httpPorts()
+	for port, id := range map[int]string{9090: "auto-allow-mgmt-http", 8080: "auto-allow-mgmt-http-bound"} {
 		rule, ok := ports[port]
-		if !ok || !reflect.DeepEqual(rule.Ifaces, []string{"mgmtnic"}) || !reflect.DeepEqual(rule.DeniedIfaces, []string{"wannic"}) {
+		if !ok || rule.ID != id || !reflect.DeepEqual(rule.Ifaces, []string{"mgmtnic"}) || !reflect.DeepEqual(rule.DeniedIfaces, []string{"wannic"}) {
 			t.Fatalf("recovery HTTP management input on %d = %+v (%v)", port, rule, ok)
 		}
 	}

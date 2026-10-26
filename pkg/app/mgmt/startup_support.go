@@ -269,13 +269,13 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 				next.System.Hostname = "containd"
 			}
 			if strings.TrimSpace(next.System.Mgmt.ListenAddr) == "" {
-				next.System.Mgmt.ListenAddr = ":8080"
+				next.System.Mgmt.ListenAddr = config.DefaultManagementHTTPAddr
 			}
 			if strings.TrimSpace(next.System.Mgmt.HTTPListenAddr) == "" {
-				next.System.Mgmt.HTTPListenAddr = ":8080"
+				next.System.Mgmt.HTTPListenAddr = config.DefaultManagementHTTPAddr
 			}
 			if strings.TrimSpace(next.System.Mgmt.HTTPSListenAddr) == "" {
-				next.System.Mgmt.HTTPSListenAddr = ":8443"
+				next.System.Mgmt.HTTPSListenAddr = config.DefaultManagementHTTPSAddr
 			}
 			if next.System.Mgmt.EnableHTTP == nil {
 				next.System.Mgmt.EnableHTTP = boolPtr(true)
@@ -328,20 +328,14 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if r == nil {
 		return nil
 	}
-	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
+	l := config.EffectiveManagementListeners(cfg)
+	if err := r.ValidateListen(l.HTTP.Addr); err != nil {
 		return err
 	}
-	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerConflictsHTTP(resolveHTTPSAddr(cfg), resolveHTTPAddr(cfg), true, r) {
+	if l.HTTPS.Enabled && config.ManagementListenerConflictsHTTP(l.HTTPS.Addr, l.HTTP.Addr, true, r) {
 		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
 	}
-	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
-	if ssh == "" && cfg != nil {
-		ssh = cfg.System.SSH.ListenAddr
-	}
-	if ssh == "" {
-		ssh = ":2222"
-	}
-	if config.ManagementListenerConflictsHTTP(ssh, resolveHTTPAddr(cfg), false, r) {
+	if config.ManagementListenerConflictsHTTP(l.SSH.Addr, l.HTTP.Addr, false, r) {
 		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
 	}
 	return nil
