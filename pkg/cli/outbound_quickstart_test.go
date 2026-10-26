@@ -72,3 +72,79 @@ func TestApplyQuickstartRoutingAppendsGatewayAndDefaultRoute(t *testing.T) {
 		t.Fatalf("routes = %#v, want %#v", posted.Routes, want)
 	}
 }
+
+func TestGuessGatewayAddress(t *testing.T) {
+	t.Parallel()
+
+	for cidr, want := range map[string]string{
+		"192.0.2.7/24":         "192.0.2.1",
+		"10.20.30.40/8":        "10.0.0.1",
+		"172.16.5.9/0":         "0.0.0.1",
+		"198.51.100.6/30":      "198.51.100.5",
+		"255.255.255.254/30":   "255.255.255.253",
+		"198.51.100.6/31":      "198.51.100.7",
+		"198.51.100.7/31":      "198.51.100.6",
+		"255.255.255.255/31":   "255.255.255.254",
+		"0.0.0.0/31":           "0.0.0.1",
+		"198.51.100.7/32":      "",
+		"255.255.255.255/32":   "",
+		"192.0.2.1/24":         "",
+		"198.51.100.5/30":      "",
+		"010.0.0.1/24":         "",
+		"0x1.0.0.1/24":         "",
+		"1e1.0.0.1/24":         "",
+		"1.2.3/24":             "",
+		"1.2.3.4.5/24":         "",
+		"1.2.3.4/":             "",
+		"1.2.3.4/024":          "",
+		"1.2.3.4/33":           "",
+		"1.2.3.4/ 24":          "",
+		" 1.2.3.4/24":          "",
+		"1.2.3.4":              "",
+		"2001:db8::1/64":       "",
+		"::ffff:192.0.2.7/120": "",
+	} {
+		got, err := guessGatewayAddress(cidr)
+		if want == "" {
+			if err == nil {
+				t.Errorf("guessGatewayAddress(%q) = %q, want an error", cidr, got)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Errorf("guessGatewayAddress(%q) = %q, %v; want %q", cidr, got, err, want)
+		}
+	}
+}
+
+func TestInferWANGatewayGuessesFromTheWANAddress(t *testing.T) {
+	t.Parallel()
+
+	for addr, want := range map[string]string{
+		"192.0.2.7/24":    "192.0.2.1",
+		"198.51.100.6/31": "198.51.100.7",
+		"192.0.2.1/24":    "",
+		"198.51.100.7/32": "",
+	} {
+		client := &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
+			"GET /api/v1/interfaces": func(*http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(200, []outboundIface{{Name: "wan", Device: "eth0", Zone: "wan"}}, nil), nil
+			},
+			"GET /api/v1/interfaces/state": func(*http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(200, []outboundIfaceState{{Name: "eth0", Addrs: []string{addr}}}, nil), nil
+			},
+		}}
+		api := &API{BaseURL: "http://test", Client: client}
+
+		dev, gw, err := inferWANGateway(context.Background(), api)
+		if want == "" {
+			if err == nil {
+				t.Errorf("%s: inferWANGateway = %q, %q; want an error", addr, dev, gw)
+			}
+			continue
+		}
+		if err != nil || dev != "eth0" || gw != want {
+			t.Errorf("%s: inferWANGateway = %q, %q, %v; want eth0, %q", addr, dev, gw, err, want)
+		}
+	}
+}

@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -91,7 +91,7 @@ func inferWANGateway(ctx context.Context, api *API) (string, string, error) {
 	if wanCIDR == "" {
 		return "", "", fmt.Errorf("could not determine wan IPv4 address for device %q (try restarting so DHCP assigns an IP)", wanDev)
 	}
-	gwIP, err := firstHostInCIDR(wanCIDR)
+	gwIP, err := guessGatewayAddress(wanCIDR)
 	if err != nil {
 		return "", "", err
 	}
@@ -161,29 +161,33 @@ func ensureQuickstartAllowRule(ctx context.Context, api *API) error {
 	return api.postJSON(ctx, "/api/v1/firewall/rules", allow, nil)
 }
 
-func firstHostInCIDR(cidr string) (string, error) {
-	_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cidr))
-	if err != nil || ipnet == nil || ipnet.IP == nil {
+// guessGatewayAddress returns the gateway guess for an interface that holds
+// the IPv4 address cidr: the first address after the network address. On a
+// /31 both addresses are hosts (RFC 3021), so the guess is the other one. It
+// refuses a /32 (no other host shares the prefix) and a first host that is
+// the interface's own address.
+func guessGatewayAddress(cidr string) (string, error) {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
 		return "", fmt.Errorf("invalid cidr %q", cidr)
 	}
-	ip4 := ipnet.IP.To4()
-	if ip4 == nil {
+	own := prefix.Addr()
+	if !own.Is4() {
 		return "", fmt.Errorf("cidr must be IPv4: %q", cidr)
 	}
-	ones, bits := ipnet.Mask.Size()
-	if bits != 32 {
-		return "", fmt.Errorf("cidr must be IPv4: %q", cidr)
+	switch prefix.Bits() {
+	case 32:
+		return "", fmt.Errorf("cannot infer a wan gateway from %q: no other host shares the prefix", cidr)
+	case 31:
+		other := own.As4()
+		other[3] ^= 1
+		return netip.AddrFrom4(other).String(), nil
 	}
-	if ones >= 31 {
-		return "", fmt.Errorf("cidr too small to infer gateway: %q", cidr)
+	first := prefix.Masked().Addr().Next()
+	if first == own {
+		return "", fmt.Errorf("cannot infer a wan gateway from %q: the wan address is the first host of its subnet", cidr)
 	}
-	netIP := ip4.Mask(ipnet.Mask).To4()
-	if netIP == nil {
-		return "", fmt.Errorf("cidr must be IPv4: %q", cidr)
-	}
-	gw := append(net.IP(nil), netIP...)
-	gw[3]++
-	return gw.String(), nil
+	return first.String(), nil
 }
 
 func pickWAN(ifaces []outboundIface) *outboundIface {

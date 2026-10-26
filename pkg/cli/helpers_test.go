@@ -76,12 +76,6 @@ func TestOutboundQuickstartHelpers(t *testing.T) {
 		t.Fatalf("pickWANIPv4CIDR = %q", got)
 	}
 
-	if got, err := firstHostInCIDR("10.0.0.5/24"); err != nil || got != "10.0.0.1" {
-		t.Fatalf("firstHostInCIDR(valid) = %q, %v", got, err)
-	}
-	if _, err := firstHostInCIDR("10.0.0.0/31"); err == nil {
-		t.Fatal("expected too-small CIDR error")
-	}
 	if !isDefaultQuickstartRoute("default") || !isDefaultQuickstartRoute("0.0.0.0/0") || isDefaultQuickstartRoute("10.0.0.0/24") {
 		t.Fatal("isDefaultQuickstartRoute returned unexpected result")
 	}
