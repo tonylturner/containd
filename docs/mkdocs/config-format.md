@@ -251,6 +251,25 @@ Exports are redacted by default. Only admins can request an unredacted export;
 store full backups securely. Keep the persistent data volume as well as exported
 JSON if you need users, audit history, or service files during recovery.
 
+## Additional CA bundle
+
+`system.mgmt.trustedCAFile` selects the PEM bundle storage path, defaulting to
+`/data/tls/trusted_ca.pem`. Uploads require a path under `/data`.
+`POST /api/v1/system/tls/trusted-ca` is an immediate admin operation, not a
+candidate edit:
+
+- `{"pem":"-----BEGIN CERTIFICATE-----\n..."}` replaces the entire bundle.
+  Every block must parse as an X.509 CA certificate with valid CA basic
+  constraints. Root and intermediate CA certificates are accepted; leaf
+  certificates, non-certificate blocks, malformed PEM and empty bundles are not.
+- `{"clear":true}` clears the stored bundle. Do not combine it with nonblank PEM.
+- A rejected upload leaves the previous file unchanged. Successful replacement
+  is atomic, so readers cannot observe a partially written bundle.
+
+**Runtime limitation:** storing this bundle does not yet configure outbound TLS
+clients or external service daemons to use it. An upload's `updated` response
+confirms storage only, not endpoint trust. See [security limits](secure-by-design.md#additional-ca-bundle-storage).
+
 ## API endpoints
 
 See [API Reference](api-reference.md) for endpoints and the OpenAPI wire contract.

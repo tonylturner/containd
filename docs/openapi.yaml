@@ -1565,9 +1565,18 @@ components:
       required: [certPEM, keyPEM]
     SetTrustedCARequest:
       type: object
+      description: >-
+        Replace the stored bundle with nonblank PEM containing only X.509 CA
+        certificates, or clear it with clear=true and no nonblank PEM.
+        Empty PEM alone is invalid. Storage does not configure outbound TLS clients.
       properties:
         pem: {type: string}
-      required: [pem]
+        clear: {type: boolean, default: false}
+      anyOf:
+        - required: [pem]
+        - required: [clear]
+          properties:
+            clear: {enum: [true]}
     StatusResponse:
       type: object
       properties:
@@ -4286,7 +4295,12 @@ paths:
               schema: {$ref: '#/components/schemas/StatusResponse'}
   /system/tls/trusted-ca:
     post:
-      summary: Replace trusted CA PEM file (admin)
+      summary: Replace or clear the stored trusted CA PEM file (admin)
+      description: >-
+        Validates every PEM block as a CA certificate and atomically replaces the
+        bundle under /data. The running trustedCAFile setting selects its path;
+        the default is /data/tls/trusted_ca.pem. This operation stores the bundle
+        only; outbound client trust is not reconfigured.
       tags: [System]
       requestBody:
         required: true
@@ -4295,10 +4309,15 @@ paths:
             schema: {$ref: '#/components/schemas/SetTrustedCARequest'}
       responses:
         '200':
-          description: Success
+          description: Bundle stored or cleared
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
+        '400':
+          description: Invalid JSON, empty or invalid CA bundle, conflicting clear and PEM, or path outside /data
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /ids/convert/sigma:
     post:
       summary: Convert Sigma YAML without persisting
