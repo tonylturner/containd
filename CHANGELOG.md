@@ -199,6 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Firewall rules with a schedule no longer re-read the schedule or its
+  timezone for each packet: schedules are parsed once per applied ruleset.
 - Rule matching parses addresses once per applied ruleset, and the engine
   caches each zone's networks until the kernel reports a link or address
   change. Inline ICS packets no longer read the interfaces or allocate memory
@@ -278,6 +280,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Management listener readouts agree with what is served. The TLS settings
+  show the effective listeners, including environment overrides. The console
+  calls the bound HTTP listener. SSH no longer falls back to port 8080: with no
+  bound HTTP listener it stays off and reports a fault. `show system` always
+  shows `ssh.listen`, and both saved-settings views say they exclude
+  environment overrides.
 - Web UI: the zone form refuses names longer than 125 bytes or with leading
   or trailing whitespace before saving, as the server does, and shows the
   server's error if one comes back.
