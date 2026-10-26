@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their Prometheus series.
 - `show system ssh` reports the effective SSH password policy and where it
   comes from (saved setting, lab default, bootstrap or environment).
+- SIGHUP reapplies the running configuration in management and combined mode,
+  repairing runtime drift. Failures are logged, audited and shown in health.
+  Environment variables and flags still need a restart.
 
 ### Changed
 
@@ -68,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Factory reset brings the firewall and service daemons to the default
+  configuration and reports any part that did not converge. It revokes web and
+  API sessions (lab-mode tokens stay valid by design) and closes SSH sessions.
+  The SSH console reports a failed reset instead of claiming success.
+- Disabling DNS, the proxy or ClamAV waits, within a bound, for the daemon to
+  exit; ClamAV is now stopped when disabled.
 - DHCP `authoritative` is stored and applied; it defaults to off. Authoritative
   servers send DHCPNAK for a requested address that is not leasable on the
   served link; non-authoritative servers stay silent. Both modes adopt a free
@@ -135,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The unused OpenNTPD fallback; chrony is the only NTP daemon the images ship.
-- Removed the redundant documentation-directory landing page and the unsupported SIGHUP reload claim.
+- Removed the redundant documentation-directory landing page.
 - Remove the incomplete host/systemd deployment guide; Docker Compose remains
   the documented appliance installation path.
 - Refresh contributor testing, performance and code-boundary guidance and
