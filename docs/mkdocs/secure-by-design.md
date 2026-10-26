@@ -52,7 +52,13 @@ What the design delivers by default:
   whose MFA enrollment grace period has ended cannot log in over SSH either.
 - A password or MFA change ends the account's other sessions, including its SSH
   connections. The session that made the change stays signed in.
-- Web/API login and SSH login, including TOTP codes, are rate-limited.
+- A TOTP code works once. Web/API and SSH refuse a code whose time step is not
+  later than the account's last accepted one, including after a restart.
+- The SSH menu and setup wizard ask for the current password before they change
+  the signed-in account's password, so a session opened with a key cannot set it.
+- Web/API login and SSH login, including TOTP codes, are rate-limited. SSH
+  password, key and TOTP failures share one limit per client address and account.
+- Lab mode skips the SSH account checks and accepts a reused TOTP code.
 
 Caveats:
 
@@ -182,6 +188,11 @@ What the design delivers by default:
   MFA changes, SSH logouts, key enrollment and CLI commands, management TLS
   certificate and CA bundle replacement, configuration saves and commits, factory
   resets and management boot faults.
+- Refused logins and credential changes are recorded as `denied`: wrong
+  passwords, unknown or non-admin SSH accounts, unauthorized SSH keys, wrong or
+  reused TOTP codes, and a wrong current password or code when changing a
+  password or MFA. Records name the account and client address, never the
+  secret tried.
 - `GET /api/v1/events` exposes firewall, DPI, IDS, AV, proxy and service events.
   Separate bounded banks keep firewall denies and IEC 104 incident evidence,
   so routine traffic does not evict them.
