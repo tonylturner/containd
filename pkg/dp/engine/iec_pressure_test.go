@@ -5,6 +5,10 @@ package engine
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"testing"
 	"time"
 
@@ -68,12 +72,12 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 }
 
 func TestIECPressureEveryAbortClearsGauges(t *testing.T) {
-	for _, reason := range []string{abortDeny, abortTimeout, abortBound, abortStream, abortFraming, abortTransport, abortPolicy, abortQueue, abortMidstream, abortUnhealthy} {
-		t.Run(reason, func(t *testing.T) {
+	for _, reason := range iecAbortReasons {
+		t.Run(reason.name, func(t *testing.T) {
 			h := newIECHarness(t, "enforce")
 			h.handshake()
 			h.send(true, iframe(46, 1)[:4])
-			before := h.e.IEC104Diagnostics().Aborts[reason]
+			before := h.e.IEC104Diagnostics().Aborts[reason.name]
 			table := h.e.iec
 			table.mu.Lock()
 			for _, s := range table.sessions {
@@ -81,7 +85,7 @@ func TestIECPressureEveryAbortClearsGauges(t *testing.T) {
 			}
 			table.mu.Unlock()
 			assertNoIECHolds(t, h.e)
-			if got := h.e.IEC104Diagnostics(); got.Aborts[reason] != before+1 || got.ActiveSessions != 0 {
+			if got := h.e.IEC104Diagnostics(); got.Aborts[reason.name] != before+1 || got.ActiveSessions != 0 {
 				t.Fatalf("abort pressure: %+v", got)
 			}
 		})
@@ -174,5 +178,65 @@ func TestIECPressureInjectorFailures(t *testing.T) {
 	d := unavailable.e.handlePacket(unavailable.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil))
 	if d.Action != capture.Drop || unavailable.e.IEC104Diagnostics().Aborts["injector"] != p.Aborts["injector"]+1 {
 		t.Fatal(d)
+	}
+}
+
+// Check declarations as well as the catalog so adding a typed reason without
+// exporting it in snapshots and zero-valued metric series fails immediately.
+func TestIECPressureReasonCatalog(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "iec_events.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := make(map[string]bool)
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		typ, ok := literal.Type.(*ast.Ident)
+		if !ok || typ.Name != "iecAbortReason" {
+			return true
+		}
+		for _, field := range literal.Elts {
+			kv, ok := field.(*ast.KeyValueExpr)
+			if !ok {
+				t.Fatal("abort reasons must use named fields")
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok || key.Name != "name" {
+				continue
+			}
+			value, ok := kv.Value.(*ast.BasicLit)
+			if !ok || value.Kind != token.STRING {
+				t.Fatal("abort reason label must be a fixed string")
+			}
+			name, err := strconv.Unquote(value.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "" || declared[name] {
+				t.Fatalf("empty or duplicate abort reason: %q", name)
+			}
+			declared[name] = true
+		}
+		return true
+	})
+	if len(declared) != len(iecAbortReasons) {
+		t.Fatalf("declared %d reasons, catalog has %d", len(declared), len(iecAbortReasons))
+	}
+	before := newIECTable("learn").pressure()
+	for _, reason := range iecAbortReasons {
+		if reason == nil || !declared[reason.name] {
+			t.Fatalf("undeclared or duplicate reason: %v", reason)
+		}
+		delete(declared, reason.name)
+		countIECAbort(reason)
+		if got := newIECTable("learn").pressure().Aborts[reason.name]; got != before.Aborts[reason.name]+1 {
+			t.Fatalf("%s: count = %d", reason.name, got)
+		}
+	}
+	if len(declared) != 0 {
+		t.Fatalf("reasons missing from catalog: %v", declared)
 	}
 }

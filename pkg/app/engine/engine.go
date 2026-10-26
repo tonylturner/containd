@@ -198,6 +198,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/stats/protocols", protoStatsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/top-talkers", topTalkersHandler(dpEngine))
 	metrics.SetIEC104PressureReader(dpEngine.IEC104PressureMetrics)
+	// Combined mode shares this registry with management; split mode needs
+	// its own engine scrape endpoint for live dataplane metrics.
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/internal/diagnostics/iec104", iec104PressureHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))

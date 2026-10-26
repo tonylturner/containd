@@ -36,29 +36,21 @@ type IEC104PressureLimits struct {
 	ResetWorkerJobs       int     `json:"resetWorkerJobs"`
 }
 
-var pressureReasons = [...]string{"deny", "timeout", "bound", "midstream", "fail_close", "injector", "stream", "framing", "transport", "policy", "queue", "unhealthy"}
 var pressureTotals struct {
-	aborts   [len(pressureReasons)]atomic.Uint64
 	worker   atomic.Uint64
 	injector atomic.Uint64
 	verdict  atomic.Uint64
 }
 
 func init() {
-	for _, reason := range pressureReasons {
-		metrics.IEC104AbortsTotal.WithLabelValues(reason).Add(0)
+	for _, reason := range iecAbortReasons {
+		metrics.IEC104AbortsTotal.WithLabelValues(reason.name).Add(0)
 	}
 }
 
-func countIECAbort(reason string) {
-	for i, name := range pressureReasons {
-		if name == reason {
-			pressureTotals.aborts[i].Add(1)
-			metrics.IEC104AbortsTotal.WithLabelValues(reason).Inc()
-			return
-		}
-	}
-	panic("unknown IEC104 pressure reason: " + reason)
+func countIECAbort(reason *iecAbortReason) {
+	reason.total.Add(1)
+	metrics.IEC104AbortsTotal.WithLabelValues(reason.name).Inc()
 }
 
 func countIECVerdictFailure(err error) {
@@ -74,10 +66,10 @@ func (t *iecTable) pressure() IEC104Pressure {
 		HeldPackets: iecMaxHeldGlobal, HeldPacketsPerSession: iecMaxHeldPerSession,
 		HeldBytesPerSession: iecMaxHeldBytes, PendingSeconds: iecPendingTimeout.Seconds(),
 		Sessions: iecMaxSessions, ResetWorkerJobs: blockWorkerQueue,
-	}, Aborts: make(map[string]uint64, len(pressureReasons)),
+	}, Aborts: make(map[string]uint64, len(iecAbortReasons)),
 		ResetWorkerRejections: pressureTotals.worker.Load(), VerdictFailures: pressureTotals.verdict.Load()}
-	for i, reason := range pressureReasons {
-		out.Aborts[reason] = pressureTotals.aborts[i].Load()
+	for _, reason := range iecAbortReasons {
+		out.Aborts[reason.name] = reason.total.Load()
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()

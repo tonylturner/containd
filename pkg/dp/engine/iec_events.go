@@ -48,19 +48,34 @@ const (
 	outcomeUntracked        = "untracked"
 )
 
-// Abort reasons, carried as the reason of the ics.session aborted event.
-const (
-	abortDeny      = "deny"
-	abortTimeout   = "timeout"
-	abortBound     = "bound"
-	abortStream    = "stream"
-	abortFraming   = "framing"
-	abortTransport = "transport"
-	abortPolicy    = "policy"
-	abortQueue     = "queue"
-	abortMidstream = "midstream"
-	abortUnhealthy = "unhealthy"
+// iecAbortReason binds each fixed reason label to its process-lifetime counter.
+// Packet-path callers take a declared reason, never a string or an array index.
+type iecAbortReason struct {
+	name  string
+	total atomic.Uint64
+}
+
+// Session aborts and fail-closed admission/steering rejections share this catalog.
+var (
+	abortDeny      = &iecAbortReason{name: "deny"}
+	abortTimeout   = &iecAbortReason{name: "timeout"}
+	abortBound     = &iecAbortReason{name: "bound"}
+	abortStream    = &iecAbortReason{name: "stream"}
+	abortFraming   = &iecAbortReason{name: "framing"}
+	abortTransport = &iecAbortReason{name: "transport"}
+	abortPolicy    = &iecAbortReason{name: "policy"}
+	abortQueue     = &iecAbortReason{name: "queue"}
+	abortMidstream = &iecAbortReason{name: "midstream"}
+	abortUnhealthy = &iecAbortReason{name: "unhealthy"}
+	abortFailClose = &iecAbortReason{name: "fail_close"}
+	abortInjector  = &iecAbortReason{name: "injector"}
 )
+
+// The catalog is used by metric initialization, snapshots and exhaustive tests.
+var iecAbortReasons = [...]*iecAbortReason{
+	abortDeny, abortTimeout, abortBound, abortStream, abortFraming, abortTransport,
+	abortPolicy, abortQueue, abortMidstream, abortUnhealthy, abortFailClose, abortInjector,
+}
 
 // liveRunID identifies this process's live engine for session IDs.
 // It is set once per live engine lifetime; Reconfigure keeps it.

@@ -67,7 +67,7 @@ var targetNames = [2]string{"client", "server"}
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
 // verdict completion. A learn envelope never aborts; callers ensure that.
-func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldPacket, now time.Time) iecActions {
+func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
 	if s.state == iecAborted {
 		return acts
@@ -103,7 +103,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldP
 		t.markAbort(s.id)
 	}
 	t.reconnect[pairKey(s.client, s.server)] = now
-	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason}, now))
+	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason.name}, now))
 	if txn.pending == 0 {
 		acts.merge(t.finishLocked(txn, now))
 	}

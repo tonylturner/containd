@@ -145,10 +145,11 @@ var (
 	})
 )
 
-// SetIEC104PressureReader binds the exporter to the live engine. The reader
-// follows configuration rebuilds rather than retaining a retired table.
+// iec104PressureReader follows the live engine across configuration rebuilds.
 var iec104PressureReader atomic.Pointer[func() map[string]float64]
 
+// SetIEC104PressureReader binds the process-wide exporter without registering
+// collectors again. Combined-mode engine and management listeners share it.
 func SetIEC104PressureReader(read func() map[string]float64) {
 	iec104PressureReader.Store(&read)
 }
@@ -185,4 +186,5 @@ var iec104GaugeHelp = map[string]string{
 	"reset_worker_jobs_limit":        "Fixed shared reset and block worker queue capacity.",
 }
 
+// Register once per process, including when both listeners run in combined mode.
 func init() { prometheus.MustRegister(iec104PressureCollector{}) }

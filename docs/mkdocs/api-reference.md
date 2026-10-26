@@ -262,6 +262,9 @@ the engine process lifetime. `trackedSessions` includes closed sessions and tomb
 failures cover the shared inline pipeline (excluding intentional queue closure).
 See [IEC 104 holdback diagnostics](ics-dpi.md#iec-104-holdback-diagnostics) for
 bounds and counting semantics; the OpenAPI schema lists every field and reason.
+In combined `all` mode, the management `/metrics` serves these dataplane series
+from the shared process registry. For split `engine`/`mgmt` processes, scrape the
+engine listener's `/metrics` instead.
 
 ## Binary Runtime Environment
 

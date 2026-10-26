@@ -197,14 +197,21 @@ traffic, stream/framing/transport errors, policy changes and queue closure.
 Fail-closed steering rejections and injector-unavailable admission rejections are
 also counted per occurrence, not as unique commands. Reset-worker rejections,
 inline verdict failures and failed reset-injection attempts are separate totals.
-Verdict failures cover the shared inline pipeline as well as rejected IEC holdback settlement requests; intentional
-queue-closure completions are excluded. Totals survive configuration rebuilds
-and reset only when the engine process restarts. These diagnostics do not change
+Verdict failures cover the shared inline pipeline as well as rejected IEC
+holdback settlement requests; intentional queue-closure completions are excluded.
+Totals survive configuration rebuilds and reset only when the engine process
+restarts. These diagnostics do not change
 packet decisions or the `iec104Enforcement` health object.
 
 Authenticated clients read `GET /api/v1/diagnostics/iec104`. An unavailable engine
-returns HTTP 503, not an empty or zero snapshot. Scrape the **engine listener's**
-`/metrics` for `containd_dp_iec104_*` gauges and counters, not the separate
-management process's metrics. The engine listener is internal and unauthenticated;
-keep it on a trusted network. The series have no station/session/IP/CA/IOA labels;
-only the abort counter has a fixed `reason` label.
+returns HTTP 503, not an empty or zero snapshot.
+
+In the default `containd all` deployment (including Compose), engine and
+management run in one process and share the Prometheus registry. Scrape the
+management listener's `/metrics` for `containd_dp_iec104_*` gauges and counters;
+the engine API stays on `127.0.0.1:8081` by default. With separate `engine` and
+`mgmt` processes, scrape the engine listener's `/metrics` for dataplane pressure;
+the management process has its own registry. The engine API is unauthenticated:
+keep any split-mode listener on a trusted private network. Metric registration
+happens once per process, not once per listener. The series have no
+station/session/IP/CA/IOA labels; only the abort counter has a fixed `reason` label.
