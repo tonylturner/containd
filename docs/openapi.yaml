@@ -732,7 +732,7 @@ components:
         authoritative:
           type: boolean
           default: false
-          description: Send DHCPNAK for invalid or unknown lease requests only on directly attached served subnets; otherwise stay silent.
+          description: Send DHCPNAK for ineligible address requests only on directly attached served subnets; otherwise stay silent. Eligible addresses are ACKed and recorded in either mode, even without a prior lease.
         dnsServers: {items: {type: string}, type: array}
         domain: {type: string}
         enabled: {type: boolean}

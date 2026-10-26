@@ -58,23 +58,27 @@ func replyOption(pkt []byte, code byte) []byte {
 func TestRequestPackets(t *testing.T) {
 	cases := []struct {
 		name, requested, ciaddr, server, relay, lease, otherLease, reservation string
+		hops                                                                   byte
 		unserved                                                               bool
 		want                                                                   byte
 	}{
 		{name: "off subnet reboot", requested: "198.51.100.10", want: dhcpMsgNak},
-		{name: "unknown reboot", requested: "192.0.2.10", want: dhcpMsgNak},
+		{name: "adopted reboot", requested: "192.0.2.10", want: dhcpMsgAck},
 		{name: "known reboot", requested: "192.0.2.10", lease: "192.0.2.10", want: dhcpMsgAck},
 		{name: "reserved reboot", requested: "192.0.2.10", reservation: "192.0.2.10", want: dhcpMsgAck},
 		{name: "valid selection", requested: "192.0.2.10", server: "192.0.2.1", want: dhcpMsgAck},
 		{name: "valid renewal", ciaddr: "192.0.2.10", lease: "192.0.2.10", want: dhcpMsgAck},
 		{name: "off subnet renewal", ciaddr: "198.51.100.10", lease: "198.51.100.10", want: dhcpMsgNak},
-		{name: "unknown renewal", ciaddr: "192.0.2.10", want: dhcpMsgNak},
+		{name: "adopted renewal", ciaddr: "192.0.2.10", want: dhcpMsgAck},
 		{name: "outside pool", requested: "192.0.2.30", lease: "192.0.2.30", want: dhcpMsgNak},
-		{name: "stale lease must not override requested IP", requested: "192.0.2.11", lease: "192.0.2.10", want: dhcpMsgNak},
+		{name: "stale lease must not override requested IP", requested: "192.0.2.11", lease: "192.0.2.10", want: dhcpMsgAck},
 		{name: "other client owns address", requested: "192.0.2.10", server: "192.0.2.1", otherLease: "192.0.2.10", want: dhcpMsgNak},
+		{name: "taken reboot", requested: "192.0.2.10", otherLease: "192.0.2.10", want: dhcpMsgNak},
+		{name: "taken renewal", ciaddr: "192.0.2.10", otherLease: "192.0.2.10", want: dhcpMsgNak},
 		{name: "wrong reservation", requested: "192.0.2.11", server: "192.0.2.1", reservation: "192.0.2.10", want: dhcpMsgNak},
 		{name: "foreign server", requested: "198.51.100.10", server: "192.0.2.2"},
 		{name: "relay", requested: "198.51.100.10", relay: "198.51.100.1"},
+		{name: "hops without relay", requested: "192.0.2.10", hops: 1},
 		{name: "no requested address"},
 		{name: "malformed renewal", ciaddr: "192.0.2.10", requested: "192.0.2.11"},
 		{name: "unserved subnet", requested: "198.51.100.10", unserved: true},
@@ -99,7 +103,9 @@ func TestRequestPackets(t *testing.T) {
 				if tc.reservation != "" {
 					rt.reservations = map[string]string{testMAC: tc.reservation}
 				}
-				req, err := parseRequest(requestPacket(dhcpMsgRequest, tc.requested, tc.ciaddr, tc.server, tc.relay))
+				packet := requestPacket(dhcpMsgRequest, tc.requested, tc.ciaddr, tc.server, tc.relay)
+				packet[3] = tc.hops
+				req, err := parseRequest(packet)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -143,6 +149,10 @@ func TestRequestPackets(t *testing.T) {
 					}
 					if ip, ok := rt.manager.lookupLeaseIP(rt.dev, testMAC); !ok || ip != address {
 						t.Fatalf("lease not saved: %s", ip)
+					}
+					other := request{mac: "02:00:00:00:00:02", reqIP: net.ParseIP(address)}
+					if offered := selectOfferIP(rt, other); offered != nil && offered.Equal(net.ParseIP(address)) {
+						t.Fatalf("adopted address offered to another client: %s", offered)
 					}
 				}
 			})
@@ -242,5 +252,29 @@ func TestUnservedInterfaceIsSilent(t *testing.T) {
 	pkt, err := replyToDHCPRequest(rt, req)
 	if err != nil || len(pkt) != 0 {
 		t.Fatalf("unserved interface replied: %x, %v", pkt, err)
+	}
+}
+
+func TestAdoptedRenewalAndRebinding(t *testing.T) {
+	for _, authority := range []bool{false, true} {
+		for _, flags := range []uint16{0, 0x8000} {
+			rt := testRuntime(authority)
+			packet := requestPacket(dhcpMsgRequest, "", "192.0.2.10", "", "")
+			binary.BigEndian.PutUint16(packet[10:12], flags)
+			req, err := parseRequest(packet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pkt, err := replyToDHCPRequest(rt, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind := replyOption(pkt, dhcpOptMsgType); len(kind) != 1 || kind[0] != dhcpMsgAck {
+				t.Fatalf("authority=%v flags=%x: expected ACK, got %x", authority, flags, pkt)
+			}
+			if ip, ok := rt.manager.lookupLeaseIP(rt.dev, testMAC); !ok || ip != "192.0.2.10" {
+				t.Fatalf("adopted lease missing: %s", ip)
+			}
+		}
 	}
 }

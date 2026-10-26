@@ -44,7 +44,9 @@ Check runtime status after commit, not just whether saving succeeded.
 - API:
   - `GET/POST /api/v1/services/dhcp`
   - `GET /api/v1/dhcp/leases`
-- `authoritative` defaults to false. Invalid address requests and unknown INIT-REBOOT or renewal requests receive no reply by default; enabling authority sends DHCPNAK so clients restart discovery. Valid requests receive DHCPACK in either mode.
+- `authoritative` defaults to false. INIT-REBOOT, RENEWING and REBINDING requests for eligible addresses receive DHCPACK and record a lease in either mode, even when no prior lease is stored. This adopts active clients after lease data is lost and keeps their addresses out of the free pool.
+- Eligible addresses must be inside the served interface's pool, must not be the server, network or broadcast address, and must not be leased or reserved for another MAC. A client's own fixed reservation, when configured, remains binding.
+- Requests for ineligible addresses receive DHCPNAK only in authoritative mode; otherwise the server stays silent. SELECTING requests naming this server use the same eligibility checks. DISCOVER never receives DHCPNAK, including when the pool is exhausted.
 - Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
 

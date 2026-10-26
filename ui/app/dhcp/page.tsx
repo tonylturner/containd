@@ -278,7 +278,7 @@ export default function DHCPPage() {
               className="h-4 w-4"
             />
             Authoritative
-            <InfoTip label="Sends DHCPNAK for invalid or unknown lease requests on served interfaces. Leave off when another DHCP server owns the subnet." />
+            <InfoTip label="Sends DHCPNAK for addresses this server cannot lease on served interfaces. Eligible addresses are adopted in either mode. Leave off when another DHCP server owns the subnet." />
           </label>
 
           <details className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">

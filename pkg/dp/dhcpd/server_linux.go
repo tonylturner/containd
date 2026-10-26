@@ -246,11 +246,9 @@ func replyToDHCPRequest(rt dhcpRuntime, req request) ([]byte, error) {
 		if !nonzeroIP(ip) {
 			return nil, nil
 		}
-		known := lookupExistingLease(rt, req)
-		reserved := net.ParseIP(rt.reservations[strings.ToLower(req.mac)]).To4()
-		// Selecting this server may accept its offer. Reboot/renewal must
-		// match a recorded lease or this client's fixed reservation.
-		if !rt.leasable(req, ip) || (!nonzeroIP(req.serverID) && !ip.Equal(known) && !ip.Equal(reserved)) {
+		// Adopt eligible addresses even if the lease database was lost, so
+		// active clients' addresses cannot be offered to another client.
+		if !rt.leasable(req, ip) {
 			if !rt.authoritative {
 				return nil, nil
 			}
