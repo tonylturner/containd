@@ -8,9 +8,9 @@ import {
 } from "./api-core";
 import {
   deleteJSONResult,
+  failureOf,
   getJSON,
   getJSONList,
-  parseErrorBody,
   parseWarningHeader,
   postJSONResult,
 } from "./api-request";
@@ -117,7 +117,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return {
       ok: true,

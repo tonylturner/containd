@@ -5,7 +5,7 @@ import {
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { getJSON, getJSONShaped, isRecord, parseErrorBody, postJSONResult } from "./api-request";
+import { failureOf, getJSON, getJSONShaped, isRecord, postJSONResult } from "./api-request";
 
 import type {
   AVConfig,
@@ -73,7 +73,7 @@ export const servicesAPI = {
       });
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
-      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);
       return {
         ok: true,
@@ -100,7 +100,7 @@ export const servicesAPI = {
       );
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
-      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);
       return {
         ok: true,

@@ -7,9 +7,9 @@ import {
   handleUnauthorized,
 } from "./api-core";
 import {
+  failureOf,
   getJSON,
   getJSONList,
-  parseErrorBody,
   postJSON,
   postJSONResult,
 } from "./api-request";
@@ -129,7 +129,7 @@ export const idsAPI = {
       });
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
-      if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);
       return { ok: true, data: (await res.json()) as IDSImportResult };
     } catch (e) {

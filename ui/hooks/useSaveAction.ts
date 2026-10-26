@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useToast } from "../components/ToastProvider";
 import type { ApiResult } from "../lib/api";
+import { withRetryTime } from "../lib/utils";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -48,7 +49,7 @@ export function useSaveAction<K extends string = "save">() {
       }
       settle.current = setTimeout(() => setState("idle"), SETTLE_MS);
       if (!result.ok) {
-        const error = result.error || messages.failure;
+        const error = withRetryTime(result.error || messages.failure, result.retryAfter);
         setState("error");
         toast(error, "error");
         return { ok: false, error };

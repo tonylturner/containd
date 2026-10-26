@@ -6,7 +6,7 @@ import {
   handleUnauthorized,
 } from "./api-core";
 
-import type { ApiResult } from "./api";
+import type { ApiFailure, ApiResult } from "./api";
 
 /**
  * A JSON object body type. Lists have a length, so `getJSON<Zone[]>` does
@@ -34,13 +34,13 @@ async function getBody(
   path: string,
   shape: Shape,
   signal?: AbortSignal,
-): Promise<{ status: number; body: unknown } | { status: number; error: string }> {
+): Promise<{ status: number; body: unknown } | { status: number; failure: ApiFailure }> {
   const res = await fetchWithSession(path, { cache: "no-store", headers: authHeaders() }, signal);
-  if (handleUnauthorized(res)) return { status: 401, error: "Unauthorized" };
+  if (handleUnauthorized(res)) return { status: 401, failure: { ok: false, error: "Unauthorized" } };
   clearAuthExpired();
-  if (!res.ok) return { status: res.status, error: await parseErrorBody(res) };
+  if (!res.ok) return { status: res.status, failure: await failureOf(res) };
   const body: unknown = await res.json().catch(() => undefined);
-  if (!fits(body, shape)) return { status: res.status, error: `malformed response from ${path}` };
+  if (!fits(body, shape)) return { status: res.status, failure: { ok: false, error: `malformed response from ${path}` } };
   return { status: res.status, body };
 }
 
@@ -127,7 +127,7 @@ export async function getJSONListResult<T>(path: string): Promise<ApiResult<T[]>
 async function getResult<T>(path: string, shape: Shape): Promise<ApiResult<T>> {
   try {
     const res = await getBody(path, shape);
-    return "body" in res ? { ok: true, data: res.body as T } : { ok: false, error: res.error };
+    return "body" in res ? { ok: true, data: res.body as T } : res.failure;
   } catch (e) {
     return {
       ok: false,
@@ -191,6 +191,25 @@ export async function deleteJSON(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Retry-After in seconds: a delay, or an HTTP date turned into one.
+ * Undefined when the header is absent or unreadable.
+ */
+export function parseRetryAfter(res: Response, now = Date.now()): number | undefined {
+  const raw = (res.headers.get("retry-after") || "").trim();
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+/** The failure of a non-ok response: the server's message and Retry-After. */
+export async function failureOf(res: Response): Promise<ApiFailure> {
+  const retryAfter = parseRetryAfter(res);
+  const error = await parseErrorBody(res);
+  return retryAfter === undefined ? { ok: false, error } : { ok: false, error, retryAfter };
+}
+
 export async function parseErrorBody(res: Response): Promise<string> {
   try {
     const body = await res.json();
@@ -225,7 +244,7 @@ export async function postJSONResult<T>(
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return {
       ok: true,
@@ -252,7 +271,7 @@ export async function patchJSONResult<T>(
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return {
       ok: true,
@@ -275,7 +294,7 @@ export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
     });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return { ok: true, data: undefined, warning: parseWarningHeader(res) };
   } catch (e) {
