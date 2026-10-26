@@ -20,6 +20,24 @@ library defaults for configured files, not a guarantee of complete retention.
 levels. CLI queries include `show audit` and `show events`; see
 [API Reference](api-reference.md) for wire contracts.
 
+## Account and credential audit records
+
+Every account and credential change writes an audit record with its actor and
+source (`api` or `ssh`). Refused logins and own password changes with a wrong
+current password are recorded with result `denied`.
+
+| Action | Change |
+| ------ | ------ |
+| `auth.login` | Web/API logins, wrong passwords and wrong TOTP codes |
+| `ssh.login`, `ssh.logout` | SSH logins and logouts, wrong TOTP codes and logins refused after the MFA enrollment grace period |
+| `auth.user.create`, `auth.user.update`, `auth.user.delete` | User creation, profile or role change, and deletion |
+| `auth.profile.update` | A user's change to their own profile |
+| `auth.password.change` | A user's own password change, on the web/API, the SSH menu or wizard, or at a forced SSH login change |
+| `auth.password.set_admin` | An admin setting another account's password |
+| `auth.mfa.*` | MFA enable, disable, requirement, grace and admin reset |
+| `ssh.authorized_key.add` | SSH key enrollment in the setup wizard, with the key fingerprint |
+| `system.tls.cert.set`, `system.tls.trusted_ca.set` | Management TLS certificate and additional CA bundle replacement |
+
 ## Off-box forwarding
 
 Two working syslog paths are distinct:

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -62,6 +63,7 @@ func createUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.create", Target: created.Username, Detail: "role=" + created.Role})
 		c.JSON(http.StatusOK, created)
 	}
 }
@@ -87,6 +89,7 @@ func updateUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.update", Target: updated.Username, Detail: "role=" + updated.Role})
 		c.JSON(http.StatusOK, updated)
 	}
 }
@@ -105,16 +108,23 @@ func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
-		id := c.Param("id")
 		var req setPasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if err := store.SetPassword(c.Request.Context(), id, req.Password); err != nil {
+		u, err := store.GetByID(c.Request.Context(), c.Param("id"))
+		if err != nil {
 			apiError(c, setPasswordErrorStatus(err), err.Error())
 			return
 		}
+		// SetPassword also revokes the account's sessions, except the
+		// caller's own when an admin sets their own password here.
+		if err := store.SetPassword(c.Request.Context(), u.ID, req.Password); err != nil {
+			apiError(c, setPasswordErrorStatus(err), err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "auth.password.set_admin", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
 	}
 }
@@ -137,18 +147,22 @@ func deleteUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
-		id := c.Param("id")
-		if err := store.Delete(c.Request.Context(), id); err != nil {
+		u, err := store.GetByID(c.Request.Context(), c.Param("id"))
+		if err == nil {
+			err = store.Delete(c.Request.Context(), u.ID)
+		}
+		if err != nil {
 			code := http.StatusBadRequest
-			switch err {
-			case users.ErrNotFound:
+			switch {
+			case errors.Is(err, users.ErrNotFound):
 				code = http.StatusNotFound
-			case users.ErrLastAdmin:
+			case errors.Is(err, users.ErrLastAdmin):
 				code = http.StatusConflict
 			}
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.delete", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }

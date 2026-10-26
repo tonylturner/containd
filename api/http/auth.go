@@ -265,6 +265,8 @@ func setAuthenticatedContext(c *gin.Context, u *users.StoredUser, jti string) {
 	c.Set(ctxUserKey, u.ID)
 	c.Set(ctxSessionKey, jti)
 	c.Set("actor", u.Username)
+	// A password or MFA change made by this request keeps this session.
+	c.Request = c.Request.WithContext(users.WithActingSession(c.Request.Context(), jti))
 }
 
 func allowRestrictedAccountPath(c *gin.Context, u *users.StoredUser) bool {

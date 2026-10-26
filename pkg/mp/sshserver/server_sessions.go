@@ -67,6 +67,22 @@ func (s *Server) RevokeConnections(initiator string) {
 	}
 }
 
+// closeRevokedSessions closes connections whose management session a password
+// or MFA change revoked, or whose account was deleted.
+func (s *Server) closeRevokedSessions(sessionIDs []string) {
+	revoked := make(map[string]struct{}, len(sessionIDs))
+	for _, id := range sessionIDs {
+		revoked[id] = struct{}{}
+	}
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	for conn := range s.conns {
+		if _, ok := revoked[conn.sessionID]; ok && conn.sessionID != "" {
+			conn.close()
+		}
+	}
+}
+
 func connectionFromContext(ctx context.Context) *sshConnection {
 	conn, _ := ctx.Value(connectionContextKey{}).(*sshConnection)
 	return conn

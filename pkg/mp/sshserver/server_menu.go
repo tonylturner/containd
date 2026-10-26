@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -174,7 +175,7 @@ func (s *interactiveSession) menuResetPassword() {
 		s.writeLn("error: " + err.Error())
 		return
 	}
-	s.writeAudit("user.password.set", s.username)
+	s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Detail: "ssh menu"})
 	s.writeLn("Password updated.")
 }
 
@@ -474,7 +475,7 @@ func (s *interactiveSession) wizardPromptPassword() bool {
 		s.writeLn("error: " + err.Error())
 		return false
 	}
-	s.writeAudit("user.password.set", s.username)
+	s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Detail: "ssh setup wizard"})
 	s.writeLn("password updated")
 	return true
 }
@@ -492,6 +493,7 @@ func (s *interactiveSession) wizardPromptSSHKey() (bool, bool) {
 		s.writeLn("error: failed to add key: " + err.Error())
 		return false, true
 	}
+	s.writeAudit(audit.Record{Action: "ssh.authorized_key.add", Target: s.username, Detail: authorizedKeyFingerprint(v)})
 	s.writeLn("ssh key added")
 	return true, true
 }

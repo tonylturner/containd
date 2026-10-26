@@ -90,6 +90,13 @@ type setTLSCertRequest struct {
 }
 
 func setTLSCertHandler(store config.Store) gin.HandlerFunc {
+	return tlsCertUploadHandler(store, "/data")
+}
+
+// tlsCertUploadHandler writes the management certificate and key, which must
+// both be under dataDir.
+func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
+	under := filepath.Clean(dataDir) + string(os.PathSeparator)
 	return func(c *gin.Context) {
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
@@ -108,7 +115,8 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 		}
 
 		// Validate the pair before writing.
-		if _, err := tls.X509KeyPair([]byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {
+		pair, err := tls.X509KeyPair([]byte(req.CertPEM), []byte(req.KeyPEM))
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid cert/key pair", err.Error())
 			return
 		}
@@ -121,12 +129,12 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 		cert, key := mgmttls.ResolveFilesWithSources(cfg)
 		certFile, keyFile := cert.Path, key.Path
 
-		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			apiError(c, http.StatusConflict, fmt.Sprintf("TLS certificate path %q (source: %s) must be under /data", certFile, cert.Source))
+		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), under) {
+			apiError(c, http.StatusConflict, fmt.Sprintf("TLS certificate path %q (source: %s) must be under %s", certFile, cert.Source, dataDir))
 			return
 		}
-		if !strings.HasPrefix(filepath.Clean(keyFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			apiError(c, http.StatusConflict, fmt.Sprintf("TLS key path %q (source: %s) must be under /data", keyFile, key.Source))
+		if !strings.HasPrefix(filepath.Clean(keyFile)+string(os.PathSeparator), under) {
+			apiError(c, http.StatusConflict, fmt.Sprintf("TLS key path %q (source: %s) must be under %s", keyFile, key.Source, dataDir))
 			return
 		}
 
@@ -148,7 +156,7 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-
+		auditLog(c, audit.Record{Action: "system.tls.cert.set", Target: certFile, Detail: certAuditDetail(pair.Leaf)})
 		c.JSON(http.StatusOK, gin.H{"status": "updated"})
 	}
 }
@@ -238,6 +246,14 @@ func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir str
 		setWarningHeader(c, warnings)
 		c.JSON(http.StatusOK, gin.H{"status": status, "revision": bundle.Revision, "warnings": warnings})
 	}
+}
+
+// certAuditDetail identifies a replaced management certificate in the audit log.
+func certAuditDetail(cert *x509.Certificate) string {
+	if cert == nil {
+		return ""
+	}
+	return fmt.Sprintf("subject=%s notAfter=%s", cert.Subject, cert.NotAfter.UTC().Format(time.RFC3339))
 }
 
 func readFirstCertDER(path string) ([]byte, error) {

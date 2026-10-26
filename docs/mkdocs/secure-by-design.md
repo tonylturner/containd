@@ -18,13 +18,13 @@ Official references:
 
 | Pledge goal | Status | Default design |
 | ----------- | ------ | -------------- |
-| 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account; admins can require it. SSH does not use it. |
-| 2. Default passwords | Gap | Forced first-login change on web/API. SSH accepts the bootstrap password before that change. |
+| 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account on web/API and SSH password login; admins can require it. An SSH key alone signs in. |
+| 2. Default passwords | Met with caveat | Forced first-login change on web/API and SSH. The bootstrap credential is universal, not per instance. |
 | 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
 | 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
 | 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
 | 6. CVE transparency | Met | CSAF 2.0 advisories with CWE, served provider metadata. |
-| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding and metrics in the base product. Some account changes are not audited. |
+| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding and metrics in the base product. Audit records stay on the appliance. |
 
 - **Met**: the design and its defaults deliver the goal.
 - **Met with caveat**: the design delivers the goal. A stated limit or trade-off
@@ -48,14 +48,17 @@ What the design delivers by default:
   management refuses to start with an empty or example `CONTAIND_JWT_SECRET`.
 - API routes enforce the `admin` or `view` role. SSH accepts only `admin`
   accounts.
-- Web/API login and SSH password login are rate-limited.
+- SSH password login of an account with MFA asks for its TOTP code. An account
+  whose MFA enrollment grace period has ended cannot log in over SSH either.
+- A password or MFA change ends the account's other sessions, including its SSH
+  connections. The session that made the change stays signed in.
+- Web/API login and SSH login, including TOTP codes, are rate-limited.
 
 Caveats:
 
-- SSH accepts a password or a public key. It does not use TOTP, and an MFA
-  requirement on an account does not apply to SSH. See [Known gaps](#known-gaps).
-- A password or MFA change does not end the account's other active sessions.
-  They end at the idle or maximum session limit.
+- SSH public-key login does not ask for a TOTP code. The key counts as the
+  possession factor, so a key alone signs in to an MFA account. This keeps
+  key-based automation working; protect admin keys accordingly.
 - MFA is local-account TOTP. SMS is intentionally not supported. External
   identity (OIDC single sign-on) and resource-scoped roles are not implemented.
 
@@ -67,15 +70,17 @@ What the design delivers by default:
   for a forced password change.
 - Until that change, a web/API session can reach only its own session, logout
   and the password-change endpoint.
+- SSH asks for the change at login, for password and key logins alike, before
+  the CLI, menu or shell opens. It applies the same password rules.
 - A new password needs at least 8 characters with an uppercase letter, a
-  lowercase letter and a digit, so the bootstrap value cannot be kept.
+  lowercase letter and a digit, and must differ from the current one, so the
+  bootstrap value cannot be kept.
 
-The bootstrap credential is universal, not per instance. This is a deliberate
-trade-off: containd often runs in offline labs and classrooms that have no
-channel to distribute a per-instance secret. The forced change limits the
-credential's life on web/API.
-
-The SSH path does not have this protection. See [Known gaps](#known-gaps).
+Caveat: the bootstrap credential is universal, not per instance. This is a
+deliberate trade-off: containd often runs in offline labs and classrooms that
+have no channel to distribute a per-instance secret. The forced change limits
+the credential's life to the first login, on every path, but whoever logs in
+first sets the new password.
 
 #### Lab-mode credential pinning
 
@@ -97,7 +102,7 @@ Lab mode also relaxes web/API authentication. Every request gets admin access.
 With a JWT secret, any validly signed, unexpired token passes without a session
 lookup. Without a secret, any nonempty token passes. Factory reset does not
 revoke lab tokens. SSH password login is on by default, uses the same pinned
-credential, and has no MFA.
+credential, and skips the forced change and MFA checks.
 
 Use lab mode only for single-tenant, isolated or offline training environments,
 with HTTP and SSH bound to loopback or an instructor-private network. Do not use
@@ -173,9 +178,10 @@ advisories, including `containd-2026-001`, are indexed in
 
 What the design delivers by default:
 
-- A persistent audit database records web/API logins and MFA changes, SSH logins,
-  logouts and CLI commands, configuration saves and commits, factory resets and
-  management boot faults.
+- A persistent audit database records web/API and SSH logins, user, password and
+  MFA changes, SSH logouts, key enrollment and CLI commands, management TLS
+  certificate and CA bundle replacement, configuration saves and commits, factory
+  resets and management boot faults.
 - `GET /api/v1/events` exposes firewall, DPI, IDS, AV, proxy and service events.
   Separate bounded banks keep firewall denies and IEC 104 incident evidence,
   so routine traffic does not evict them.
@@ -185,8 +191,6 @@ What the design delivers by default:
 
 Caveats:
 
-- User creation, change and deletion, password changes, and management TLS
-  certificate replacement through the web/API do not write audit records.
 - Audit records stay in the local database. The syslog forwarder does not carry
   them.
 - Event history is bounded and in memory, and syslog forwarding is best-effort.
@@ -197,14 +201,8 @@ See [Logging and Evidence](logging-evidence.md).
 
 ## Known gaps
 
-**SSH accepts the bootstrap credential without the forced change (goal 2).**
-On a fresh install with no SSH keys, SSH password login is on, SSH listens on
-`:2222`, and default interface access allows SSH on every interface. SSH accepts
-`containd` / `containd` before anyone changes it. SSH also ignores an account's
-MFA requirement. An SSH session can open a Linux shell in the appliance
-container, which runs as root. The bootstrap credential therefore gives full
-appliance access over SSH until someone changes the password through the web
-UI, the API or the SSH menu.
+No pledge goal has a design gap. The caveats under each goal state the
+remaining limits and trade-offs.
 
 ## Deployment hardening
 

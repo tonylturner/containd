@@ -241,6 +241,7 @@ func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.profile.update", Target: u.Username})
 		c.JSON(http.StatusOK, u)
 	}
 }
@@ -282,13 +283,16 @@ func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
+			auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username, Result: "denied", Detail: "current password invalid"})
 			apiError(c, http.StatusUnauthorized, "current password invalid")
 			return
 		}
+		// SetPassword also revokes this account's other sessions.
 		if err := userStore.SetPassword(c.Request.Context(), uid, req.NewPassword); err != nil {
 			apiError(c, setPasswordErrorStatus(err), err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,36 +27,40 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 		if err != nil || !allow {
 			return nil, errors.New("password auth disabled")
 		}
-		key := conn.RemoteAddr().String() + "|" + strings.ToLower(conn.User())
-		if s.pwLimiter != nil {
-			if ok, _ := s.pwLimiter.Allow(key); !ok {
-				return nil, errors.New("too many login attempts; retry later")
-			}
+		key := limiterKey(conn)
+		if ok, _ := s.pwLimiter.Allow(key); !ok {
+			return nil, errTooManyAttempts
 		}
 		u, err := s.opts.UserStore.GetByUsername(context.Background(), conn.User())
 		if err != nil || u == nil {
-			if s.pwLimiter != nil {
-				s.pwLimiter.Fail(key)
-			}
-			return nil, errors.New("invalid credentials")
+			s.pwLimiter.Fail(key)
+			return nil, errInvalidCredentials
 		}
 		if strings.ToLower(strings.TrimSpace(u.Role)) != "admin" {
-			if s.pwLimiter != nil {
-				s.pwLimiter.Fail(key)
-			}
+			s.pwLimiter.Fail(key)
 			return nil, errors.New("ssh requires admin role")
 		}
 		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), password) != nil {
-			if s.pwLimiter != nil {
-				s.pwLimiter.Fail(key)
-			}
-			return nil, errors.New("invalid credentials")
+			s.pwLimiter.Fail(key)
+			return nil, errInvalidCredentials
 		}
-		if s.pwLimiter != nil {
+		// A pending second step keeps the failure count until it succeeds.
+		perms, err := s.assureAccount(conn, u, factorPassword)
+		if err == nil {
 			s.pwLimiter.Success(key)
 		}
-		return &ssh.Permissions{Extensions: map[string]string{"user_id": u.ID}}, nil
+		return perms, err
 	}
+}
+
+// limiterKey counts attempts per client host and user. The source port is
+// excluded: every connection has a new one.
+func limiterKey(conn ssh.ConnMetadata) string {
+	host := conn.RemoteAddr().String()
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host + "|" + strings.ToLower(conn.User())
 }
 
 func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
@@ -78,7 +83,23 @@ func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicK
 		if !ok {
 			return nil, errors.New("unauthorized key")
 		}
-		return &ssh.Permissions{Extensions: map[string]string{"user_id": u.ID}}, nil
+		return userPermissions(u), nil
+	}
+}
+
+// verifiedPublicKeyCallback applies account assurance once the client has
+// proven possession of an authorized key. The key is the possession factor,
+// so it does not ask for a TOTP code.
+func (s *Server) verifiedPublicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicKey, perms *ssh.Permissions, algorithm string) (*ssh.Permissions, error) {
+	return func(conn ssh.ConnMetadata, _ ssh.PublicKey, perms *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+		if s.opts.LabMode {
+			return perms, nil
+		}
+		u, err := s.opts.UserStore.GetByID(context.Background(), perms.Extensions["user_id"])
+		if err != nil || u == nil {
+			return nil, errors.New("invalid user")
+		}
+		return s.assureAccount(conn, u, factorPublicKey)
 	}
 }
 
@@ -179,6 +200,16 @@ func signJWT(secret []byte, userID string, username any, role any, jti string, e
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString(secret)
+}
+
+// authorizedKeyFingerprint returns the SHA256 fingerprint of a validated
+// authorized-key line, for audit records.
+func authorizedKeyFingerprint(line string) string {
+	pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(line)))
+	if err != nil {
+		return ""
+	}
+	return ssh.FingerprintSHA256(pub)
 }
 
 func (s *Server) EnsureAuthorizedKeysDir() {

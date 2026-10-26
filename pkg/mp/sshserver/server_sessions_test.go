@@ -3,7 +3,6 @@ package sshserver
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +29,6 @@ func TestFactoryResetDisconnectsSSHAfterResult(t *testing.T) {
 				// This test exercises concurrent connections, not the
 				// intentionally unsynchronized recording audit fixture.
 				srv.opts.AuditStore = nil
-				srv.opts.ListenAddr = "127.0.0.1:0"
 				srv.opts.LabMode = true
 				if secretless {
 					srv.opts.JWTSecret = nil
@@ -56,36 +54,7 @@ func TestFactoryResetDisconnectsSSHAfterResult(t *testing.T) {
 				}))
 				defer api.Close()
 				srv.opts.BaseURL = api.URL
-				ctx, cancel := context.WithCancel(context.Background())
-				done := make(chan error, 1)
-				go func() { done <- srv.ListenAndServe(ctx) }()
-				defer func() {
-					cancel()
-					select {
-					case err := <-done:
-						if err != nil {
-							t.Error(err)
-						}
-					case <-time.After(5 * time.Second):
-						t.Error("SSH server did not stop")
-					}
-				}()
-				addr := ""
-				deadline := time.Now().Add(3 * time.Second)
-				for time.Now().Before(deadline) {
-					srv.lnMu.Lock()
-					if srv.ln != nil {
-						addr = srv.ln.Addr().String()
-					}
-					srv.lnMu.Unlock()
-					if addr != "" {
-						break
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-				if addr == "" {
-					t.Fatal("SSH listener unavailable")
-				}
+				addr := serveSSH(t, srv)
 				dial := func() *ssh.Client {
 					client, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{
 						User: "containd", Auth: []ssh.AuthMethod{ssh.Password("containd")},
