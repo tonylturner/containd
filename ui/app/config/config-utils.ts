@@ -61,7 +61,6 @@ const SECTION_LABELS: Record<string, string> = {
   ids: "IDS",
   services: "Services",
   dataplane: "Data plane",
-  export: "Export",
   pcap: "PCAP",
 };
 
@@ -207,8 +206,6 @@ export function getBlockValue(
         dpiProtocols: cfg.dataplane?.dpiProtocols,
         dpiExclusions: cfg.dataplane?.dpiExclusions,
       };
-    case "export":
-      return cfg.export;
     case "pcap":
       return cfg.pcap;
     default:

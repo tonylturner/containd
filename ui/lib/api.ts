@@ -726,14 +726,6 @@ export type ConfigBundle = {
     policyRouting?: unknown[];
   };
   dataplane?: DataPlaneConfig;
-  export?: {
-    targets?: Array<{
-      name?: string;
-      format?: string;
-      destination?: string;
-      [k: string]: unknown;
-    }>;
-  };
   pcap?: { enabled?: boolean; filter?: unknown; forwardTargets?: unknown[] };
   firewall?: {
     defaultAction?: "ALLOW" | "DENY";

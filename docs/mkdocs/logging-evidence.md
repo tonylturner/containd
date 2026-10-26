@@ -99,12 +99,6 @@ and `last_sent`. A growing backlog or a set `last_error` means the collector is
 not receiving audit records. The CLI command `show syslog status` prints the
 same fields.
 
-The top-level `export` configuration and `pkg/dp/export` CEF/JSON/Syslog library
-are **not wired into the runtime**. Setting that configuration does not export
-DPI events to a SIEM or to a file/UDP/TCP target. Do not use it as an evidence
-preservation mechanism. Use the working syslog paths for their documented
-sources and retrieve event queries explicitly for other evidence.
-
 ## Retention checklist
 
 1. Choose an external collector and retention period; test delivery and inspect

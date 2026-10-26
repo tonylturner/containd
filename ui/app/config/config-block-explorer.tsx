@@ -17,7 +17,6 @@ export type BlockKey =
   | "services"
   | "dataPlane"
   | "dpi"
-  | "export"
   | "pcap";
 
 type BlockItem = {
@@ -45,7 +44,6 @@ const BLOCK_OPTIONS: Array<{ key: BlockKey; label: string; help: string }> = [
   { key: "services", label: "Services", help: "DNS, NTP, DHCP, proxy, VPN, AV, and syslog." },
   { key: "dataPlane", label: "Data plane", help: "Enforcement, capture interfaces, nftables." },
   { key: "dpi", label: "DPI", help: "DPI mode (learn/enforce), protocol enable/disable, exclusions." },
-  { key: "export", label: "Export", help: "Event export targets (CEF, JSON, Syslog)." },
   { key: "pcap", label: "PCAP", help: "Capture settings and forwarding." },
 ];
 

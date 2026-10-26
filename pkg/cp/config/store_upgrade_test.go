@@ -165,3 +165,55 @@ func TestSnapshotRejectsUnknownFormat(t *testing.T) {
 		t.Fatal("accepted unknown snapshot format")
 	}
 }
+
+// Releases before the top-level "export" section was removed stored it in
+// running and candidate configs. Those snapshots must still load and validate.
+func TestStoredRemovedExportSectionLoads(t *testing.T) {
+	s := candidateStore(t)
+	ctx := context.Background()
+	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+		cfg.System.Hostname = "candidate"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{configKeyRunning, configKeyCandidate} {
+		var raw string
+		if err := s.db.QueryRow(`SELECT data FROM configs WHERE key = ?`, key).Scan(&raw); err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+			t.Fatal(err)
+		}
+		fields["export"] = json.RawMessage(`{"enabled":true,"format":"cef","target":"udp://192.0.2.10:514","filter":"all"}`)
+		blob, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE configs SET data = ? WHERE key = ?`, string(blob), key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s = reopenSnapshotStore(t, s)
+	running, err := s.Load(ctx)
+	if err != nil {
+		t.Fatalf("load running: %v", err)
+	}
+	if err := running.Validate(); err != nil {
+		t.Fatalf("validate running: %v", err)
+	}
+	candidate, err := s.LoadCandidate(ctx)
+	if err != nil {
+		t.Fatalf("load candidate: %v", err)
+	}
+	if candidate.System.Hostname != "candidate" {
+		t.Fatalf("candidate hostname = %q", candidate.System.Hostname)
+	}
+	if err := candidate.Validate(); err != nil {
+		t.Fatalf("validate candidate: %v", err)
+	}
+	if err := s.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
