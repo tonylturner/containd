@@ -21,51 +21,125 @@ func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
 }
 
 func (s *SQLiteStore) loadCandidateLocked(ctx context.Context) (*Config, error) {
-	cfg, err := s.loadKind(ctx, configKeyCandidate)
+	return loadCandidateFrom(ctx, s.db, true)
+}
+
+// LoadCandidateDocument reads editable settings without loading the rule bank.
+// Callers must not interpret its absent rules as an empty stored bank.
+func (s *SQLiteStore) LoadCandidateDocument(ctx context.Context) (*Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return loadCandidateFrom(ctx, s.db, false)
+}
+
+func loadCandidateFrom(ctx context.Context, db configReader, withBank bool) (*Config, error) {
+	cfg, err := readKindFrom(ctx, db, configKeyCandidate, withBank)
 	if errors.Is(err, ErrNotFound) {
-		return s.loadRunningLocked(ctx)
+		return readKindFrom(ctx, db, configKeyRunning, withBank)
 	}
 	return cfg, err
 }
 
-// MutateCandidate serializes read, edit, validation and persistence with all
-// other candidate mutations and promotions. The callback must not call Store.
-func (s *SQLiteStore) MutateCandidate(ctx context.Context, edit func(*Config) error) error {
+// IDSCandidateStore exposes edits that deliberately read or replace the bank.
+// Store's ordinary mutation contract excludes it.
+type IDSCandidateStore interface {
+	Store
+	MutateCandidateIDS(context.Context, func(*Config) error) error
+}
+
+// PairedStore reads both desired states from the same serialized boundary.
+type PairedStore interface {
+	Store
+	LoadPair(context.Context) (*Config, *Config, error)
+}
+
+// LoadPair returns detached running and candidate snapshots. Missing documents
+// are nil; an absent candidate is seeded in memory, just like LoadCandidate.
+func (s *SQLiteStore) LoadPair(ctx context.Context) (*Config, *Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg, err := s.loadCandidateLocked(ctx)
+	running, err := s.loadRunningLocked(ctx)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, nil, err
+	}
+	candidate, err := s.loadCandidateLocked(ctx)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, nil, err
+	}
+	return running, candidate, nil
+}
+
+// MutateCandidate never loads, validates or rewrites the bank. The callback
+// receives nil rules and must leave them nil; it must not call Store methods.
+func (s *SQLiteStore) MutateCandidate(ctx context.Context, edit func(*Config) error) error {
+	return s.mutateCandidate(ctx, edit, false)
+}
+
+// MutateCandidateIDS supplies a complete detached bank to the callback.
+func (s *SQLiteStore) MutateCandidateIDS(ctx context.Context, edit func(*Config) error) error {
+	return s.mutateCandidate(ctx, edit, true)
+}
+
+func (s *SQLiteStore) mutateCandidate(ctx context.Context, edit func(*Config) error, withBank bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg, err := loadCandidateFrom(ctx, s.db, withBank)
 	if err != nil {
 		return err
 	}
 	if err := edit(cfg); err != nil {
 		return err
 	}
+	if !withBank && cfg.IDS.Rules != nil {
+		return errors.New("bank-free candidate edit supplied IDS rules")
+	}
+	// nil from a bank-aware edit means an authoritative empty bank, not retain.
+	if withBank && cfg.IDS.Rules == nil {
+		cfg.IDS.Rules = []IDSRule{}
+	}
 	return s.saveKind(ctx, configKeyCandidate, cfg)
 }
 
-// SaveCandidate replaces desired config while retaining an omitted IDS bank.
-// An explicitly supplied empty bank clears the candidate rules.
+// SaveCandidate retains an omitted bank; an explicit empty bank clears it.
 func (s *SQLiteStore) SaveCandidate(ctx context.Context, cfg *Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if cfg == nil {
-		return errors.New("config is nil")
-	}
-	next := cloneConfigForPersist(cfg)
-	if cfg.IDS.Rules == nil {
-		existing, err := s.loadCandidateLocked(ctx)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		if existing != nil {
-			next.IDS.Rules = existing.IDS.Rules
-		}
-	}
-	return s.saveKind(ctx, configKeyCandidate, next)
+	return s.saveKind(ctx, configKeyCandidate, cfg)
 }
 
 func writeConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config) error {
-	blob, err := marshalStoredConfig(key, cfg)
+	id, err := bankReference(ctx, tx, key)
+	if err != nil {
+		return err
+	}
+	if id == 0 && key == configKeyCandidate {
+		id, err = bankReference(ctx, tx, configKeyRunning)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.IDS.Rules != nil || id == 0 {
+		rules := cfg.IDS.Rules
+		// Save may create the first running document after SaveIDSRules.
+		// An omitted bank retains that already persisted standalone bank too.
+		if id == 0 && key == configKeyRunning && rules == nil {
+			rules, err = loadIDSRulesFrom(ctx, tx)
+			if err != nil {
+				return err
+			}
+		}
+		id, err = createBankTx(ctx, tx, rules)
+		if err != nil {
+			return err
+		}
+	}
+	return writeReferencedConfigTx(ctx, tx, key, cfg, id)
+}
+
+func writeReferencedConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config, id int64) error {
+	stored := storedConfig{Config: *cfg, SnapshotFormat: snapshotFormatReferencedBank, BankID: id}
+	stored.IDS.Rules = nil
+	blob, err := json.Marshal(stored)
 	if err != nil {
 		return err
 	}
@@ -73,9 +147,8 @@ func writeConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config) err
 	return err
 }
 
-// Candidate and previous blobs embed their complete IDS banks. Running keeps
-// the bank in ids_rules for engine consumers. Both representations change in
-// the same transaction; no secondary candidate/previous tables are needed.
+// Promotions move immutable references. Only a changed running bank needs to
+// be materialized into ids_rules, the engine's existing consumer table.
 func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) error {
 	candidate, err := s.loadCandidateLocked(ctx)
 	if err != nil {
@@ -84,7 +157,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err := s.ValidateConfig(candidate); err != nil {
 		return err
 	}
-	running, err := s.loadRunningLocked(ctx)
+	running, err := readKindFrom(ctx, s.db, configKeyRunning, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -93,12 +166,28 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	runningID, err := bankReference(ctx, tx, configKeyRunning)
+	if err != nil {
+		return err
+	}
+	candidateID, err := bankReference(ctx, tx, configKeyCandidate)
+	if err != nil {
+		return err
+	}
+	if candidateID == 0 {
+		candidateID = runningID
+	}
 	if running != nil {
-		if err := writeConfigTx(ctx, tx, configKeyPrevious, running); err != nil {
+		if err := writeReferencedConfigTx(ctx, tx, configKeyPrevious, running, runningID); err != nil {
 			return err
 		}
 	}
-	if err := writeRunningTx(ctx, tx, candidate); err != nil {
+	if candidateID != runningID {
+		if err := replaceIDSRulesTx(ctx, tx, candidate.IDS.Rules); err != nil {
+			return err
+		}
+	}
+	if err := writeReferencedConfigTx(ctx, tx, configKeyRunning, candidate, candidateID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?, ?)`, configKeyCandidate, configKeyPending, bootFaultKey); err != nil {
@@ -113,7 +202,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
@@ -127,9 +216,12 @@ func writeRunningTx(ctx context.Context, tx *sql.Tx, cfg *Config) error {
 	if err := replaceIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 		return err
 	}
-	persisted := cloneConfigForPersist(cfg)
-	persisted.IDS.Rules = nil
-	return writeConfigTx(ctx, tx, configKeyRunning, persisted)
+	// A reset's nil bank is authoritative, unlike Save's retain semantics.
+	cp := *cfg
+	if cp.IDS.Rules == nil {
+		cp.IDS.Rules = []IDSRule{}
+	}
+	return writeConfigTx(ctx, tx, configKeyRunning, &cp)
 }
 
 func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
@@ -148,13 +240,29 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if err := writeRunningTx(ctx, tx, prev); err != nil {
+	id, err := bankReference(ctx, tx, configKeyPrevious)
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return errors.New("previous snapshot has no IDS bank reference")
+	}
+	runningID, err := bankReference(ctx, tx, configKeyRunning)
+	if err != nil {
+		return err
+	}
+	if runningID != id {
+		if err := replaceIDSRulesTx(ctx, tx, prev.IDS.Rules); err != nil {
+			return err
+		}
+	}
+	if err := writeReferencedConfigTx(ctx, tx, configKeyRunning, prev, id); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()

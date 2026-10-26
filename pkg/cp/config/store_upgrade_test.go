@@ -57,9 +57,9 @@ func TestLegacySnapshotsKeepDeployedBank(t *testing.T) {
 			}
 			defer s.Close()
 			if mode != "expired" {
-				// Legacy "unchanged" means the bank at use time, not at migration.
-				before.IDS.Rules = DefaultIDSConfig().Rules[1:2]
-				if err := s.SaveIDSRules(ctx, before.IDS.Rules); err != nil {
+				// Extraction pins the inherited bank at migration, independently
+				// of later running-bank replacements.
+				if err := s.SaveIDSRules(ctx, DefaultIDSConfig().Rules[1:2]); err != nil {
 					t.Fatal(err)
 				}
 				if mode == "candidate" {
@@ -82,7 +82,7 @@ func TestLegacySnapshotsKeepDeployedBank(t *testing.T) {
 func TestSnapshotEmptyBankSurvivesReopen(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
-	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 		cfg.IDS.Rules = []IDSRule{}
 		return nil
 	}); err != nil {
@@ -93,7 +93,7 @@ func TestSnapshotEmptyBankSurvivesReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Snapshot the empty bank as previous, then put rules back in running.
-	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 		cfg.IDS.Rules = DefaultIDSConfig().Rules[:1]
 		return nil
 	}); err != nil {
@@ -157,7 +157,7 @@ func TestUnversionedEmbeddedBankIsPreserved(t *testing.T) {
 func TestSnapshotRejectsUnknownFormat(t *testing.T) {
 	s := candidateStore(t)
 	// Derive a guaranteed unsupported version from the loaded authority.
-	raw := fmt.Sprintf(`{"snapshot_format":%d}`, snapshotFormatEmbeddedBank+1)
+	raw := fmt.Sprintf(`{"snapshot_format":%d}`, snapshotFormatReferencedBank+1)
 	if _, err := s.db.Exec(`INSERT INTO configs VALUES (?, ?, 123)`, configKeyCandidate, raw); err != nil {
 		t.Fatal(err)
 	}

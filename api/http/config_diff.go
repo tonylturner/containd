@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -81,13 +80,13 @@ func changedConfigSections(running, candidate *config.Config, runningBank, candi
 
 func diffConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		running, err := store.Load(c.Request.Context())
-		if err != nil && !errors.Is(err, config.ErrNotFound) {
-			internalError(c, err)
+		paired, ok := store.(config.PairedStore)
+		if !ok {
+			internalError(c, fmt.Errorf("store does not support paired config reads"))
 			return
 		}
-		candidate, err := store.LoadCandidate(c.Request.Context())
-		if err != nil && !errors.Is(err, config.ErrNotFound) {
+		running, candidate, err := paired.LoadPair(c.Request.Context())
+		if err != nil {
 			internalError(c, err)
 			return
 		}

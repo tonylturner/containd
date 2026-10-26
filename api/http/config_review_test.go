@@ -132,7 +132,7 @@ func TestDiffDetectsSecretsAndSummarizesBank(t *testing.T) {
 	if !reflect.DeepEqual(diff.Running, diff.Candidate) {
 		t.Fatal("secret-only redacted snapshots should be equal")
 	}
-	if err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+	if err := store.MutateCandidateIDS(context.Background(), func(cfg *config.Config) error {
 		cfg.IDS.Rules = []config.IDSRule{}
 		return nil
 	}); err != nil {

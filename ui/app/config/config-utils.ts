@@ -3,9 +3,10 @@ import type { ConfigDiff } from "../../lib/api-config";
 import { effectiveICSDecoders } from "../firewall/firewall-utils";
 import type { BlockKey } from "./config-block-explorer";
 
-export type Tab = "overview" | "running" | "candidate" | "diff";
+import { diffLines, type DiffLine } from "./config-line-diff";
+export { diffLines, type DiffLine } from "./config-line-diff";
 
-export type DiffLine = { type: "add" | "del" | "same"; line: string };
+export type Tab = "overview" | "running" | "candidate" | "diff";
 
 export type DiffBlock = {
   key: string;
@@ -45,82 +46,6 @@ export function parseTab(value: string | null): Tab {
     return value as Tab;
   }
   return "overview";
-}
-
-export function diffLines(aLines: string[], bLines: string[]): DiffLine[] {
-  const n = aLines.length;
-  const m = bLines.length;
-  let prefix = 0;
-  while (prefix < n && prefix < m && aLines[prefix] === bLines[prefix]) {
-    prefix++;
-  }
-  let suffix = 0;
-  while (
-    suffix < n - prefix &&
-    suffix < m - prefix &&
-    aLines[n - 1 - suffix] === bLines[m - 1 - suffix]
-  ) {
-    suffix++;
-  }
-  const aSlice = aLines.slice(prefix, n - suffix);
-  const bSlice = bLines.slice(prefix, m - suffix);
-  const sn = aSlice.length;
-  const sm = bSlice.length;
-  if (sn === 0 && sm === 0) {
-    return aLines.map((line) => ({ type: "same" as const, line }));
-  }
-  const prefixLines: DiffLine[] = aLines
-    .slice(0, prefix)
-    .map((line) => ({ type: "same" as const, line }));
-  const suffixLines: DiffLine[] = aLines
-    .slice(n - suffix)
-    .map((line) => ({ type: "same" as const, line }));
-  if (sn === 0) {
-    return [
-      ...prefixLines,
-      ...bSlice.map((line) => ({ type: "add" as const, line })),
-      ...suffixLines,
-    ];
-  }
-  if (sm === 0) {
-    return [
-      ...prefixLines,
-      ...aSlice.map((line) => ({ type: "del" as const, line })),
-      ...suffixLines,
-    ];
-  }
-
-  const dp: number[][] = Array.from({ length: sn + 1 }, () =>
-    new Array(sm + 1).fill(0),
-  );
-  for (let i = 1; i <= sn; i += 1) {
-    for (let j = 1; j <= sm; j += 1) {
-      if (aSlice[i - 1] === bSlice[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  const mid: DiffLine[] = [];
-  let i = sn;
-  let j = sm;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && aSlice[i - 1] === bSlice[j - 1]) {
-      mid.push({ type: "same", line: aSlice[i - 1] });
-      i -= 1;
-      j -= 1;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      mid.push({ type: "add", line: bSlice[j - 1] });
-      j -= 1;
-    } else if (i > 0) {
-      mid.push({ type: "del", line: aSlice[i - 1] });
-      i -= 1;
-    }
-  }
-  mid.reverse();
-  return [...prefixLines, ...mid, ...suffixLines];
 }
 
 export function formatBytes(size: number) {

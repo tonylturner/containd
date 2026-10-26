@@ -77,7 +77,7 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 				cfg.System.Hostname = "candidate"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 				return nil
@@ -98,7 +98,7 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 			}
 			if mode == "superseded" {
 				before = running
-				if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+				if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 					cfg.System.Hostname = "superseding"
 					cfg.IDS.Rules = []IDSRule{}
 					return nil
@@ -151,7 +151,7 @@ func TestCandidatePromotionFailureIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 		cfg.System.Hostname = "must-not-promote"
 		cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 		return nil
@@ -183,7 +183,7 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 				cfg.System.Hostname = "confirmed"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 				return nil
@@ -193,7 +193,7 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 			if err := s.CommitConfirmed(ctx, 100*time.Millisecond); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 				cfg.Description = "newer edit"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[2:3]
 				return nil
