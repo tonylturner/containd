@@ -105,6 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sigma rules with unmapped constraints, and imported rules without
   executable content (including YARA), are kept as non-evaluable with notes
   and no longer alert. Re-importing applies the corrected field mapping.
+- **Upgrade notes for RangerDanger and rollback.** RangerDanger 0.1.25 and
+  earlier send `ics.functionCodes` and `ics.note` when applying a Modbus DPI
+  plan; 0.1.32 ignored them (the rule allowed every function code) and 0.1.33
+  rejects them with HTTP 400. Use RangerDanger 0.1.26 or later. The stored
+  config schema moves to 0.1.7, which 0.1.32 cannot read: back up `/data`
+  before upgrading and restore that backup to roll back. `POST /config/import`
+  now stages; RangerDanger uses it only as a fallback when candidate→commit
+  fails, and in neither version does that fallback change the live firewall.
 - **Malformed management listener addresses are rejected** at validation.
   A listener value must be `host:port` or `:port`.
 
