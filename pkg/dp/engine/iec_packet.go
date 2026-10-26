@@ -77,6 +77,7 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 	}
 	res, ok := t.packet(pkt, state)
 	if !ok {
+		t.finish(res.acts)
 		if envelopeMarked(pkt) {
 			// nft steered this packet as IEC104 envelope traffic, but the
 			// engine finds no envelope for it: fail closed rather than let
@@ -119,7 +120,9 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, boo
 	case s.state == iecClosed:
 		return t.closedPacketLocked(s, dir, pkt, now)
 	default:
-		return t.livePacketLocked(s, dir, pkt, state, now), true
+		res := t.livePacketLocked(s, dir, pkt, state, now)
+		_, res.decision.Notify = t.inventoryTokens[pkt.Token]
+		return res, true
 	}
 }
 
@@ -255,8 +258,8 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		ctx := t.sessionCtx(s.client, s.server)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{}, false
+			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
+			return iecResult{acts: acts}, false
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
 	}
@@ -280,8 +283,8 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 		ctx := t.sessionCtx(s.client, s.server)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{}, false
+			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
+			return iecResult{acts: acts}, false
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
 	}
@@ -381,12 +384,13 @@ func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now tim
 		if s.mode == "enforce" {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortTransport, "", t.current(s, dir, pkt, now), now))
 		}
-		t.closeLocked(s, now)
-		return accepted(reasonIECClosed)
+		res := accepted(reasonIECClosed)
+		res.acts.merge(t.closeLocked(s, now))
+		return res
 	}
 	res := accepted(reasonIECClosed)
 	res.decision.Resolved = t.dropHeldLocked(s, -1)
-	t.closeLocked(s, now)
+	res.acts.merge(t.closeLocked(s, now))
 	return res
 }
 
@@ -411,7 +415,7 @@ func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
 	d.fin, d.finFwd = true, true
 	if s.dirs[1-dir].fin {
 		res.decision.Resolved = append(res.decision.Resolved, t.dropHeldLocked(s, -1)...)
-		t.closeLocked(s, t.now())
+		res.acts.merge(t.closeLocked(s, t.now()))
 	}
 }
 
@@ -434,10 +438,12 @@ func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 	return out
 }
 
-func (t *iecTable) closeLocked(s *iecSession, now time.Time) {
+func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
+	acts := t.endInventoryLocked(s)
 	s.apci = nil
 	s.state, s.endedAt = iecClosed, now
 	t.dpi.EndStream(s.id)
+	return acts
 }
 
 func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
@@ -462,7 +468,11 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 		if cur.off < 0 {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
 		}
-		return dropped(reasonIECInvalid)
+		// A below-floor retransmission is not parseable, but still carries
+		// bytes of any command awaiting its original verdict completion.
+		res := dropped(reasonIECInvalid)
+		t.inventoryPacketLocked(s, cur, &res.acts)
+		return res
 	}
 	start, fresh, err := d.bytes.Add(cur.off, pkt.Payload)
 	if err != nil {
@@ -478,6 +488,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 	}
 	d.seq.Advance(d.bytes.Next())
 	var res iecResult
+	t.inventoryPacketLocked(s, cur, &res.acts)
 	if len(fresh) > 0 && !s.stopParse {
 		denied, trigger, failed := t.inspectLocked(s, dir, pkt, state, start, fresh, &res, now)
 		if enforce && (denied || failed) {
@@ -487,7 +498,8 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 			}
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
 			r.inspect = res.inspect
-			r.acts.events = append(res.acts.events, r.acts.events...)
+			res.acts.merge(r.acts)
+			r.acts = res.acts
 			return r
 		}
 	}
@@ -519,6 +531,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
 		s.observeAPCILocked(dir, f, &res.acts, now)
+		t.observeInventoryLocked(s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
 		d.frames = append(d.frames, iecFrame{start: f.Start, end: f.End})
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
@@ -581,7 +594,8 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 		r := droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		r.decision.Resolved = append(res.decision.Resolved, r.decision.Resolved...)
 		r.inspect = res.inspect
-		r.acts.events = append(res.acts.events, r.acts.events...)
+		res.acts.merge(r.acts)
+		r.acts = res.acts
 		return r
 	}
 	s.held = append(s.held, cur)

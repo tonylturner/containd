@@ -147,6 +147,7 @@ func (g *generation) finish(tok Token, d Decision) {
 		rejected = append(rejected, fmt.Errorf("capture: %s disposition %d: %w", tok, d.Action, err))
 	}
 	if submitCur {
+		cur.notify = cur.notify || d.Notify
 		subs = append([]submission{cur}, subs...)
 		subs[0].tok = tok
 	}

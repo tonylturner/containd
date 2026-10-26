@@ -163,7 +163,7 @@ func (inv *Inventory) ObserveIEC104(o IEC104Observation) IEC104CommandRef {
 	}, &s.overflow.CAs)
 	seen(&ca.FirstSeen, &ca.LastSeen, at)
 	var ref IEC104CommandRef
-	if o.ControlDirection && commandType(o.TypeID) {
+	if o.IsCommand() {
 		ref = IEC104CommandRef{pairKey{o.Controlling, o.Controlled}, o.CA, ca.generation}
 		p.AttemptedCommands++
 		ca.AttemptedCommands++

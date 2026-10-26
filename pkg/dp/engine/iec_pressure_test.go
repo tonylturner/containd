@@ -99,8 +99,8 @@ func TestIECPressureTotalsAndWorkerSaturation(t *testing.T) {
 	table.jobs = newWorker(1)
 	table.jobs.submit(func() {})
 	table.finish(iecActions{jobs: []func(){func() {}}})
-	table.onVerdict(h.token(), errors.New("verdict failed"))
-	table.onVerdict(h.token(), capture.ErrQueueClosed)
+	table.onVerdict(h.token(), capture.VerdictDrop, errors.New("verdict failed"))
+	table.onVerdict(h.token(), capture.VerdictDrop, capture.ErrQueueClosed)
 	after := h.e.IEC104Diagnostics()
 	if after.ResetWorkerRejections != before.ResetWorkerRejections+1 || after.VerdictFailures != before.VerdictFailures+1 {
 		t.Fatalf("totals before=%+v after=%+v", before, after)

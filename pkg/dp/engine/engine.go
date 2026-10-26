@@ -260,6 +260,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	if prevRunDone != nil {
 		<-prevRunDone
 	}
+	if prevIEC != nil {
+		prevIEC.stopInventory()
+	}
 	e.runCancel = nil
 	e.runCapture = nil
 	e.runDone = nil
