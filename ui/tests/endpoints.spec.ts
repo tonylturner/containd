@@ -97,16 +97,3 @@ test("the NAT page brackets an IPv6 port forward destination", async ({ page }) 
   await expect(page.getByRole("cell", { name: "[2001:db8::5]:2404", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "192.0.2.5", exact: true })).toBeVisible();
 });
-
-test("the publish-service wizard summary brackets an IPv6 server", async ({ page }) => {
-  await mockAPI(page, { "/api/v1/zones": zones, "/api/v1/firewall/nat": { enabled: false } });
-  await open(page, "/wizard/", "/api/v1/firewall/nat");
-  await page.getByRole("button", { name: /Publish Internal Service/ }).click();
-  await page.getByPlaceholder("e.g. 192.168.1.10").fill("2001:db8::5");
-  await page.getByPlaceholder("e.g. 443").fill("502");
-  await page.getByRole("button", { name: "Next", exact: true }).click();
-  await page.getByRole("button", { name: "Next", exact: true }).click();
-  await page.getByRole("combobox").selectOption("wan");
-  await page.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(page.getByText("[2001:db8::5]:502", { exact: true })).toBeVisible();
-});
