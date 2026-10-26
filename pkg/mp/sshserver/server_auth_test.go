@@ -18,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -344,5 +345,30 @@ func TestAuthorizedKeyRejectsPathUsername(t *testing.T) {
 		if ok, err := isAuthorizedKey(srv.opts.AuthorizedKeysDir, username, pub); err != nil || ok {
 			t.Fatalf("lookup accepted username %q: %v", username, err)
 		}
+	}
+}
+
+// portConnMetadata is a connection from the same host on a given source port.
+type portConnMetadata struct {
+	testConnMetadata
+	port int
+}
+
+func (m portConnMetadata) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: m.port}
+}
+
+func TestPasswordLimiterCountsPerHost(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	srv.pwLimiter = ratelimit.NewAttemptLimiter(time.Minute, 2, time.Minute)
+	auth := srv.passwordCallback()
+	for port := 40000; port < 40002; port++ {
+		if _, err := auth(portConnMetadata{testConnMetadata{user: "containd"}, port}, []byte("wrong")); err == nil {
+			t.Fatal("wrong password accepted")
+		}
+	}
+	// A new connection gets a new source port; it must not reset the count.
+	if _, err := auth(portConnMetadata{testConnMetadata{user: "containd"}, 40002}, []byte("containd")); err == nil || !strings.Contains(err.Error(), "too many login attempts") {
+		t.Fatalf("limiter did not apply across source ports: %v", err)
 	}
 }

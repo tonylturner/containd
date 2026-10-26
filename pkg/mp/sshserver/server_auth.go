@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 		if err != nil || !allow {
 			return nil, errors.New("password auth disabled")
 		}
-		key := conn.RemoteAddr().String() + "|" + strings.ToLower(conn.User())
+		key := limiterKey(conn)
 		if s.pwLimiter != nil {
 			if ok, _ := s.pwLimiter.Allow(key); !ok {
 				return nil, errors.New("too many login attempts; retry later")
@@ -56,6 +57,16 @@ func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte)
 		}
 		return &ssh.Permissions{Extensions: map[string]string{"user_id": u.ID}}, nil
 	}
+}
+
+// limiterKey counts attempts per client host and user. The source port is
+// excluded: every connection has a new one.
+func limiterKey(conn ssh.ConnMetadata) string {
+	host := conn.RemoteAddr().String()
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host + "|" + strings.ToLower(conn.User())
 }
 
 func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
