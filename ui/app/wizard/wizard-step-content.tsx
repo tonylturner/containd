@@ -9,6 +9,7 @@ import {
   CARDS,
   COMMON_PROTOCOLS,
   ICS_PROTOCOLS,
+  serverIpError,
   serverPortError,
   type WizardId,
   zoneLabel,
@@ -144,7 +145,8 @@ export function WizardStepContent({
 
   if (active === "publish-service") {
     if (step === 0) {
-      // A blank port only disables Next; the message is for what was typed.
+      // A blank field only disables Next; the messages are for what was typed.
+      const ipError = serverIp.trim() ? serverIpError(serverIp) : null;
       const portError = serverPort.trim() ? serverPortError(serverPort) : null;
       return (
         <div className="space-y-3">
@@ -156,8 +158,15 @@ export function WizardStepContent({
               value={serverIp}
               onChange={(e) => setServerIp(e.target.value)}
               placeholder="e.g. 192.168.1.10"
+              aria-invalid={ipError ? true : undefined}
+              aria-describedby={ipError ? "wizard-ip-error" : undefined}
               className="input-industrial w-full"
             />
+            {ipError && (
+              <p id="wizard-ip-error" role="alert" className="mt-1 text-xs text-red-400">
+                {ipError}
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-(--text)">
@@ -222,12 +231,12 @@ export function WizardStepContent({
           <p>
             Port forward (DNAT): <strong>{ingressZone}</strong>{" "}
             {pubProto.toUpperCase()}/{serverPort} &#8594;{" "}
-            <strong>{formatEndpoint(serverIp, serverPort)}</strong>
+            <strong>{formatEndpoint(serverIp.trim(), serverPort)}</strong>
           </p>
           <p>
             Firewall rule: <span className="text-emerald-400">ALLOW</span>{" "}
             inbound from <strong>{ingressZone}</strong> to{" "}
-            <strong>{serverIp}</strong> on {pubProto.toUpperCase()}/{serverPort}
+            <strong>{serverIp.trim()}</strong> on {pubProto.toUpperCase()}/{serverPort}
           </p>
         </div>
       </div>

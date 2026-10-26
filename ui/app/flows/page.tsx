@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
@@ -11,6 +11,8 @@ import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { TagList } from "../../components/TagList";
+
+const UNAVAILABLE = "Flows unavailable — the engine could not be reached.";
 
 /** Short form of an IEC 104 session ID ("<run>-<seq>"): run prefix and seq. */
 function shortSessionID(id: string): string {
@@ -52,43 +54,30 @@ function FlowsInner() {
 
   const hasMore = filteredFlows.length > PAGE_SIZE && !showAll;
 
-  async function manualRefresh() {
+  // A failed load clears the error only on the next success, so the earlier
+  // list stays hidden instead of reappearing while a retry is in flight.
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const list = await api.listFlows();
-      if (!list) { setError("Flows unavailable — the engine could not be reached."); setLoading(false); return; }
-      setError(null);
-      setFlows(list);
-      setLoading(false);
-    } catch {
-      setError("Flows unavailable — the engine could not be reached.");
-      setLoading(false);
+      const list = await api.listFlows(200, signal);
+      if (list) {
+        setError(null);
+        setFlows(list);
+      } else {
+        setError(UNAVAILABLE);
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError(UNAVAILABLE);
     }
-  }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     const avOnly = searchParams.get("av") === "1";
     if (avOnly) setShowAVOnly(true);
     const controller = new AbortController();
-
-    async function refresh() {
-      setLoading(true);
-      try {
-        const list = await api.listFlows(200, controller.signal);
-        if (!list) {
-          setError("Flows unavailable — the engine could not be reached.");
-          setLoading(false);
-          return;
-        }
-        setError(null);
-        setFlows(list);
-        setLoading(false);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError("Flows unavailable — the engine could not be reached.");
-        setLoading(false);
-      }
-    }
+    const refresh = () => load(controller.signal);
 
     refresh();
     const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
@@ -99,7 +88,7 @@ function FlowsInner() {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [searchParams]);
+  }, [searchParams, load]);
 
   return (
     <Shell
@@ -107,7 +96,7 @@ function FlowsInner() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={manualRefresh}
+            onClick={() => load()}
             className="transition-ui rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text)"
           >
             Refresh
@@ -127,7 +116,7 @@ function FlowsInner() {
       {error && (
         <div role="status" className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           <p>{error}</p>
-          <button onClick={manualRefresh} disabled={loading} className="mt-2 rounded-xs border px-3 py-1 disabled:opacity-50">Retry</button>
+          <button onClick={() => load()} disabled={loading} className="mt-2 rounded-xs border px-3 py-1 disabled:opacity-50">Retry</button>
         </div>
       )}
 

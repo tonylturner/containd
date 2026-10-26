@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The publish-service wizard checks the port on the step where it is typed,
-// with the same rule it applies when staging the port forward.
+// The publish-service wizard checks the server address and port on the step
+// where they are typed, with the same rules it applies when staging the port
+// forward. A port forward's destination must be IPv4.
 
 const zones = [{ name: "wan" }, { name: "lan" }];
 
@@ -32,13 +33,38 @@ async function mockWizardAPI(page: Page) {
   return staged;
 }
 
-async function openPublishService(page: Page) {
+async function openPublishService(page: Page, ip = "192.0.2.5") {
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/nat");
   await page.goto("/wizard/");
   await loaded;
   await page.getByRole("button", { name: /Publish Internal Service/ }).click();
-  await page.getByPlaceholder("e.g. 192.168.1.10").fill("192.0.2.5");
+  await page.getByPlaceholder("e.g. 192.168.1.10").fill(ip);
 }
+
+test("the publish-service wizard rejects a non-IPv4 server address at the server step", async ({ page }) => {
+  await mockWizardAPI(page);
+  await openPublishService(page);
+  const ip = page.getByPlaceholder("e.g. 192.168.1.10");
+  await page.getByPlaceholder("e.g. 443").fill("443");
+  const next = page.getByRole("button", { name: "Next", exact: true });
+
+  for (const bad of ["192.0.2", "192.0.2.256", "192.0.2.05", "server.local", "2001:db8::5"]) {
+    await ip.fill(bad);
+    await expect(page.getByRole("alert").filter({ hasText: `"${bad}" is not a valid IPv4 address` })).toBeVisible();
+    await expect(ip).toHaveAttribute("aria-invalid", "true");
+    await expect(ip).toHaveAttribute("aria-describedby", "wizard-ip-error");
+    await expect(next).toBeDisabled();
+  }
+
+  await ip.fill("");
+  await expect(page.locator("#wizard-ip-error")).toHaveCount(0);
+  await expect(next).toBeDisabled();
+
+  await ip.fill("192.0.2.5");
+  await expect(page.locator("#wizard-ip-error")).toHaveCount(0);
+  await expect(ip).not.toHaveAttribute("aria-invalid", "true");
+  await expect(next).toBeEnabled();
+});
 
 test("the publish-service wizard rejects an out-of-range port at the server step", async ({ page }) => {
   await mockWizardAPI(page);
@@ -64,9 +90,9 @@ test("the publish-service wizard rejects an out-of-range port at the server step
   await expect(next).toBeEnabled();
 });
 
-test("the publish-service wizard stages the port accepted at the server step", async ({ page }) => {
+test("the publish-service wizard stages the address and port accepted at the server step", async ({ page }) => {
   const staged = await mockWizardAPI(page);
-  await openPublishService(page);
+  await openPublishService(page, " 192.0.2.5 ");
   await page.getByPlaceholder("e.g. 443").fill("502");
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Next", exact: true }).click();

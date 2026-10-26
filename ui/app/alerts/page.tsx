@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
+import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { Pagination, SearchBar } from "../../components/TableControls";
@@ -31,6 +32,8 @@ function alertView(ev: TelemetryEvent): { severity: string; message: string; rul
 export default function AlertsPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Until the first answer the list is unknown, not empty.
+  const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(true);
   const [selected, setSelected] = useState<TelemetryEvent | null>(null);
   const [page, setPage] = useState(0);
@@ -43,13 +46,17 @@ export default function AlertsPage() {
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const list = await api.listEvents(2000, signal);
-      if (!list) { setError("Failed to load alerts."); return; }
-      setError(null);
-      setEvents(list);
+      if (list) {
+        setError(null);
+        setEvents(list);
+      } else {
+        setError("Failed to load alerts.");
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError("Failed to load alerts.");
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -129,7 +136,7 @@ export default function AlertsPage() {
       {/* An unavailable list hides the earlier one rather than present it as current. */}
       {error ? (
         <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>
-      ) : <>
+      ) : loading ? <SkeletonList rows={4} /> : <>
       {/* Severity summary */}
       <div className="mb-4 flex gap-3">
         {(["critical", "high", "medium", "low"] as const).map((s) => (

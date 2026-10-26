@@ -1,15 +1,12 @@
 /** Client-side validation helpers for network inputs. */
 
-const ipv4Re = /^(\d{1,3}\.){3}\d{1,3}$/;
+// Octets without leading zeros: the server's net.ParseIP refuses "010.0.0.1".
+const ipv4Re = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
 const ipv6Re = /^[0-9a-fA-F:]+$/;
 
 /** Returns true if s looks like a valid IPv4 address. */
 export function isIPv4(s: string): boolean {
-  if (!ipv4Re.test(s)) return false;
-  return s.split(".").every((o) => {
-    const n = Number(o);
-    return n >= 0 && n <= 255;
-  });
+  return ipv4Re.test(s);
 }
 
 /** Returns true if s looks like a valid IPv6 address (loose check). */
@@ -78,6 +75,14 @@ export function validateIP(input: string): string | null {
   const s = input.trim();
   if (!s) return null;
   if (!isIP(s)) return `"${s}" is not a valid IP address`;
+  return null;
+}
+
+/** Validates a single IPv4 address. Returns null if valid or empty. */
+export function validateIPv4(input: string): string | null {
+  const s = input.trim();
+  if (!s) return null;
+  if (!isIPv4(s)) return `"${s}" is not a valid IPv4 address`;
   return null;
 }
 
