@@ -1192,10 +1192,20 @@ components:
       type: object
     SSHConfig:
       properties:
-        allowPassword: {type: boolean}
+        allowPassword:
+          type: boolean
+          nullable: true
+          description: >-
+            Omitted or null uses bootstrap/lab defaults. Explicit false disables
+            SSH password authentication even in lab mode. Staging and commit
+            require a usable authorized key for an existing admin before disabling.
         authorizedKeysDir: {type: string}
         banner: {type: string}
-        hostKeyRotationDays: {type: integer}
+        hostKeyRotationDays:
+          type: integer
+          minimum: 0
+          maximum: 36500
+          description: "Rotate host keys at this age in days; 0 disables rotation. Running settings are checked every minute."
         listenAddr: {type: string}
         shellMode: {type: string}
       type: object

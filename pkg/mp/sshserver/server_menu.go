@@ -447,13 +447,16 @@ func (s *interactiveSession) wizardPromptPassword() bool {
 		return true
 	}
 	u, err := s.server.opts.UserStore.GetByUsername(s.ctx, s.username)
-	if err == nil && u != nil {
-		_ = s.server.opts.UserStore.SetPassword(s.ctx, u.ID, v)
-		s.writeAudit("user.password.set", s.username)
-		s.writeLn("password updated")
-		return true
+	if err != nil || u == nil {
+		s.writeLn("error: failed to load user")
+		return false
 	}
-	s.writeLn("failed to update password")
+	if err := s.server.opts.UserStore.SetPassword(s.ctx, u.ID, v); err != nil {
+		s.writeLn("error: " + err.Error())
+		return false
+	}
+	s.writeAudit("user.password.set", s.username)
+	s.writeLn("password updated")
 	return true
 }
 

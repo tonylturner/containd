@@ -109,6 +109,9 @@ func validateSSH(s SSHConfig) error {
 	if s.AuthorizedKeysDir != "" && len(s.AuthorizedKeysDir) > 256 {
 		return fmt.Errorf("ssh.authorizedKeysDir too long")
 	}
+	if s.HostKeyRotationDays < 0 || s.HostKeyRotationDays > MaxSSHHostKeyRotationDays {
+		return fmt.Errorf("ssh.hostKeyRotationDays must be in 0..%d", MaxSSHHostKeyRotationDays)
+	}
 	return nil
 }
 

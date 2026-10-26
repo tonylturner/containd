@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -278,4 +280,69 @@ func authorizedKeyLineForTest(t *testing.T) (ssh.PublicKey, string) {
 		t.Fatalf("ssh.NewPublicKey: %v", err)
 	}
 	return pub, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+}
+
+func TestPasswordDisableIncludesLabMode(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	unreadable := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(unreadable, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, lab := range []bool{false, true} {
+		srv.opts.LabMode = lab
+		srv.opts.AllowPassword = false
+		for _, dir := range []string{t.TempDir(), unreadable, filepath.Join(t.TempDir(), "missing")} {
+			srv.opts.AuthorizedKeysDir = dir
+			if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd")); err == nil {
+				t.Fatalf("password accepted with lab=%v keys=%s", lab, dir)
+			}
+		}
+	}
+}
+
+func TestRunningSSHAuthPolicy(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	srv.opts.LabMode = true
+	allow := true
+	dir := t.TempDir()
+	var readErr error
+	srv.opts.AuthPolicy = func(context.Context) (bool, string, error) { return allow, dir, readErr }
+	auth := func() error {
+		_, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd"))
+		return err
+	}
+	if err := auth(); err != nil {
+		t.Fatal(err)
+	}
+	pub, key := authorizedKeyLineForTest(t)
+	if err := srv.SeedAuthorizedKey("containd", key); err != nil {
+		t.Fatal(err)
+	}
+	allow = false
+	if err := auth(); err == nil {
+		t.Fatal("running disable did not take effect")
+	}
+	if _, err := srv.publicKeyCallback()(testConnMetadata{user: "containd"}, pub); err != nil {
+		t.Fatalf("key in running directory was not usable: %v", err)
+	}
+	readErr = errors.New("config unavailable")
+	if err := auth(); err == nil {
+		t.Fatal("unavailable policy allowed password auth")
+	}
+	if _, err := srv.publicKeyCallback()(testConnMetadata{user: "containd"}, pub); err == nil {
+		t.Fatal("unavailable policy allowed key auth")
+	}
+}
+
+func TestAuthorizedKeyRejectsPathUsername(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	pub, key := authorizedKeyLineForTest(t)
+	for _, username := range []string{"", ".", "..", "../outside", "/outside"} {
+		if err := srv.SeedAuthorizedKey(username, key); err == nil {
+			t.Fatalf("seed accepted username %q", username)
+		}
+		if ok, err := isAuthorizedKey(srv.opts.AuthorizedKeysDir, username, pub); err != nil || ok {
+			t.Fatalf("lookup accepted username %q: %v", username, err)
+		}
+	}
 }

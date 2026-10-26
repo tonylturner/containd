@@ -6,10 +6,6 @@ package sshserver
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -20,44 +16,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
-
-func ensureHostKey(path string, rotationDays int) (ssh.Signer, error) {
-	if b, err := os.ReadFile(path); err == nil {
-		if rotationDays > 0 {
-			info, err := os.Stat(path)
-			if err == nil && time.Since(info.ModTime()) > time.Duration(rotationDays)*24*time.Hour {
-				_ = os.Remove(path)
-			} else {
-				return ssh.ParsePrivateKey(b)
-			}
-		} else {
-			return ssh.ParsePrivateKey(b)
-		}
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return nil, err
-	}
-	p := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	if err := os.WriteFile(path, p, 0o600); err != nil {
-		return nil, err
-	}
-	return ssh.ParsePrivateKey(p)
-}
 
 func (s *Server) passwordCallback() func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 	return func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-		if !s.opts.AllowPassword && !s.opts.LabMode {
+		allow, _, err := s.authPolicy(context.Background())
+		if err != nil || !allow {
 			return nil, errors.New("password auth disabled")
 		}
 		key := conn.RemoteAddr().String() + "|" + strings.ToLower(conn.User())
@@ -101,7 +67,11 @@ func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicK
 		if strings.ToLower(strings.TrimSpace(u.Role)) != "admin" {
 			return nil, errors.New("ssh requires admin role")
 		}
-		ok, err := isAuthorizedKey(s.opts.AuthorizedKeysDir, conn.User(), key)
+		_, dir, err := s.authPolicy(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		ok, err := isAuthorizedKey(dir, conn.User(), key)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +82,41 @@ func (s *Server) publicKeyCallback() func(conn ssh.ConnMetadata, key ssh.PublicK
 	}
 }
 
+func (s *Server) authPolicy(ctx context.Context) (bool, string, error) {
+	if s.opts.AuthPolicy != nil {
+		return s.opts.AuthPolicy(ctx)
+	}
+	return s.opts.AllowPassword, s.opts.AuthorizedKeysDir, nil
+}
+
 func isAuthorizedKey(dir, username string, presented ssh.PublicKey) (bool, error) {
+	return hasAuthorizedKey(dir, username, func(pub ssh.PublicKey) bool {
+		return bytes.Equal(pub.Marshal(), presented.Marshal())
+	}), nil
+}
+
+// ValidateAdminAuthorizedKey checks the same files and key parser used at login,
+// and only accepts keys belonging to an existing admin.
+func ValidateAdminAuthorizedKey(ctx context.Context, store users.Store, dir string) error {
+	if store == nil {
+		return errors.New("ssh.allowPassword=false requires a usable admin authorized key; user store unavailable")
+	}
+	admins, err := store.List(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot verify SSH admin authorized keys: %w", err)
+	}
+	for _, u := range admins {
+		if strings.EqualFold(strings.TrimSpace(u.Role), "admin") && hasAuthorizedKey(dir, u.Username, func(ssh.PublicKey) bool { return true }) {
+			return nil
+		}
+	}
+	return errors.New("ssh.allowPassword=false would lock out SSH access: enroll a usable authorized key for an admin first")
+}
+
+func hasAuthorizedKey(dir, username string, match func(ssh.PublicKey) bool) bool {
+	if !validKeyUsername(username) {
+		return false
+	}
 	candidates := []string{
 		filepath.Join(dir, username),
 		filepath.Join(dir, username+".pub"),
@@ -128,13 +132,17 @@ func isAuthorizedKey(dir, username string, presented ssh.PublicKey) (bool, error
 			if err != nil {
 				break
 			}
-			if bytes.Equal(pub.Marshal(), presented.Marshal()) {
-				return true, nil
+			if match(pub) {
+				return true
 			}
 			b = rest
 		}
 	}
-	return false, nil
+	return false
+}
+
+func validKeyUsername(username string) bool {
+	return username != "" && username != "." && username != ".." && filepath.Base(username) == username
 }
 
 func (s *Server) issueToken(ctx context.Context, username, userID string) (token string, sessionID string, err error) {
@@ -179,8 +187,8 @@ func (s *Server) EnsureAuthorizedKeysDir() {
 
 func (s *Server) SeedAuthorizedKey(username string, authorizedKeyLine string) error {
 	username = strings.TrimSpace(username)
-	if username == "" {
-		return errors.New("username required")
+	if !validKeyUsername(username) {
+		return errors.New("SSH key username must be a single non-empty filename")
 	}
 	line := strings.TrimSpace(authorizedKeyLine)
 	if line == "" {
@@ -190,10 +198,14 @@ func (s *Server) SeedAuthorizedKey(username string, authorizedKeyLine string) er
 		return fmt.Errorf("invalid authorized key: %w", err)
 	}
 
-	if err := os.MkdirAll(s.opts.AuthorizedKeysDir, 0o700); err != nil {
+	_, dir, err := s.authPolicy(context.Background())
+	if err != nil {
 		return err
 	}
-	dst := filepath.Join(s.opts.AuthorizedKeysDir, username+".pub")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	dst := filepath.Join(dir, username+".pub")
 	if b, err := os.ReadFile(dst); err == nil {
 		if bytes.Contains(b, []byte(line)) {
 			return nil

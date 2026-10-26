@@ -59,7 +59,7 @@ func newSSHTestHTTPClient() *sshTestHTTPClient {
 	cfg.System.Mgmt.ListenAddr = ":8080"
 	cfg.System.SSH.ListenAddr = ":2222"
 	cfg.System.SSH.AuthorizedKeysDir = "/data/ssh"
-	cfg.System.SSH.AllowPassword = true
+	cfg.System.SSH.AllowPassword = new(true)
 	cfg.Interfaces = []config.Interface{
 		{Name: "wan", Device: "eth0", Zone: "wan", AddressMode: "dhcp"},
 		{Name: "lan1", Device: "eth1", Zone: "lan", AddressMode: "static", Addresses: []string{"192.0.2.2/24"}},
@@ -446,5 +446,64 @@ func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
 
 	if len(auditStore.records) == 0 {
 		t.Fatal("expected password audit records")
+	}
+}
+
+// A failed write still permits reads, matching a store that cannot persist a password.
+type passwordWriteFailure struct{ users.Store }
+
+func (s passwordWriteFailure) SetPassword(context.Context, string, string) error {
+	return io.ErrClosedPipe
+}
+
+func TestWizardPasswordFailureStops(t *testing.T) {
+	for _, failure := range []string{"weak", "store"} {
+		t.Run(failure, func(t *testing.T) {
+			srv, store, audits := newTestSSHServer(t)
+			before, err := store.GetByUsername(context.Background(), "containd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			password := "weak"
+			if failure == "store" {
+				password = sshTestValue("write-failure")
+				srv.opts.UserStore = passwordWriteFailure{store}
+			}
+			session, output := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n")
+			if session.wizardPromptPassword() {
+				t.Fatal("wizard continued after failed password write")
+			}
+			if !strings.Contains(output.String(), "error:") || strings.Contains(output.String(), "password updated") {
+				t.Fatal(output.String())
+			}
+			if len(audits.records) != 0 {
+				t.Fatalf("unexpected success audit: %+v", audits.records)
+			}
+			after, err := store.GetByUsername(context.Background(), "containd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.PasswordHash != after.PasswordHash {
+				t.Fatal("failed write changed credentials")
+			}
+		})
+	}
+}
+
+func TestWizardPasswordSuccessAuthenticates(t *testing.T) {
+	srv, _, audits := newTestSSHServer(t)
+	password := sshTestValue("wizard-success")
+	session, output := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n")
+	if !session.wizardPromptPassword() || !strings.Contains(output.String(), "password updated") {
+		t.Fatal(output.String())
+	}
+	if len(audits.records) != 1 || audits.records[0].Action != "user.password.set" {
+		t.Fatalf("audit: %+v", audits.records)
+	}
+	if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte(password)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd")); err == nil {
+		t.Fatal("old password accepted")
 	}
 }
