@@ -91,8 +91,8 @@ func TestReservedAutoBindKeepsExistingBinding(t *testing.T) {
 	// Discovery would prefer eth8 for lan3. The stored reserved binding wins.
 	t.Setenv("CONTAIND_AUTO_LAN3_SUBNET", "192.0.2.0/24")
 	state := []config.InterfaceState{
-		{Name: "eth7", Index: 7, Addrs: []string{"10.99.99.2/24"}},
-		{Name: "eth8", Index: 8, Addrs: []string{"192.0.2.2/24"}},
+		{Name: "eth7", Index: 7, Up: true, Addrs: []string{"10.99.99.2/24"}},
+		{Name: "eth8", Index: 8, Up: true, Addrs: []string{"192.0.2.2/24"}},
 	}
 	autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, "eth8", store.ManagementReservation())
 	if cfg.Interfaces[0].Device != "eth7" || cfg.Interfaces[1].Device != "eth8" {

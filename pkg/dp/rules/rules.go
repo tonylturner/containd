@@ -27,6 +27,11 @@ type LocalServiceRule struct {
 	Zone   string
 	Proto  string // tcp|udp
 	Port   int
+	// RecoverUnbound is set only for a management listener with logical grants.
+	// Resolve in the engine namespace; an empty resolved set MUST omit the rule,
+	// never turn it into an unconstrained allow.
+	RecoverUnbound bool
+	DeniedIfaces   []string
 }
 
 type NATConfig struct {

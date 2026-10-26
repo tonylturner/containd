@@ -12,9 +12,43 @@ import (
 	"testing"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
+
+func TestHealthReportsUnboundManagement(t *testing.T) {
+	cfg := config.DefaultConfig()
+	engine := &mockEngine{}
+	server := NewServerWithEngine(&mockStore{cfg: cfg}, nil, engine)
+	check := func(want string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		var body struct {
+			Binding struct {
+				State string `json:"state"`
+				Ports []int  `json:"recoveryPorts"`
+			} `json:"managementBinding"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || body.Binding.State != want || (want == "unbound-appliance" && len(body.Binding.Ports) == 0) {
+			t.Fatalf("health = %s", rec.Body)
+		}
+	}
+	check("unbound-appliance")
+	cfg.Interfaces[0].Device = "eth0"
+	check("configured")
+	engine.state = []config.InterfaceState{{Name: "eth0", Up: false}, {Name: "eth1", Up: true}}
+	check("configured") // Administrative link-down is not an unbound appliance.
+	off := false
+	for i := range cfg.Interfaces {
+		cfg.Interfaces[i].Access = config.InterfaceAccess{Mgmt: &off, HTTP: &off, HTTPS: &off, SSH: &off}
+	}
+	check("configured")
+}
 
 type healthMockEngine struct {
 	*mockEngine

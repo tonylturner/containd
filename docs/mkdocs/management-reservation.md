@@ -23,6 +23,25 @@ from that local address, and in the declared subnet. The deployment must place
 them on-link. Ambiguity or a malformed declaration is fatal.
 This is process authority, never an editable Config or snapshot field.
 
+## Partial appliances and default binding
+
+Default interfaces bind independently to a unique **up** NIC matching their
+`CONTAIND_AUTO_<NAME>_SUBNET`. Missing or ambiguous explicit subnet matches stay
+unbound; names, the default route and index order cannot override that authority.
+Five- and seven-NIC appliances do not need eight NICs to initialize a reservation.
+Default bindings are rediscovered by subnet on restart, including NIC renumbering.
+
+Management INPUT rules contain bound device names, never unbound logical names.
+If a listener has logical access grants but none of its bindings exists on a
+NIC, enforcement permits that listener on discovered NICs **except explicitly
+disabled device bindings**. This is the unbound-appliance recovery invariant, not
+a permanent reservation. Once a granted binding exists, only granted bindings
+are used, even if administratively down. Turning every access flag off creates
+no recovery allow. Management
+health reports `managementBinding.state: "unbound-appliance"` and `recoveryPorts`;
+`"configured"` means ordinary bindings/policy apply, and `"unknown"` means the
+running config or engine interface state could not be read.
+
 ## Guarantees
 
 Every compiled firewall has an independent INPUT allow after invalid-packet drop:

@@ -12,6 +12,10 @@ import (
 // Discovery changes only the new in-memory config; callers preflight before any
 // persistence or destructive action.
 func ApplianceDefaults(r *mgmtpath.Reservation) *config.Config {
+	return applianceDefaults(r, AutoBindDefaultInterfaceDevicesReserved)
+}
+
+func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtpath.Reservation) bool) *config.Config {
 	def := config.DefaultConfig()
 	config.ApplyBootstrapEnvDefaults(def)
 	def.System.Hostname = "containd"
@@ -40,6 +44,6 @@ func ApplianceDefaults(r *mgmtpath.Reservation) *config.Config {
 			def.System.SSH.ListenAddr = "127.0.0.1:0"
 		}
 	}
-	AutoBindDefaultInterfaceDevicesReserved(def, r)
+	bind(def, r)
 	return def
 }

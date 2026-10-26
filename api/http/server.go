@@ -213,7 +213,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api := r.Group("/api/v1")
 	api.Use(limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit))
 	// Health is always unauthenticated for liveness.
-	api.GET("/health", healthHandler(engine))
+	api.GET("/health", healthHandler(store, engine))
 	// Prometheus metrics endpoint (unauthenticated for scraping).
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
