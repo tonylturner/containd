@@ -186,7 +186,9 @@ Docker starter topology.
 Notes:
 - Serialized firewall rules always include `ics`; `{}` means the rule has no
   ICS predicate. Input rules may omit this field.
-- `zones` must be unique.
+- `zones` must be unique. A zone name is 1 to 125 bytes without leading or
+  trailing whitespace; enforcement names each zone's nftables interface set
+  after it.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
 - `interfaces.device`, or the `name` of an interface without a device (which is then its kernel name), must be a Linux interface name that nftables can match exactly: 1–15 bytes, without `/`, `:`, whitespace, control characters, `"`, `*` or `\`, and neither `.` nor `..`. So must each `services.dhcp.listenIfaces` entry of an enabled DHCP server that names a kernel device rather than a configured interface.
 - `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).

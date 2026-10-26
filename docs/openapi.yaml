@@ -1470,7 +1470,7 @@ components:
         alias: {type: string}
         consequence: {type: string}
         description: {type: string}
-        name: {type: string}
+        name: {type: string, maxLength: 125, description: No leading or trailing whitespace.}
         slOverrides: {additionalProperties: {type: boolean}, type: object}
         slTarget: {type: integer}
       type: object
