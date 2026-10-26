@@ -335,6 +335,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The routing page's Auto WAN default route reads the WAN address as strictly as the firewall quick start, and both infer the gateway the same way: the other address of a /31, and no gateway for a /32 or when the WAN interface holds the first address of its subnet.
+- The firewall's outbound quick start binds the wan-gw gateway and default route to the WAN interface's OS device, as Auto WAN and the CLI quick start do.
 - The ICS templates and NAT pages show loading until the first answer instead of "No templates available", disabled SNAT, no port forwards or setup tips. NAT settings the server did not return are reported as unavailable instead of being shown, and saved, as disabled NAT.
 - The flows list keeps its rows and "Showing x of y" footer during its 10-second refresh.
 - Diagnostics refuses IPv4 addresses with leading zeros (such as 192.0.2.07) for temporary host and flow blocks.
