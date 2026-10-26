@@ -3,7 +3,6 @@
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import type {
-  InterfaceState,
   PcapConfig,
   PcapStatus,
 } from "../../lib/api";

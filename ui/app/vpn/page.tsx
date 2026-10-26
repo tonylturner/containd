@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   isAdmin,
-  type VPNConfig,
   type OpenVPNConfig,
   type Zone,
   type Interface,
@@ -20,17 +19,14 @@ import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import {
   Badge,
-  defaultOpenVPNManaged,
   defaultOpenVPNServer,
   hasLikelyPEM,
   hasNonEmptyString,
   IssuesBanner,
   normalize,
-  PEMField,
   type FieldIssue,
 } from "./vpn-shared";
 import { OpenVPNEditorCard } from "./vpn-openvpn-editor";

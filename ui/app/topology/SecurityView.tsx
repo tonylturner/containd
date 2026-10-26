@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useToast } from "../../components/ToastProvider";
 import { api, Conduit, ConduitMap } from "../../lib/api";
-import { type ZoneView, type SRCheck, SR_DEFS, MAX_SL, mapZone, scoreZone, slColor, zoneColor } from "../../lib/security-scoring";
+import { type ZoneView, MAX_SL, mapZone, scoreZone, slColor } from "../../lib/security-scoring";
 import s from "./security.module.css";
 import ts from "./topology.module.css";
 
@@ -53,13 +53,6 @@ export default function SecurityView() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
-
-  // Gap count across ALL zones
-  const gapCount = useMemo(() => {
-    let g = 0;
-    allZones.forEach((z) => { const { sl_a } = scoreZone(z, conduits); if (sl_a < z.sl_t) g++; });
-    return g;
-  }, [allZones, conduits]);
 
   // ── Zone selector ──
   const addZone = useCallback((id: string) => {

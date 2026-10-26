@@ -11,7 +11,6 @@ import {
   ResetPasswordModal,
 } from "./users-sections";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
 type UsersTab = "manage" | "create";
 
 export default function UsersPage() {
@@ -19,7 +18,6 @@ export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
     firstName: string;
@@ -68,12 +66,9 @@ export default function UsersPage() {
 
   async function onCreate() {
     setError(null);
-    setSaveState("saving");
     const created = await api.createUser(newUser as any);
     if (!created.ok) {
-      setSaveState("error");
       setError(created.error || "Failed to create user.");
-      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     setNewUser({
@@ -85,8 +80,6 @@ export default function UsersPage() {
       password: "",
     });
     await refresh();
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function startEdit(user: User) {
@@ -107,19 +100,14 @@ export default function UsersPage() {
   async function saveEdit(id: string) {
     if (!editDraft) return;
     setError(null);
-    setSaveState("saving");
     const updated = await api.updateUser(id, editDraft);
     if (!updated.ok) {
-      setSaveState("error");
       setError(updated.error || "Failed to update user.");
-      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     await refresh();
-    setSaveState("saved");
     setEditingUserId(null);
     setEditDraft(null);
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function onResetPassword(id: string) {
@@ -130,18 +118,13 @@ export default function UsersPage() {
   async function submitResetPassword() {
     if (!resetPwUserId || !resetPwValue) return;
     setError(null);
-    setSaveState("saving");
     const ok = await api.setUserPassword(resetPwUserId, resetPwValue);
     if (!ok.ok) {
-      setSaveState("error");
       setError(ok.error || "Failed to set password.");
-      setTimeout(() => setSaveState("idle"), 5000);
       return;
     }
     setResetPwUserId(null);
     setResetPwValue("");
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function onDeleteUser(user: User) {
@@ -153,20 +136,15 @@ export default function UsersPage() {
       variant: "danger",
       onConfirm: async () => {
         setError(null);
-        setSaveState("saving");
         const ok = await api.deleteUser(user.id);
         if (!ok.ok) {
-          setSaveState("error");
           setError(
             ok.error ||
               "Failed to delete user. Ensure at least one admin remains.",
           );
-          setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
         await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
       },
     });
   }
@@ -180,17 +158,12 @@ export default function UsersPage() {
       variant: "warning",
       onConfirm: async () => {
         setError(null);
-        setSaveState("saving");
         const ok = await api.disableUserMFA(user.id);
         if (!ok.ok) {
-          setSaveState("error");
           setError(ok.error || "Failed to disable MFA.");
-          setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
         await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
       },
     });
   }
@@ -206,17 +179,12 @@ export default function UsersPage() {
       variant: "warning",
       onConfirm: async () => {
         setError(null);
-        setSaveState("saving");
         const ok = await api.requireUserMFA(user.id);
         if (!ok.ok) {
-          setSaveState("error");
           setError(ok.error || "Failed to require MFA.");
-          setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
         await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
       },
     });
   }
@@ -230,17 +198,12 @@ export default function UsersPage() {
       variant: "warning",
       onConfirm: async () => {
         setError(null);
-        setSaveState("saving");
         const ok = await api.clearUserMFARequirement(user.id);
         if (!ok.ok) {
-          setSaveState("error");
           setError(ok.error || "Failed to clear MFA requirement.");
-          setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
         await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
       },
     });
   }
@@ -254,17 +217,12 @@ export default function UsersPage() {
       variant: "warning",
       onConfirm: async () => {
         setError(null);
-        setSaveState("saving");
         const ok = await api.extendUserMFAGrace(user.id);
         if (!ok.ok) {
-          setSaveState("error");
           setError(ok.error || "Failed to extend MFA grace.");
-          setTimeout(() => setSaveState("idle"), 5000);
           return;
         }
         await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
       },
     });
   }

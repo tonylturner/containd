@@ -8,10 +8,8 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useEffect, useState } from "react";
 
 import {
-  api,
   apiURL,
   isAdmin,
-  uploadPcap,
   listPcaps,
   type PcapItem,
 } from "../../lib/api";

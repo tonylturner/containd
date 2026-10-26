@@ -36,7 +36,6 @@ export default function AVPage() {
   const [defs, setDefs] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [defsPath, setDefsPath] = useState<string>("");
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -203,18 +202,9 @@ export default function AVPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      {(updateMsg || notice) && (
-        <div className="mb-4 space-y-2">
-          {updateMsg && (
-            <div className="rounded-lg border bg-(--surface) px-3 py-2 text-sm text-(--text)">
-              {updateMsg}
-            </div>
-          )}
-          {notice && (
-            <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-400">
-              {notice}
-            </div>
-          )}
+      {updateMsg && (
+        <div className="mb-4 rounded-lg border bg-(--surface) px-3 py-2 text-sm text-(--text)">
+          {updateMsg}
         </div>
       )}
 
@@ -372,12 +362,6 @@ export default function AVPage() {
             />
           </div>
         </div>
-        {notice && (
-          <div className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-400">
-            {notice}
-          </div>
-        )}
-
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
           <p className="text-xs text-(--text-muted)">Use when mode is ICAP; leave empty to disable.</p>
