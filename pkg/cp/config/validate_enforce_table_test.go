@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// The accepted names follow the engine's table name rule: nft's identifier
-// syntax, with room for the "_policy" table within the kernel's 255 bytes.
+// Configuration applies the engine's table name rule: nft's identifier
+// syntax without nft keywords or the DHCP redirect table, with room for the
+// "_policy" table within the kernel's 255 bytes.
 func TestValidateEnforceTable(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -33,6 +34,11 @@ func TestValidateEnforceTable(t *testing.T) {
 		{"fw/lab", false},
 		{`"fw"`, false},
 		{"containd_dhcp", false},
+		{"table", false},
+		{"inet", false},
+		{"accept", false},
+		{"auto-merge", false},
+		{"Table", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateDataPlane(DataPlaneConfig{Enforcement: true, EnforceTable: tc.name})

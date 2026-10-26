@@ -136,3 +136,25 @@ func TestTableNameRuleIsSharedByCompilerAndUpdater(t *testing.T) {
 		t.Fatal("empty table name accepted")
 	}
 }
+
+func TestValidateTableNameRejectsKeywordsAndForeignTables(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"table": false, "inet": false, "ip": false, "accept": false, "auto-merge": false, "rt0": false,
+		"tunnel": false, DHCPRedirectTable: false, "Table": true, "INET": true, "auto_merge": true,
+		"rt1": true, "tunnels": true, "table_x": true, "containd_dhcp_policy": true, "containd_policy": true,
+	} {
+		if err := ValidateTableName(name); (err == nil) != ok {
+			t.Errorf("ValidateTableName(%q) = %v, want ok=%v", name, err, ok)
+		}
+	}
+	// A valid name's policy table is valid too: "_policy" ends no keyword
+	// and not the DHCP redirect table.
+	for w := range nftKeywords {
+		if strings.HasSuffix(w, "_policy") || ValidateTableName(w) == nil {
+			t.Errorf("keyword %q: accepted or a policy table name", w)
+		}
+	}
+	if strings.HasSuffix(DHCPRedirectTable, "_policy") {
+		t.Errorf("%s ends in _policy", DHCPRedirectTable)
+	}
+}

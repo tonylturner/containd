@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -870,22 +870,13 @@ func validateDataPlane(dp DataPlaneConfig) error {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")
 		}
 	}
-	// The engine owns inet <t> (dynamic sets) and inet <t>_policy; neither
-	// may be the DHCP redirect table.
-	t := dp.EnforceTable
-	if t != "" && !enforceTableName.MatchString(t) {
-		return fmt.Errorf("dataplane.enforceTable %q must start with a letter or '_', continue with letters, digits, '_' or '-', and have at most 248 characters", t)
-	}
-	if t == "containd_dhcp" || t+"_policy" == "containd_dhcp" {
-		return errors.New("dataplane.enforceTable must not name the DHCP redirect table containd_dhcp")
+	if t := dp.EnforceTable; t != "" {
+		if err := enforce.ValidateTableName(t); err != nil {
+			return fmt.Errorf("dataplane.enforceTable: %w", err)
+		}
 	}
 	return nil
 }
-
-// enforceTableName is the engine's table name rule: nft cannot address a
-// name that starts with a digit or '-', even quoted, and <t>_policy must fit
-// the kernel's 255-byte object names.
-var enforceTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,247}$`)
 
 func validatePCAP(p PCAPConfig) error {
 	if err := validatePCAPInterfaces(p); err != nil {

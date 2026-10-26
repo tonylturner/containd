@@ -22,15 +22,22 @@ import (
 
 const defaultTableName = "containd"
 
+// DHCPRedirectTable is the inet table the DHCP server owns. Neither table
+// above may take its name.
+const DHCPRedirectTable = "containd_dhcp"
+
 // maxTableName leaves room for the policy table suffix within the kernel's
 // 255-byte object names.
 const maxTableName = 255 - len("_policy")
 
 // ValidateTableName checks a dynamic table name. It is the one rule for
-// table names in this package: nft's identifier syntax restricted to the
+// containd's table names: nft's identifier syntax restricted to the
 // characters configuration allows, a letter or underscore followed by
 // letters, digits, underscores and hyphens. nft cannot address a name that
-// starts with a digit or hyphen, even quoted.
+// starts with a digit or hyphen, or a name that is an nft keyword, even
+// quoted. The DHCP redirect table's name is taken. The policy table's name
+// needs no check of its own: it ends in "_policy", which no keyword and not
+// the DHCP redirect table does.
 func ValidateTableName(name string) error {
 	if name == "" || len(name) > maxTableName {
 		return fmt.Errorf("invalid nft table name %q: want 1-%d characters", name, maxTableName)
@@ -40,6 +47,12 @@ func ValidateTableName(name string) error {
 		if !letter && (i == 0 || (r != '-' && (r < '0' || r > '9'))) {
 			return fmt.Errorf("invalid nft table name %q: start with a letter or underscore, then use letters, digits, underscores and hyphens", name)
 		}
+	}
+	if _, ok := nftKeywords[name]; ok {
+		return fmt.Errorf("invalid nft table name %q: it is an nft keyword", name)
+	}
+	if name == DHCPRedirectTable {
+		return fmt.Errorf("invalid nft table name %q: it is the DHCP redirect table", name)
 	}
 	return nil
 }
