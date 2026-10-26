@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -20,7 +21,9 @@ import (
 func TestClientPreviewRule(t *testing.T) {
 	entry := rules.Entry{ID: "candidate", SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}}}
-	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}}}
+	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}},
+		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow,
+			Message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive"}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var got rules.Entry
 		if r.Method != http.MethodPost || r.URL.Path != "/internal/rules/preview" ||

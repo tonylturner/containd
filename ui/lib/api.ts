@@ -49,6 +49,7 @@ export {
 } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
+export type { RulePreview } from "./api-network";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 import { inventoryAPI } from "./api-inventory";
@@ -282,8 +283,17 @@ export type FirewallRule = {
   destinations?: string[];
   protocols?: Protocol[];
   ics?: ICSPredicate;
+  identities?: string[];
+  schedule?: RuleSchedule;
   action: "ALLOW" | "DENY";
   log?: boolean;
+};
+
+export type RuleSchedule = {
+  daysOfWeek?: string[];
+  startTime?: string;
+  endTime?: string;
+  timezone?: string;
 };
 
 export type NATConfig = {

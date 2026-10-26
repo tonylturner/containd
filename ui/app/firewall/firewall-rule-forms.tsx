@@ -6,9 +6,11 @@ import { useState } from "react";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import {
+  api,
   type FirewallRule,
   type ICSPredicate,
   type Protocol,
+  type RulePreview,
   type Zone,
 } from "../../lib/api";
 import { validateIPOrCIDRList } from "../../lib/validate";
@@ -24,6 +26,7 @@ import {
   icsProtoMeta,
   zoneLabel,
 } from "./firewall-utils";
+import { RuleImpactSummary } from "./firewall-rule-warnings";
 
 export function EditRuleModal({
   zones,
@@ -56,8 +59,10 @@ export function EditRuleModal({
   const [mode, setMode] = useState<"enforce" | "learn">(rule.ics?.mode ?? "learn");
   const [iec, setIec] = useState<IEC104Draft>(() => iec104DraftFrom(rule.ics));
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<RulePreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
-  function save() {
+  function buildPatch(): Partial<FirewallRule> | null {
     setError(null);
     const ics = buildRuleICS({
       enabled: icsEnabled,
@@ -75,9 +80,9 @@ export function EditRuleModal({
     });
     if (!ics.ok) {
       setError(ics.error);
-      return;
+      return null;
     }
-    onSave({
+    return {
       description: description.trim() || undefined,
       action,
       log: log || undefined,
@@ -87,7 +92,28 @@ export function EditRuleModal({
       destinations: splitCSV(destinations),
       protocols: buildProtocols(proto, port),
       ics: ics.ics,
-    });
+    };
+  }
+
+  function save() {
+    const patch = buildPatch();
+    if (patch) onSave(patch);
+  }
+
+  // Previews the edited rule, including the identities and schedule this form
+  // does not edit: their warnings explain an inactive ALLOW rule.
+  async function previewImpact() {
+    const patch = buildPatch();
+    if (!patch) return;
+    setPreviewing(true);
+    const res = await api.previewFirewallRule({ ...rule, ...patch });
+    setPreviewing(false);
+    if (!res.ok) {
+      setPreview(null);
+      setError(`Impact preview failed: ${res.error}`);
+      return;
+    }
+    setPreview(res.data);
   }
 
   return (
@@ -153,8 +179,12 @@ export function EditRuleModal({
           />
         )}
 
+        {preview && <RuleImpactSummary preview={preview} />}
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
+          <button onClick={previewImpact} disabled={previewing} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50">
+            {previewing ? "Previewing..." : "Preview impact"}
+          </button>
           <button onClick={onClose} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">Cancel</button>
           <button onClick={save} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
         </div>

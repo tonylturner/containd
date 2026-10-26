@@ -24,6 +24,10 @@ type PreviewRuleResponse struct {
 	SampleMatches []events.Event    `json:"sample_matches"`
 	TimeRange     *PreviewTimeRange `json:"time_range"`
 	TotalEvents   int               `json:"total_events"`
+	// Warnings lists the candidate's predicates that resolve toward denial
+	// under the running enforcement, which explains an inactive ALLOW rule's
+	// zero matches; omitted when there are none.
+	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 }
 
 type PreviewTimeRange struct {
@@ -47,7 +51,9 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	evs := e.eventStore.ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	effective, active := enforcedCandidate(entry, e.enforcedQueueID())
+	queueID := e.enforcedQueueID()
+	effective, active := enforcedCandidate(entry, queueID)
+	result.Warnings = (&enforce.Compiler{QueueID: queueID}).RuleWarnings(&rules.Snapshot{Firewall: []rules.Entry{entry}})
 	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{effective}})
 	for _, ev := range evs {
 		if result.TimeRange == nil {

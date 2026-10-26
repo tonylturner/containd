@@ -38,6 +38,7 @@ import {
 import { DPIConfigSection } from "./firewall-dpi-config";
 import { summarizeIEC104 } from "../ics/iec104";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
+import { RuleWarningList } from "./firewall-rule-warnings";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -424,18 +425,7 @@ export default function FirewallPage() {
             {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
           </p>
         )}
-        {rulesetPreview?.warnings && rulesetPreview.warnings.length > 0 && (
-          <div role="status" className="mt-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
-            <p className="font-semibold">Rule predicates resolved toward denial</p>
-            <ul className="mt-1 space-y-0.5">
-              {rulesetPreview.warnings.map((w) => (
-                <li key={`${w.ruleId}:${w.predicate}`}>
-                  <span className="font-mono">{w.ruleId}</span>: {w.message}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <RuleWarningList warnings={rulesetPreview?.warnings} />
         {rulesetPreview?.ruleset && (
           <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {rulesetPreview.ruleset}

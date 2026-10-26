@@ -638,6 +638,12 @@ components:
             start: {type: string, format: date-time}
             end: {type: string, format: date-time}
         total_events: {type: integer, description: Total events evaluated}
+        warnings:
+          type: array
+          items: {$ref: '#/components/schemas/RuleWarning'}
+          description: >-
+            Predicates of the rule that resolve toward denial under the running enforcement;
+            an inactive ALLOW rule matches nothing. Omitted when there are none.
     AVConfig:
       properties:
         blockTtlSeconds: {type: integer}
@@ -3119,6 +3125,8 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RulePreviewResponse"}
         "400": {description: Invalid rule payload, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "502": {description: The engine failed to evaluate the preview, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "503": {description: No engine rule preview is available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Learn Mode ──────────────────────────────────────────────────
   /learn/profiles:

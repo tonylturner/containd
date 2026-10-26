@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -36,7 +37,9 @@ func (e *previewMockEngine) PreviewRule(_ context.Context, entry rules.Entry) (d
 func TestPreviewFirewallRuleDelegates(t *testing.T) {
 	result := dpengine.PreviewRuleResponse{MatchCount: 123, TotalEvents: 456,
 		SampleMatches: []events.Event{{ID: 99, SrcIP: "10.30.30.30"}},
-		TimeRange:     &dpengine.PreviewTimeRange{Start: time.Unix(1, 0).UTC(), End: time.Unix(20, 0).UTC()}}
+		TimeRange:     &dpengine.PreviewTimeRange{Start: time.Unix(1, 0).UTC(), End: time.Unix(20, 0).UTC()},
+		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
+			Message: "identity predicates are not enforced yet; ALLOW rule inactive"}}}
 	eng := &previewMockEngine{result: result}
 	body := `{"id":"candidate","sourceZones":["control"],"destZones":["plant"],
 		"sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],"action":"ALLOW",
