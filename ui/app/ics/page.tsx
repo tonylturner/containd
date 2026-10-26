@@ -114,14 +114,14 @@ export default function ICSPolicyPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -129,7 +129,7 @@ export default function ICSPolicyPage() {
       {/* -- DPI status --------------------------------------------------- */}
       <Card title="Candidate DPI Settings" className="mb-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-[var(--text)]">
+          <div className="text-sm text-(--text)">
             ICS protocol filters require DPI to be enabled with at least one capture interface configured.
           </div>
           <StatusBadge variant={(dpiConfig.dpiEnabled ?? false) ? "success" : "neutral"} dot>
@@ -137,7 +137,7 @@ export default function ICSPolicyPage() {
           </StatusBadge>
         </div>
         {(dpiConfig.captureInterfaces ?? []).length > 0 && (
-          <div className="mt-2 text-xs text-[var(--text-muted)]">
+          <div className="mt-2 text-xs text-(--text-muted)">
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
         )}
@@ -145,7 +145,7 @@ export default function ICSPolicyPage() {
           <IEC104HealthStatus />
         </div>
         <div className="mt-2">
-          <Link href="/firewall/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
             Configure DPI in Firewall Rules &rarr;
           </Link>
         </div>
@@ -163,21 +163,21 @@ export default function ICSPolicyPage() {
           </div>
         </Card>
         <Card title="Quick Start">
-          <ol className="space-y-1 text-xs text-[var(--text-muted)]">
+          <ol className="space-y-1 text-xs text-(--text-muted)">
             <li>1. Create a firewall rule matching your PLC/RTU zone.</li>
             <li>2. Select the protocol and define criteria here.</li>
             <li>3. Start with Safe Learning, then switch to Enforce.</li>
           </ol>
           <Link
             href="/firewall/"
-            className="mt-3 inline-block text-xs text-[var(--amber)] hover:text-[var(--amber)]"
+            className="mt-3 inline-block text-xs text-(--amber) hover:text-(--amber)"
           >
             Go to Firewall Rules &rarr;
           </Link>
         </Card>
         <Card title="Candidate Filters">
           {Object.keys(protoCounts).length === 0 ? (
-            <div className="text-xs text-[var(--text-muted)]">
+            <div className="text-xs text-(--text-muted)">
               No ICS filters configured yet.
             </div>
           ) : (
@@ -185,7 +185,7 @@ export default function ICSPolicyPage() {
               {Object.entries(protoCounts).map(([p, n]) => (
                 <div
                   key={p}
-                  className="flex items-center justify-between text-sm text-[var(--text)]"
+                  className="flex items-center justify-between text-sm text-(--text)"
                 >
                   <span>{protoMeta(p).label}</span>
                   <StatusBadge variant="neutral">{n}</StatusBadge>
@@ -200,7 +200,7 @@ export default function ICSPolicyPage() {
       <div className="mb-3 flex gap-2 overflow-x-auto">
         <button
           onClick={() => setFilterProto("all")}
-          className={`rounded-sm px-3 py-1.5 text-xs transition-ui ${filterProto === "all" ? "bg-[var(--amber)] text-white font-medium" : "bg-[var(--surface2)] text-[var(--text)] hover:bg-amber-500/[0.08]"}`}
+          className={`rounded-xs px-3 py-1.5 text-xs transition-ui ${filterProto === "all" ? "bg-(--amber) text-white font-medium" : "bg-(--surface2) text-(--text) "}`}
         >
           All
         </button>
@@ -208,7 +208,7 @@ export default function ICSPolicyPage() {
           <button
             key={k}
             onClick={() => setFilterProto(k)}
-            className={`rounded-sm px-3 py-1.5 text-xs transition-ui ${filterProto === k ? "bg-[var(--amber)] text-white font-medium" : "bg-[var(--surface2)] text-[var(--text)] hover:bg-amber-500/[0.08]"}`}
+            className={`rounded-xs px-3 py-1.5 text-xs transition-ui ${filterProto === k ? "bg-(--amber) text-white font-medium" : "bg-(--surface2) text-(--text) "}`}
           >
             {PROTOCOLS[k].label}
             {protoCounts[k] ? ` (${protoCounts[k]})` : ""}
@@ -217,9 +217,9 @@ export default function ICSPolicyPage() {
       </div>
 
       {/* -- Rules table ------------------------------------------------- */}
-      <div className="overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
+      <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Rule</th>
               <th className="px-4 py-3">Zones</th>
@@ -249,7 +249,7 @@ export default function ICSPolicyPage() {
                     action={
                       <Link
                         href="/firewall/"
-                        className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+                        className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
                       >
                         Open Firewall Rules
                       </Link>
@@ -259,37 +259,37 @@ export default function ICSPolicyPage() {
               </tr>
             )}
             {icsRules.map((r) => (
-              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
+              <tr key={r.id} className="border-t table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.id}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   {(r.sourceZones ?? []).join(", ") || "any"} &rarr;{" "}
                   {(r.destZones ?? []).join(", ") || "any"}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   <StatusBadge variant="neutral">
                     {protoMeta(r.ics?.protocol ?? "").label}
                   </StatusBadge>
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.ics?.protocol === "iec104"
                     ? summarizeIEC104(r.ics).types
                     : (r.ics?.functionCode ?? []).join(", ") || "*"}
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.ics?.protocol === "iec104"
                     ? summarizeIEC104(r.ics).addresses
                     : (r.ics?.addresses ?? []).join(", ") || "*"}
                 </td>
-                <td className="px-4 py-3 text-xs text-[var(--text)]">
+                <td className="px-4 py-3 text-xs text-(--text)">
                   {r.ics?.readOnly
                     ? "R"
                     : r.ics?.writeOnly
                       ? "W"
                       : "R/W"}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   <ICSModeBadge
                     ruleMode={r.ics?.mode}
                     globalMode={dpiConfig.dpiMode}
@@ -298,7 +298,7 @@ export default function ICSPolicyPage() {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => setEditing(r)}
-                    className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]"
+                    className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
                   >
                     Edit
                   </button>

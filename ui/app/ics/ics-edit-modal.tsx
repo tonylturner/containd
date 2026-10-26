@@ -86,15 +86,15 @@ export function EditICSModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+      <div className="w-full max-w-xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">
+          <h2 className="text-lg font-semibold text-(--text)">
             ICS filter &mdash; rule{" "}
-            <span className="font-mono text-[var(--amber)]">{rule.id}</span>
+            <span className="font-mono text-(--amber)">{rule.id}</span>
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
           >
             Close
           </button>
@@ -106,14 +106,14 @@ export function EditICSModal({
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
             />
             Enable ICS protocol filter
           </label>
 
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 Protocol
                 <InfoTip label="Select the ICS/OT protocol for this rule." />
               </label>
@@ -131,7 +131,7 @@ export function EditICSModal({
               </select>
             </div>
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 Safety mode
                 <InfoTip label="Safe learning only alerts; enforce will block on match." />
               </label>
@@ -157,7 +157,7 @@ export function EditICSModal({
           ) : (
             <>
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.fcLabel}
                 <InfoTip label={meta.fcHelp} />
               </label>
@@ -171,7 +171,7 @@ export function EditICSModal({
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.addrLabel}
                 <InfoTip label={meta.addrHelp} />
               </label>
@@ -186,7 +186,7 @@ export function EditICSModal({
 
             {protocol === "modbus" && (
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                   Unit ID
                   <InfoTip label="Modbus unit identifier (slave address). 0-255. Leave empty for all." />
                 </label>
@@ -202,7 +202,7 @@ export function EditICSModal({
 
             {protocol === "cip" && (
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                   Object Classes
                   <InfoTip label="CIP object class IDs (comma-separated, hex with 0x prefix or decimal). Leave empty for all." />
                 </label>
@@ -226,7 +226,7 @@ export function EditICSModal({
                     if (e.target.checked) setWriteOnly(false);
                   }}
                   disabled={!enabled}
-                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                  className="h-4 w-4 rounded-sm border-white/20 bg-(--surface) disabled:opacity-60"
                 />
                 Read-only
                 <InfoTip label="Only match read operations. Mutually exclusive with write-only." />
@@ -240,7 +240,7 @@ export function EditICSModal({
                     if (e.target.checked) setReadOnly(false);
                   }}
                   disabled={!enabled}
-                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                  className="h-4 w-4 rounded-sm border-white/20 bg-(--surface) disabled:opacity-60"
                 />
                 Write-only
                 <InfoTip label="Only match write/control operations. Mutually exclusive with read-only." />
@@ -249,8 +249,8 @@ export function EditICSModal({
             </>
           )}
 
-          <div className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
-            <strong className="text-[var(--text)]">{meta.label}</strong> &mdash;
+          <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text-muted)">
+            <strong className="text-(--text)">{meta.label}</strong> &mdash;
             port {meta.port}.{" "}
             {protocol === "modbus" &&
               "Common: 3=Read Holding Regs, 4=Read Input Regs, 5=Write Single Coil, 6=Write Single Reg, 15=Write Multiple Coils, 16=Write Multiple Regs."}
@@ -291,13 +291,13 @@ export function EditICSModal({
           />
           <button
             onClick={onClose}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Save filter
           </button>

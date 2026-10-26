@@ -1,6 +1,168 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  /* Appliance palette: flat amber/cyan accents, with fixed sRGB status colors. */
+  --color-*: initial;
+  --color-black: #000;
+  --color-white: #fff;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-green-300: #86efac;
+  --color-green-500: #22c55e;
+  --color-orange-300: #fdba74;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-pink-300: #f9a8d4;
+  --color-pink-500: #ec4899;
+  --color-purple-300: #d8b4fe;
+  --color-purple-400: #c084fc;
+  --color-purple-500: #a855f7;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-rose-200: #fecdd3;
+  --color-rose-500: #f43f5e;
+  --color-sky-500: #0ea5e9;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-teal-300: #5eead4;
+  --color-teal-500: #14b8a6;
+  --color-yellow-300: #fde047;
+  --color-yellow-500: #eab308;
+
+  /* Keep line boxes fixed when components use a smaller local font size. */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  --color-ink: #080a08;
+  --color-surface: #0d110d;
+  --color-surface-raised: #111611;
+  --color-mint: #22c55e;
+  --color-amber: #f59e0b;
+  --color-danger: #ef4444;
+  --color-cyan: #06b6d4;
+
+  --shadow-card:
+    0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.08);
+  --shadow-card-lg:
+    0 4px 16px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(245, 158, 11, 0.1);
+  --shadow-focus-ring: 0 0 0 2px #080a08, 0 0 0 4px #f59e0b;
+  --shadow-amber-glow:
+    0 0 12px rgba(245, 158, 11, 0.15), inset 0 0 8px rgba(245, 158, 11, 0.1);
+
+  --font-display: 'Orbitron', monospace;
+  --font-ui: 'Rajdhani', sans-serif;
+  --font-mono: 'Share Tech Mono', monospace;
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --animate-fade-in: fadeIn 200ms ease;
+  --animate-fade-in-up: fadeInUp 400ms ease both;
+  --animate-slide-down: slideDown 200ms ease;
+  --animate-pulse-ring: pulseRing 3s ease-in-out infinite;
+  --animate-blink: blink 1.5s ease-in-out infinite;
+
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes fadeInUp {
+    0% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes slideDown {
+    0% {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes pulseRing {
+    0%,
+    100% {
+      box-shadow:
+        0 0 8px rgba(245, 158, 11, 0.15),
+        inset 0 0 6px rgba(245, 158, 11, 0.1);
+    }
+    50% {
+      box-shadow:
+        0 0 20px rgba(245, 158, 11, 0.4),
+        inset 0 0 12px rgba(245, 158, 11, 0.3);
+    }
+  }
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.2;
+    }
+  }
+}
+
+/* Shared form and separator defaults for the industrial theme. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+
+  th,
+  td {
+    padding: 1px;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
 
 :root {
   color-scheme: dark;
@@ -65,11 +227,6 @@ body::before {
   z-index: 9999;
   will-change: transform;
   contain: strict;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
 }
 
 /* ── Utility classes ────────────────────────────────────────── */

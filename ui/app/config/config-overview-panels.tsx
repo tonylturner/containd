@@ -33,22 +33,22 @@ export function ConfigBackupRecoveryCard({
     <Card padding="lg">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
+          <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">
             Backup &amp; Restore
           </div>
-          <h2 className="text-lg font-semibold text-[var(--text)]">Backup &amp; recovery</h2>
+          <h2 className="text-lg font-semibold text-(--text)">Backup &amp; recovery</h2>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => onDownloadConfig(true)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+            className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Download redacted
           </button>
           {canEdit && (
             <button
               onClick={() => onDownloadConfig(false)}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
             >
               Download full
             </button>
@@ -61,40 +61,40 @@ export function ConfigBackupRecoveryCard({
           accept=".json"
           onChange={(e) => onUploadFileChange(e.target.files?.[0] ?? null)}
           disabled={!canEdit}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+          className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui outline-hidden"
         />
-        <div className="text-xs text-[var(--text-muted)]">
+        <div className="text-xs text-(--text-muted)">
           Restore replaces the candidate config. Use redacted backups for sharing.
         </div>
         {canEdit && (
           <button
             onClick={onRestoreConfig}
-            className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
           >
             Restore
           </button>
         )}
       </div>
-      <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card">
+      <div className="mt-4 rounded-xs border bg-(--surface) p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">
+            <div className="text-xs uppercase tracking-[0.2em] text-(--text-dim)">
               Appliance backups
             </div>
-            <div className="text-sm text-[var(--text)]">Store backups on the firewall.</div>
+            <div className="text-sm text-(--text)">Store backups on the firewall.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => onCreateBackup(true)}
               disabled={!canEdit}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-xs text-(--text) transition-ui"
             >
               Save redacted
             </button>
             {canEdit && (
               <button
                 onClick={() => onCreateBackup(false)}
-                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 transition-ui"
+                className="rounded-xs bg-(--amber) px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 transition-ui"
               >
                 Save full
               </button>
@@ -107,26 +107,26 @@ export function ConfigBackupRecoveryCard({
             onChange={(e) => onBackupNameChange(e.target.value)}
             placeholder="Name this backup (optional)"
             disabled={!canEdit}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui outline-hidden"
           />
-          <div className="text-xs text-[var(--text-muted)]">
+          <div className="text-xs text-(--text-muted)">
             Backups are stored under the appliance data volume.
           </div>
         </div>
         <div className="mt-3 grid gap-2">
           {backups.length === 0 ? (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text-muted)">
               No backups saved yet.
             </div>
           ) : (
             backups.map((backup) => (
               <div
                 key={backup.id}
-                className="grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:grid-cols-[1fr_auto]"
+                className="grid gap-2 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:grid-cols-[1fr_auto]"
               >
                 <div>
-                  <div className="font-semibold text-[var(--text)]">{backup.name}</div>
-                  <div className="text-[11px] text-[var(--text-muted)]">
+                  <div className="font-semibold text-(--text)">{backup.name}</div>
+                  <div className="text-[11px] text-(--text-muted)">
                     {new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.size)} ·{" "}
                     {backup.redacted ? "Redacted" : "Full"}
                     {backup.idsRuleCount ? ` · ${backup.idsRuleCount} IDS rules` : ""} · ID {backup.id.slice(0, 6)}
@@ -135,7 +135,7 @@ export function ConfigBackupRecoveryCard({
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <button
                     onClick={() => onDownloadBackup(backup)}
-                    className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                    className="rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui"
                   >
                     Download
                   </button>
@@ -159,9 +159,9 @@ export function ConfigBackupRecoveryCard({
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
-      <span className="text-[var(--text)]">{label}</span>
-      <span className="text-[var(--text)]">{value}</span>
+    <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2">
+      <span className="text-(--text)">{label}</span>
+      <span className="text-(--text)">{value}</span>
     </div>
   );
 }
@@ -185,7 +185,7 @@ export function ConfigSummaryCard({
 }) {
   return (
     <Card padding="lg">
-      <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">Config summary</div>
+      <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">Config summary</div>
       <div className="mt-3 grid gap-3 text-sm">
         <Stat label="Zones" value={zoneCount} />
         <Stat label="Interfaces" value={ifaceCount} />
@@ -193,22 +193,22 @@ export function ConfigSummaryCard({
         <Stat label="Assets" value={assetCount} />
         <Stat label="Objects" value={objectCount} />
         <Stat label="IDS rules" value={idsRuleCount} />
-        <div className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
-          <span className="text-[var(--text)]">DPI mode</span>
+        <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2">
+          <span className="text-(--text)">DPI mode</span>
           <span
             className={
               dpiMode === "enforce"
                 ? "text-emerald-400"
                 : dpiMode === "learn"
-                  ? "text-amber-400"
-                  : "text-[var(--text-muted)]"
+                  ? ""
+                  : "text-(--text-muted)"
             }
           >
             {dpiMode}
           </span>
         </div>
       </div>
-      <div className="mt-4 text-xs text-[var(--text-muted)]">
+      <div className="mt-4 text-xs text-(--text-muted)">
         Typical workflow: define zones, bind interfaces, add policy, review changes, then commit.
       </div>
     </Card>
@@ -230,20 +230,20 @@ export function IDSRulesCard({
     <Card padding="md">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">IDS Rules</div>
-          <div className="text-sm text-[var(--text)]">
+          <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">IDS Rules</div>
+          <div className="text-sm text-(--text)">
             Running IDS bank: {idsRuleCount} committed rules. Restores stage the candidate bank; commit promotes both.
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={onDownloadRules}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+            className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Download rule backup
           </button>
           {canEdit && (
-            <label className="cursor-pointer rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui">
+            <label className="cursor-pointer rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui">
               Stage rule restore
               <input
                 type="file"
@@ -285,7 +285,7 @@ export function ConfigActionBar({
         {canEdit && (
           <button
             onClick={onCommit}
-            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
           >
             Commit
           </button>
@@ -294,7 +294,7 @@ export function ConfigActionBar({
           {canEdit && (
             <button
               onClick={onCommitConfirmed}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
               Commit-confirmed
             </button>
@@ -303,21 +303,21 @@ export function ConfigActionBar({
             value={ttlSeconds}
             onChange={(e) => onTtlChange(e.target.value)}
             disabled={!canEdit}
-            className="w-20 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+            className="w-20 rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui outline-hidden"
           />
-          <span className="text-xs text-[var(--text)]">seconds</span>
+          <span className="text-xs text-(--text)">seconds</span>
         </div>
         {canEdit && (
           <>
             <button
               onClick={onConfirmCommit}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
               Confirm
             </button>
             <button
               onClick={onRollback}
-              className="rounded-sm bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
             >
               Rollback
             </button>

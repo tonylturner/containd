@@ -114,11 +114,11 @@ function LoginInner() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] text-[var(--text)]">
-      <div className="w-full max-w-md rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-8 shadow-card-lg">
+    <div className="flex min-h-screen items-center justify-center bg-(--bg) text-(--text)">
+      <div className="w-full max-w-md rounded-xs border bg-(--surface) p-8 shadow-card-lg">
         <div className="mb-6 flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full bg-amber-500" />
-          <h1 className="text-xl font-semibold text-[var(--text)]">
+          <div className="h-2 w-2 rounded-full" />
+          <h1 className="text-xl font-semibold text-(--text)">
             containd login
           </h1>
         </div>
@@ -129,18 +129,18 @@ function LoginInner() {
           </div>
         )}
         {info && (
-          <div className="mb-4 rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
+          <div className="mb-4 rounded-lg border bg-(--surface) px-3 py-2 text-sm text-(--text)">
             {info}
           </div>
         )}
         {detail && (
-          <div className="mb-4 rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+          <div className="mb-4 rounded-lg border bg-(--surface) px-3 py-2 text-xs text-(--text)">
             Last auth error: <span className="font-mono">{detail}</span>
           </div>
         )}
 
         {alreadyLoggedIn && (
-          <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-[var(--text)]">
+          <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-(--text)">
             You are already logged in.
             <div className="mt-2">
               <button
@@ -148,7 +148,7 @@ function LoginInner() {
                 onClick={() => {
                   if (typeof window !== "undefined") window.location.href = "/";
                 }}
-                className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+                className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >
                 Continue
               </button>
@@ -161,7 +161,7 @@ function LoginInner() {
             <div>
               <label
                 htmlFor="login-username"
-                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-(--text-muted)"
               >
                 Username
               </label>
@@ -176,7 +176,7 @@ function LoginInner() {
             <div>
               <label
                 htmlFor="login-password"
-                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-(--text-muted)"
               >
                 Password
               </label>
@@ -192,21 +192,21 @@ function LoginInner() {
             <button
               type="submit"
               disabled={state === "logging_in"}
-              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+              className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {state === "logging_in" ? "Logging in..." : "Login"}
             </button>
           </form>
         ) : (
           <form onSubmit={onVerifyMFA} className="grid gap-4">
-            <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            <div className="rounded-lg border bg-(--surface) px-3 py-2 text-xs text-(--text-muted)">
               Password verified. Finish sign-in with the 6-digit code from your
               authenticator app.
             </div>
             <div>
               <label
                 htmlFor="login-mfa-code"
-                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"
+                className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-(--text-muted)"
               >
                 Authentication Code
               </label>
@@ -223,7 +223,7 @@ function LoginInner() {
             <button
               type="submit"
               disabled={state === "verifying_mfa"}
-              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+              className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {state === "verifying_mfa" ? "Verifying..." : "Verify code"}
             </button>
@@ -236,14 +236,14 @@ function LoginInner() {
                 setError(null);
                 setState("idle");
               }}
-              className="rounded-sm border border-amber-500/[0.15] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-xs border px-3 py-2 text-sm text-(--text) transition-ui"
             >
               Back
             </button>
           </form>
         )}
 
-        <p className="mt-4 text-xs text-[var(--text-muted)]">
+        <p className="mt-4 text-xs text-(--text-muted)">
           Default credentials on fresh installs: containd / containd.
         </p>
       </div>

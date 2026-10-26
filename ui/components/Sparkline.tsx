@@ -20,13 +20,13 @@ export function Sparkline({
   return (
     <div
       title={title}
-      className={`flex items-end gap-0.5 overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-2 ${className}`}
+      className={`flex items-end gap-0.5 overflow-hidden rounded-lg border border-white/8 bg-white/3 px-2 py-2 ${className}`}
       style={{ background }}
     >
       {values.map((v, idx) => (
         <div
           key={idx}
-          className="w-full rounded-sm transition-all duration-300"
+          className="w-full rounded-xs transition-all duration-300"
           style={{
             height: `${Math.max(4, Math.round((v / max) * 100))}%`,
             background: `linear-gradient(180deg, ${color}, ${color}60)`,

@@ -39,8 +39,8 @@ export function ResetPasswordModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-sm rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 shadow-card-lg animate-slide-down">
-        <h2 className="text-base font-semibold text-[var(--text)]">
+      <div className="w-full max-w-sm rounded-xs border bg-(--surface) p-6 shadow-card-lg animate-slide-down">
+        <h2 className="text-base font-semibold text-(--text)">
           Reset Password
         </h2>
         <div className="mt-3">
@@ -50,14 +50,14 @@ export function ResetPasswordModal({
             onChange={(e) => onChange(e.target.value)}
             placeholder="Enter new password"
             autoFocus
-            className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
         </div>
         <div className="mt-5 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-4 py-2 text-sm text-(--text) transition-ui"
           >
             Cancel
           </button>
@@ -65,7 +65,7 @@ export function ResetPasswordModal({
             type="button"
             onClick={onSubmit}
             disabled={!value}
-            className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+            className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
           >
             Set Password
           </button>
@@ -143,8 +143,8 @@ export function ManageUsersPanel({
 
   return (
     <Card padding="lg">
-      <h2 className="text-lg font-semibold text-[var(--text)]">Users</h2>
-      <p className="mt-1 text-sm text-[var(--text)]">
+      <h2 className="text-lg font-semibold text-(--text)">Users</h2>
+      <p className="mt-1 text-sm text-(--text)">
         Manage local accounts, roles, and MFA requirements.
       </p>
 
@@ -153,13 +153,13 @@ export function ManageUsersPanel({
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Search users (name, email, role)"
-          className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
         />
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
+      <div className="mt-4 overflow-x-auto rounded-xs border bg-(--surface)">
         <table className="min-w-[980px] w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Username</th>
               <th className="px-4 py-3">Name</th>
@@ -174,7 +174,7 @@ export function ManageUsersPanel({
             {loading && (
               <tr>
                 <td
-                  className="px-4 py-4 text-[var(--text-muted)]"
+                  className="px-4 py-4 text-(--text-muted)"
                   colSpan={7}
                 >
                   Loading…
@@ -184,7 +184,7 @@ export function ManageUsersPanel({
             {!loading && users.length === 0 && (
               <tr>
                 <td
-                  className="px-4 py-4 text-[var(--text-muted)]"
+                  className="px-4 py-4 text-(--text-muted)"
                   colSpan={7}
                 >
                   No users found.
@@ -194,10 +194,10 @@ export function ManageUsersPanel({
             {filteredUsers.map((u) => (
               <tr
                 key={u.id}
-                className="border-t border-amber-500/[0.1] table-row-hover transition-ui"
+                className="border-t table-row-hover transition-ui"
               >
-                <td className="px-4 py-3 text-[var(--text)]">{u.username}</td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">{u.username}</td>
+                <td className="px-4 py-3 text-(--text)">
                   {editingUserId === u.id && editDraft ? (
                     <div className="grid gap-1">
                       <input
@@ -209,7 +209,7 @@ export function ManageUsersPanel({
                         }
                         disabled={!canEdit}
                         placeholder="first name"
-                        className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       />
                       <input
                         value={editDraft.lastName}
@@ -220,14 +220,14 @@ export function ManageUsersPanel({
                         }
                         disabled={!canEdit}
                         placeholder="last name"
-                        className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       />
                     </div>
                   ) : (
                     (u.firstName || "") + " " + (u.lastName || "")
                   )}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   {editingUserId === u.id && editDraft ? (
                     <input
                       value={editDraft.email}
@@ -238,7 +238,7 @@ export function ManageUsersPanel({
                       }
                       disabled={!canEdit}
                       placeholder="email"
-                      className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="w-full rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     />
                   ) : (
                     u.email ?? ""
@@ -254,13 +254,13 @@ export function ManageUsersPanel({
                         )
                       }
                       disabled={!canEdit}
-                      className="rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     >
                       <option value="view">view-only</option>
                       <option value="admin">admin</option>
                     </select>
                   ) : (
-                    <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-[var(--text)]">
+                    <span className="rounded-full px-2 py-1 text-xs text-(--text)">
                       {u.role}
                     </span>
                   )}
@@ -268,23 +268,23 @@ export function ManageUsersPanel({
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span
-                      className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/[0.1] text-emerald-400" : "bg-white/[0.06] text-[var(--text-muted)]"}`}
+                      className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/6 text-(--text-muted)"}`}
                     >
                       {u.mfaEnabled ? "enabled" : "disabled"}
                     </span>
                     {u.mfaRequired && (
-                      <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-xs text-amber-300">
+                      <span className="rounded-full px-2 py-1 text-xs">
                         required
                       </span>
                     )}
                   </div>
                   {u.mfaRequired && !u.mfaEnabled && (
-                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                    <div className="mt-1 text-xs text-(--text-muted)">
                       {formatMFAGrace(u.mfaGraceUntil)}
                     </div>
                   )}
                 </td>
-                <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
+                <td className="px-4 py-3 text-xs text-(--text-muted)">
                   {formatTimestamp(u.updatedAt ?? u.createdAt)}
                 </td>
                 <td className="px-4 py-3 text-right">
@@ -293,13 +293,13 @@ export function ManageUsersPanel({
                       <button
                         onClick={() => saveEdit(u.id)}
                         disabled={!canEdit}
-                        className="rounded-md bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
+                        className="rounded-md bg-(--amber) px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
                       >
                         Save
                       </button>
                       <button
                         onClick={cancelEdit}
-                        className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                        className="rounded-md border px-2 py-1 text-xs text-(--text) transition-ui"
                       >
                         Cancel
                       </button>
@@ -309,14 +309,14 @@ export function ManageUsersPanel({
                       <button
                         onClick={() => startEdit(u)}
                         disabled={!canEdit}
-                        className="rounded-md border border-amber-500/[0.15] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                        className="rounded-md border px-2 py-1 text-xs text-(--text) transition-ui"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => onResetPassword(u.id)}
                         disabled={!canEdit}
-                        className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                        className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                       >
                         Reset password
                       </button>
@@ -324,7 +324,7 @@ export function ManageUsersPanel({
                         <button
                           onClick={() => onRequireUserMFA(u)}
                           disabled={!canEdit}
-                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                         >
                           Require MFA
                         </button>
@@ -333,7 +333,7 @@ export function ManageUsersPanel({
                         <button
                           onClick={() => onExtendUserMFAGrace(u)}
                           disabled={!canEdit}
-                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                         >
                           Extend grace
                         </button>
@@ -342,7 +342,7 @@ export function ManageUsersPanel({
                         <button
                           onClick={() => onClearUserMFARequirement(u)}
                           disabled={!canEdit}
-                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                         >
                           Clear MFA req
                         </button>
@@ -351,7 +351,7 @@ export function ManageUsersPanel({
                         <button
                           onClick={() => onDisableUserMFA(u)}
                           disabled={!canEdit}
-                          className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                         >
                           {u.mfaRequired ? "Reset MFA" : "Disable MFA"}
                         </button>
@@ -411,8 +411,8 @@ export function CreateUserPanel({
 }) {
   return (
     <Card padding="lg">
-      <h2 className="text-lg font-semibold text-[var(--text)]">Add User</h2>
-      <p className="mt-1 text-sm text-[var(--text)]">
+      <h2 className="text-lg font-semibold text-(--text)">Add User</h2>
+      <p className="mt-1 text-sm text-(--text)">
         Create a local account, then require MFA if the account should use an
         authenticator app after first sign-in.
       </p>
@@ -424,7 +424,7 @@ export function CreateUserPanel({
           }
           disabled={!canEdit}
           placeholder="username"
-          className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
         />
         <div className="grid gap-2 md:grid-cols-2">
           <input
@@ -434,7 +434,7 @@ export function CreateUserPanel({
             }
             disabled={!canEdit}
             placeholder="first name"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <input
             value={newUser.lastName}
@@ -443,7 +443,7 @@ export function CreateUserPanel({
             }
             disabled={!canEdit}
             placeholder="last name"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
         </div>
         <input
@@ -453,7 +453,7 @@ export function CreateUserPanel({
           }
           disabled={!canEdit}
           placeholder="email"
-          className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
         />
         <select
           value={newUser.role}
@@ -461,12 +461,12 @@ export function CreateUserPanel({
             setNewUser((n) => ({ ...n, role: e.target.value as UserRole }))
           }
           disabled={!canEdit}
-          className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
         >
           <option value="view">view-only</option>
           <option value="admin">admin</option>
         </select>
-        <p className="text-xs text-[var(--text-muted)]">
+        <p className="text-xs text-(--text-muted)">
           Admins can manage users and system settings; view-only accounts have
           read access.
         </p>
@@ -478,12 +478,12 @@ export function CreateUserPanel({
           }
           disabled={!canEdit}
           placeholder="password"
-          className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+          className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
         />
         <button
           onClick={onCreate}
           disabled={!canEdit}
-          className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+          className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
         >
           Create user
         </button>

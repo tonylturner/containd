@@ -68,10 +68,10 @@ export function Badge({
     tone === "ok"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
       : tone === "warn"
-        ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+        ? ""
         : tone === "info"
-          ? "border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
-          : "border-amber-500/[0.15] bg-white/0 text-[var(--text-muted)]";
+          ? "bg-(--surface) text-(--text)"
+          : "bg-white/0 text-(--text-muted)";
   return (
     <span
       title={title}
@@ -93,9 +93,9 @@ export function IssuesBanner({
   const required = issues.filter((i) => i.severity === "required");
   const recommended = issues.filter((i) => i.severity === "recommended");
   return (
-    <div className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-      <div className="font-medium text-amber-400">{title}</div>
-      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-400/90">
+    <div className="rounded-xs border px-3 py-2 text-xs">
+      <div className="font-medium">{title}</div>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px]">
         {required.map((i) => (
           <li key={`${i.field}:${i.message}`}>
             <span className="font-semibold">Required:</span> {i.message}
@@ -161,11 +161,11 @@ export function PEMField({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
           {title}
           {tip ? <InfoTip label={tip} /> : null}
         </label>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2.5 py-1 text-[11px] text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xs border bg-(--surface2) px-2.5 py-1 text-[11px] text-(--text) transition-ui">
           <input
             type="file"
             accept=".pem,.crt,.key,.txt"
@@ -187,7 +187,7 @@ export function PEMField({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         rows={5}
-        className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+        className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
         placeholder="-----BEGIN ...-----"
       />
     </div>

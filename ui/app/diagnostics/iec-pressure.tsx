@@ -53,7 +53,7 @@ export function IECPressurePanel() {
 
   return (
     <Card title="IEC 104 holdback pressure" padding="lg">
-      <p className="text-xs text-[var(--text-muted)]">
+      <p className="text-xs text-(--text-muted)">
         Incomplete APDUs wait for a decision. Queue pressure is not a denied
         command. Limits are fixed; totals last until the engine process
         restarts.
@@ -63,7 +63,7 @@ export function IECPressurePanel() {
           Loading IEC 104 diagnostics…
         </p>
       ) : !data ? (
-        <p role="status" className="mt-4 text-sm text-amber-400">
+        <p role="status" className="mt-4 text-sm">
           IEC 104 diagnostics unavailable. The engine could not be reached;
           retrying automatically.
         </p>
@@ -74,7 +74,7 @@ export function IECPressurePanel() {
               className="w-full text-left text-sm"
               aria-label="IEC 104 current pressure"
             >
-              <thead className="text-[var(--text-muted)]">
+              <thead className="text-(--text-muted)">
                 <tr>
                   <th className="py-2 font-medium">Current pressure</th>
                   <th className="py-2 font-medium">Observed</th>
@@ -109,10 +109,10 @@ export function IECPressurePanel() {
                     `${data.limits.sessions} (includes closed / aborted)`,
                   ],
                 ].map(([label, value, limit]) => (
-                  <tr key={label} className="border-t border-amber-500/[0.1]">
+                  <tr key={label} className="border-t">
                     <th className="py-2 font-normal">{label}</th>
                     <td className="py-2">{value}</td>
-                    <td className="py-2 text-[var(--text-muted)]">{limit}</td>
+                    <td className="py-2 text-(--text-muted)">{limit}</td>
                   </tr>
                 ))}
               </tbody>
@@ -124,16 +124,16 @@ export function IECPressurePanel() {
           <dl className="mt-2 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
             {Object.entries(reasons).map(([reason, label]) => (
               <div key={reason} className="flex justify-between gap-4">
-                <dt className="text-[var(--text-muted)]">{label}</dt>
+                <dt className="text-(--text-muted)">{label}</dt>
                 <dd className="tabular-nums">{data.aborts[reason]}</dd>
               </div>
             ))}
           </dl>
-          <dl className="mt-4 space-y-2 border-t border-amber-500/[0.1] pt-3 text-sm">
+          <dl className="mt-4 space-y-2 border-t pt-3 text-sm">
             <div className="flex justify-between gap-4">
               <dt>
                 Reset-worker rejections{" "}
-                <span className="text-[var(--text-muted)]">
+                <span className="text-(--text-muted)">
                   (shared queue cap: {data.limits.resetWorkerJobs})
                 </span>
               </dt>
@@ -142,7 +142,7 @@ export function IECPressurePanel() {
             <div className="flex justify-between gap-4">
               <dt>
                 Inline verdict failures{" "}
-                <span className="text-[var(--text-muted)]">
+                <span className="text-(--text-muted)">
                   (excludes queue closure)
                 </span>
               </dt>

@@ -7,7 +7,7 @@ import { Shell } from "../../components/Shell";
 export default function ForbiddenPage() {
   return (
     <Shell title="Access denied">
-      <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 shadow-card backdrop-blur">
+      <div className="rounded-xs border bg-(--surface) p-6 shadow-card backdrop-blur-sm">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10">
             <svg
@@ -25,8 +25,8 @@ export default function ForbiddenPage() {
             </svg>
           </div>
           <div>
-            <h2 className="text-base font-semibold text-[var(--text)]">Permission denied</h2>
-            <p className="mt-1 text-sm text-[var(--text)]">
+            <h2 className="text-base font-semibold text-(--text)">Permission denied</h2>
+            <p className="mt-1 text-sm text-(--text)">
               You don&apos;t have permission to view this page. Contact your administrator if you believe this is an error.
             </p>
           </div>
@@ -34,13 +34,13 @@ export default function ForbiddenPage() {
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
             href="/"
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
           >
             Go to dashboard
           </Link>
           <Link
             href="/login/"
-            className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Switch user
           </Link>

@@ -82,19 +82,19 @@ export function ConfigBlockExplorer({
     <Card padding="lg">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
+          <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">
             Config viewer
           </div>
-          <h2 className="text-lg font-semibold text-[var(--text)]">Explore config blocks</h2>
+          <h2 className="text-lg font-semibold text-(--text)">Explore config blocks</h2>
         </div>
-        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+        <div className="flex items-center gap-2 text-xs text-(--text-muted)">
           <span>Source</span>
           <button
             onClick={() => setViewerSource("running")}
             className={
               viewerSource === "running"
-                ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
-                : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
+                ? "rounded-md px-2 py-1 text-(--text) transition-ui"
+                : "rounded-md px-2 py-1 text-(--text-muted) hover:text-(--text) transition-ui"
             }
           >
             {VIEWER_SOURCE_LABEL.running}
@@ -103,8 +103,8 @@ export function ConfigBlockExplorer({
             onClick={() => setViewerSource("candidate")}
             className={
               viewerSource === "candidate"
-                ? "rounded-md bg-amber-500/[0.1] px-2 py-1 text-[var(--text)] transition-ui"
-                : "rounded-md px-2 py-1 text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
+                ? "rounded-md px-2 py-1 text-(--text) transition-ui"
+                : "rounded-md px-2 py-1 text-(--text-muted) hover:text-(--text) transition-ui"
             }
           >
             {VIEWER_SOURCE_LABEL.candidate}
@@ -123,8 +123,8 @@ export function ConfigBlockExplorer({
               title={item.help}
               className={
                 selectedBlock === item.key
-                  ? "rounded-sm bg-amber-500/[0.1] px-3 py-2 text-left text-sm text-[var(--text)] transition-ui"
-                  : "rounded-sm px-3 py-2 text-left text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
+                  ? "rounded-xs px-3 py-2 text-left text-sm text-(--text) transition-ui"
+                  : "rounded-xs px-3 py-2 text-left text-sm text-(--text-muted) hover:text-(--text) transition-ui"
               }
             >
               {item.label}
@@ -136,7 +136,7 @@ export function ConfigBlockExplorer({
             <div
               role="region"
               aria-label="IDS rule bank"
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-sm text-[var(--text)]"
+              className="rounded-xs border bg-(--surface) p-3 text-sm text-(--text)"
             >
               <p>
                 {viewerConfig == null
@@ -145,21 +145,21 @@ export function ConfigBlockExplorer({
                     ? "IDS rule count unavailable."
                     : `${VIEWER_SOURCE_LABEL[viewerSource]} IDS bank: ${idsBankCount.toLocaleString()} rules.`}
               </p>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
+              <p className="mt-1 text-xs text-(--text-muted)">
                 Rule bodies are omitted from this viewer.
               </p>
-              <a href="/ids/" className="mt-2 inline-block text-xs text-[var(--amber)] hover:underline transition-ui">
+              <a href="/ids/" className="mt-2 inline-block text-xs text-(--amber) hover:underline transition-ui">
                 Browse IDS rules
               </a>
             </div>
           )}
           {blockItems.length > 0 && (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 shadow-card">
+            <div className="rounded-xs border bg-(--surface) p-3 shadow-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">
                   {selectedBlock} entries
                 </div>
-                <span className="text-xs text-[var(--text-muted)]">{blockItems.length} items</span>
+                <span className="text-xs text-(--text-muted)">{blockItems.length} items</span>
               </div>
               <div className="mt-2 grid gap-1 md:grid-cols-2">
                 {blockItems.map((item) => (
@@ -168,38 +168,38 @@ export function ConfigBlockExplorer({
                     onClick={() => setSelectedItemId(item.id)}
                     className={
                       selectedItemId === item.id
-                        ? "rounded-sm border border-amber-500/[0.15] bg-amber-500/[0.1] px-2 py-1 text-left text-xs text-[var(--text)] transition-ui"
-                        : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-left text-xs text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                        ? "rounded-xs border px-2 py-1 text-left text-xs text-(--text) transition-ui"
+                        : "rounded-xs border bg-(--surface) px-2 py-1 text-left text-xs text-(--text) transition-ui"
                     }
                   >
                     <div className="font-semibold">{item.label}</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">{item.meta}</div>
+                    <div className="text-[11px] text-(--text-muted)">{item.meta}</div>
                   </button>
                 ))}
               </div>
               {selectedItem != null && (
-                <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)]">
+                <div className="mt-3 rounded-xs border bg-(--surface) p-3 text-xs text-(--text)">
                   <div className="mb-2 flex items-center justify-between">
-                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                    <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">
                       Selected
                     </div>
                     {selectedBlock === "zones" && (
-                      <a href="/zones/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
+                      <a href="/zones/" className="text-xs text-(--amber) hover:text-(--amber) transition-ui">
                         Open Zones
                       </a>
                     )}
                     {selectedBlock === "interfaces" && (
-                      <a href="/interfaces/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
+                      <a href="/interfaces/" className="text-xs text-(--amber) hover:text-(--amber) transition-ui">
                         Open Interfaces
                       </a>
                     )}
                     {selectedBlock === "firewall" && (
-                      <a href="/firewall/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
+                      <a href="/firewall/" className="text-xs text-(--amber) hover:text-(--amber) transition-ui">
                         Open Firewall
                       </a>
                     )}
                     {selectedBlock === "assets" && (
-                      <a href="/assets/" className="text-xs text-[var(--amber)] hover:text-[var(--amber)] transition-ui">
+                      <a href="/assets/" className="text-xs text-(--amber) hover:text-(--amber) transition-ui">
                         Open Assets
                       </a>
                     )}
@@ -211,11 +211,11 @@ export function ConfigBlockExplorer({
               )}
             </div>
           )}
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
+          <div className="rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {viewerConfig != null ? (
               Array.isArray(blockValue) ? (
                 blockValue.length === 0 ? (
-                  <div className="text-[var(--text-muted)]">No entries in this block.</div>
+                  <div className="text-(--text-muted)">No entries in this block.</div>
                 ) : (
                   <div className="grid gap-2">
                     {blockValue.map((item: any) => {
@@ -235,8 +235,8 @@ export function ConfigBlockExplorer({
                           ref={isSelected ? setSelectedRef : undefined}
                           className={
                             isSelected
-                              ? "rounded-sm border border-amber-500/40 bg-amber-500/[0.1] p-3 transition-ui"
-                              : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 hover:border-amber-500/30 transition-ui"
+                              ? "rounded-xs border p-3 transition-ui"
+                              : "rounded-xs border bg-(--surface) p-3 transition-ui"
                           }
                         >
                           <pre className="whitespace-pre-wrap">
@@ -253,12 +253,12 @@ export function ConfigBlockExplorer({
                 </pre>
               )
             ) : (
-              <div className="text-[var(--text-muted)]">No config loaded for this source.</div>
+              <div className="text-(--text-muted)">No config loaded for this source.</div>
             )}
           </div>
         </div>
       </div>
-      <div className="mt-3 text-xs text-[var(--text-muted)]">
+      <div className="mt-3 text-xs text-(--text-muted)">
         Select a block to jump to its JSON. Use Running for the last committed config and Staged for candidate changes waiting for commit.
       </div>
     </Card>

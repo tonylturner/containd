@@ -12,10 +12,10 @@ type EmptyStateProps = {
 
 export function EmptyState({ icon, title, description, action, className = "" }: EmptyStateProps) {
   return (
-    <div role="status" aria-label={title} className={`flex flex-col items-center justify-center rounded-sm border border-dashed border-amber-500/[0.15] bg-[var(--surface)] px-6 py-12 text-center ${className}`}>
-      {icon && <div aria-hidden="true" className="mb-3 text-[var(--text-dim)]">{icon}</div>}
-      <h3 className="text-sm font-medium font-ui text-[var(--text)]">{title}</h3>
-      {description && <p className="mt-1.5 max-w-sm text-xs text-[var(--text-dim)]">{description}</p>}
+    <div role="status" aria-label={title} className={`flex flex-col items-center justify-center rounded-xs border border-dashed bg-(--surface) px-6 py-12 text-center ${className}`}>
+      {icon && <div aria-hidden="true" className="mb-3 text-(--text-dim)">{icon}</div>}
+      <h3 className="text-sm font-medium font-ui text-(--text)">{title}</h3>
+      {description && <p className="mt-1.5 max-w-sm text-xs text-(--text-dim)">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );

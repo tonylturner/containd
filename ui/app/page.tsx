@@ -140,7 +140,7 @@ export default function Home() {
             <div className="flex items-center gap-2.5">
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
-                  hasAlerts ? "bg-amber-400 animate-pulse" : "bg-emerald-400"
+                  hasAlerts ? "animate-pulse" : "bg-emerald-400"
                 }`}
               />
               <span className="text-sm font-semibold text-white tracking-wide">
@@ -154,7 +154,7 @@ export default function Home() {
             <Skeleton className="h-5 w-48" />
           )}
           {health?.build && (
-            <span className="hidden sm:inline text-2xs text-amber-500/60 font-mono">
+            <span className="hidden sm:inline text-2xs font-mono">
               {health.build === "dev" ? "local build" : `v${health.build}`}
             </span>
           )}
@@ -175,7 +175,7 @@ export default function Home() {
               />
             </Link>
           ))}
-          {simUnavailable && <div role="status" className="text-red-400">Simulation unavailable <button onClick={retrySimulation} className="ml-2 rounded-sm border border-red-500/30 px-2 py-1">Retry</button></div>}
+          {simUnavailable && <div role="status" className="text-red-400">Simulation unavailable <button onClick={retrySimulation} className="ml-2 rounded-xs border border-red-500/30 px-2 py-1">Retry</button></div>}
           {simRunning !== null && (
             <button
               type="button"
@@ -184,10 +184,10 @@ export default function Home() {
               className="flex items-center gap-2 text-2xs font-mono"
               title={simRunning ? "Stop traffic simulation" : "Start traffic simulation"}
             >
-              <span className={`text-2xs ${simRunning ? "text-amber-400" : "text-slate-500"}`}>SIM</span>
+              <span className={`text-2xs ${simRunning ? "" : "text-slate-500"}`}>SIM</span>
               <span
                 className={`relative inline-flex h-4 w-8 items-center rounded-[2px] transition-colors ${
-                  simRunning ? "bg-amber-500" : "bg-white/10"
+                  simRunning ? "" : "bg-white/10"
                 }`}
               >
                 <span className={`inline-block h-3 w-3 rounded-[1px] bg-white transition-transform ${
@@ -196,7 +196,7 @@ export default function Home() {
               </span>
             </button>
           )}
-          <span className="text-amber-500/80 tabular-nums">{clock}</span>
+          <span className="tabular-nums">{clock}</span>
         </div>
       </div>
 
@@ -208,14 +208,14 @@ export default function Home() {
 
       {/* ── Needs attention ─────────────────────────────────── */}
       {hasAlerts && (
-        <div className="mb-5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 animate-fade-in">
+        <div className="mb-5 rounded-lg border px-4 py-3 animate-fade-in">
           <div className="flex flex-wrap items-center gap-3 text-xs">
             <svg
               width="14"
               height="14"
               viewBox="0 0 14 14"
               fill="none"
-              className="text-amber-400 flex-shrink-0"
+              className="shrink-0"
             >
               <path
                 d="M7 1L13 13H1L7 1Z"
@@ -226,7 +226,7 @@ export default function Home() {
             {eventStats!.idsAlerts > 0 && (
               <Link
                 href="/alerts/"
-                className="text-amber-300 hover:text-amber-200 transition-colors"
+                className="transition-colors"
               >
                 {eventStats!.idsAlerts} IDS alert
                 {eventStats!.idsAlerts !== 1 ? "s" : ""}
@@ -248,20 +248,20 @@ export default function Home() {
       {/* ── Main grid ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_320px] gap-4">
         {/* Network Pulse — spans 2 cols */}
-        <div className="lg:col-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
+        <div className="lg:col-span-2 rounded-xl border border-white/8 bg-white/3 shadow-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/6">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Network Pulse
             </h3>
             {!flowsUnavailable && <NetworkPulseStats flows={flows} eventStats={eventStats} />}
           </div>
-          {flowsUnavailable ? <div role="status" className="p-4 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button></div> : <div className="h-[220px]">
+          {flowsUnavailable ? <div role="status" className="p-4 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button></div> : <div className="h-[220px]">
             <NetworkPulseCanvas zones={zones} flows={flows} events={events} />
           </div>}
         </div>
 
         {/* Zone Status — right column, spans 2 rows */}
-        <div className="lg:row-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4 overflow-y-auto max-h-[520px]">
+        <div className="lg:row-span-2 rounded-xl border border-white/8 bg-white/3 shadow-card p-4 overflow-y-auto max-h-[520px]">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Zone Status
           </h3>
@@ -273,7 +273,7 @@ export default function Home() {
         </div>
 
         {/* Services */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
+        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Service Health
           </h3>
@@ -281,7 +281,7 @@ export default function Home() {
         </div>
 
         {/* Traffic Chart */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
+        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
@@ -298,7 +298,7 @@ export default function Home() {
             <TrafficCounter
               label="Total Events"
               value={eventStats?.total ?? 0}
-              color="text-amber-400"
+              color=""
             />
             <TrafficCounter
               label="IDS Alerts"
@@ -319,7 +319,7 @@ export default function Home() {
         </div>
 
         {/* Event Stream — spans 2 cols */}
-        <div className="lg:col-span-2 rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
+        <div className="lg:col-span-2 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Event Stream
           </h3>
@@ -327,7 +327,7 @@ export default function Home() {
         </div>
 
         {/* System Health — replaces old stats row */}
-        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-card p-4">
+        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             System Health
           </h3>

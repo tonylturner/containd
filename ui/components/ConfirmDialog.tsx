@@ -44,21 +44,21 @@ export function ConfirmDialog({
 
   const confirmClass =
     variant === "danger"
-      ? "rounded-sm bg-[var(--red)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-white hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui"
+      ? "rounded-xs bg-(--red) px-4 py-2 font-mono text-xs tracking-wider uppercase text-white hover:brightness-110 focus-visible:shadow-focus-ring outline-hidden transition-ui"
       : variant === "warning"
-        ? "rounded-sm bg-[var(--amber)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui"
-        : "rounded-sm bg-[var(--amber)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-none transition-ui";
+        ? "rounded-xs bg-(--amber) px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-hidden transition-ui"
+        : "rounded-xs bg-(--amber) px-4 py-2 font-mono text-xs tracking-wider uppercase text-black hover:brightness-110 focus-visible:shadow-focus-ring outline-hidden transition-ui";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div className="card-industrial w-full max-w-md rounded-sm border border-amber-500/[0.2] bg-[var(--surface)] p-6 shadow-card-lg animate-slide-down">
-        <h2 id="confirm-title" className="font-display text-sm font-bold tracking-wider uppercase text-[var(--amber)]">{title}</h2>
-        <div className="mt-2 text-sm text-[var(--text)]">{message}</div>
+      <div className="card-industrial w-full max-w-md rounded-xs border bg-(--surface) p-6 shadow-card-lg animate-slide-down">
+        <h2 id="confirm-title" className="font-display text-sm font-bold tracking-wider uppercase text-(--amber)">{title}</h2>
+        <div className="mt-2 text-sm text-(--text)">{message}</div>
         <div className="mt-5 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 font-mono text-xs tracking-wider uppercase text-[var(--text-dim)] hover:text-[var(--text)] hover:border-amber-500/30 focus-visible:shadow-focus-ring outline-none transition-ui"
+            className="rounded-xs border bg-(--surface2) px-4 py-2 font-mono text-xs tracking-wider uppercase text-(--text-dim) hover:text-(--text) focus-visible:shadow-focus-ring outline-hidden transition-ui"
           >
             {cancelLabel}
           </button>

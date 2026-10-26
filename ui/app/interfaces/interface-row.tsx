@@ -82,8 +82,8 @@ export function InterfaceRow({
     : "—";
 
   return (
-    <tr className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-      <td className="px-4 py-3 font-medium text-[var(--text)]">{iface.name}</td>
+    <tr className="border-t table-row-hover transition-ui">
+      <td className="px-4 py-3 font-medium text-(--text)">{iface.name}</td>
       <td className="px-4 py-3">
         {editing ? (
           <input
@@ -91,10 +91,10 @@ export function InterfaceRow({
             onChange={(e) => setAlias(e.target.value)}
             disabled={!canEdit}
             placeholder="alias (optional)"
-            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+            className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
           />
         ) : (
-          <span className="text-[var(--text)]">{iface.alias || "—"}</span>
+          <span className="text-(--text)">{iface.alias || "—"}</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -104,7 +104,7 @@ export function InterfaceRow({
               value={itype}
               onChange={(e) => setIType(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             >
               <option value="physical">physical</option>
               <option value="bridge">bridge</option>
@@ -117,7 +117,7 @@ export function InterfaceRow({
                   onChange={(e) => setMembers(e.target.value)}
                   disabled={!canEdit}
                   placeholder="members (comma-separated)"
-                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+                  className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
                 />
                 <select
                   value=""
@@ -132,7 +132,7 @@ export function InterfaceRow({
                     setMembers(existing.join(", "));
                   }}
                   disabled={!canEdit}
-                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="w-full rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   title="Quick-pick a member (appends)"
                 >
                   <option value="">+ add member…</option>
@@ -149,7 +149,7 @@ export function InterfaceRow({
                   value={parent}
                   onChange={(e) => setParent(e.target.value)}
                   disabled={!canEdit}
-                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 >
                   <option value="">(parent)</option>
                   {parentCandidates.map((c) => (
@@ -163,13 +163,13 @@ export function InterfaceRow({
                   onChange={(e) => setVlanId(e.target.value)}
                   disabled={!canEdit}
                   placeholder="vlan id (1-4094)"
-                  className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+                  className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
                 />
               </div>
             ) : null}
           </div>
         ) : (
-          <span className="text-[var(--text)]">{typeLabel()}</span>
+          <span className="text-(--text)">{typeLabel()}</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -179,17 +179,17 @@ export function InterfaceRow({
             onChange={(e) => setDevice(e.target.value)}
             disabled={!canEdit}
             placeholder="os iface (e.g. eth0)"
-            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+            className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
           />
         ) : (
-          <span className="text-[var(--text)]">{iface.device || "—"}</span>
+          <span className="text-(--text)">{iface.device || "—"}</span>
         )}
       </td>
       <td className="px-4 py-3">
         {runtime ? (
           <span className={chipClass(runtime.up)}>{runtime.up ? "up" : "down"}</span>
         ) : (
-          <span className="text-[var(--text-muted)]">—</span>
+          <span className="text-(--text-muted)">—</span>
         )}
       </td>
       <td className="px-4 py-3">
@@ -198,7 +198,7 @@ export function InterfaceRow({
             value={zone}
             onChange={(e) => setZone(e.target.value)}
             disabled={!canEdit}
-            className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             <option value="">(no zone)</option>
             {zones.map((z) => (
@@ -208,7 +208,7 @@ export function InterfaceRow({
             ))}
           </select>
         ) : (
-          <span className="text-[var(--text)]">{zoneDisplay}</span>
+          <span className="text-(--text)">{zoneDisplay}</span>
         )}
       </td>
       <td className="px-4 py-3">{modeLabel}</td>
@@ -219,7 +219,7 @@ export function InterfaceRow({
               value={mode}
               onChange={(e) => setMode(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             >
               <option value="">{addresses.trim() ? "static (implicit)" : "external"}</option>
               <option value="static">static</option>
@@ -230,17 +230,17 @@ export function InterfaceRow({
               onChange={(e) => setAddresses(e.target.value)}
               disabled={!canEdit || mode === "dhcp"}
               placeholder={display.source === "os" ? display.addrs.join(", ") : "CIDRs (comma-separated)"}
-              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+              className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
             />
             <input
               value={gateway}
               onChange={(e) => setGateway(e.target.value)}
               disabled={!canEdit || mode === "dhcp"}
               placeholder="gateway (optional)"
-              className="w-full rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none placeholder:text-[var(--text-dim)]"
+              className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
             />
             {canEdit && mode !== "dhcp" && detectedCIDR && (
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text)]">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-(--text)">
                 <button
                   type="button"
                   onClick={() => {
@@ -248,23 +248,23 @@ export function InterfaceRow({
                     setAddresses(detectedCIDR);
                     if (suggestedGateway) setGateway(suggestedGateway);
                   }}
-                  className="rounded-md bg-amber-500/[0.15] px-2 py-1 text-[var(--amber)] transition-ui hover:bg-amber-500/[0.25]"
+                  className="rounded-md px-2 py-1 text-(--amber) transition-ui"
                   title="Use the currently detected OS address as this interface's static address (and infer gateway)."
                 >
                   Use detected
                 </button>
-                <span className="text-[var(--text-muted)]">
-                  Applies <span className="text-[var(--text)]">{detectedCIDR}</span>
+                <span className="text-(--text-muted)">
+                  Applies <span className="text-(--text)">{detectedCIDR}</span>
                   {suggestedGateway ? (
                     <>
                       {" "}
-                      and gateway <span className="text-[var(--text)]">{suggestedGateway}</span>
+                      and gateway <span className="text-(--text)">{suggestedGateway}</span>
                     </>
                   ) : null}
                 </span>
               </div>
             )}
-            <div className="text-[11px] text-[var(--text-muted)]">
+            <div className="text-[11px] text-(--text-muted)">
               {mode === "dhcp" ? (
                 <span>
                   DHCP uses OS/Docker-assigned addresses (in containers,
@@ -273,12 +273,12 @@ export function InterfaceRow({
               ) : detectedCIDR ? (
                 <span>
                   Detected subnet:{" "}
-                  <span className="text-[var(--text)]">{detectedCIDR}</span>
+                  <span className="text-(--text)">{detectedCIDR}</span>
                   {suggestedGateway ? (
                     <>
                       {" "}
                       (gateway often{" "}
-                      <span className="text-[var(--text)]">
+                      <span className="text-(--text)">
                         {suggestedGateway}
                       </span>
                       )
@@ -292,7 +292,7 @@ export function InterfaceRow({
           </div>
         ) : (
           <span
-            className="inline-flex items-center gap-1 text-[var(--text)]"
+            className="inline-flex items-center gap-1 text-(--text)"
             title={(display.source === "config" ? iface.addresses : runtime?.addrs)?.join(", ")}
           >
             {display.source === "os" && (
@@ -317,7 +317,7 @@ export function InterfaceRow({
           const network = runtime?.addrs?.length ? runtime.addrs.join(", ") : "—";
           const hasNetwork = network !== "—";
           return (
-            <span className="relative inline-flex items-center justify-center rounded-md border border-amber-500/[0.15] bg-[var(--surface)] p-1 text-[var(--text)] group">
+            <span className="relative inline-flex items-center justify-center rounded-md border bg-(--surface) p-1 text-(--text) group">
               <Image
                 src={staticAssetURL("/icons/docker.svg")}
                 alt="Docker"
@@ -325,27 +325,27 @@ export function InterfaceRow({
                 height={16}
                 className="h-4 w-4"
               />
-              <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] opacity-0 shadow-lg backdrop-blur-sm group-hover:opacity-100">
-                <div className="font-semibold text-[var(--text)]">Network</div>
-                <div className="mt-1 text-[var(--text)]">
-                  <span className="text-[var(--text-muted)]">
+              <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) opacity-0 shadow-lg backdrop-blur-xs group-hover:opacity-100">
+                <div className="font-semibold text-(--text)">Network</div>
+                <div className="mt-1 text-(--text)">
+                  <span className="text-(--text-muted)">
                     OS/Docker address:
                   </span>{" "}
                   {network}
                 </div>
-                <div className="text-[var(--text)]">
-                  <span className="text-[var(--text-muted)]">
+                <div className="text-(--text)">
+                  <span className="text-(--text-muted)">
                     Interface address:
                   </span>{" "}
                   {configured}
                 </div>
                 {!hasNetwork ? (
-                  <div className="mt-1 text-[var(--text-muted)]">
+                  <div className="mt-1 text-(--text-muted)">
                     No OS/Docker IP detected yet (check device binding / link
                     state).
                   </div>
                 ) : null}
-                <span className="absolute left-1/2 top-full -translate-x-1/2 border-8 border-transparent border-t-[var(--surface)]" />
+                <span className="absolute left-1/2 top-full -translate-x-1/2 border-8 border-transparent border-t-(--surface)" />
               </span>
             </span>
           );
@@ -353,7 +353,7 @@ export function InterfaceRow({
       </td>
       <td className="px-4 py-3">
         {editing ? (
-          <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text)]">
+          <div className="grid grid-cols-2 gap-2 text-xs text-(--text)">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -442,7 +442,7 @@ export function InterfaceRow({
                 });
                 setEditing(false);
               }}
-              className="rounded-sm bg-[var(--amber)] px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-2 py-1 text-xs font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
@@ -466,7 +466,7 @@ export function InterfaceRow({
                 setHTTPS(iface.access?.https ?? true);
                 setEditing(false);
               }}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-xs border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
             >
               Cancel
             </button>
@@ -477,13 +477,13 @@ export function InterfaceRow({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                  className="rounded-xs border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                 >
                   Edit
                 </button>
                 <button
                   onClick={async () => onDelete(iface.name)}
-                  className="rounded-sm px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                  className="rounded-xs px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                 >
                   Delete
                 </button>
@@ -528,5 +528,5 @@ function suggestGatewayFromCIDR(cidr: string | null): string | null {
 export function chipClass(ok: boolean) {
   return ok
     ? "rounded-md bg-emerald-500/15 px-2 py-1 text-emerald-400"
-    : "rounded-md bg-amber-500/15 px-2 py-1 text-amber-400";
+    : "rounded-md px-2 py-1 ";
 }

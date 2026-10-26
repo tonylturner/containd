@@ -58,31 +58,31 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
 
   return (
     <Card padding="lg">
-      <h2 className="text-lg font-semibold text-[var(--text)]">Saved PCAPs</h2>
-      <p className="mt-1 text-sm text-[var(--text)]">Download or replay captures from storage.</p>
+      <h2 className="text-lg font-semibold text-(--text)">Saved PCAPs</h2>
+      <p className="mt-1 text-sm text-(--text)">Download or replay captures from storage.</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={pcapQuery}
           onChange={(e) => setPcapQuery(e.target.value)}
           placeholder="Search by name, iface, tag"
-          className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:w-2/3"
+          className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden md:w-2/3"
         />
         <button
           onClick={onRefresh}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+          className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
         >
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
         <button
           onClick={() => setPcapQuery("")}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+          className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
         >
           Clear search
         </button>
         <button
           onClick={() => uploadInputRef.current?.click()}
           disabled={!canEdit || uploading}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+          className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui disabled:opacity-50"
         >
           {uploading ? "Uploading..." : "Upload PCAP"}
         </button>
@@ -95,22 +95,22 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
         />
       </div>
       {lastRefresh ? (
-        <div className="mt-2 text-xs text-[var(--text-dim)]">
+        <div className="mt-2 text-xs text-(--text-dim)">
           Last refreshed: {lastRefresh.toLocaleTimeString()} · Auto-refresh every 8s
         </div>
       ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-        <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">{pcaps.length} total</span>
-        <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[var(--text)]">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-(--text-muted)">
+        <span className="rounded-full px-2 py-0.5 text-(--text)">{pcaps.length} total</span>
+        <span className="rounded-full px-2 py-0.5 text-(--text)">
           {totalSizeMB.toFixed(1)} MB stored
         </span>
       </div>
       {ifaceStats.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text)]">
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-(--text)">
           <button
             onClick={() => setIfaceFilter("all")}
             className={`rounded-full px-2 py-0.5 transition-ui ${
-              ifaceFilter === "all" ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"
+              ifaceFilter === "all" ? "text-(--amber)" : "text-(--text)"
             }`}
           >
             All interfaces
@@ -120,7 +120,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
               key={iface}
               onClick={() => setIfaceFilter(iface)}
               className={`rounded-full px-2 py-0.5 transition-ui ${
-                ifaceFilter === iface ? "bg-amber-500/[0.15] text-[var(--amber)]" : "bg-amber-500/[0.1] text-[var(--text)]"
+                ifaceFilter === iface ? "text-(--amber)" : "text-(--text)"
               }`}
             >
               {iface} · {stats.count}
@@ -128,9 +128,9 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
           ))}
         </div>
       ) : null}
-      <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
-        <table className="w-full text-left text-sm text-[var(--text)]">
-          <thead className="bg-[var(--surface)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
+      <div className="mt-4 overflow-hidden rounded-xs border">
+        <table className="w-full text-left text-sm text-(--text)">
+          <thead className="bg-(--surface) text-xs uppercase tracking-wide text-(--text-muted)">
             <tr>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Iface</th>
@@ -142,17 +142,17 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
           </thead>
           <tbody>
             {visiblePcaps.length === 0 ? (
-              <tr className="border-t border-amber-500/[0.1]">
-                <td colSpan={6} className="px-3 py-3 text-sm text-[var(--text-muted)]">
+              <tr className="border-t">
+                <td colSpan={6} className="px-3 py-3 text-sm text-(--text-muted)">
                   No captures match your filters.
                 </td>
               </tr>
             ) : (
               visiblePcaps.map((p) => (
-                <tr key={p.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
+                <tr key={p.name} className="border-t table-row-hover transition-ui">
                   <td className="px-3 py-2">
-                    <div className="font-mono text-xs text-[var(--text)]">{p.name}</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">{new Date(p.createdAt).toLocaleString()}</div>
+                    <div className="font-mono text-xs text-(--text)">{p.name}</div>
+                    <div className="text-[11px] text-(--text-muted)">{new Date(p.createdAt).toLocaleString()}</div>
                   </td>
                   <td className="px-3 py-2">{p.interface || "—"}</td>
                   <td className="px-3 py-2">{(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</td>
@@ -160,12 +160,12 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
                     <div className="flex flex-wrap gap-1">
                       {(p.tags ?? []).length ? (
                         (p.tags ?? []).map((t) => (
-                          <span key={t} className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">
+                          <span key={t} className="rounded-full px-2 py-0.5 text-[10px] text-(--text)">
                             {t}
                           </span>
                         ))
                       ) : (
-                        <span className="text-xs text-[var(--text-dim)]">—</span>
+                        <span className="text-xs text-(--text-dim)">—</span>
                       )}
                     </div>
                     <div className="mt-1 flex items-center gap-1">
@@ -173,31 +173,31 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
                         value={pcapTag}
                         onChange={(e) => setPcapTag(e.target.value)}
                         placeholder="add tag"
-                        className="w-24 rounded-md border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="w-24 rounded-md border bg-(--surface) px-2 py-1 text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       />
                       <button
                         onClick={() => onAddTag(p.name)}
                         disabled={!canEdit}
-                        className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                        className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-50"
                       >
                         Add
                       </button>
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <span className="rounded-full bg-amber-500/[0.1] px-2 py-0.5 text-[10px] text-[var(--text)]">{p.status}</span>
+                    <span className="rounded-full px-2 py-0.5 text-[10px] text-(--text)">{p.status}</span>
                   </td>
                   <td className="px-3 py-2 text-right">
                     <a
                       href={downloadPcapURL(p.name)}
-                      className="mr-2 inline-flex rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                      className="mr-2 inline-flex rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                     >
                       Download
                     </a>
                     <button
                       onClick={() => onReplayInline(p)}
                       disabled={!canEdit}
-                      className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                      className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-50"
                     >
                       Replay
                     </button>
@@ -246,14 +246,14 @@ export function ReplayCard({
 }: ReplayCardProps) {
   return (
     <Card padding="lg">
-      <h2 className="text-lg font-semibold text-[var(--text)]">Replay</h2>
-      <p className="mt-1 text-sm text-[var(--text)]">Replay a saved PCAP back onto an interface.</p>
+      <h2 className="text-lg font-semibold text-(--text)">Replay</h2>
+      <p className="mt-1 text-sm text-(--text)">Replay a saved PCAP back onto an interface.</p>
       <div className="mt-4 grid gap-3">
         <select
           disabled={!canEdit}
           value={replayName}
           onChange={(e) => setReplayName(e.target.value)}
-          className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+          className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden disabled:opacity-50"
         >
           <option value="">Select a PCAP</option>
           {pcaps.map((p) => (
@@ -266,7 +266,7 @@ export function ReplayCard({
           disabled={!canEdit}
           value={replayIface}
           onChange={(e) => setReplayIface(e.target.value)}
-          className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+          className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden disabled:opacity-50"
         >
           <option value="">Replay interface</option>
           {ifaceOptions.map((opt) => (
@@ -280,12 +280,12 @@ export function ReplayCard({
           value={replayRate}
           onChange={(e) => setReplayRate(e.target.value)}
           placeholder="Replay rate (pps)"
-          className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-50"
+          className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden disabled:opacity-50"
         />
         <button
           disabled={!canEdit || !replayName || !replayIface}
           onClick={onReplaySubmit}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+          className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui disabled:opacity-50"
         >
           Start replay
         </button>

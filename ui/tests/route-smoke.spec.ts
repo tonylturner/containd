@@ -418,6 +418,16 @@ for (const path of routes) {
   });
 }
 
+test("dashboard health keeps twelve pixels between uptime and gauges", async ({ page }) => {
+  await page.goto("/");
+  const uptime = page.getByText("Uptime: 12m", { exact: true }).locator("..");
+  const cpu = page.getByText("CPU", { exact: true }).locator("..");
+  await expect(uptime).toBeVisible();
+  const uptimeBox = (await uptime.boundingBox())!;
+  const cpuBox = (await cpu.boundingBox())!;
+  expect(cpuBox.y - uptimeBox.y - uptimeBox.height).toBe(12);
+});
+
 test("interface addresses prefer config, then the bound device, without mutating either", () => {
   const before = JSON.stringify({ interfaces, interfaceState });
   expect(interfaceAddresses(interfaces[0], interfaceState)).toEqual({

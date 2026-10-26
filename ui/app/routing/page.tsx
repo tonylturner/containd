@@ -380,7 +380,7 @@ export default function RoutingPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refreshOSRouting}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             title="Reload OS routing table snapshot"
           >
             {detecting ? "Detecting..." : "Detect from OS"}
@@ -388,7 +388,7 @@ export default function RoutingPage() {
           {canEdit && (
             <button
               onClick={autoWanDefaultRoute}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
               title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
             >
               Auto WAN default
@@ -398,7 +398,7 @@ export default function RoutingPage() {
             <button
               onClick={reconcileReplace}
               disabled={reconciling}
-              className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
+              className="rounded-xs border px-3 py-1.5 text-sm transition-ui disabled:opacity-50"
               title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
             >
               {reconciling ? "Reconciling..." : "Reconcile live"}
@@ -406,7 +406,7 @@ export default function RoutingPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
@@ -414,26 +414,26 @@ export default function RoutingPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
 
       {interfaceStateUnavailable && (
-        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           <p>Interface runtime state unavailable — the engine could not be reached. Auto WAN setup cannot determine the WAN address; no routing changes were staged.</p>
-          <button onClick={autoWanDefaultRoute} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+          <button onClick={autoWanDefaultRoute} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
 
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mb-4 rounded-sm border border-amber-500/20 bg-amber-500/[0.1] px-4 py-3 text-sm text-[var(--amber)]">
+        <div className="mb-4 rounded-xs border px-4 py-3 text-sm text-(--amber)">
           {notice}
         </div>
       )}

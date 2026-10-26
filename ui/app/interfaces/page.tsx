@@ -46,7 +46,7 @@ export default function InterfacesPage() {
       body: (
         <>
           Add zones in{" "}
-          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">
             Zones
           </Link>{" "}
           so you can assign them to interfaces.
@@ -248,7 +248,7 @@ export default function InterfacesPage() {
               <button
                 onClick={onAutoAssign}
                 disabled={assigning}
-                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+                className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected OS interfaces"
               >
                 {assigning ? "Assigning..." : "Auto-assign"}
@@ -256,7 +256,7 @@ export default function InterfacesPage() {
               <button
                 onClick={onReconcileReplace}
                 disabled={reconciling}
-                className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
+                className="rounded-xs border px-3 py-1.5 text-sm transition-ui disabled:opacity-50"
                 title="Reconcile interface addresses (replace semantics for configured static addresses)"
               >
                 {reconciling ? "Reconciling..." : "Reconcile live"}
@@ -265,7 +265,7 @@ export default function InterfacesPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
@@ -274,20 +274,20 @@ export default function InterfacesPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {reservation?.active && (
-        <aside aria-label="Reserved management path" className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">
           <p className="font-semibold">RangerDanger management access is reserved</p>
-          <p className="mt-1 break-words">
+          <p className="mt-1 wrap-break-word">
             {reservation.sources?.join(", ")} can reach HTTP management on {reservation.device} ({reservation.local}, port {reservation.port}),
             even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
           </p>
           {(!reservation.guard?.active || reservation.guard?.error) && (
-            <p className="mt-1 text-amber-400">Guard fault: {reservation.guard?.error || "engine guard unavailable"}</p>
+            <p className="mt-1">Guard fault: {reservation.guard?.error || "engine guard unavailable"}</p>
           )}
           {!!reservation.guard?.faults && (
-            <p className="mt-1 text-amber-400">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
+            <p className="mt-1">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
           )}
           {reservation.bootFault && (
-            <div role="status" className="mt-2 text-amber-400">
+            <div role="status" className="mt-2">
               <p className="font-semibold">Configuration apply paused</p>
               <p>{reservation.recovery || "recovery pending: ruleset not verified"}</p>
               <p>{reservation.bootFault}</p>
@@ -295,7 +295,7 @@ export default function InterfacesPage() {
             </div>
           )}
           {!!reservation.listenerFaults?.length && (
-            <div role="status" className="mt-2 text-amber-400">
+            <div role="status" className="mt-2">
               <p className="font-semibold">Optional listener boot faults</p>
               <p>Reserved HTTP management remains available. Correct the listener settings and restart to restore these listeners.</p>
               <ul className="list-disc pl-5">
@@ -303,38 +303,38 @@ export default function InterfacesPage() {
               </ul>
             </div>
           )}
-          {reservation.rollbackFault && <p className="mt-1 text-amber-400">{reservation.rollbackFault}</p>}
+          {reservation.rollbackFault && <p className="mt-1">{reservation.rollbackFault}</p>}
         </aside>
       )}
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       {notice && (
-        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
       {runtimeStatus === "unavailable" && (
-        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           <p>Interface runtime state unavailable — the engine could not be reached. Link and address state is unknown.</p>
-          <button onClick={refresh} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+          <button onClick={refresh} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
-      {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
+      {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No OS interfaces reported.</p>}
       {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
-        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+        <div className="mb-4 rounded-xs border px-4 py-3 text-sm">
           <div className="font-semibold">Interface bindings needed</div>
-          <div className="mt-1 text-amber-400/90">
+          <div className="mt-1">
             Some configured interfaces are not bound to OS devices. Use <span className="font-semibold">Auto-assign</span>{" "}
             or set the <span className="font-semibold">Device</span> field per interface.
           </div>
         </div>
       )}
       <Card padding="lg">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Create interface</h2>
+        <h2 className="text-sm font-semibold text-(--text)">Create interface</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-6">
           <input
             value={name}
@@ -379,9 +379,9 @@ export default function InterfacesPage() {
             ))}
           </select>
           {zones.length === 0 && (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
+            <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
               No zones yet.{" "}
-              <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+              <Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">
                 Create a zone
               </Link>{" "}
               to assign it here.
@@ -421,7 +421,7 @@ export default function InterfacesPage() {
             className="input-industrial md:col-span-2"
           />
         </div>
-        <div className="mt-2 text-xs text-[var(--text-muted)]">
+        <div className="mt-2 text-xs text-(--text-muted)">
           {ifaceType === "bridge" ? (
             <span>
               Bridge members should be L2-only; assign IPs to the bridge interface (not the member interfaces).
@@ -437,12 +437,12 @@ export default function InterfacesPage() {
           )}
         </div>
         <div className="mt-3 flex items-center justify-between">
-          {error && <p className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
+          {error && <p className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
           {isAdmin() && (
             <button
               onClick={onCreate}
               disabled={saving}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+              className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
             </button>
@@ -450,9 +450,9 @@ export default function InterfacesPage() {
         </div>
       </Card>
 
-      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
+      <div className="mt-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Alias</th>
@@ -497,13 +497,13 @@ export default function InterfacesPage() {
 
       {state.length > 0 && (
         <Card padding="lg" className="mt-6">
-          <h2 className="text-sm font-semibold text-[var(--text)]">Detected OS interfaces</h2>
-          <div className="mt-1 text-xs text-[var(--text-muted)]">
+          <h2 className="text-sm font-semibold text-(--text)">Detected OS interfaces</h2>
+          <div className="mt-1 text-xs text-(--text-muted)">
             This is what the kernel currently exposes (used for device binding and link/address state).
           </div>
-          <div className="mt-3 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+          <div className="mt-3 overflow-hidden rounded-xs border">
             <table className="w-full text-sm">
-              <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+              <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Link</th>
@@ -518,14 +518,14 @@ export default function InterfacesPage() {
                   .sort((a, b) => a.index - b.index)
                   .filter((s) => s.name !== "lo")
                   .map((s) => (
-                    <tr key={s.name} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                      <td className="px-4 py-3 font-medium text-[var(--text)]">{s.name}</td>
+                    <tr key={s.name} className="border-t table-row-hover transition-ui">
+                      <td className="px-4 py-3 font-medium text-(--text)">{s.name}</td>
                       <td className="px-4 py-3">
                         <span className={chipClass(s.up)}>{s.up ? "up" : "down"}</span>
                       </td>
-                      <td className="px-4 py-3 text-[var(--text)]">{s.mac || "—"}</td>
-                      <td className="px-4 py-3 text-[var(--text)]">{s.mtu || "—"}</td>
-                      <td className="px-4 py-3 text-[var(--text)]">{(s.addrs ?? []).join(", ") || "—"}</td>
+                      <td className="px-4 py-3 text-(--text)">{s.mac || "—"}</td>
+                      <td className="px-4 py-3 text-(--text)">{s.mtu || "—"}</td>
+                      <td className="px-4 py-3 text-(--text)">{(s.addrs ?? []).join(", ") || "—"}</td>
                     </tr>
                   ))}
               </tbody>

@@ -8,7 +8,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   success: "badge-secure",
   warning: "badge-warning",
   error: "badge-critical",
-  info: "bg-[rgba(6,182,212,0.15)] text-[var(--cyan)]",
+  info: "bg-[rgba(6,182,212,0.15)] text-(--cyan)",
   neutral: "badge-offline",
 };
 
@@ -21,13 +21,13 @@ type StatusBadgeProps = {
 
 export function StatusBadge({ variant, children, dot, className = "" }: StatusBadgeProps) {
   return (
-    <span role="status" className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-mono text-[9px] tracking-wider uppercase ${variantClasses[variant]} ${className}`}>
+    <span role="status" className={`inline-flex items-center gap-1.5 rounded-xs px-2 py-0.5 font-mono text-[9px] tracking-wider uppercase ${variantClasses[variant]} ${className}`}>
       {dot && <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${
-        variant === "success" ? "bg-[var(--green)]" :
-        variant === "warning" ? "bg-[var(--amber)]" :
-        variant === "error" ? "bg-[var(--red)]" :
-        variant === "info" ? "bg-[var(--cyan)]" :
-        "bg-[var(--text-dim)]"
+        variant === "success" ? "bg-(--green)" :
+        variant === "warning" ? "bg-(--amber)" :
+        variant === "error" ? "bg-(--red)" :
+        variant === "info" ? "bg-(--cyan)" :
+        "bg-(--text-dim)"
       }`} />}
       {children}
     </span>
@@ -45,18 +45,18 @@ export function StatusIndicator({
   sublabel?: string;
 }) {
   const colors = {
-    healthy: "bg-[var(--green)]",
-    degraded: "bg-[var(--amber)]",
-    error: "bg-[var(--red)]",
-    unknown: "bg-[var(--text-dim)]",
+    healthy: "bg-(--green)",
+    degraded: "bg-(--amber)",
+    error: "bg-(--red)",
+    unknown: "bg-(--text-dim)",
   };
 
   return (
     <div role="status" aria-label={`${label}: ${status}`} className="flex items-center gap-2.5">
       <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${colors[status]}`} />
       <div>
-        <span className="text-sm font-medium text-[var(--text)]">{label}</span>
-        {sublabel && <span className="ml-2 text-xs text-[var(--text-dim)]">{sublabel}</span>}
+        <span className="text-sm font-medium text-(--text)">{label}</span>
+        {sublabel && <span className="ml-2 text-xs text-(--text-dim)">{sublabel}</span>}
       </div>
     </div>
   );

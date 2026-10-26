@@ -78,13 +78,13 @@ export function RulePreviewButton({
     <div className="relative inline-block">
       <button
         onClick={handlePreview}
-        className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs text-slate-300 transition-ui hover:bg-white/[0.08] hover:text-white"
+        className="rounded-md border border-white/8 bg-white/4 px-2 py-1 text-xs text-slate-300 transition-ui hover:bg-white/8 hover:text-white"
       >
         Preview Impact
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-xl border border-white/[0.08] bg-surface-raised p-4 shadow-card-lg animate-fade-in">
+        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-xl border border-white/8 bg-surface-raised p-4 shadow-card-lg animate-fade-in">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
@@ -107,7 +107,7 @@ export function RulePreviewButton({
                 </div>
                 <button
                   onClick={() => setOpen(false)}
-                  className="rounded-md p-1 text-xs text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-white"
+                  className="rounded-md p-1 text-xs text-slate-400 transition-ui hover:bg-white/6 hover:text-white"
                 >
                   Close
                 </button>
@@ -132,7 +132,7 @@ export function RulePreviewButton({
                       {result.sampleEvents.map((e) => (
                         <div
                           key={e.id}
-                          className="rounded-lg border border-white/[0.06] bg-black/30 p-2 text-xs"
+                          className="rounded-lg border border-white/6 bg-black/30 p-2 text-xs"
                         >
                           <div className="flex items-center justify-between text-slate-300">
                             <span>

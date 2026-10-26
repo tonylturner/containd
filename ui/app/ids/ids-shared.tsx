@@ -18,11 +18,11 @@ export const EXPORT_FORMATS = [
 export const PAGE_SIZES = [10, 25, 50, 100];
 
 const FORMAT_BADGE_COLOR: Record<string, string> = {
-  suricata: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+  suricata: "",
   snort: "text-orange-400 bg-orange-500/10 border-orange-500/20",
   yara: "text-purple-400 bg-purple-500/10 border-purple-500/20",
   sigma: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-  native: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  native: "",
 };
 
 export const SEVERITY_ORDER: Record<string, number> = {
@@ -117,7 +117,7 @@ export function FormatBadge({ format }: { format?: string }) {
   const color = FORMAT_BADGE_COLOR[f] ?? FORMAT_BADGE_COLOR.native;
   return (
     <span
-      className={`inline-block rounded-sm border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${color}`}
+      className={`inline-block rounded-xs border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${color}`}
     >
       {f}
     </span>

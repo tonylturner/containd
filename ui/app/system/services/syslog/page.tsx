@@ -118,24 +118,24 @@ export default function SyslogPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
               Auto
           </label>
@@ -143,7 +143,7 @@ export default function SyslogPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -152,11 +152,11 @@ export default function SyslogPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {status && (
-        <div className="mb-4 grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)] md:grid-cols-4">
+        <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">
           <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
           <div>Sent: {status?.sent_total ?? 0}</div>
           <div>Failed: {status?.failed_total ?? 0}</div>
@@ -166,20 +166,20 @@ export default function SyslogPage() {
           <div>Hit limit: {status?.hit_limit ? "yes" : "no"}</div>
           <div>Flush interval: {status?.flush_interval_sec ?? cfg.flushEvery ?? 0}s</div>
           {status?.last_error ? (
-            <div className="md:col-span-4 text-amber-300">Last error: {status.last_error}</div>
+            <div className="md:col-span-4">Last error: {status.last_error}</div>
           ) : null}
         </div>
       )}
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Forwarders</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-(--text)">Forwarders</h2>
+        <p className="mt-1 text-sm text-(--text)">
           Send unified events to external syslog collectors.
         </p>
-        <p className="mt-2 text-xs text-[var(--text-muted)]">
+        <p className="mt-2 text-xs text-(--text-muted)">
           Active forwarders: {status?.configured_forwarders ?? 0}
         </p>
-        <div className="mt-2 grid gap-3 text-xs text-[var(--text-muted)] md:grid-cols-3">
+        <div className="mt-2 grid gap-3 text-xs text-(--text-muted) md:grid-cols-3">
           <div>
             Log format:
             <select
@@ -256,12 +256,12 @@ export default function SyslogPage() {
             />
           )}
           {!loading && typeof status?.rate_per_min === "number" ? (
-            <p className="mt-2 text-xs text-[var(--text-muted)]">
+            <p className="mt-2 text-xs text-(--text-muted)">
               Rate: {status?.rate_per_min.toFixed(1)} / min
             </p>
           ) : null}
           {!loading && typeof status?.errors_rate_per_min === "number" ? (
-            <p className="mt-1 text-xs text-amber-300">
+            <p className="mt-1 text-xs">
               Errors: {status?.errors_rate_per_min.toFixed(1)} / min
             </p>
           ) : null}
@@ -295,16 +295,16 @@ export default function SyslogPage() {
           {canEdit && (
             <button
               onClick={addForwarder}
-              className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Add
             </button>
           )}
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
+        <div className="mt-4 overflow-hidden rounded-xs border bg-(--surface)">
           <table className="w-full text-sm">
-            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-[var(--text)]">
+            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
                 <th className="px-4 py-3">Address</th>
                 <th className="px-4 py-3">Port</th>
@@ -315,16 +315,16 @@ export default function SyslogPage() {
             <tbody>
               {fwdCount === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={4}>
+                  <td className="px-4 py-4 text-(--text-muted)" colSpan={4}>
                     No forwarders configured.
                   </td>
                 </tr>
               )}
               {(cfg.forwarders ?? []).map((f, i) => (
-                <tr key={`${f.address}-${i}`} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                  <td className="px-4 py-3 text-[var(--text)]">{f.address}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.port}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.proto ?? "udp"}</td>
+                <tr key={`${f.address}-${i}`} className="border-t table-row-hover transition-ui">
+                  <td className="px-4 py-3 text-(--text)">{f.address}</td>
+                  <td className="px-4 py-3 text-(--text)">{f.port}</td>
+                  <td className="px-4 py-3 text-(--text)">{f.proto ?? "udp"}</td>
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button
@@ -341,7 +341,7 @@ export default function SyslogPage() {
           </table>
         </div>
 
-        <p className="mt-3 text-xs text-[var(--text-muted)]">
+        <p className="mt-3 text-xs text-(--text-muted)">
           State:{" "}
           {saveState === "saving"
             ? "saving\u2026"

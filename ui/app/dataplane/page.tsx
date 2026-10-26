@@ -462,42 +462,42 @@ export default function PcapPage() {
               <button
                 onClick={saveSettings}
                 disabled={state !== "idle"}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
               >
                 Save PCAP defaults
               </button>
               <button
                 onClick={startCapture}
                 disabled={!canStart}
-                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+                className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
               >
                 {state === "starting" ? "Starting..." : "Start capture now"}
               </button>
               <button
                 onClick={stopCapture}
                 disabled={state !== "idle" || !isRunning}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-50"
+                className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
               >
                 {state === "stopping" ? "Stopping..." : "Stop"}
               </button>
             </>
           ) : (
-            <span className="text-xs text-[var(--text-muted)]">View-only</span>
+            <span className="text-xs text-(--text-muted)">View-only</span>
           )}
         </div>
       }
     >
       <ConfirmDialog {...confirm.props} />
       {ifaceStateStatus === "unavailable" && (
-        <div role="status" className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           <p>Interface runtime state unavailable — the engine could not be reached. Device discovery is unknown; saved capture settings are unchanged.</p>
-          <button onClick={refreshInterfaceState} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+          <button onClick={refreshInterfaceState} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
-      {ifaceStateStatus === "ready" && ifaceStates.length === 0 && <p role="status" className="mb-4 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
+      {ifaceStateStatus === "ready" && ifaceStates.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No OS interfaces reported.</p>}
 
       {notice && (
-        <div className="mb-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+        <div className="mb-4 rounded-xs border px-3 py-2 text-sm">
           {notice}
         </div>
       )}

@@ -91,11 +91,11 @@ export function EditRuleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--surface)] px-4 animate-fade-in">
-      <div className="w-full max-w-2xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-(--surface) px-4 animate-fade-in">
+      <div className="w-full max-w-2xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Edit rule {rule.id}</h2>
-          <button onClick={onClose} className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Close</button>
+          <h2 className="text-lg font-semibold text-(--text)">Edit rule {rule.id}</h2>
+          <button onClick={onClose} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Close</button>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
@@ -105,8 +105,8 @@ export function EditRuleModal({
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           {zones.length === 0 && (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
-              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">Create a zone</Link> to target policies.
+            <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
+              No zones yet.{" "}<Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">Create a zone</Link> to target policies.
             </div>
           )}
           <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
@@ -117,8 +117,8 @@ export function EditRuleModal({
             <option value="ALLOW">ALLOW</option>
             <option value="DENY">DENY</option>
           </select>
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
             Log hits
             <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
           </label>
@@ -130,13 +130,13 @@ export function EditRuleModal({
             <option value="icmp">icmp</option>
           </select>
           <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
             ICS Protocol Filter
             <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
           </label>
-          <span className="text-xs text-[var(--text-muted)] md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-          <span className="text-xs text-[var(--text-muted)] md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-[var(--amber)] hover:text-[var(--amber)]">PCAP Capture</a>).</span>
+          <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+          <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
         </div>
 
         {icsEnabled && (
@@ -155,8 +155,8 @@ export function EditRuleModal({
 
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">Cancel</button>
-          <button onClick={save} className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
+          <button onClick={onClose} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">Cancel</button>
+          <button onClick={save} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
         </div>
       </div>
     </div>
@@ -247,7 +247,7 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
 
   return (
     <Card padding="lg" className="mt-6">
-      <h2 className="text-sm font-semibold text-[var(--text)]">Create rule</h2>
+      <h2 className="text-sm font-semibold text-(--text)">Create rule</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
         <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
         <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-2" />
@@ -259,8 +259,8 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
         {zones.length === 0 && (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)] md:col-span-2">
-            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">Create a zone</Link> to target policies.
+          <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text) md:col-span-2">
+            No zones yet.{" "}<Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">Create a zone</Link> to target policies.
           </div>
         )}
         <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
@@ -282,18 +282,18 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
         </select>
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+        <label className="flex items-center gap-2 text-sm text-(--text)">
+          <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
           Log hits
           <InfoTip label="When enabled, matching traffic is logged as a firewall.rule.hit event." />
         </label>
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+        <label className="flex items-center gap-2 text-sm text-(--text)">
+          <input type="checkbox" checked={icsEnabled} onChange={(e) => setIcsEnabled(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
           ICS Protocol Filter
           <InfoTip label="Adds OT/ICS-aware matching to this firewall rule." />
         </label>
-        <span className="text-xs text-[var(--text-muted)] md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-        <span className="text-xs text-[var(--text-muted)] md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-[var(--amber)] hover:text-[var(--amber)]">PCAP Capture</a>).</span>
+        <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
+        <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
       </div>
 
       {icsEnabled && (
@@ -312,7 +312,7 @@ export function CreateRuleForm({ zones, onCreate }: { zones: Zone[]; onCreate: (
 
       <div className="mt-3 flex items-center justify-between">
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <button onClick={submit} disabled={saving} className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+        <button onClick={submit} disabled={saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
           {saving ? "Creating..." : "Create rule"}
         </button>
       </div>
@@ -345,16 +345,16 @@ function ICSPredicateFields({
   const [showHelp, setShowHelp] = useState(false);
 
   return (
-    <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 space-y-3">
+    <div className="mt-3 rounded-xs border bg-(--surface) p-4 space-y-3">
       <div className="grid gap-3 md:grid-cols-4">
         <div className="md:col-span-2">
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">ICS Protocol</label>
+          <label className="block text-[10px] font-medium text-(--text-muted) mb-1">ICS Protocol</label>
           <select value={protocol} onChange={(e) => onProtocolChange(e.target.value)} className="input-industrial w-full">
             {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
           </select>
         </div>
         <div>
-          <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Rule Mode</label>
+          <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Rule Mode</label>
           <select value={mode} onChange={(e) => onModeChange(e.target.value as "enforce" | "learn")} className="input-industrial w-full">
             <option value="learn">Learning (passive)</option>
             <option value="enforce">Enforcement (after commit)</option>
@@ -363,7 +363,7 @@ function ICSPredicateFields({
         <div className="flex items-end">
           <button
             onClick={() => setShowHelp(!showHelp)}
-            className="rounded-sm border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
+            className="rounded-xs border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
           >
             {showHelp ? "Hide" : "Show"} protocol reference
           </button>
@@ -371,20 +371,20 @@ function ICSPredicateFields({
       </div>
 
       {showHelp && (
-        <div className="rounded-sm border border-blue-500/[0.1] bg-blue-500/[0.03] p-3 space-y-2">
+        <div className="rounded-xs border border-blue-500/10 bg-blue-500/3 p-3 space-y-2">
           <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <div className="text-[10px] font-medium text-[var(--text)]">{meta.fcLabel}</div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.fcHelp}</div>
+              <div className="text-[10px] font-medium text-(--text)">{meta.fcLabel}</div>
+              <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.fcHelp}</div>
             </div>
             <div>
-              <div className="text-[10px] font-medium text-[var(--text)]">{meta.addrLabel}</div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{meta.addrHelp}</div>
+              <div className="text-[10px] font-medium text-(--text)">{meta.addrLabel}</div>
+              <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.addrHelp}</div>
             </div>
           </div>
           {meta.notes && (
-            <div className="text-[10px] text-[var(--text-dim)] border-t border-white/[0.04] pt-2 mt-2">{meta.notes}</div>
+            <div className="text-[10px] text-(--text-dim) border-t border-white/4 pt-2 mt-2">{meta.notes}</div>
           )}
         </div>
       )}
@@ -395,11 +395,11 @@ function ICSPredicateFields({
         <>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.fcLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+              <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.fcLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>
               <input value={functionCodes} onChange={(e) => onFunctionCodesChange(e.target.value)} placeholder={meta.fcPlaceholder || `${meta.fcLabel}`} className="input-industrial w-full" />
             </div>
             <div>
-              <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">{meta.addrLabel} <span className="text-[var(--text-dim)]">(comma-separated)</span></label>
+              <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.addrLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>
               <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder={meta.addrPlaceholder || meta.addrLabel} className="input-industrial w-full" />
             </div>
           </div>
@@ -407,50 +407,50 @@ function ICSPredicateFields({
           <div className="grid gap-3 md:grid-cols-3">
             {meta.showUnitId && (
               <div>
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Unit ID <span className="text-[var(--text-dim)]">(0-255, Modbus slave)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Unit ID <span className="text-(--text-dim)">(0-255, Modbus slave)</span></label>
                 <input value={unitId} onChange={(e) => onUnitIdChange(e.target.value)} placeholder="e.g. 1" className="input-industrial w-full" />
               </div>
             )}
             {meta.showObjectClasses && (
               <div className="md:col-span-2">
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">CIP Object Classes <span className="text-[var(--text-dim)]">(hex csv)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">CIP Object Classes <span className="text-(--text-dim)">(hex csv)</span></label>
                 <input value={objectClasses} onChange={(e) => onObjectClassesChange(e.target.value)} placeholder="0x02, 0x04, 0x66" className="input-industrial w-full" />
               </div>
             )}
             {meta.showStationAddrs && (
               <div className="md:col-span-2">
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Station Addresses <span className="text-[var(--text-dim)]">(source/destination, 0-65534)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Station Addresses <span className="text-(--text-dim)">(source/destination, 0-65534)</span></label>
                 <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
               </div>
             )}
             {meta.showDbNumber && (
               <div>
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">DB Numbers <span className="text-[var(--text-dim)]">(Siemens data blocks)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">DB Numbers <span className="text-(--text-dim)">(Siemens data blocks)</span></label>
                 <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="DB1, DB100" className="input-industrial w-full" />
               </div>
             )}
             {meta.showObjectType && (
               <div>
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Object Type <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Object Type <span className="text-(--text-dim)">(BACnet)</span></label>
                 <input disabled placeholder="analog-input, binary-output" className="input-industrial w-full opacity-60" title="Object type filtering coming soon" />
               </div>
             )}
             {meta.showPropertyId && (
               <div>
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1">Property ID <span className="text-[var(--text-dim)]">(BACnet)</span></label>
+                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Property ID <span className="text-(--text-dim)">(BACnet)</span></label>
                 <input disabled placeholder="85 (present-value)" className="input-industrial w-full opacity-60" title="Property ID filtering coming soon" />
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-4 text-sm text-[var(--text)]">
+          <div className="flex items-center gap-4 text-sm text-(--text)">
             <label className="flex items-center gap-2">
-              <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+              <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
               Read-only
               <InfoTip label="Only match read operations (function codes that read data without modifying state)." />
             </label>
             <label className="flex items-center gap-2">
-              <input type="checkbox" checked={writeOnly} onChange={(e) => onWriteOnlyChange(e.target.checked)} className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+              <input type="checkbox" checked={writeOnly} onChange={(e) => onWriteOnlyChange(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
               Write-only
               <InfoTip label="Only match write/control operations (function codes that modify device state)." />
             </label>
