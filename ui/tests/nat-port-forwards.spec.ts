@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Adding a port forward checks its ports with the shared port rule. The card
-// has one error banner for the whole row, so each message names its field.
+// Adding a port forward checks its ports and IPv4 destination with the shared
+// rules. The card has one error banner for the whole row, so each message
+// names its field.
 
 const zones = [{ name: "wan" }, { name: "lan" }];
 
@@ -55,4 +56,25 @@ test("adding a port forward rejects ports outside 1-65535 and fractional ports",
   await expect(page.getByRole("cell", { name: "192.0.2.5:443", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "8443", exact: true })).toBeVisible();
   await expect(page.getByText("is not a valid port", { exact: false })).toHaveCount(0);
+});
+
+test("adding a port forward rejects a destination that is not IPv4", async ({ page }) => {
+  await openNAT(page);
+  const destIp = page.getByPlaceholder("dest ip");
+  const add = page.getByRole("button", { name: "Add", exact: true });
+  await page.getByPlaceholder("listen port").fill("8443");
+
+  await add.click();
+  await expect(page.getByText("Destination IP is required.", { exact: true })).toBeVisible();
+
+  for (const bad of ["192.0.2", "192.0.2.05", "server.local", "2001:db8::5"]) {
+    await destIp.fill(bad);
+    await add.click();
+    await expect(page.getByText(`Destination IP: "${bad}" is not a valid IPv4 address.`, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("No port forwards configured.", { exact: false })).toBeVisible();
+
+  await destIp.fill(" 192.0.2.5 ");
+  await add.click();
+  await expect(page.getByRole("cell", { name: "192.0.2.5", exact: true })).toBeVisible();
 });

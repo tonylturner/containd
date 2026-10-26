@@ -17,7 +17,7 @@ import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
-import { validatePort } from "../../lib/validate";
+import { validateIPv4, validatePort } from "../../lib/validate";
 
 /* ── helpers ───────────────────────────────────────────────────── */
 
@@ -366,6 +366,11 @@ function PortForwardsCard({
     }
     if (!newDestIp.trim()) {
       setError("Destination IP is required.");
+      return;
+    }
+    const destIpError = validateIPv4(newDestIp);
+    if (destIpError) {
+      setError(`Destination IP: ${destIpError}.`);
       return;
     }
     const destPortError = validatePort(newDestPort);
