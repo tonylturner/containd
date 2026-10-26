@@ -169,7 +169,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newer with no plaintext fallback.
 - The Sessions page and `GET /api/v1/conntrack` show the kernel's real IPv4
   and IPv6 connections, including NAT reply tuples, and report an unavailable
-  backend as an error instead of an empty list. Kill now works for TCP and UDP:
+  backend as an error instead of an empty list. The list comes from a
+  ctnetlink dump only, so it works on kernels that do not export
+  `/proc/net/nf_conntrack`. A cancelled request stops the dump, and the
+  `limit` bounds the records held in memory. Kill now works for TCP and UDP:
   it deletes the connection and refuses reconnects for a chosen interval
   (1–3600 s, default 60 s), for the exact connection or the client's service.
 - DPI domain exclusions now work: a flow is excluded when its TLS SNI or an
