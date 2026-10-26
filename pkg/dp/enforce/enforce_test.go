@@ -205,7 +205,7 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	// The ICS entry should use queue instead of accept.
-	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
 		t.Fatalf("expected queue rule for ICS entry, got:\n%s", ruleset)
 	}
 	// The non-ICS entry should still use accept.
@@ -314,7 +314,7 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 	if strings.Contains(ruleset, "log prefix") {
 		t.Fatalf("did not expect log clause on DPI-eligible rule, got:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
 		t.Fatalf("expected queue verdict on DPI rule, got:\n%s", ruleset)
 	}
 }

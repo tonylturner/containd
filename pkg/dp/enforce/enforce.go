@@ -27,8 +27,9 @@ type Compiler struct {
 	EngineAPI *EngineAPIPath
 	TableName string
 	// QueueID, when non-zero, causes DPI-eligible rules (those with an
-	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
-	// steering matched traffic through NFQUEUE for selective DPI.
+	// ICS predicate) to queue their traffic to NFQUEUE <QueueID> instead of
+	// accepting or dropping it, through ICSQueueChain (IEC104 rules:
+	// IEC104EnvelopeChain), for selective DPI.
 	QueueID int
 	// IEC104EnvelopeOpen is the state CompileFirewall writes into
 	// IEC104EnvelopeChain: true queues envelope traffic to QueueID, false
@@ -90,9 +91,12 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if err := preds.writeRecheckChains(&buf); err != nil {
 		return "", err
 	}
-	// Declared before the forward chain that jumps to it.
+	// Declared before the forward chain that jumps to them.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
+	}
+	if c.queuesICS(snap) {
+		c.writeICSQueueChain(&buf)
 	}
 	if err := c.writeInputChain(&buf, preds.zones, locals); err != nil {
 		return "", err
@@ -291,7 +295,7 @@ func compileEntry(e rules.Entry, zones zoneIndex, queueID int, nflogGroup int) (
 			lines = append(lines, metered...)
 			continue
 		}
-		forms, err := actionForms(e, p, queued, queueID, counterStmt(e.ID), logStmt)
+		forms, err := actionForms(e, p, queued, counterStmt(e.ID), logStmt)
 		if err != nil {
 			return nil, err
 		}

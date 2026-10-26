@@ -40,7 +40,11 @@ import (
 // partial frame, framing could start inside a message. Its connection's
 // packets drop until the flow ends, but no flow block is installed: the
 // client's next connection anchors at its SYN and is inspected from its
-// first byte.
+// first byte. Only a SYN or SYN-ACK of a handshake that the kernel's
+// connection tracking has not seen complete anchors a stream
+// (dpi.ParsedPacket.TCPHandshake): anchoring at one sent into an
+// established connection, such as a picked-up one, would let its sender
+// choose where framing starts.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).
@@ -63,10 +67,11 @@ func (e *Engine) failClosedRule(pkt capture.Packet, state *flow.State, parsed *d
 	if !pkt.Token.Inline() {
 		return nil
 	}
-	snap := e.ruleSnap.Load()
-	if snap == nil {
+	p := e.ruleSnap.current.Load()
+	if p == nil || p.snapshot == nil {
 		return nil
 	}
+	snap := p.snapshot
 	ctx := rules.EvalContext{SrcIP: state.Key.OpenerIP(), DstIP: state.Key.ServerIP()}
 	zoned := false
 	for i := range snap.Firewall {
@@ -76,24 +81,14 @@ func (e *Engine) failClosedRule(pkt capture.Packet, state *flow.State, parsed *d
 			continue
 		}
 		if !zoned && (len(entry.SourceZones) > 0 || len(entry.DestZones) > 0) {
-			ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(snap, ctx.SrcIP, ctx.DstIP)
+			ctx.SrcZone, ctx.DstZone = e.zones.resolve(snap, ctx.SrcIP, ctx.DstIP)
 			zoned = true
 		}
-		if rules.PreviewMatch(addressScope(entry), ctx) {
+		if p.evaluator.AddressScopeMatch(i, ctx) {
 			return entry
 		}
 	}
 	return nil
-}
-
-// addressScope is the zone and address part of an entry's scope.
-func addressScope(entry *rules.Entry) rules.Entry {
-	return rules.Entry{
-		SourceZones:  entry.SourceZones,
-		DestZones:    entry.DestZones,
-		Sources:      entry.Sources,
-		Destinations: entry.Destinations,
-	}
 }
 
 // inspectFlow runs DPI on one packet. A panic while inspecting a

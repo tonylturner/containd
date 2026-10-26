@@ -19,7 +19,7 @@ func feedVerify(r *reassembler, key string, seq uint32, verify bool, data ...byt
 func TestReassemblerVerifiesConsumedBytes(t *testing.T) {
 	for _, verify := range []bool{false, true} {
 		r := newReassembler(64, time.Minute)
-		r.open("f", 100, testNow, verify)
+		r.open("f", 100, testNow, verify, true)
 		wantBuf(t, feedVerify(r, "f", 100, verify, 1, 2, 3, 4), 0, 1, 2, 3, 4)
 		r.trim("f", 0, 4)
 		wantBuf(t, feedVerify(r, "f", 104, verify, 5, 6), 4, 5, 6)
@@ -44,7 +44,7 @@ func TestReassemblerVerifiesConsumedBytes(t *testing.T) {
 // cannot be verified. Turning verification off drops the history.
 func TestReassemblerHistoryBound(t *testing.T) {
 	r := newReassembler(4, time.Minute)
-	r.open("f", 100, testNow, true)
+	r.open("f", 100, testNow, true, true)
 	for i := range uint32(3) {
 		b := byte(3 * i)
 		wantBuf(t, feedVerify(r, "f", 100+3*i, true, b, b+1, b+2), int64(3*i), b, b+1, b+2)

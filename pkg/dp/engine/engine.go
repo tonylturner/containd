@@ -49,6 +49,7 @@ type Engine struct {
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
+	zones                 zoneCache // outlives Reconfigure, as the namespace does
 	started               atomic.Bool
 	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler              *enforce.Compiler
@@ -322,6 +323,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
+	fresh.iec.zones = &e.zones
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
 	e.epoch.Add(1)
@@ -412,7 +414,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup
-	run.Add(4)
+	run.Add(5)
 	go func() {
 		defer run.Done()
 		e.hooks.blocks.run(runCtx)
@@ -425,6 +427,10 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	go func() {
 		defer run.Done()
 		e.iec.run(runCtx.Done())
+	}()
+	go func() {
+		defer run.Done()
+		e.zones.watch(runCtx, onError)
 	}()
 	// Periodically update the active goroutine gauge.
 	go func() {

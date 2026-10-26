@@ -5,6 +5,7 @@ package engine
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -289,4 +290,46 @@ func BenchmarkFailClosedRule(b *testing.B) {
 			b.Fatal("flow out of scope")
 		}
 	}
+}
+
+// BenchmarkFailClosedRuleZoned is BenchmarkFailClosedRule with zoned rules,
+// whose scope needs the zones of the flow's addresses, while the zone
+// cache is subscribed to interface changes, as in a running engine.
+func BenchmarkFailClosedRuleZoned(b *testing.B) {
+	e, err := New(Config{DPIEnabled: true, DPIMode: "enforce"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	e.zones.subscribed()
+	snap := firstCommandPolicy()
+	snap.ZoneIfaces = map[string][]string{"control": {loopbackName(b)}}
+	for i := range snap.Firewall {
+		snap.Firewall[i].SourceZones = []string{""}
+	}
+	e.LoadRules(snap)
+	pkt := connSegment(false, 41000, dnp3Port, 1, ackPsh, dnp3Request(1, 1, []byte{0x3C, 0x01, 0x06}))
+	pkt.Token = capture.NewToken(1, 1)
+	state := e.trackFlow(pkt, time.Now())
+	parsed := dpi.ParsedPacket{Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
+	b.ReportAllocs()
+	for b.Loop() {
+		if e.failClosedRule(pkt, state, &parsed) == nil {
+			b.Fatal("flow out of scope")
+		}
+	}
+}
+
+// loopbackName is the name of the host's loopback interface.
+func loopbackName(tb testing.TB) string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			return iface.Name
+		}
+	}
+	tb.Skip("no loopback interface")
+	return ""
 }

@@ -52,7 +52,7 @@ func EffectiveMode(ruleMode, globalMode string) string {
 func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched bool, mode string) {
 	for i := range e.compiled {
 		ce := &e.compiled[i]
-		if ce.iec == nil || !matchZones(ce.Entry, ctx) || !matchCIDRs(ce.Entry, ctx) || !matchProtoCompiled(ce, ctx) {
+		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) {
 			continue
 		}
 		matched = true

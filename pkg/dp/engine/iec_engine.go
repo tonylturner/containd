@@ -29,7 +29,7 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	health := newIECHealth(func(outcome, errText string) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
-	t = newIECTable(cfg.DPIMode)
+	t = newIECTable(cfg.DPIMode, &e.zones)
 	t.inventory = e.inventory
 	t.dpi = e.dpiMgr
 	t.health = health

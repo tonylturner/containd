@@ -45,15 +45,16 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
-		Payload:     pkt.Payload,
-		Proto:       pkt.Transport,
-		SrcPort:     pkt.SrcPort,
-		DstPort:     pkt.DstPort,
-		TCPSeq:      pkt.TCP.Seq,
-		TCPSeqValid: pkt.TCP.Valid,
-		TCPSyn:      pkt.TCP.Flags&capture.TCPFlagSYN != 0,
-		TCPFin:      pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagFIN != 0,
-		TCPRst:      pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagRST != 0,
+		Payload:      pkt.Payload,
+		Proto:        pkt.Transport,
+		SrcPort:      pkt.SrcPort,
+		DstPort:      pkt.DstPort,
+		TCPSeq:       pkt.TCP.Seq,
+		TCPSeqValid:  pkt.TCP.Valid,
+		TCPSyn:       pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+		TCPHandshake: handshakeMarked(pkt),
+		TCPFin:       pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagFIN != 0,
+		TCPRst:       pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagRST != 0,
 	}
 	if parsed.TCPSyn {
 		parsed.TCPSeq++
@@ -72,9 +73,11 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 			if !shouldInspect {
 				return acceptDecision
 			}
-		case parsed.TCPSyn && cached.Reason == failClosedMidStream:
-			// After a mid-stream pickup a SYN starts the client's next
-			// connection on the tuple, inspected from its first byte.
+		case parsed.TCPSyn && parsed.TCPHandshake && cached.Reason == failClosedMidStream:
+			// After a mid-stream pickup the SYN of a new handshake starts
+			// the client's next connection on the tuple, inspected from
+			// its first byte. A SYN sent into the established connection
+			// drops with it.
 			e.verdictCache.Invalidate(flowHash)
 		default:
 			return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
@@ -210,6 +213,13 @@ func isIECPort(pkt capture.Packet) bool {
 // envelope rule (the nft envelope mark).
 func envelopeMarked(pkt capture.Packet) bool {
 	return pkt.HasMark && enforce.EnvelopeMarked(pkt.Mark)
+}
+
+// handshakeMarked reports a packet that nft queued under a generic ICS
+// rule in a connection whose handshake connection tracking has not seen
+// complete (enforce.HandshakeMark).
+func handshakeMarked(pkt capture.Packet) bool {
+	return pkt.HasMark && enforce.HandshakeMarked(pkt.Mark)
 }
 
 // HandlePacket is the handler given to capture; offline replays and tests

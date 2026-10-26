@@ -141,7 +141,7 @@ func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 	if pkt.DstPort != iec104Port {
 		ctx.SrcIP, ctx.DstIP = pkt.DstIP, pkt.SrcIP
 	}
-	ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(t.snap, ctx.SrcIP, ctx.DstIP)
+	ctx.SrcZone, ctx.DstZone = t.zones.resolve(t.snap, ctx.SrcIP, ctx.DstIP)
 	matched, mode := t.envelopeLocked(ctx)
 	if !matched || mode != "enforce" {
 		return iecResult{}, false

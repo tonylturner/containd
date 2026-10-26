@@ -35,7 +35,7 @@ func DecisionOrder(entries []Entry) []int {
 
 // matches reports whether every predicate of the entry holds for ctx.
 func (ce *compiledEntry) matches(ctx EvalContext) bool {
-	return matchZones(ce.Entry, ctx) && matchCIDRs(ce.Entry, ctx) && matchProtoCompiled(ce, ctx) &&
+	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx) && matchProtoCompiled(ce, ctx) &&
 		matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce.Entry, ctx)
 }
 

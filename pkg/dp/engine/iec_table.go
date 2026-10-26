@@ -123,6 +123,7 @@ func newIECDir(isn uint32) *iecDir {
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
 	mu         sync.Mutex
+	zones      *zoneCache // the engine's
 	now        func() time.Time
 	dpi        *dpi.Manager
 	injector   session.Injector
@@ -155,8 +156,10 @@ type iecTable struct {
 	reconnect  map[string]time.Time // client IP + server → aborted at
 }
 
-func newIECTable(globalMode string) *iecTable {
+// newIECTable returns a table that resolves zones through zones.
+func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 	return &iecTable{
+		zones:      zones,
 		now:        time.Now,
 		newPolicy:  newRulesPolicy,
 		safeRead:   iec104.SafeRead,
@@ -187,7 +190,7 @@ func pairKey(client, server netip.AddrPort) string {
 
 // sessionCtx is the opener-oriented evaluation context of a session.
 func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
-	return iecSessionContext(t.snap, client, server, resolveZonesForFlow)
+	return iecSessionContext(t.snap, client, server, t.zones.resolve)
 }
 
 func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, resolve zoneResolver) rules.EvalContext {

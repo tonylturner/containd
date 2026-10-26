@@ -127,7 +127,7 @@ const actionsForwardGolden = `  chain forward {
     meta nfproto ipv6 meta l4proto != { tcp, udp } ct state != { invalid, untracked } ct direction reply iifname { "eth2" } counter name "rule_c6679320c12984e0" update @rule_c6679320c12984e0_m6 { ip6 saddr . ip6 daddr . meta l4proto limit rate over 1000/second burst 50000 packets } counter name "rule_c6679320c12984e0_excess" drop;
     meta nfproto ipv4 ct state { invalid, untracked } meta l4proto icmp ip daddr { 10.0.2.10/32 } counter name "rule_344d02b85c20d34e" update @rule_344d02b85c20d34e_m4 { ip saddr . ip daddr . meta l4proto limit rate over 5/second burst 5 packets } counter name "rule_344d02b85c20d34e_excess" drop;
     meta nfproto ipv4 ct state != { invalid, untracked } meta l4proto icmp ct reply ip saddr { 10.0.2.10/32 } counter name "rule_344d02b85c20d34e" update @rule_344d02b85c20d34e_m4 { ip saddr . ip daddr . meta l4proto limit rate over 5/second burst 5 packets } counter name "rule_344d02b85c20d34e_excess" drop;
-    tcp dport 502 counter name "rule_e2b88688266c1ba6" queue num 100;
+    tcp dport 502 counter name "rule_e2b88688266c1ba6" jump ics_queue;
     ct state { established, related } accept;
     ip daddr { 10.0.2.0/24 } counter name "rule_d70a03c1af306977";
     tcp dport 443 counter name "rule_8df01028adf79ed2" accept;

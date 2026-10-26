@@ -14,14 +14,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// containd reserves the skb-mark bits in EnvelopeMarkMask. EnvelopeMark
-// within them means "steered to the queue by an IEC104 envelope rule"; the
-// other mark bits are preserved.
-const (
-	EnvelopeMarkMask uint32 = 0x0f000000
-	EnvelopeMark     uint32 = 0x01000000
-)
-
 // iec104Port is the only supported IEC104 server port.
 const iec104Port = 2404
 
@@ -32,11 +24,6 @@ const iec104Port = 2404
 // passes through a state where envelope traffic is neither queued to the
 // engine nor dropped, and no other rule changes.
 const IEC104EnvelopeChain = "iec104_envelope"
-
-// EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
-func EnvelopeMarked(mark uint32) bool {
-	return mark&EnvelopeMarkMask == EnvelopeMark
-}
 
 // SteersIEC104 reports whether CompileFirewall steers IEC104 envelope
 // traffic to the queue for snap: a queue is configured and at least one
@@ -92,7 +79,7 @@ func (c *Compiler) iec104EnvelopeVerdict(open bool) string {
 		return "drop"
 	}
 	return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
-		^EnvelopeMarkMask, EnvelopeMark, c.QueueID)
+		^QueueMarkMask, EnvelopeMark, c.QueueID)
 }
 
 // writeIEC104EnvelopeChain emits IEC104EnvelopeChain in the state of

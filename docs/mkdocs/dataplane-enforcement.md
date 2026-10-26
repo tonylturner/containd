@@ -30,7 +30,10 @@ or underscore, followed by letters, digits, underscores and hyphens.
 Local input and NAT rules match a zone's interfaces through the set
 `zone_<hex-encoded zone name>` in the policy table, so every zone gets its own
 set even when names differ only in case or punctuation. A zone with interfaces
-can therefore have a name of at most 125 bytes.
+can therefore have a name of at most 125 bytes. The engine places a flow's
+addresses in zones by the networks on each zone's interfaces. It reads them
+once and again after every link or address change the kernel reports, so a
+changed address takes effect without a commit.
 
 nftables enforces identity and schedule predicates on the rules it handles,
 with per-label address sets and absolute-time interval sets in the policy
@@ -91,6 +94,10 @@ restart or a data-plane configuration change, and connections idle longer than
 the engine's 5-minute flow timeout. No flow block is installed, so the client's
 next connection is inspected from its first byte. The old connection is not
 reset. Learn-mode flows and packets without an inline verdict still pass.
+Inspection starts only at a SYN of a handshake that the kernel's connection
+tracking has not seen complete. A SYN sent into an established connection,
+for example one the engine picked up, cannot restart inspection at a sequence
+number of the sender's choosing: the connection stays dropped.
 
 ## ICS rule coverage
 
@@ -159,7 +166,10 @@ decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
    bucket and dropped over the limit. Tracked packets match by their
    connection's original tuple (`ct original`, `ct reply`), packets without
    usable connection tracking state by their header.
-2. IEC 104 envelope steering and the NFQUEUE lines of ICS rules.
+2. IEC 104 envelope steering and the NFQUEUE lines of ICS rules. The NFQUEUE
+   lines of the other ICS rules jump to the `ics_queue` chain, which marks the
+   packets of connections whose handshake connection tracking has not seen
+   complete.
 3. The established/related accept and the DNAT accepts.
 4. `TAG` lines, by rule ID, which count matching connection openers and
    continue.
@@ -172,8 +182,9 @@ decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
 Every line updates its rule's named counter, read through
 `GET /api/v1/firewall/counters`; a `RATE_LIMIT` rule has a second counter for
 its excess drops. Counters live in the policy table, so each apply restarts
-them. `TAG` has no kernel mark: IEC 104 owns mark mask `0x0f000000`, and a tag
-has no enforcement effect.
+them. `TAG` has no kernel mark: NFQUEUE steering owns mark mask `0x0f000000`
+(`0x01000000` for IEC 104 envelope traffic, `0x02000000` for the packets
+`ics_queue` marks), and a tag has no enforcement effect.
 
 ## Temporary blocks
 

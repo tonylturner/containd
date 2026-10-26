@@ -74,7 +74,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
 			for _, re := range []string{
-				`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 207;`,
+				`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`,
+				`ct status assured meta mark set meta mark and 0xf0ffffff queue num 207;`,
+				`ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 207;`,
 				`meta time @schedule_allow_40_0120_0360_555443 tcp dport 22 counter name "rule_[0-9a-f]{16}" accept;`,
 			} {
 				if !regexp.MustCompile(re).MatchString(preview.Ruleset) {

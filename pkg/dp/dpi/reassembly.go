@@ -153,21 +153,35 @@ func seqDiff(a, b uint32) int32 {
 // except one that began without a SYN and failed as picked up
 // mid-connection: a SYN starts the client's next connection on the tuple.
 // A stream that lost its partial frame was live, so it stays failed.
-func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed bool) *StreamError {
+//
+// A fail-closed SYN starts a stream, a new one or the next connection of a
+// failed or closed one, only when it belongs to a handshake the kernel's
+// connection tracking has not seen complete (handshake). Any other was
+// sent into an established connection, which a stream picked up
+// mid-connection, or none, may belong to: anchoring at it would let its
+// sender choose where framing starts.
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) *StreamError {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if s, ok := r.streams[key]; ok {
-		switch {
-		case failClosed && s.failed != nil:
-			if !midStream(s.failed) || s.synSeen {
-				return nil
-			}
-		case s.synSeen && s.synSeq == seq && !s.closed:
-			s.lastUpdate = now
+	s, ok := r.streams[key]
+	switch {
+	case !ok:
+		if failClosed && !handshake {
 			return nil
-		case failClosed && !s.closed:
-			return &StreamError{Kind: StreamResync, Offset: s.end()}
 		}
+	case failClosed && s.failed != nil:
+		if !midStream(s.failed) || s.synSeen || !handshake {
+			return nil
+		}
+	case s.synSeen && s.synSeq == seq && !s.closed:
+		s.lastUpdate = now
+		return nil
+	case failClosed && !s.closed:
+		return &StreamError{Kind: StreamResync, Offset: s.end()}
+	case failClosed && !handshake:
+		return nil
+	}
+	if ok {
 		r.bytesBuffered -= s.held()
 	} else {
 		r.activeStreams++

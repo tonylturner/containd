@@ -119,7 +119,7 @@ func TestIECSessionEventsCarryTags(t *testing.T) {
 	snap := &rules.Snapshot{Firewall: append(tagRules(), tagEntry("tag-iec", "telecontrol", func(e *rules.Entry) {
 		e.Protocols = []rules.Protocol{{Name: "tcp", Port: "2404"}}
 	}))}
-	table := newIECTable("enforce")
+	table := newIECTable("enforce", &zoneCache{})
 	table.snap, table.policy = snap, rules.NewEvaluator(snap)
 	s := &iecSession{id: "s1", client: netip.MustParseAddrPort(testClient + ":40000"), server: netip.MustParseAddrPort(testServer + ":2404")}
 	evs := table.withSessionTags([]events.Event{s.sessionEvent(outcomeAborted, nil, time.Now()), healthEvent(outcomeEnforceHealthy, "", time.Now())})

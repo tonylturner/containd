@@ -222,7 +222,7 @@ func TestMainFeedQueuedSegmentTailPastNextSeq(t *testing.T) {
 	now := time.Now()
 	data := mainSeqBytes(40) // seq 100..140
 
-	r.open("flow1", 100, now, false)
+	r.open("flow1", 100, now, false, true)
 	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false)
 	// 100..130 overlaps the queued 120..140; its tail 130..140 must still
 	// be appended.
@@ -237,7 +237,7 @@ func TestMainFeedOOOSameSeqKeepsLongerCopy(t *testing.T) {
 	now := time.Now()
 	data := mainSeqBytes(40)
 
-	r.open("flow1", 100, now, false)
+	r.open("flow1", 100, now, false, true)
 	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:25], now, false, false, false)
 	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false)
 	// A shorter copy arriving after the longer one adds nothing.
@@ -253,7 +253,7 @@ func TestMainFeedOOOPartialAndContainedOverlaps(t *testing.T) {
 	now := time.Now()
 	data := mainSeqBytes(60)
 
-	r.open("flow1", 100, now, false)
+	r.open("flow1", 100, now, false, true)
 	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false) // queued
 	r.feed("flow1", position{kind: posSeq, seq: 130}, data[30:50], now, false, false, false) // overlaps its tail
 	r.feed("flow1", position{kind: posSeq, seq: 115}, data[15:25], now, false, false, false) // overlaps its head
@@ -270,7 +270,7 @@ func TestMainFeedOOOCoveringSegmentReplacesQueued(t *testing.T) {
 	now := time.Now()
 	data := mainSeqBytes(10 + 2*maxOOOSegments)
 
-	r.open("flow1", 100, now, false)
+	r.open("flow1", 100, now, false, true)
 	for i := 0; i < maxOOOSegments; i++ {
 		off := 10 + 2*i
 		r.feed("flow1", position{kind: posSeq, seq: uint32(100 + off)}, data[off:off+1], now, false, false, false)
@@ -362,7 +362,7 @@ func TestMainFeedShuffledOverlappingSegmentsLoseNoByte(t *testing.T) {
 
 		r := newReassembler(0, time.Minute)
 		now := time.Now()
-		r.open("flow1", base, now, false)
+		r.open("flow1", base, now, false, true)
 		var buf []byte
 		for _, s := range order {
 			buf = r.feed("flow1", position{kind: posSeq, seq: base + uint32(s.start)}, data[s.start:s.end], now, false, false, false).buf

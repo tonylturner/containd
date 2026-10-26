@@ -17,9 +17,18 @@ import (
 // new sequence number, and a decoder panic. The mock framer's frames are a
 // length byte followed by that many bytes.
 
+// synSeg is a SYN of a handshake the kernel's connection tracking has not
+// seen complete.
 func synSeg(seq uint32, failClosed bool) *ParsedPacket {
 	p := tcpSeg(seq)
-	p.TCPSyn, p.FailClosed = true, failClosed
+	p.TCPSyn, p.TCPHandshake, p.FailClosed = true, true, failClosed
+	return p
+}
+
+// establishedSynSeg is a SYN sent into an established connection.
+func establishedSynSeg(seq uint32, failClosed bool) *ParsedPacket {
+	p := synSeg(seq, failClosed)
+	p.TCPHandshake = false
 	return p
 }
 
@@ -371,4 +380,50 @@ func TestFailStreamDenied(t *testing.T) {
 	if !errors.As(res.Err, &se) || se.Kind != StreamDenied || se.Offset != 2 || len(res.Events) != 0 {
 		t.Fatalf("retransmitted denied frame Err=%v events=%v, want the stream denied at 2", res.Err, res.Events)
 	}
+}
+
+// A fail-closed SYN sent into a connection whose handshake the kernel's
+// connection tracking saw complete anchors no stream: not on a tuple
+// without one, whose bytes stay a pickup, not as the next connection of a
+// pickup or of a closed stream. A legacy stream still anchors at it.
+func TestEstablishedSYNAnchorsNoFailClosedStream(t *testing.T) {
+	mgr, _, st := framedFixture()
+	if res := mgr.Inspect(st, establishedSynSeg(5000, true)); res.Err != nil {
+		t.Fatalf("SYN without a stream Err = %v", res.Err)
+	}
+	wantMidStream(t, "bytes after the SYN", mgr.Inspect(st, failClosedSeg(5000, 0x00)))
+	wantMidStream(t, "after a second SYN", func() InspectResult {
+		mgr.Inspect(st, establishedSynSeg(6000, true))
+		return mgr.Inspect(st, failClosedSeg(6000, 0x00))
+	}())
+
+	mgr, _, st = framedFixture()
+	wantMidStream(t, "pickup", mgr.Inspect(st, failClosedSeg(100, 0x00)))
+	mgr.Inspect(st, establishedSynSeg(5000, true))
+	wantMidStream(t, "pickup after the SYN", mgr.Inspect(st, failClosedSeg(5000, 0x00)))
+	mgr.Inspect(st, synSeg(7000, true))
+	wantFrames(t, "the next connection's handshake", mgr.Inspect(st, failClosedSeg(7000, 0x00)), frameRange{0, 1})
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	wantFrames(t, "frame", mgr.Inspect(st, failClosedSeg(100, 0x00)), frameRange{0, 1})
+	wantClose(t, "FIN in window", mgr, st, finSeg(101), true)
+	mgr.Inspect(st, establishedSynSeg(5000, true))
+	if res := mgr.Inspect(st, failClosedSeg(5000, 0x00)); res.Err != nil || len(res.Frames) != 0 {
+		t.Fatalf("closed stream after the SYN: Err=%v frames=%v, want it still closed", res.Err, ranges(res))
+	}
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	mgr.Inspect(st, establishedSynSeg(100, true))
+	wantFrames(t, "after a retransmitted SYN", mgr.Inspect(st, failClosedSeg(100, 0x00)), frameRange{0, 1})
+	res := mgr.Inspect(st, establishedSynSeg(9000, true))
+	var se *StreamError
+	if !errors.As(res.Err, &se) || se.Kind != StreamResync {
+		t.Fatalf("SYN with a new sequence number on the live stream Err = %v, want a resync", res.Err)
+	}
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, establishedSynSeg(100, false))
+	wantFrames(t, "legacy stream", mgr.Inspect(st, tcpSeg(100, 0x00)), frameRange{0, 1})
 }
