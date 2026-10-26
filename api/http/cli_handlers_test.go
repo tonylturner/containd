@@ -63,6 +63,7 @@ func TestCLICommandsHandlerIncludesExpectedCommands(t *testing.T) {
 }
 
 func TestCLIExecuteHandlerSupportsBlankAndCommandExecution(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
 	s := NewServer(store, nil)
 
@@ -136,6 +137,7 @@ func TestCLICompleteHandlerSuggestsConfigAwareArgs(t *testing.T) {
 }
 
 func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
 	srv := httptest.NewServer(NewServer(store, nil))
 	defer srv.Close()
@@ -225,12 +227,24 @@ func consoleTestRouter(store config.Store) *gin.Engine {
 	return r
 }
 
-func consoleTestConfig(addr, certFile string) *config.Config {
+// bindConsoleTest records l as the listeners this process has bound until
+// the test ends.
+func bindConsoleTest(t *testing.T, l config.ManagementListeners) {
+	t.Helper()
+	config.SetBoundManagementListeners(l)
+	t.Cleanup(func() { config.SetBoundManagementListeners(config.ManagementListeners{}) })
+}
+
+// bindConsoleHTTPS records a bound HTTPS listener on addr and no HTTP one.
+func bindConsoleHTTPS(t *testing.T, addr string) {
+	t.Helper()
+	bindConsoleTest(t, config.ManagementListeners{HTTPS: config.ManagementListener{Addr: addr, Enabled: true}})
+}
+
+// consoleTestConfig saves certFile and the default listeners, which the
+// console never dials: it calls the bound ones.
+func consoleTestConfig(certFile string) *config.Config {
 	cfg := config.DefaultConfig()
-	enabled, disabled := true, false
-	cfg.System.Mgmt.EnableHTTP = &disabled
-	cfg.System.Mgmt.EnableHTTPS = &enabled
-	cfg.System.Mgmt.HTTPSListenAddr = addr
 	cfg.System.Mgmt.TLSCertFile = certFile
 	return cfg
 }
@@ -290,7 +304,8 @@ func TestConsoleTLSVerificationAndRotation(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "server.crt")
 	t.Setenv("CONTAIND_TLS_CERT_FILE", path)
-	store := &mockStore{cfg: consoleTestConfig(srv.Listener.Addr().String(), "/not-the-served-certificate")}
+	bindConsoleHTTPS(t, srv.Listener.Addr().String())
+	store := &mockStore{cfg: consoleTestConfig("/not-the-served-certificate")}
 	router := consoleTestRouter(store)
 	write := func(data []byte) {
 		t.Helper()
@@ -367,7 +382,8 @@ func TestConsoleTLSCertificateFileErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			router := consoleTestRouter(&mockStore{cfg: consoleTestConfig(":1", path)})
+			bindConsoleHTTPS(t, ":1")
+			router := consoleTestRouter(&mockStore{cfg: consoleTestConfig(path)})
 			_, errText := executeConsoleTest(t, router, "untrusted.example")
 			if !strings.Contains(errText, tt.want) {
 				t.Fatalf("error = %q; want %q", errText, tt.want)
@@ -394,12 +410,7 @@ func TestConsoleConfigFailureNeverUsesRequestHost(t *testing.T) {
 		{"load error", &mockStore{load: func() (*config.Config, error) { return nil, errors.New("store offline") }}},
 		{"nil config", &mockStore{load: func() (*config.Config, error) { return nil, nil }}},
 		{"nil store", nil},
-		{"disabled listeners", &mockStore{cfg: func() *config.Config {
-			cfg := consoleTestConfig(":1", "")
-			disabled := false
-			cfg.System.Mgmt.EnableHTTPS = &disabled
-			return cfg
-		}()}},
+		{"no listener bound", &mockStore{cfg: consoleTestConfig("")}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, errText := executeConsoleTest(t, consoleTestRouter(tt.store), strings.TrimPrefix(host.URL, "http://"))
@@ -428,11 +439,39 @@ func TestConsoleHTTPStillPreferred(t *testing.T) {
 		_, _ = io.WriteString(w, `{"status":"http"}`)
 	}))
 	defer srv.Close()
-	cfg := config.DefaultConfig()
-	cfg.System.Mgmt.HTTPListenAddr = srv.Listener.Addr().String()
-	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: cfg}), "untrusted.example")
+	bindConsoleTest(t, config.ManagementListeners{
+		HTTP:  config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true},
+		HTTPS: config.ManagementListener{Addr: ":1", Enabled: true},
+	})
+	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: config.DefaultConfig()}), "untrusted.example")
 	if errText != "" || !strings.Contains(output, "http") || calls.Load() != 1 {
 		t.Fatalf("HTTP call: output=%q error=%q calls=%d", output, errText, calls.Load())
+	}
+}
+
+// A saved or environment listener that is not bound yet is never dialled.
+func TestConsoleCallsTheBoundListener(t *testing.T) {
+	counting := func(calls *atomic.Int32) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			calls.Add(1)
+			_, _ = io.WriteString(w, `{"status":"bound"}`)
+		}))
+	}
+	var boundCalls, savedCalls atomic.Int32
+	bound, saved := counting(&boundCalls), counting(&savedCalls)
+	defer bound.Close()
+	defer saved.Close()
+	t.Setenv(config.EnvManagementHTTPAddr, saved.Listener.Addr().String())
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.HTTPListenAddr = saved.Listener.Addr().String()
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: bound.Listener.Addr().String(), Enabled: true}})
+	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: cfg}), "untrusted.example")
+	if errText != "" || !strings.Contains(output, "bound") || boundCalls.Load() != 1 || savedCalls.Load() != 0 {
+		t.Fatalf("output=%q error=%q bound calls=%d saved calls=%d", output, errText, boundCalls.Load(), savedCalls.Load())
 	}
 }
 
@@ -464,7 +503,8 @@ func TestConsoleTLSRefusesRedirect(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
-	cfg := consoleTestConfig(srv.Listener.Addr().String(), path)
+	bindConsoleHTTPS(t, srv.Listener.Addr().String())
+	cfg := consoleTestConfig(path)
 	_, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: cfg}), "untrusted.example")
 	if !strings.Contains(errText, "redirect refused") || calls.Load() != 1 || leaked.Load() != 0 {
 		t.Fatalf("redirect: error=%q verified calls=%d leaked calls=%d", errText, calls.Load(), leaked.Load())
@@ -479,7 +519,7 @@ func TestConsoleTLSInfoUsesServedEnvironmentPaths(t *testing.T) {
 	}
 	t.Setenv("CONTAIND_TLS_CERT_FILE", path)
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "/env/server.key")
-	cfg := consoleTestConfig(":8443", "/config/server.crt")
+	cfg := consoleTestConfig("/config/server.crt")
 	cfg.System.Mgmt.TLSKeyFile = "/config/server.key"
 	router := gin.New()
 	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))

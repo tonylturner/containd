@@ -15,7 +15,14 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-const savedListenerNotice = "Listener settings: saved configuration (not live socket state)."
+const savedListenerNotice = "Listener settings: saved configuration (not environment overrides or live socket state)."
+
+// savedListeners resolves the listeners cfg saves, defaults included. An API
+// client does not see the management process's environment, so environment
+// overrides are not applied.
+func savedListeners(cfg *config.Config) config.ManagementListeners {
+	return config.ResolveManagementListeners(cfg, func(string) string { return "" })
+}
 
 func showRunningConfig(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
@@ -79,12 +86,11 @@ func showSystem(api *API) Command {
 		} else {
 			fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
 			fmt.Fprintln(out, savedListenerNotice)
-			mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-			mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-			fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)))
-			fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)))
-			fmt.Fprintf(out, "mgmt.http_listen: %s\n", mgmtHTTP)
-			fmt.Fprintf(out, "mgmt.https_listen: %s\n", mgmtHTTPS)
+			listeners := savedListeners(&cfg)
+			fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(listeners.HTTP.Enabled))
+			fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(listeners.HTTPS.Enabled))
+			fmt.Fprintf(out, "mgmt.http_listen: %s\n", listeners.HTTP.Addr)
+			fmt.Fprintf(out, "mgmt.https_listen: %s\n", listeners.HTTPS.Addr)
 			fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
 			fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)))
 			if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
@@ -99,9 +105,7 @@ func showSystem(api *API) Command {
 			if cfg.System.Mgmt.TrustedCAFile != "" {
 				fmt.Fprintf(out, "mgmt.trusted_ca_file: %s\n", cfg.System.Mgmt.TrustedCAFile)
 			}
-			if cfg.System.SSH.ListenAddr != "" {
-				fmt.Fprintf(out, "ssh.listen: %s\n", cfg.System.SSH.ListenAddr)
-			}
+			fmt.Fprintf(out, "ssh.listen: %s\n", listeners.SSH.Addr)
 			if cfg.System.SSH.AuthorizedKeysDir != "" {
 				fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
 			}
@@ -142,20 +146,19 @@ func showMgmtListeners(api *API) Command {
 		}
 
 		fmt.Fprintln(out, savedListenerNotice)
-		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+		listeners := savedListeners(&cfg)
 		kvTable(out, map[string]string{
-			"http_enabled":            yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)),
-			"https_enabled":           yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)),
-			"http_listen":             mgmtHTTP,
-			"https_listen":            mgmtHTTPS,
+			"http_enabled":            yesNoStr(listeners.HTTP.Enabled),
+			"https_enabled":           yesNoStr(listeners.HTTPS.Enabled),
+			"http_listen":             listeners.HTTP.Addr,
+			"https_listen":            listeners.HTTPS.Addr,
 			"redirect_http_to_https":  yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)),
 			"hsts":                    yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)),
 			"hsts_max_age_seconds":    fmt.Sprintf("%d", max(0, cfg.System.Mgmt.HSTSMaxAgeSeconds)),
 			"tls_cert_file":           firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "—"),
 			"tls_key_file":            firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "—"),
 			"trusted_ca_file":         firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "—"),
-			"ssh_listen":              firstNonEmpty(cfg.System.SSH.ListenAddr, ":2222"),
+			"ssh_listen":              listeners.SSH.Addr,
 			"ssh_allow_password":      sshPasswordSetting(cfg.System.SSH.AllowPassword),
 			"ssh_authorized_keys_dir": firstNonEmpty(cfg.System.SSH.AuthorizedKeysDir, "—"),
 		})

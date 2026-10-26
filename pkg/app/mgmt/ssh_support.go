@@ -31,16 +31,23 @@ type sshRuntimeConfig struct {
 	banner         string
 	rotationDays   int
 	shellMode      string
-	baseURL        string
 }
 
 func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
 	configureSSHPolicy(store, userStore)
-	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
+	rt := resolveSSHRuntimeConfig(cfg)
+	baseURL, err := sshBaseURL(httpAddr, loopbackAddr)
+	if err != nil {
+		logger.Warnf("ssh disabled: %v", err)
+		if optionalFault != nil {
+			optionalFault(fmt.Errorf("ssh disabled: %w", err))
+		}
+		return "", false
+	}
 
 	opts := sshserver.Options{
 		ListenAddr:          rt.sshAddr,
-		BaseURL:             rt.baseURL,
+		BaseURL:             baseURL,
 		HostKeyPath:         rt.hostKeyPath,
 		AuthorizedKeysDir:   rt.authKeysDir,
 		AllowPassword:       rt.allowPassword,
@@ -64,7 +71,7 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 			if err != nil {
 				return false, "", err
 			}
-			live := resolveSSHRuntimeConfig(running, httpAddr, loopbackAddr)
+			live := resolveSSHRuntimeConfig(running)
 			return live.allowPassword, live.authKeysDir, nil
 		},
 		ShellMode:  rt.shellMode,
@@ -124,7 +131,7 @@ func configureSSHPolicy(store config.Store, userStore users.Store) {
 			if err != nil {
 				return config.SSHRuntimePolicy{}, err
 			}
-			rt := resolveSSHRuntimeConfig(running, "", "")
+			rt := resolveSSHRuntimeConfig(running)
 			return config.SSHRuntimePolicy{
 				AllowPassword:       rt.allowPassword,
 				PasswordSource:      rt.passwordSource,
@@ -139,13 +146,13 @@ func configureSSHPolicy(store config.Store, userStore users.Store) {
 		validator.SetSSHAccessValidator(func(ctx context.Context, ssh config.SSHConfig) error {
 			candidate := &config.Config{}
 			candidate.System.SSH = ssh
-			rt := resolveSSHRuntimeConfig(candidate, "", "")
+			rt := resolveSSHRuntimeConfig(candidate)
 			return sshserver.ValidateAdminAuthorizedKey(ctx, userStore, rt.authKeysDir)
 		})
 	}
 }
 
-func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr string) sshRuntimeConfig {
+func resolveSSHRuntimeConfig(cfg *config.Config) sshRuntimeConfig {
 	rt := sshRuntimeConfig{
 		sshAddr:       config.EffectiveManagementListeners(cfg).SSH.Addr,
 		authKeysDir:   common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", ""),
@@ -174,7 +181,6 @@ func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr s
 		rt.shellMode = env
 	}
 	rt.allowPassword, rt.passwordSource = resolveSSHPasswordPolicy(cfg, rt.authKeysDir)
-	rt.baseURL = resolveSSHBaseURL(httpAddr, loopbackAddr)
 	return rt
 }
 
@@ -203,15 +209,17 @@ func authKeysDirNeedsBootstrap(authKeysDir string) bool {
 	return len(entries) == 0
 }
 
-func resolveSSHBaseURL(httpAddr string, loopbackAddr string) string {
+// sshBaseURL is the management API URL of SSH CLI sessions: the bound
+// HTTP listener httpAddr through loopbackAddr, the loopback listener
+// management adds for it, or on 127.0.0.1 when httpAddr itself accepts
+// loopback connections.
+func sshBaseURL(httpAddr, loopbackAddr string) (string, error) {
 	if loopbackAddr != "" && loopbackAddr != httpAddr {
-		return "http://" + loopbackAddr
+		return "http://" + loopbackAddr, nil
 	}
-	if httpAddr != "" {
-		_, port, err := net.SplitHostPort(httpAddr)
-		if err == nil && port != "" {
-			return "http://127.0.0.1:" + port
-		}
+	port := config.ManagementListener{Addr: httpAddr, Enabled: true}.Port()
+	if port == 0 {
+		return "", fmt.Errorf("management HTTP address %q names no port", httpAddr)
 	}
-	return "http://127.0.0.1:8080"
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 }

@@ -27,15 +27,12 @@ func TestResolveSSHRuntimeConfigAndHelpers(t *testing.T) {
 
 	t.Setenv("CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY", "ssh-ed25519 AAAATEST")
 	t.Setenv("CONTAIND_SSH_BOOTSTRAP_ADMIN_USER", "admin")
-	rt := resolveSSHRuntimeConfig(cfg, "10.10.10.10:8080", "127.0.0.1:8080")
+	rt := resolveSSHRuntimeConfig(cfg)
 	if rt.sshAddr != ":3022" || rt.authKeysDir != "/cfg/keys" {
 		t.Fatalf("unexpected ssh runtime config: %+v", rt)
 	}
 	if rt.bootstrapUser != "admin" || rt.bootstrapKey == "" {
 		t.Fatalf("unexpected bootstrap config: %+v", rt)
-	}
-	if rt.baseURL != "http://127.0.0.1:8080" {
-		t.Fatalf("baseURL = %q", rt.baseURL)
 	}
 	if !rt.allowPassword {
 		t.Fatal("expected allowPassword=true from config")
@@ -159,15 +156,21 @@ func TestResolveSSHAllowPasswordAndBootstrap(t *testing.T) {
 	}
 }
 
-func TestResolveSSHBaseURL(t *testing.T) {
-	if got := resolveSSHBaseURL("10.10.10.10:8080", "127.0.0.1:8080"); got != "http://127.0.0.1:8080" {
-		t.Fatalf("resolveSSHBaseURL loopback = %q", got)
+func TestSSHBaseURL(t *testing.T) {
+	for _, tc := range []struct{ httpAddr, loopbackAddr, want string }{
+		{"10.10.10.10:8080", "127.0.0.1:8080", "http://127.0.0.1:8080"},
+		{"0.0.0.0:8081", "0.0.0.0:8081", "http://127.0.0.1:8081"},
+		{"localhost:9180", "localhost:9180", "http://127.0.0.1:9180"},
+	} {
+		if got, err := sshBaseURL(tc.httpAddr, tc.loopbackAddr); err != nil || got != tc.want {
+			t.Errorf("sshBaseURL(%q, %q) = %q, %v; want %q", tc.httpAddr, tc.loopbackAddr, got, err, tc.want)
+		}
 	}
-	if got := resolveSSHBaseURL("0.0.0.0:8081", ""); got != "http://127.0.0.1:8081" {
-		t.Fatalf("resolveSSHBaseURL inferred = %q", got)
-	}
-	if got := resolveSSHBaseURL("", ""); got != "http://127.0.0.1:8080" {
-		t.Fatalf("resolveSSHBaseURL default = %q", got)
+	// No default port stands in for an address without one.
+	for _, addr := range []string{"", "10.10.10.10"} {
+		if got, err := sshBaseURL(addr, ""); err == nil {
+			t.Errorf("sshBaseURL(%q) = %q, want an error", addr, got)
+		}
 	}
 }
 
