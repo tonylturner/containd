@@ -62,7 +62,7 @@ Rule:
 ## Engine Control API Boundaries
 
 The engine's internal HTTP routes are registered in `pkg/app/engine/engine.go`.
-Management-plane callers use `pkg/mp/engineclient/`. Keep engine control
+Management-plane callers use the engine client in `api/engine/`. Keep engine control
 handlers with the engine application, separate from the public management
 API in `api/http/`.
 

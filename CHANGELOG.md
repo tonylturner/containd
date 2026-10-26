@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- With NFQUEUE, a SYN sent into an established Modbus or DNP3 connection
+  covered by an enforce ICS rule no longer restarts inspection. After an
+  engine restart, or once the engine forgot an idle connection, such a SYN
+  could choose where the engine started framing the connection's bytes.
+  Inspection now starts only at a handshake that connection tracking has not
+  seen complete; otherwise the connection stays dropped as
+  `stream_midstream`. Generic ICS rules now jump to the new `ics_queue` nft
+  chain, which queues with skb mark `0x02000000` for such handshakes.
 - Outside lab mode, wrong TOTP codes and wrong current passwords are limited
   per account across all client addresses, on web/API and SSH. Five wrong
   codes, or ten wrong current passwords, without a success lock that check
@@ -191,6 +199,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rule matching parses addresses once per applied ruleset, and the engine
+  caches each zone's networks until the kernel reports a link or address
+  change. Inline ICS packets no longer read the interfaces or allocate memory
+  for rule and zone scope checks.
+- In split mode the ruleset preview admits the same management listeners
+  that management applies, including listeners still bound until a restart:
+  management compiles the previewed snapshot, as it does for apply.
+- Validation refuses zone names that are blank, longer than 125 bytes, or
+  have leading or trailing whitespace. A stored configuration with such a
+  zone fails validation at boot, and management starts in recovery until it
+  is fixed.
 - A failed ruleset apply no longer hides the ruleset still in force. The
   engine ruleset status keeps the installed revision and adds the failed
   snapshot and its error, rule counters keep working, and health reports
@@ -259,6 +278,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A rule whose ICS `addresses` list holds only unparseable values no longer
+  matches every address; it matches none.
+- Management-reservation validation treats a blank HTTPS or SSH listen
+  address as the default address that management binds, so a blank value no
+  longer hides a conflict with the reserved port.
+- `containd healthcheck` and `containd cli` refuse a `CONTAIND_MGMT_ADDR`
+  with no port instead of probing it.
 - Web UI: the login password and MFA steps, own password change and MFA
   disable show the server's lock message and when to try again after a `429`,
   instead of a generic failure. A wrong current password or code in the
