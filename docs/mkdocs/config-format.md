@@ -198,10 +198,10 @@ Limitations (current):
 
 ## API endpoints
 - `GET /api/v1/config` – fetch current config (404 if none).
-- `POST /api/v1/config` – replace config (validates).
+- `POST /api/v1/config` – replace the candidate config (validates; stages, never applies).
 - `POST /api/v1/config/validate` – validate JSON without saving.
 - `GET /api/v1/config/export` – export current config.
-- `POST /api/v1/config/import` – import+save config (validates).
+- `POST /api/v1/config/import` – replace the candidate config from an export (validates; stages, never applies).
 - `GET/POST /api/v1/config/candidate` – fetch/save candidate config.
 - `GET /api/v1/config/diff` – view running vs candidate.
 - `POST /api/v1/config/commit` – promote candidate to running.
