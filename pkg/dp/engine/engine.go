@@ -88,8 +88,9 @@ type Engine struct {
 // SnapshotVersion is the version of the snapshot the last apply attempted,
 // whether it succeeded or failed. Warnings lists the applied ruleset's rules
 // whose predicates resolve toward denial; a failed apply carries none.
-// ICSCoverage is the live coverage of the applied snapshot's ICS rules;
-// omitted when it has none.
+// ICSCoverage is the live coverage of the ICS rules in force: after a failed
+// apply those of the previous snapshot (none before the first success),
+// never the failed one; omitted when there are none.
 type RulesetStatus struct {
 	Ruleset         string                `json:"ruleset"`
 	SnapshotVersion string                `json:"snapshotVersion,omitempty"`

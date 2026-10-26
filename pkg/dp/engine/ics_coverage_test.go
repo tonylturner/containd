@@ -78,11 +78,9 @@ func TestICSCoverageQueueOverlay(t *testing.T) {
 }
 
 // The engine accepts a snapshot that enforces without an inline path, and
-// reports it instead of claiming protection; a failed apply keeps the
-// coverage of the rules still in force.
-func TestICSCoverageContradictorySnapshotAndFailedApply(t *testing.T) {
-	applier := &recordingApplier{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
+// reports it instead of claiming protection.
+func TestICSCoverageContradictorySnapshot(t *testing.T) {
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: &recordingApplier{}, Updater: &recordingUpdater{}},
 		DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)
@@ -91,12 +89,47 @@ func TestICSCoverageContradictorySnapshotAndFailedApply(t *testing.T) {
 		t.Fatalf("contradictory snapshot refused: %v", err)
 	}
 	wantCoverage(t, e, "no queue configured", coverage.NotEnforcing, coverage.NoInlinePath)
-	applier.err = errors.New("nft apply failed")
-	if err := e.ApplyRules(context.Background(), modbusEnforceSnapshot("new")); err == nil {
+}
+
+// Applied coverage describes the rules in force. A failed apply leaves the
+// kernel ruleset and the engine snapshot unchanged, so the status carries
+// the failure (error and the failed snapshot's version) while the coverage
+// still describes the previous rules; with no earlier success it is empty.
+func TestICSCoverageAfterFailedApply(t *testing.T) {
+	applier := &recordingApplier{err: errors.New("nft apply failed")}
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
+		DPIEnabled: true, DPIMode: "enforce"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := modbusEnforceSnapshot("first")
+	first.Version = "v1"
+	if err := e.ApplyRules(context.Background(), first); err == nil {
 		t.Fatal("apply error swallowed")
 	}
-	if got := e.ICSCoverage(); len(got) != 1 || got[0].RuleID != "old" {
-		t.Fatalf("failed apply reported new coverage: %+v", got)
+	if st := e.RulesetStatus(); st.Error == "" || st.SnapshotVersion != "v1" || st.ICSCoverage != nil {
+		t.Fatalf("first failed apply: status %+v, want the error and no coverage", st)
+	}
+
+	applier.err = nil
+	running := modbusEnforceSnapshot("running")
+	running.Version = "v2"
+	running.Firewall[0].ICS.Mode = "learn"
+	if err := e.ApplyRules(context.Background(), running); err != nil {
+		t.Fatal(err)
+	}
+	applier.err = errors.New("nft apply failed")
+	failed := modbusEnforceSnapshot("failed")
+	failed.Version = "v3"
+	if err := e.ApplyRules(context.Background(), failed); err == nil {
+		t.Fatal("apply error swallowed")
+	}
+	st := e.RulesetStatus()
+	if st.Error == "" || st.SnapshotVersion != "v3" {
+		t.Fatalf("status after failed apply = %+v, want the failure", st)
+	}
+	if len(st.ICSCoverage) != 1 || st.ICSCoverage[0].RuleID != "running" || st.ICSCoverage[0].State != coverage.Monitoring {
+		t.Fatalf("coverage after failed apply = %+v, want the running learn rule", st.ICSCoverage)
 	}
 }
 

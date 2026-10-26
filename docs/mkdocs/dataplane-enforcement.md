@@ -94,7 +94,10 @@ exclusions never lower a rule. Coverage appears in:
   settings alone, and `engineStatus.icsCoverage` for the applied rules under the
   running engine's settings and state. Applied exclusion reasons carry
   `matches`, the connections that exclusion has exempted from inspection since
-  the rules were last applied.
+  the rules were last applied. Applied coverage always describes the rules in
+  force: a failed apply leaves the previous rules installed, so after one
+  `engineStatus.error` is set while `engineStatus.icsCoverage` still describes
+  the previous rules (and is empty if no apply has succeeded yet).
 - `POST /api/v1/firewall/rules/preview`: `icsCoverage` for the previewed rule
   under the running engine.
 - `GET /api/v1/health`: `icsEnforcement`, counts only (see
