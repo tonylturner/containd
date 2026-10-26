@@ -113,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Secure by Design page maps all seven CISA pledge goals again and credits
+  the default design. Operator steps are deployment guidance. Its one known gap:
+  SSH accepts the bootstrap password before the forced first-login change.
 - `containd engine` has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
   engine's address on the management network; loopback and wildcard
   listeners are refused at start, except loopback with a reserved management
