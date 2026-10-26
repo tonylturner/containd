@@ -1,9 +1,9 @@
 table inet containd_policy {
-  set zone_l1_ifaces {
+  set zone_6c31 {
     type ifname;
     elements = { "eth1" }
   }
-  set zone_l3_ifaces {
+  set zone_6c33 {
     type ifname;
     elements = { "eth3" }
   }

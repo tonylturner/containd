@@ -4,6 +4,7 @@ package enforce
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,7 +19,8 @@ import (
 type zoneIndex map[string][]string
 
 // newZoneIndex quotes the interfaces of every zone, refusing a name that
-// ValidateInterfaceName refuses.
+// ValidateInterfaceName refuses and a zone with interfaces whose name is
+// too long to name its set.
 func newZoneIndex(zoneIfaces map[string][]string) (zoneIndex, error) {
 	idx := zoneIndex{}
 	for z, ifaces := range zoneIfaces {
@@ -30,6 +32,9 @@ func newZoneIndex(zoneIfaces map[string][]string) (zoneIndex, error) {
 			idx[z] = append(idx[z], lit)
 		}
 		if lits := idx[z]; len(lits) > 0 {
+			if len(z) > maxZoneName {
+				return nil, fmt.Errorf("zone %q: a zone with interfaces needs a name of at most %d bytes", z, maxZoneName)
+			}
 			idx[z] = sortedUnique(lits)
 		}
 	}
@@ -62,9 +67,17 @@ func (idx zoneIndex) unmatched(zones []string) []string {
 	return sortedUnique(zones)
 }
 
-// zoneSetName names the set of a zone's interfaces.
+const zoneSetPrefix = "zone_"
+
+// maxZoneName is the longest zone name, in bytes, whose set name fits the
+// kernel's 255-byte object names.
+const maxZoneName = (255 - len(zoneSetPrefix)) / 2
+
+// zoneSetName names the set of a zone's interfaces: zone_<hex name>. Hex
+// keeps any zone name a valid nft identifier and distinct, so zones whose
+// names differ only in case or punctuation get sets of their own.
 func zoneSetName(zone string) string {
-	return "zone_" + sanitizeIdent(zone) + "_ifaces"
+	return zoneSetPrefix + hex.EncodeToString([]byte(zone))
 }
 
 // writeSets declares the interface set of every zone that has interfaces,

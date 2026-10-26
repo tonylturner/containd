@@ -33,7 +33,7 @@ func TestNATConfiguredZones(t *testing.T) {
 			}
 			assertDeclaredSets(t, text)
 			if tc.name == "custom" {
-				for _, want := range []string{"iifname @zone_plant_ifaces oifname @zone_outside_ifaces masquerade", "dnat ip to 192.0.2.10:8443", "iifname @zone_outside_ifaces ct status dnat tcp dport 8443 ip daddr 192.0.2.10 masquerade"} {
+				for _, want := range []string{"iifname @zone_706c616e74 oifname @zone_6f757473696465 masquerade", "dnat ip to 192.0.2.10:8443", "iifname @zone_6f757473696465 ct status dnat tcp dport 8443 ip daddr 192.0.2.10 masquerade"} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("missing %q:\n%s", want, text)
 					}

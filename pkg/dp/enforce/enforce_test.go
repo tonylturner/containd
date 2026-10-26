@@ -172,7 +172,7 @@ func TestCompileFirewallZoneBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !strings.Contains(ruleset, "set zone_lan_ifaces") || !strings.Contains(ruleset, "type ifname") {
+	if !strings.Contains(ruleset, "set zone_6c616e") || !strings.Contains(ruleset, "type ifname") {
 		t.Fatalf("missing zone iface sets: %s", ruleset)
 	}
 	if !strings.Contains(ruleset, "iifname { \"lan2\", \"lan3\" }") || !strings.Contains(ruleset, "oifname { \"wan\" }") {
@@ -479,16 +479,16 @@ func TestCompileFirewallNATChains(t *testing.T) {
 	if !strings.Contains(ruleset, "chain prerouting") {
 		t.Fatalf("missing prerouting chain:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
+	if !strings.Contains(ruleset, `iifname @zone_77616e ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
 		t.Fatalf("missing prerouting DNAT rule:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
+	if !strings.Contains(ruleset, `iifname @zone_77616e ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
 		t.Fatalf("missing DNAT accept rule:\n%s", ruleset)
 	}
 	if !strings.Contains(ruleset, "chain postrouting") {
 		t.Fatalf("missing postrouting chain:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_lan_ifaces oifname @zone_wan_ifaces masquerade`) {
+	if !strings.Contains(ruleset, `iifname @zone_6c616e oifname @zone_77616e masquerade`) {
 		t.Fatalf("missing zone masquerade rule:\n%s", ruleset)
 	}
 }
@@ -503,7 +503,7 @@ func TestCompileLocalInputRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compileLocalInputRule(valid): %v", err)
 	}
-	if line != `iifname @zone_mgmt_ifaces tcp dport 22 accept` {
+	if line != `iifname @zone_6d676d74 tcp dport 22 accept` {
 		t.Fatalf("unexpected local input rule %q", line)
 	}
 
