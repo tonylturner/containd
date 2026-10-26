@@ -30,7 +30,7 @@ type Event struct {
 	DstIP      string         `json:"dstIp,omitempty"`
 	SrcPort    uint16         `json:"srcPort,omitempty"`
 	DstPort    uint16         `json:"dstPort,omitempty"`
-	Transport  string         `json:"transport,omitempty"` // tcp/udp
+	Transport  string         `json:"transport,omitempty"` // tcp, udp, icmp or icmpv6
 	Hash       string         `json:"hash,omitempty"`      // optional content hash for AV events
 }
 
