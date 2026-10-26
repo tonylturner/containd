@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // benchPolicy has n ALLOW rules on distinct source networks; only the last
@@ -42,6 +43,25 @@ func BenchmarkEvaluateMatch(b *testing.B) {
 	const n = 16
 	ev := NewEvaluator(benchPolicy(n))
 	ctx := benchContext(n)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, entry := ev.EvaluateMatch(ctx); entry == nil {
+			b.Fatal("no rule matched")
+		}
+	}
+}
+
+// BenchmarkEvaluateMatchScheduled decides a packet that a scheduled ALLOW
+// in a named timezone admits, inside its window.
+func BenchmarkEvaluateMatchScheduled(b *testing.B) {
+	snap := benchPolicy(1)
+	snap.Firewall[0].Schedule = SchedulePredicate{
+		DaysOfWeek: []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday"},
+		StartTime:  "22:00", EndTime: "06:00", Timezone: "America/New_York",
+	}
+	ev := NewEvaluator(snap)
+	ctx := benchContext(1)
+	ctx.Now = time.Date(2026, 10, 27, 3, 30, 0, 0, time.UTC) // Monday 23:30 in New York
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, entry := ev.EvaluateMatch(ctx); entry == nil {

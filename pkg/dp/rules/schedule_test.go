@@ -169,10 +169,52 @@ func TestScheduleKeyEquivalence(t *testing.T) {
 func TestScheduleFailsClosed(t *testing.T) {
 	bad := SchedulePredicate{StartTime: "09:00", EndTime: "17:00", Timezone: "Mars/Olympus"}
 	ctx := EvalContext{Now: utc(2026, 10, 26, 10, 0, 0)}
-	if matchSchedule(Entry{Action: ActionAllow, Schedule: bad}, ctx) {
+	allow, deny := compileEntry(Entry{Action: ActionAllow, Schedule: bad}), compileEntry(Entry{Action: ActionDeny, Schedule: bad})
+	if matchSchedule(&allow, ctx) {
 		t.Fatal("an unloadable schedule admitted an ALLOW")
 	}
-	if !matchSchedule(Entry{Action: ActionDeny, Schedule: bad}, ctx) {
+	if !matchSchedule(&deny, ctx) {
 		t.Fatal("an unloadable schedule lifted a DENY")
+	}
+}
+
+// TestActiveAtMatchesWindows checks the window lookup the evaluator uses
+// against the windows the nftables time sets are built from, every 15
+// minutes over a year, across daylight-saving changes and overnight
+// windows, and that it allocates nothing.
+func TestActiveAtMatchesWindows(t *testing.T) {
+	scheds := []SchedulePredicate{
+		{DaysOfWeek: []string{"Monday", "Friday"}, StartTime: "22:00", EndTime: "06:00", Timezone: "America/New_York"},
+		{StartTime: "01:30", EndTime: "03:00", Timezone: "Europe/Berlin"},
+		{DaysOfWeek: []string{"Sunday"}, StartTime: "02:15", EndTime: "02:45", Timezone: "America/New_York"},
+		{EndTime: "00:30", Timezone: "Australia/Lord_Howe"},
+		{DaysOfWeek: []string{"Saturday"}},
+	}
+	for _, p := range scheds {
+		s, err := parseSchedule(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		active := 0
+		for at := utc(2026, 1, 1, 0, 0, 0); at.Before(utc(2027, 1, 1, 0, 0, 0)); at = at.Add(15 * time.Minute) {
+			windows, err := p.Windows(at, at.Add(time.Nanosecond))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := s.activeAt(at); got != (len(windows) > 0) {
+				t.Fatalf("%+v at %s: activeAt = %v, Windows = %v", p, at, got, windows)
+			}
+			if len(windows) > 0 {
+				active++
+			}
+		}
+		if active == 0 {
+			t.Fatalf("%+v is never active: the comparison proves nothing", p)
+		}
+	}
+	ce := compileEntry(Entry{Action: ActionAllow, Schedule: scheds[0]})
+	ctx := EvalContext{Now: utc(2026, 10, 27, 3, 30, 0)}
+	if allocs := testing.AllocsPerRun(100, func() { matchSchedule(&ce, ctx) }); allocs != 0 {
+		t.Fatalf("matchSchedule allocates %v times per call", allocs)
 	}
 }

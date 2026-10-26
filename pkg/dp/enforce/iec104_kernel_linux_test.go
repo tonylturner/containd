@@ -15,18 +15,15 @@ import (
 
 // TestKernelIEC104SteeringLoads applies a compiled ruleset with IEC104
 // envelope steering to the kernel. It needs root, CAP_NET_ADMIN and nft
-// (it replaces containd's tables in its network namespace), so it skips otherwise
-// unless CONTAIND_KERNEL_TESTS=1. Run in a throwaway container:
-//
-//	GOOS=linux CGO_ENABLED=0 go test -c -o build/enforce.test ./pkg/dp/enforce
-//	docker run --rm --cap-add NET_ADMIN --user 0 -e CONTAIND_KERNEL_TESTS=1 \
-//	  -v "$PWD/build:/w" --entrypoint /w/enforce.test containd/containd:dev -test.run Kernel -test.v
+// (it replaces containd's tables in its network namespace), so it runs only
+// when CONTAIND_NETNS_KERNEL_TEST=1 in a disposable privileged container,
+// as the other kernel tests of this package (see netns_kernel_linux_test.go).
 func TestKernelIEC104SteeringLoads(t *testing.T) {
-	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
-		t.Skip("set CONTAIND_KERNEL_TESTS=1 in a throwaway network namespace: the test replaces containd's nft tables")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable privileged Linux container with nft: the test replaces containd's nft tables")
 	}
-	if _, err := exec.LookPath("nft"); err != nil || os.Geteuid() != 0 {
-		t.Fatalf("CONTAIND_KERNEL_TESTS=1 needs root and nft (lookup err %v)", err)
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Fatalf("kernel test needs nft: %v", err)
 	}
 	c := NewCompiler()
 	c.QueueID = 100

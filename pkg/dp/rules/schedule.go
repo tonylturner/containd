@@ -56,8 +56,11 @@ func (p SchedulePredicate) Validate() error {
 
 // ActiveAt reports whether a window of p holds at t.
 func (p SchedulePredicate) ActiveAt(t time.Time) (bool, error) {
-	windows, err := p.Windows(t, t.Add(time.Nanosecond))
-	return len(windows) > 0, err
+	s, err := parseSchedule(p)
+	if err != nil {
+		return false, err
+	}
+	return s.activeAt(t), nil
 }
 
 // Windows returns the windows of p that intersect [from, to), in order. They
@@ -241,20 +244,48 @@ func schedulePredicateEmpty(s SchedulePredicate) bool {
 	return len(s.DaysOfWeek) == 0 && s.StartTime == "" && s.EndTime == ""
 }
 
-// matchSchedule matches an entry's schedule at the context's time (now when
-// unset). A schedule that cannot be evaluated fails closed: an ALLOW does not
-// match, and a DENY or RESET does.
-func matchSchedule(entry Entry, ctx EvalContext) bool {
+// compiledSchedule is an entry's schedule predicate parsed once per
+// snapshot. A predicate that does not parse is invalid.
+type compiledSchedule struct {
+	set     bool // the entry has a schedule predicate
+	invalid bool
+	s       schedule
+}
+
+func compileSchedule(entry Entry) compiledSchedule {
 	if !entry.HasSchedulePredicate() {
+		return compiledSchedule{}
+	}
+	s, err := parseSchedule(entry.Schedule)
+	return compiledSchedule{set: true, invalid: err != nil, s: s}
+}
+
+// activeAt reports whether a window of s holds at t, as Windows does for
+// [t, t+1ns), without building the windows: only the windows that open on
+// t's local day or the day before can hold.
+func (s schedule) activeAt(t time.Time) bool {
+	day := civilDate(t.In(s.loc))
+	for _, d := range [2]time.Time{day.AddDate(0, 0, -1), day} {
+		if w, ok := s.windowOn(d); ok && !t.Before(w.Start) && w.End.After(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchSchedule matches an entry's compiled schedule at the context's time
+// (now when unset). A schedule that cannot be evaluated fails closed: an
+// ALLOW does not match, and a DENY or RESET does.
+func matchSchedule(ce *compiledEntry, ctx EvalContext) bool {
+	if !ce.schedule.set {
 		return true
+	}
+	if ce.schedule.invalid {
+		return ce.Action == ActionDeny || ce.Action == ActionReset
 	}
 	now := ctx.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
-	active, err := entry.Schedule.ActiveAt(now)
-	if err != nil {
-		return entry.Action == ActionDeny || entry.Action == ActionReset
-	}
-	return active
+	return ce.schedule.s.activeAt(now)
 }
