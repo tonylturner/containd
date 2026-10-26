@@ -236,7 +236,10 @@ test("committed events clear commit-confirmed and warning notices", async ({ pag
 
 const unchangedBank = { count: 30000, sha256: "a".repeat(64) };
 
-function configDiff(overrides: Partial<ConfigDiff> = {}): ConfigDiff {
+// The server's diff always carries both bank summaries.
+type WireConfigDiff = ConfigDiff & Required<Pick<ConfigDiff, "idsBank">>;
+
+function configDiff(overrides: Partial<WireConfigDiff> = {}): WireConfigDiff {
   return {
     changed: false,
     changedSections: [],

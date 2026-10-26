@@ -1,4 +1,4 @@
-import { getJSON } from "./api-request";
+import { getJSONShaped } from "./api-request";
 
 export type IEC104Pressure = {
   heldPackets: number;
@@ -21,5 +21,5 @@ export type IEC104Pressure = {
 };
 
 export function fetchIEC104Pressure(signal?: AbortSignal) {
-  return getJSON<IEC104Pressure>("/api/v1/diagnostics/iec104", signal);
+  return getJSONShaped<IEC104Pressure>("/api/v1/diagnostics/iec104", { objects: ["limits", "aborts"] }, signal);
 }

@@ -8,6 +8,7 @@ import {
 import {
   deleteJSONResult,
   getJSON,
+  getJSONList,
   getJSONWithStatus,
   patchJSONResult,
   postJSON,
@@ -94,7 +95,7 @@ export const authAPI = {
       code,
     } as MFADisableRequest),
 
-  listUsers: () => getJSON<User[]>("/api/v1/users"),
+  listUsers: () => getJSONList<User>("/api/v1/users"),
   createUser: (u: Omit<User, "id"> & { password: string }) =>
     postJSONResult<User>("/api/v1/users", u),
   updateUser: (id: string, patch: Partial<User>) =>

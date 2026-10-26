@@ -1,4 +1,4 @@
-import { getJSON, postJSON, postJSONResult, parseErrorBody } from "./api-request";
+import { getJSON, getJSONList, getJSONShaped, postJSON, postJSONResult, parseErrorBody } from "./api-request";
 import { authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
 
 import type {
@@ -60,21 +60,21 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>
 
 export const consoleAPI = {
   getManagementReservation: () => getJSON<ManagementReservation>("/api/v1/system/management-reservation"),
-  listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
+  listCLICommands: () => getJSONList<string>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
     postJSON<CLIExecuteResponse>("/api/v1/cli/execute", { line }),
   completeCLI: (line: string) =>
-    getJSON<string[]>(`/api/v1/cli/complete?line=${encodeURIComponent(line)}`),
+    getJSONList<string>(`/api/v1/cli/complete?line=${encodeURIComponent(line)}`),
 
   listEvents: (limit = 500, signal?: AbortSignal) =>
-    getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`, signal),
+    getJSONList<TelemetryEvent>(`/api/v1/events?limit=${limit}`, signal),
   queryEvents: (query: EventQuery, signal?: AbortSignal) => {
     const params = new URLSearchParams({ query: "1", limit: "500" });
     for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
-    return getJSON<EventPage>(`/api/v1/events?${params}`, signal);
+    return getJSONShaped<EventPage>(`/api/v1/events?${params}`, { lists: ["events"] }, signal);
   },
   listFlows: (limit = 200, signal?: AbortSignal) =>
-    getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`, signal),
+    getJSONList<FlowSummary>(`/api/v1/flows?limit=${limit}`, signal),
   getEvent: (id: number) => getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
 
   getSimulationStatus: (signal?: AbortSignal) =>

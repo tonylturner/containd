@@ -1,6 +1,7 @@
 import {
   deleteJSONResult,
   getJSON,
+  getJSONList,
   patchJSONResult,
   postJSONResult,
 } from "./api-request";
@@ -16,7 +17,7 @@ import type {
 } from "./api";
 
 export const networkAPI = {
-  listZones: (signal?: AbortSignal) => getJSON<Zone[]>("/api/v1/zones", signal),
+  listZones: (signal?: AbortSignal) => getJSONList<Zone>("/api/v1/zones", signal),
   createZone: (z: Zone) => postJSONResult<Zone>("/api/v1/zones", z),
   updateZone: (name: string, z: Partial<Zone>) =>
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
@@ -26,9 +27,9 @@ export const networkAPI = {
     getJSON<ConduitMap>("/api/v1/security/conduits", signal),
 
   listInterfaces: (signal?: AbortSignal) =>
-    getJSON<Interface[]>("/api/v1/interfaces", signal),
+    getJSONList<Interface>("/api/v1/interfaces", signal),
   listInterfaceState: (signal?: AbortSignal) =>
-    getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
+    getJSONList<InterfaceState>("/api/v1/interfaces/state", signal),
   assignInterfaces: (
     mode: "auto" | "explicit",
     mappings?: Record<string, string>,

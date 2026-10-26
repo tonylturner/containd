@@ -1,46 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { routes } from "./fixtures/routes";
 import { snapshot } from "./fixtures/iec104-inventory";
 import { pressure } from "./fixtures/iec104-pressure";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
-
-const routes = [
-  "/",
-  "/alerts",
-  "/assets",
-  "/audit",
-  "/config",
-  "/dataplane",
-  "/dhcp",
-  "/diagnostics",
-  "/events",
-  "/firewall",
-  "/flows",
-  "/forbidden",
-  "/ics",
-  "/identities",
-  "/ids",
-  "/interfaces",
-  "/login",
-  "/monitoring",
-  "/nat",
-  "/pcap",
-  "/proxies",
-  "/routing",
-  "/sessions",
-  "/system/services",
-  "/system/services/av",
-  "/system/services/dns",
-  "/system/services/ntp",
-  "/system/services/syslog",
-  "/system/settings",
-  "/system/users",
-  "/templates",
-  "/topology",
-  "/vpn",
-  "/wizard",
-  "/zones",
-] as const;
 
 const adminUser = {
   id: "admin-1",

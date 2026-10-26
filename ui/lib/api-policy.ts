@@ -9,6 +9,8 @@ import {
 import {
   deleteJSONResult,
   getJSON,
+  getJSONList,
+  getJSONShaped,
   parseErrorBody,
   patchJSONResult,
   postJSON,
@@ -35,7 +37,7 @@ export type TrustedCAUploadResult =
   | { state: "failed"; error: string };
 
 export const policyAPI = {
-  listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
+  listAssets: () => getJSONList<Asset>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSONResult<Asset>("/api/v1/assets", a),
   updateAsset: (id: string, a: Partial<Asset>) =>
     patchJSONResult<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
@@ -104,11 +106,11 @@ export const policyAPI = {
     URL.revokeObjectURL(url);
     return true;
   },
-  getIDSSources: () => getJSON<IDSRuleSource[]>("/api/v1/ids/sources"),
+  getIDSSources: () => getJSONList<IDSRuleSource>("/api/v1/ids/sources"),
 
-  listAudit: () => getJSON<AuditRecord[]>("/api/v1/audit"),
+  listAudit: () => getJSONList<AuditRecord>("/api/v1/audit"),
   getDashboard: (signal?: AbortSignal) =>
-    getJSON<DashboardData>("/api/v1/dashboard", signal),
+    getJSONShaped<DashboardData>("/api/v1/dashboard", { objects: ["health", "counts", "eventStats"] }, signal),
 
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
   setTLSCert: (certPEM: string, keyPEM: string) =>

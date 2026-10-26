@@ -312,7 +312,7 @@ function ConfigPage() {
   const ifaceCount = running?.interfaces?.length ?? 0;
   const ruleCount = running?.firewall?.rules?.length ?? 0;
   const assetCount = running?.assets?.length ?? 0;
-  const idsRuleCount = configDiff?.idsBank.running.count ?? 0;
+  const idsRuleCount = configDiff?.idsBank?.running.count ?? 0;
   const objectCount = running?.objects?.length ?? 0;
   const dpiMode = (running as any)?.dataplane?.dpiMode ?? "off";
   const tips: Tip[] = [
@@ -469,7 +469,7 @@ function ConfigPage() {
             selectedItem={selectedItem}
             blockValue={blockValue}
             viewerConfig={viewerConfig}
-            idsBankCount={configDiff?.idsBank[viewerSource].count ?? null}
+            idsBankCount={configDiff?.idsBank?.[viewerSource].count ?? null}
             setSelectedRef={(node) => {
               selectedRef.current = node;
             }}

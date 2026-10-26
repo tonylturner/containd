@@ -47,5 +47,8 @@ export type IEC104Inventory = {
 
 export const inventoryAPI = {
   getIEC104Inventory: () =>
-    getJSONWithStatus<IEC104Inventory>("/api/v1/inventory/iec104"),
+    getJSONWithStatus<IEC104Inventory>("/api/v1/inventory/iec104", {
+      lists: ["pairs"],
+      objects: ["limits", "overflow"],
+    }),
 };
