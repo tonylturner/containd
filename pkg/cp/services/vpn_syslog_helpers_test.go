@@ -179,7 +179,6 @@ func TestOpenVPNConfigPathAndManagedRendering(t *testing.T) {
 func TestSyslogFormattingHelpers(t *testing.T) {
 	mgr := NewSyslogManager()
 	mgr.hostname = "fw-lab"
-	mgr.config.Format = "json"
 
 	ev := dpevents.Event{
 		ID:        1,
@@ -196,7 +195,7 @@ func TestSyslogFormattingHelpers(t *testing.T) {
 		},
 	}
 
-	rawJSON := mgr.formatEvent(ev, "udp")
+	rawJSON := mgr.formatEvent(ev, "json")
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(rawJSON), &decoded); err != nil {
 		t.Fatalf("formatEvent(json) unmarshal: %v", err)
@@ -205,8 +204,7 @@ func TestSyslogFormattingHelpers(t *testing.T) {
 		t.Fatalf("unexpected json event payload: %#v", decoded)
 	}
 
-	mgr.config.Format = "rfc5424"
-	rfc := mgr.formatEvent(ev, "udp")
+	rfc := mgr.formatEvent(ev, "rfc5424")
 	if !strings.Contains(rfc, "<14>1 2026-03-13T15:00:00Z fw-lab containd") || !strings.Contains(rfc, `"transport":"tcp"`) || !strings.Contains(rfc, `"src":"10.0.0.1:1234"`) {
 		t.Fatalf("unexpected rfc5424 payload: %s", rfc)
 	}
