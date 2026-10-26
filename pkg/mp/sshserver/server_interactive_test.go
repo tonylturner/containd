@@ -412,6 +412,7 @@ func TestInteractiveConfigurationMenus(t *testing.T) {
 }
 
 func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	srv, userStore, auditStore := newTestSSHServer(t)
 	httpClient := newSSHTestHTTPClient()
 	api := &cli.API{BaseURL: "http://127.0.0.1:8080", Client: httpClient}
@@ -504,6 +505,7 @@ func (s passwordWriteFailure) SetPassword(context.Context, string, string) error
 }
 
 func TestWizardPasswordFailureStops(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	for _, failure := range []string{"weak", "store"} {
 		t.Run(failure, func(t *testing.T) {
 			srv, store, audits := newTestSSHServer(t)
@@ -538,6 +540,7 @@ func TestWizardPasswordFailureStops(t *testing.T) {
 }
 
 func TestWizardPasswordSuccessAuthenticates(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	srv, _, audits := newTestSSHServer(t)
 	password := sshTestValue("wizard-success")
 	session, output := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n")

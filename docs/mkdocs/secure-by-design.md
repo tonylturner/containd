@@ -37,11 +37,17 @@ shared network before setup. Keep management private, set a unique non-empty
 ### Lab-mode credential pinning
 
 `CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops:
-it pins `containd / containd` and disables HTTP password changes.
+it pins `containd / containd` and refuses every password change for every user,
+on every path, with the same reason.
 
 - `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`.
 - `POST /api/v1/auth/me/password` returns 403.
 - `POST /api/v1/users/:id/password` also returns 403, including for admins.
+- The SSH console's "Reset admin password" menu option prints the reason and
+  changes nothing; the setup wizard prints the reason, skips its password step
+  and continues with the remaining steps.
+- Seeding the default admin at first boot and after a factory reset is not a
+  password change and is unaffected.
 - The SSH admin shell on `:2222` uses the same pinned credential and does not
   provide a substitute MFA safeguard.
 
@@ -50,7 +56,7 @@ with HTTP and SSH bound to loopback or an instructor-private network. Do not use
 it on hostile/shared networks or for real ICS deployments. A compromised lab
 credential compromises that deployment's management boundary.
 
-The password endpoints remain blocked while lab mode is enabled. To return to
+Password changes remain refused while lab mode is enabled. To return to
 standard authentication, remove the flag or set it to `0`, restart, and use the
 standard authenticated password-change flow. Disabling the flag is not itself a
 password rotation. Recreating a container with the same data volume does not

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
 func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter, reader *bufio.Reader, reg *cli.Registry) bool {
@@ -152,6 +153,10 @@ func (s *interactiveSession) menuSetInterfaceIP() {
 }
 
 func (s *interactiveSession) menuResetPassword() {
+	if err := users.CheckPasswordChange(); err != nil {
+		s.writeLn("error: " + err.Error())
+		return
+	}
 	pw, ok := s.ask("New password (blank to cancel): ")
 	if !ok {
 		return
@@ -448,6 +453,10 @@ func (s *interactiveSession) wizardPromptSSHPasswordAuth() bool {
 }
 
 func (s *interactiveSession) wizardPromptPassword() bool {
+	if err := users.CheckPasswordChange(); err != nil {
+		s.writeLn("password step skipped: " + err.Error())
+		return true
+	}
 	v, ok := s.ask("Set a new password for this user now? (blank to skip): ")
 	if !ok {
 		s.writeLn("Wizard cancelled.")
