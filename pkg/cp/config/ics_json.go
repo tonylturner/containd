@@ -29,15 +29,6 @@ type icsPredicateJSON struct {
 	IOA           []IOARange `json:"ioa,omitempty"`
 }
 
-// IsZero reports whether MarshalJSON would emit an empty object. Empty
-// slices are omitted; a non-nil UnitID includes unit ID 0.
-func (p ICSPredicate) IsZero() bool {
-	return p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil &&
-		len(p.Addresses) == 0 && len(p.ObjectClasses) == 0 &&
-		!p.ReadOnly && !p.WriteOnly && p.Direction == "" && p.Mode == "" &&
-		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0
-}
-
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 	out := icsPredicateJSON{
 		Protocol:      p.Protocol,
