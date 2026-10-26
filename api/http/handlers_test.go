@@ -151,8 +151,8 @@ func (m *mockUserStore) DisableTOTP(_ context.Context, id string) error {
 	return nil
 }
 
-// AcceptTOTP checks the code without replay tracking; replay is covered
-// against the SQLite store.
+// AcceptTOTP checks the code without replay tracking or a failure limit;
+// both are covered against the SQLite store.
 func (m *mockUserStore) AcceptTOTP(_ context.Context, id, code string, now time.Time) error {
 	u, ok := m.users[id]
 	if !ok {
@@ -160,6 +160,19 @@ func (m *mockUserStore) AcceptTOTP(_ context.Context, id, code string, now time.
 	}
 	if !u.MFAEnabled || !users.ValidateTOTP(u.TOTPSecret, code, now) {
 		return users.ErrInvalidTOTP
+	}
+	return nil
+}
+
+// CheckCurrentPassword compares the password without a failure limit, which
+// is covered against the SQLite store.
+func (m *mockUserStore) CheckCurrentPassword(_ context.Context, id, password string, _ time.Time) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		return users.ErrCurrentPasswordInvalid
 	}
 	return nil
 }

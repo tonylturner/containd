@@ -5,10 +5,10 @@ package sshserver
 
 import (
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
 type ownPasswordResult int
@@ -21,9 +21,10 @@ const (
 
 // changeOwnPassword changes the logged-in account's password after it
 // confirms the current one, as the web change does, so a session opened with
-// a key cannot set a password without knowing the old one. A blank answer
-// skips the change. path names the console path in audit records. Callers
-// refuse in lab mode before calling (users.CheckPasswordChange).
+// a key cannot set a password without knowing the old one. The store limits
+// wrong current passwords per account. A blank answer skips the change. path
+// names the console path in audit records. Callers refuse in lab mode before
+// calling (users.CheckPasswordChange).
 func (s *interactiveSession) changeOwnPassword(path, currentPrompt, newPrompt string) ownPasswordResult {
 	current, ok := s.askSecret(currentPrompt)
 	if !ok {
@@ -37,9 +38,16 @@ func (s *interactiveSession) changeOwnPassword(path, currentPrompt, newPrompt st
 		s.writeLn("error: failed to load user")
 		return ownPasswordFailed
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(current)) != nil {
-		s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Result: "denied", Detail: path + ": current password invalid"})
-		s.writeLn("error: current password invalid")
+	if err := s.server.opts.UserStore.CheckCurrentPassword(s.ctx, u.ID, current, time.Now()); err != nil {
+		detail, record, refused := users.Refusal(err)
+		if !refused {
+			s.writeLn("error: failed to check the current password")
+			return ownPasswordFailed
+		}
+		if record {
+			s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Result: "denied", Detail: path + ": " + detail})
+		}
+		s.writeLn("error: " + err.Error())
 		return ownPasswordFailed
 	}
 	pw, ok := s.askNewPassword(newPrompt)

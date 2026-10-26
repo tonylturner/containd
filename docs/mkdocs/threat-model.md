@@ -113,6 +113,7 @@ Current mitigations:
 - TOTP MFA and admin-required MFA with grace periods; SSH password login asks for the TOTP code, and SSH key login counts the key as the possession factor
 - a password or MFA change ends the account's other sessions and SSH connections
 - SSH password, key and TOTP failures are rate-limited per client address and account, and refused logins are audited; a TOTP code is accepted once
+- wrong TOTP codes (5) and wrong current passwords at password or MFA changes (10) lock that check for the account for 15 minutes, across all client addresses and web and SSH; password login is never locked by them, and each lock is audited once
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
 - audit logging for logins, account, password, MFA and certificate changes, SSH sessions and key enrollment, and config saves and commits
@@ -121,6 +122,7 @@ Residual risk:
 
 - RBAC provides admin/view roles, not resource-scoped authorization
 - the bootstrap password remains a conscious lab-usability tradeoff
+- someone who holds an account's password can keep its TOTP check locked, which blocks that account's MFA login until the password is reset; the lock audit records show it
 - when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and every password change is refused (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403, and the SSH menu and setup wizard refuse their password steps). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag that also skips the SSH account checks; standard deployments enforce the forced first-login change and MFA on web/API and SSH. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
 
 ### 3. Configuration Tampering

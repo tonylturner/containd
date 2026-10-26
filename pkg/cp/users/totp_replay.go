@@ -22,22 +22,12 @@ var (
 	ErrTOTPReused = errors.New("authentication code already used; wait for the next code")
 )
 
-// TOTPRefusal returns the audit detail for an AcceptTOTP refusal, and false
-// for any other error, such as a store failure.
-func TOTPRefusal(err error) (string, bool) {
-	switch {
-	case errors.Is(err, ErrTOTPReused):
-		return "totp code reused", true
-	case errors.Is(err, ErrInvalidTOTP):
-		return "invalid totp code", true
-	}
-	return "", false
-}
-
 // AcceptTOTP verifies code against the account's TOTP secret and records its
 // time step. Each sign-in and MFA change that checks a stored secret goes
-// through it, so a code observed in use cannot be replayed on web or SSH. Lab
-// mode verifies the code without recording or refusing reuse.
+// through it, so a code observed in use cannot be replayed on web or SSH, and
+// wrong codes count against the account's TOTP limit (factor_limit.go). It
+// returns a *FactorLockedError while that limit locks the code check. Lab mode
+// verifies the code without a limit, and without recording or refusing reuse.
 func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -57,12 +47,23 @@ func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, no
 	if !enabled {
 		return ErrInvalidTOTP
 	}
+	if labmode.Enabled() {
+		if _, ok := matchTOTPStep(secret, code, now); !ok {
+			return ErrInvalidTOTP
+		}
+		return nil
+	}
+	st, err := loadFactor(ctx, tx, id, FactorTOTP)
+	if err != nil {
+		return err
+	}
+	if locked := st.refuse(now); locked != nil {
+		return commitFactor(ctx, tx, st, locked)
+	}
 	step, ok := matchTOTPStep(secret, code, now)
 	if !ok {
-		return ErrInvalidTOTP
-	}
-	if labmode.Enabled() {
-		return nil
+		st.fail(now)
+		return commitFactor(ctx, tx, st, ErrInvalidTOTP)
 	}
 	if step <= lastStep {
 		return ErrTOTPReused
@@ -75,6 +76,9 @@ func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, no
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrTOTPReused
+	}
+	if err := clearFactor(ctx, tx, id, FactorTOTP); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit accept totp: %w", err)
