@@ -473,7 +473,11 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if _, ok := stageCandidate(c, store, func(existing *config.Config) bool {
+		stage := stageCandidate
+		if cfg.IDS.Rules != nil {
+			stage = stageCandidateIDS
+		}
+		if _, ok := stage(c, store, func(existing *config.Config) bool {
 			cfg.RestoreRedactedSecrets(existing)
 			if cfg.IDS.Rules == nil {
 				cfg.IDS.Rules = existing.IDS.Rules

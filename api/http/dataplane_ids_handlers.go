@@ -170,7 +170,7 @@ func setIDSHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		cfg, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			cfg.IDS.Enabled = idsCfg.Enabled
 			cfg.IDS.RuleGroups = idsCfg.RuleGroups
 			if idsCfg.Rules != nil {
@@ -237,7 +237,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 		}
 
 		added, skipped := 0, 0
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		cfg, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			existing := make(map[string]bool, len(cfg.IDS.Rules))
 			for _, r := range cfg.IDS.Rules {
 				existing[r.ID] = true
@@ -337,7 +337,7 @@ func idsRestoreHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if _, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		if _, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			cfg.IDS.Rules = rules
 			return true
 		}); !ok {

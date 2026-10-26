@@ -47,6 +47,14 @@ Use `GET /config/diff` to review, then `POST /config/commit` or
 its IDS bank are promoted and rolled back together. Plain commit cancels an
 outstanding confirmed-commit timer and replaces its rollback baseline.
 
+Ordinary edits leave the stored IDS rule bank untouched, so staging settings
+stays inexpensive even with a large bank. Omitting `ids.rules` from a config
+replacement retains the candidate bank; an explicit `[]` clears it. Full
+exports and backups include rules; imports can replace them. `GET /config/diff`
+compares running and candidate from one consistent store read. The Config page
+uses bounded,
+linear-memory line diffs; very large changed sections display as replacements.
+
 `GET /config`, `GET /config/export`, config backups, `GET /ids/export` and
 `GET /ids/backup` read running. IDS import and restore stage desired rules.
 Operational commands (blocks, reconcile, credentials, definition updates and

@@ -12,27 +12,21 @@ import (
 
 const (
 	// Legacy snapshots did not own the separately deployed bank.
-	snapshotFormatBankUnchanged = 1
-	snapshotFormatEmbeddedBank  = 2
+	snapshotFormatBankUnchanged  = 1
+	snapshotFormatEmbeddedBank   = 2
+	snapshotFormatReferencedBank = 3
 )
 
 // Storage metadata is not part of Config or its public wire representation.
 type storedConfig struct {
 	Config
-	SnapshotFormat int `json:"snapshot_format,omitempty"`
+	SnapshotFormat int   `json:"snapshot_format,omitempty"`
+	BankID         int64 `json:"ids_bank,omitempty"`
 }
 
-func marshalStoredConfig(key string, cfg *Config) ([]byte, error) {
-	stored := storedConfig{Config: *cfg}
-	if key == configKeyCandidate || key == configKeyPrevious {
-		stored.SnapshotFormat = snapshotFormatEmbeddedBank
-	}
-	return json.Marshal(stored)
-}
-
-// upgradeSnapshots runs before pending-deadline handling. Legacy snapshots
-// without an embedded bank retain "bank unchanged" semantics on later rollback.
-// All subsequent reads use the marker, not nil-versus-empty slice inference.
+// upgradeSnapshots classifies legacy snapshots before bank extraction and
+// pending-deadline handling. The marker distinguishes inherited banks from
+// authoritative empty embedded banks; slice nilness cannot make that decision.
 func (s *SQLiteStore) upgradeSnapshots(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -85,7 +79,7 @@ func (s *SQLiteStore) upgradeSnapshots(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx, `UPDATE configs SET data = ? WHERE key = ?`, string(blob), key); err != nil {
 				return err
 			}
-		case snapshotFormatBankUnchanged, snapshotFormatEmbeddedBank:
+		case snapshotFormatBankUnchanged, snapshotFormatEmbeddedBank, snapshotFormatReferencedBank:
 		default:
 			return fmt.Errorf("unsupported %s snapshot format %d", key, format)
 		}

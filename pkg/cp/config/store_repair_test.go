@@ -118,7 +118,7 @@ func TestRepairTransaction(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode != "no-candidate" {
-				if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+				if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
 					cfg.Description = "staged"
 					cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 					return nil
@@ -187,13 +187,23 @@ func TestRepairTransaction(t *testing.T) {
 }
 
 func BenchmarkStageWith30KRuleBank(b *testing.B) {
+	benchmarkStageRuleBank(b, 30000)
+}
+
+func BenchmarkStageRuleBankSizes(b *testing.B) {
+	for _, size := range []int{0, 300, 30000} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) { benchmarkStageRuleBank(b, size) })
+	}
+}
+
+func benchmarkStageRuleBank(b *testing.B, size int) {
 	s, err := NewSQLiteStore(b.TempDir() + "/config.db")
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer s.Close()
 	cfg := DefaultConfig()
-	cfg.IDS.Rules = make([]IDSRule, 30000)
+	cfg.IDS.Rules = make([]IDSRule, size)
 	template := DefaultIDSConfig().Rules[0]
 	for i := range cfg.IDS.Rules {
 		cfg.IDS.Rules[i] = template
@@ -217,9 +227,9 @@ func BenchmarkStageWith30KRuleBank(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	var size int
-	if err := s.db.QueryRow(`SELECT length(data) FROM configs WHERE key = ?`, configKeyCandidate).Scan(&size); err != nil {
+	var snapshotSize int
+	if err := s.db.QueryRow(`SELECT length(data) FROM configs WHERE key = ?`, configKeyCandidate).Scan(&snapshotSize); err != nil {
 		b.Fatal(err)
 	}
-	b.ReportMetric(float64(size), "snapshot-bytes")
+	b.ReportMetric(float64(snapshotSize), "snapshot-bytes")
 }

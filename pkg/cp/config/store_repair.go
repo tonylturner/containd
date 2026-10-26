@@ -54,9 +54,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 	if err := replaceChangedIDSRulesTx(ctx, tx, running.IDS.Rules); err != nil {
 		return nil, err
 	}
-	persisted := cloneConfigForPersist(running)
-	persisted.IDS.Rules = nil
-	if err := writeConfigTx(ctx, tx, configKeyRunning, persisted); err != nil {
+	if err := writeConfigTx(ctx, tx, configKeyRunning, running); err != nil {
 		return nil, err
 	}
 	if candidate != nil {
