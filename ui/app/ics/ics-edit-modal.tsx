@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 
-import type { FirewallRule, ICSPredicate } from "../../lib/api";
-import { InfoTip } from "../../components/InfoTip";
-import { RulePreviewButton } from "../../components/RulePreview";
 import {
-  buildICSRulePreview,
+  api,
+  type FirewallRule,
+  type ICSPredicate,
+  type RulePreview,
+} from "../../lib/api";
+import { InfoTip } from "../../components/InfoTip";
+import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
+import {
   buildICSRuleUpdate,
   type ICSMode,
   type ICSModeSelection,
@@ -15,7 +19,6 @@ import {
   protoMeta,
 } from "./ics-shared";
 import {
-  buildIEC104RulePreview,
   buildIEC104RuleICS,
   iec104DraftFrom,
 } from "./iec104";
@@ -49,29 +52,23 @@ export function EditICSModal({
   const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
   const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<RulePreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   const meta = protoMeta(protocol);
   const isIEC104 = protocol === "iec104";
-  const iecBuild = isIEC104
-    ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
-    : null;
 
-  function save() {
-    setError(null);
-    if (!enabled) {
-      onSave(undefined);
-      return;
+  // The predicate Save would stage; preview checks the same one.
+  function buildICS():
+    | { ok: true; ics: ICSPredicate | undefined }
+    | { ok: false; error: string } {
+    if (!enabled) return { ok: true, ics: undefined };
+    if (isIEC104) {
+      return buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode);
     }
-    if (iecBuild) {
-      if (!iecBuild.ok) {
-        setError(iecBuild.error);
-        return;
-      }
-      onSave(iecBuild.ics);
-      return;
-    }
-    onSave(
-      buildICSRuleUpdate(
+    return {
+      ok: true,
+      ics: buildICSRuleUpdate(
         protocol,
         functionCodes,
         addresses,
@@ -81,7 +78,37 @@ export function EditICSModal({
         writeOnly,
         mode,
       ),
-    );
+    };
+  }
+
+  function save() {
+    setError(null);
+    const built = buildICS();
+    if (!built.ok) {
+      setError(built.error);
+      return;
+    }
+    onSave(built.ics);
+  }
+
+  // Previews the whole rule with the edited predicate, so the zones, sources,
+  // identities and schedule this modal does not edit still apply.
+  async function previewImpact() {
+    setError(null);
+    const built = buildICS();
+    if (!built.ok) {
+      setError(built.error);
+      return;
+    }
+    setPreviewing(true);
+    const res = await api.previewFirewallRule({ ...rule, ics: built.ics });
+    setPreviewing(false);
+    if (!res.ok) {
+      setPreview(null);
+      setError(`Impact preview failed: ${res.error}`);
+      return;
+    }
+    setPreview(res.data);
   }
 
   return (
@@ -272,23 +299,15 @@ export function EditICSModal({
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
+        {preview && <RuleImpactSummary preview={preview} />}
         <div className="mt-5 flex items-center justify-end gap-2">
-          <RulePreviewButton
-            rule={
-              isIEC104
-                ? buildIEC104RulePreview(rule, enabled, iec, mode, globalMode)
-                : buildICSRulePreview(
-                    rule,
-                    enabled,
-                    protocol,
-                    functionCodes,
-                    addresses,
-                    readOnly,
-                    writeOnly,
-                    mode,
-                  )
-            }
-          />
+          <button
+            onClick={previewImpact}
+            disabled={previewing}
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
+          >
+            {previewing ? "Previewing..." : "Preview impact"}
+          </button>
           <button
             onClick={onClose}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
