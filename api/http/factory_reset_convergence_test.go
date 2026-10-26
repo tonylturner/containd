@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -55,7 +56,8 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				}
 				defer us.Close()
 				// Lab auth resolves the canonical admin, while reset must
-				// replace its identity and revoke every existing session.
+				// replace its identity and remove every session record. Lab
+				// tokens intentionally remain usable without those records.
 				u, err := us.Create(ctx, users.User{Username: "containd", Role: "admin"}, "BeforeReset123")
 				if err != nil {
 					t.Fatal(err)
@@ -89,7 +91,9 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 					t.Fatalf("initial auth: %d %s", rec.Code, rec.Body)
 				}
 				rec = httptest.NewRecorder()
-				router.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token))
+				resetReq := jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token)
+				resetReq.Header.Set("X-Containd-SSH-Connection", "initiating-ssh-connection")
+				router.ServeHTTP(rec, resetReq)
 				var body struct {
 					Warnings []string `json:"warnings"`
 					Message  string   `json:"message"`
@@ -100,7 +104,14 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				if rec.Code != http.StatusOK || (len(body.Warnings) > 0) != warning || strings.Contains(body.Message, "completed") == warning {
 					t.Fatalf("reset outcome: %d %s", rec.Code, rec.Body)
 				}
-				if (rec.Header().Get("X-Containd-Warnings") != "") != warning || revoked != sess.ID {
+				wantInitiator := sess.ID
+				if lab {
+					wantInitiator = "initiating-ssh-connection"
+				}
+				if strings.Contains(body.Message, "Lab web/API tokens remain valid") != lab {
+					t.Fatalf("incorrect lab token revocation message: %q", body.Message)
+				}
+				if (rec.Header().Get("X-Containd-Warnings") != "") != warning || revoked != wantInitiator {
 					t.Fatalf("warnings/revocation: %v %q", rec.Header(), revoked)
 				}
 				defaults := ApplianceDefaults(nil)
@@ -121,8 +132,12 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				}
 				rec = httptest.NewRecorder()
 				router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
-				if rec.Code != http.StatusUnauthorized {
-					t.Fatalf("old JWT accepted: %d %s", rec.Code, rec.Body)
+				wantStatus := http.StatusUnauthorized
+				if lab {
+					wantStatus = http.StatusOK
+				}
+				if rec.Code != wantStatus {
+					t.Fatalf("old JWT status: got %d want %d body=%s", rec.Code, wantStatus, rec.Body)
 				}
 				rec = httptest.NewRecorder()
 				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(`{"username":"containd","password":"containd"}`)))
@@ -154,6 +169,73 @@ func fmtResetCase(lab, warning bool) string {
 		name += "/converged"
 	}
 	return name
+}
+
+func TestFactoryResetPreservesRangerDangerLabToken(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "1")
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	store := stageStore(t)
+	us, err := users.NewSQLiteStore(filepath.Join(t.TempDir(), "users.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer us.Close()
+	if err := us.EnsureDefaultAdmin(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// RangerDanger signs its own tokens without a user ID or session jti.
+	sign := func(secret string, expires time.Time) string {
+		t.Helper()
+		token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":  "rangerdanger-backend",
+			"role": "admin",
+			"exp":  expires.Unix(),
+		}).SignedString([]byte(secret))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	token := sign(testJWTSecret, time.Now().Add(24*time.Hour))
+	invalidSignature := sign(testJWTSecret+"-different", time.Now().Add(24*time.Hour))
+	expired := sign(testJWTSecret, time.Now().Add(-time.Hour))
+	router := NewServerWithEngineAndServices(store, nil, &mockEngine{}, nil, us)
+	checkAuth := func() {
+		t.Helper()
+		for _, tc := range []struct {
+			token string
+			want  int
+		}{
+			{token, http.StatusOK},
+			{invalidSignature, http.StatusUnauthorized},
+			{expired, http.StatusUnauthorized},
+		} {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tc.token))
+			if rec.Code != tc.want {
+				t.Fatalf("lab token authentication: got %d want %d body=%s", rec.Code, tc.want, rec.Body)
+			}
+			if tc.want == http.StatusOK {
+				var body struct {
+					Role      string `json:"role"`
+					SessionID string `json:"sessionId"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Role != "admin" || body.SessionID != "lab" {
+					t.Fatalf("lab context changed: %+v", body)
+				}
+			}
+		}
+	}
+	checkAuth()
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/api/v1/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Lab web/API tokens remain valid") {
+		t.Fatalf("reset with session-less lab token: %d %s", rec.Code, rec.Body)
+	}
+	checkAuth()
 }
 
 func TestFactoryResetPreservesSecretlessLabBypass(t *testing.T) {

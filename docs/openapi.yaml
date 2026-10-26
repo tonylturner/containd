@@ -1847,6 +1847,7 @@ components:
           type: string
         loggedOut:
           type: boolean
+          description: The auth cookie is cleared and the client should log out; lab web/API tokens are not revoked.
         message:
           type: string
         warnings:
@@ -2139,8 +2140,11 @@ paths:
         A successful reset clears the boot fault and applies the defaults.
         The response warnings array and message report incomplete convergence when
         auxiliary applies fail; HTTP 200 alone does not guarantee convergence.
-        Old JWT sessions are revoked even in lab mode when a JWT secret is set.
-        Secretless lab tokens cannot be revoked. SSH connections are closed,
+        Session-backed web/API tokens are revoked outside lab mode. Lab mode
+        never looks up sessions; signed, unexpired lab tokens remain valid after
+        reset even with a JWT secret. Without a secret, lab mode still accepts
+        any nonempty token. The reset message reports that lab tokens remain valid.
+        SSH connections are closed,
         except an initiating appliance console until it prints the result.
         The reserved management path and lab credentials are retained.
       tags: [System]

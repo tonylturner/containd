@@ -91,10 +91,10 @@ Management APIs and the in-app CLI use short-lived JWT sessions stored in a cook
 Environment variables (common):
 - `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and disables
   password changes. Protected API routes still require a bearer token or cookie.
-  With a JWT secret, the token must validate and its session must remain active;
-  reset revokes these sessions. Without a secret, **any nonempty token passes**
-  and reset cannot revoke it. Lab requests receive admin access rather than
-  ordinary role enforcement. Use only in isolated, disposable environments; see
+  With a JWT secret, the token's signature and expiry are validated without a
+  session lookup. Without a secret, **any nonempty token passes**. Factory reset
+  does not revoke lab web/API tokens in either case. Lab requests receive admin
+  access rather than ordinary role enforcement. Use only in isolated, disposable environments; see
   [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).
 - `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification. Compose requires
   a non-empty value even for labs; follow [onboarding](docker-compose.md#quickstart).

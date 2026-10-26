@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,7 @@ type factoryResetRequest struct {
 type FactoryResetSessions func(ctx context.Context, sessionID string)
 
 func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier, revoke ...FactoryResetSessions) gin.HandlerFunc {
+	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
 		var req factoryResetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -79,7 +81,8 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			factoryResetApplyError(c, err)
 			return
 		}
-		// Wiping sessions also revokes the current token. No authentication
+		// Wiping sessions revokes session-backed tokens outside lab mode. Lab
+		// authentication deliberately does not consult session records. No user
 		// state changes until the configuration has been successfully applied.
 		if err := us.ResetToDefaultAdmin(ctx); err != nil {
 			internalError(c, err)
@@ -109,8 +112,9 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		for _, closeSessions := range revoke {
 			if closeSessions != nil {
 				sessionID := c.GetString(ctxSessionKey)
-				// Secretless lab authentication cannot establish a JWT session.
-				if len(jwtSecret()) == 0 {
+				// Lab authentication does not identify the JWT session, even
+				// with a secret. Preserve the initiating SSH transport by ID.
+				if lab || len(jwtSecret()) == 0 {
 					sessionID = c.GetHeader("X-Containd-SSH-Connection")
 				}
 				closeSessions(ctx, sessionID)
@@ -119,6 +123,9 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		message := "Factory reset completed. Log in with the default credentials."
 		if len(warnings) > 0 {
 			message = "Factory reset applied with warnings; runtime convergence is incomplete. " + strings.Join(warnings, "; ") + ". Log in with the default credentials."
+		}
+		if lab {
+			message += " Lab web/API tokens remain valid; factory reset does not revoke them."
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "reset",

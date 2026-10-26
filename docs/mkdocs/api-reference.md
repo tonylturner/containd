@@ -13,6 +13,7 @@ writes require a same-origin request or an explicitly allowed origin.
 Lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
 privileges without normal session enforcement. If a JWT secret is configured,
 the token must be a valid signed JWT; without one, any nonempty token is accepted.
+Factory reset does not revoke lab tokens, even with a JWT secret configured.
 Do not expose lab mode to untrusted clients.
 
 Static bearer authentication is a fallback when the user store or JWT secret
@@ -195,9 +196,10 @@ default admin in one users-database transaction, then clear audit history and
 the browser auth cookie. A user-reset failure rolls back the users and sessions
 to their prior state and returns HTTP 500. It does not undo the successfully
 applied configuration: the config and users databases do not share a
-transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`;
-reauthenticate with the default credentials. Configuration history, pending
-rollback and the old IDS bank are replaced, not retained for rollback.
+transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`, indicating
+cookie clearing and client logout, not revocation of lab tokens. To log in again,
+use the default credentials. Configuration history, pending rollback and the old
+IDS bank are replaced, not retained for rollback.
 
 The response includes `warnings` and the `X-Containd-Warnings` header when an
 auxiliary apply fails, including engine-side service configuration. HTTP 200
@@ -206,9 +208,11 @@ means the reset was applied, not that every subsystem converged. With warnings,
 warnings and runtime health before continuing. Mandatory daemon, dataplane or
 ruleset failures still use the failure/recovery response above.
 
-With a JWT secret configured, all old web/API sessions are revoked, including
-in lab mode. Without a secret, lab mode accepts any nonempty token by design;
-those bearer tokens cannot be revoked by reset. SSH connections are closed.
+Outside lab mode, session-backed web/API tokens are revoked. Lab mode does not
+look up session records: signed, unexpired tokens remain valid after reset even
+with a JWT secret configured. Without a secret, lab mode still accepts any
+nonempty token by design. The reset message explicitly reports that lab tokens
+remain valid. SSH connections are closed.
 An initiating appliance-console session prints its result and warnings before
 disconnecting; Linux-shell connections are closed along with other sessions.
 The reserved management path is retained, and lab mode keeps the documented

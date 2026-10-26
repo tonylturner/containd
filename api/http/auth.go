@@ -76,31 +76,15 @@ func handleLabAuth(c *gin.Context, userStore users.Store, cfg authModeConfig) {
 		abortJSON(c, http.StatusUnauthorized, "login required")
 		return
 	}
-	sessionID := "lab"
-	if len(cfg.secret) > 0 {
-		if userStore == nil {
-			abortJSON(c, http.StatusServiceUnavailable, "session store unavailable")
-			return
-		}
-		claims, ok := parseSessionClaims(c, raw, cfg.secret)
-		if !ok {
-			return
-		}
-		sess, ok := loadActiveSession(c, userStore, claims.jti)
-		if !ok {
-			return
-		}
-		if _, ok := loadSessionUser(c, userStore, sess, claims.sub); !ok {
-			return
-		}
-		_ = maybeRefreshSession(c, userStore, cfg.secret, claims, sess)
-		sessionID = claims.jti
+	if !validateOptionalJWT(raw, cfg.secret) {
+		abortJSON(c, http.StatusUnauthorized, "invalid token")
+		return
 	}
 	c.Set(ctxRoleKey, string(roleAdmin))
-	c.Set(ctxSessionKey, sessionID)
 	if userStore != nil {
 		if u, err := userStore.GetByUsername(c.Request.Context(), "containd"); err == nil {
 			c.Set(ctxUserKey, u.ID)
+			c.Set(ctxSessionKey, "lab")
 		}
 	}
 	c.Next()
@@ -151,6 +135,15 @@ func handleSessionAuth(c *gin.Context, userStore users.Store, cfg authModeConfig
 		return
 	}
 	c.Next()
+}
+
+func validateOptionalJWT(raw string, secret []byte) bool {
+	if len(secret) == 0 {
+		return true
+	}
+	claims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(raw, claims, jwtKeyFunc(secret), jwt.WithLeeway(30*time.Second))
+	return err == nil && parsed.Valid
 }
 
 func requireBearerToken(c *gin.Context) string {
