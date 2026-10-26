@@ -33,6 +33,12 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// RulesetPreviewClient is an optional interface for previewing the compiled
+// ruleset of a candidate configuration on the live engine.
+type RulesetPreviewClient interface {
+	PreviewRuleset(context.Context, *config.Config) (dpengine.RulesetPreview, error)
+}
+
 func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.LoadCandidate(c.Request.Context())
@@ -44,10 +50,7 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		type rulesetPreviewClient interface {
-			PreviewRuleset(context.Context, *config.Config) (dpengine.RulesetPreview, error)
-		}
-		ec, ok := engine.(rulesetPreviewClient)
+		ec, ok := engine.(RulesetPreviewClient)
 		if !ok || ec == nil {
 			apiError(c, http.StatusServiceUnavailable, "engine unavailable: ruleset preview requires a live engine")
 			return

@@ -6,7 +6,6 @@ package httpapi
 import (
 	"context"
 
-	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
@@ -17,9 +16,7 @@ func ipv4ForwardingCommitWarning(ctx context.Context, cfg *config.Config, engine
 	if cfg == nil || engine == nil || !netcfg.RequiresIPv4Forwarding(cfg.Interfaces) {
 		return ""
 	}
-	healthClient, ok := engine.(interface {
-		RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error)
-	})
+	healthClient, ok := engine.(RuntimeHealthClient)
 	if !ok {
 		return ""
 	}
