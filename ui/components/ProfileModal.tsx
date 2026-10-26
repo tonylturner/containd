@@ -5,6 +5,7 @@ import Image from "next/image";
 
 import { type MFAEnrollResponse, type User, api } from "../lib/api";
 import { formatOptionalDate } from "./shell-nav";
+import { withRetryTime } from "../lib/utils";
 
 export function ProfileModal({
   me,
@@ -92,7 +93,7 @@ export function ProfileModal({
     if (!ok.ok) {
       setState("error");
       setError(
-        ok.error || "Failed to change password. Check your current password.",
+        withRetryTime(ok.error || "Failed to change password. Check your current password.", ok.retryAfter),
       );
       return;
     }
@@ -152,7 +153,7 @@ export function ProfileModal({
     const res = await api.disableMFA(mfaDisablePassword, mfaDisableCode);
     if (!res.ok) {
       setState("error");
-      setError(res.error || "Failed to disable MFA.");
+      setError(withRetryTime(res.error || "Failed to disable MFA.", res.retryAfter));
       return;
     }
     setMfaEnabled(false);

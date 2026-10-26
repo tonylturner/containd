@@ -18,3 +18,13 @@ export function formatBytes(bytes: number): string {
   }
   return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
+
+/**
+ * A failure message with when to retry, from the server's Retry-After in
+ * seconds: "… Try again after 10:42:15." The message alone without one.
+ */
+export function withRetryTime(error: string, retryAfter: number | undefined, now = Date.now()): string {
+  if (retryAfter === undefined) return error;
+  const at = new Date(now + retryAfter * 1000);
+  return `${error} Try again after ${at.toLocaleTimeString()}.`;
+}

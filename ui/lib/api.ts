@@ -1,7 +1,13 @@
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
 export type ApiResult<T> =
   | { ok: true; data: T; warning?: string }
-  | { ok: false; error: string };
+  | ApiFailure;
+
+/**
+ * A refused or failed call. `retryAfter` is the server's Retry-After in
+ * seconds, set when it said when to try again (a 429 rate limit or lock).
+ */
+export type ApiFailure = { ok: false; error: string; retryAfter?: number };
 
 // This file is the stable UI API facade. Keep shared public types and the
 // exported `api` surface here, but place endpoint families in `api-*.ts`

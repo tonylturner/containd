@@ -1,4 +1,4 @@
-import { getJSON, getJSONList, getJSONShaped, postJSON, postJSONResult, parseErrorBody } from "./api-request";
+import { failureOf, getJSON, getJSONList, getJSONShaped, postJSON, postJSONResult } from "./api-request";
 import { authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
 
 import type {
@@ -48,7 +48,7 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>
     const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     const body: unknown = await res.json();
     // A list is the only valid snapshot; anything else is not "verified empty".
     if (!Array.isArray(body)) return { ok: false, error: "malformed connection list" };

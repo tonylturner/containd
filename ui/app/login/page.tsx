@@ -4,9 +4,18 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { api, clearLocalAuth, getLastAuthError } from "../../lib/api";
+import { api, clearLocalAuth, getLastAuthError, type ApiFailure } from "../../lib/api";
+import { withRetryTime } from "../../lib/utils";
 
 type State = "idle" | "logging_in" | "verifying_mfa" | "error";
+
+/**
+ * A rate limit or factor lock says why and when to retry; any other refusal
+ * keeps the generic text, which reveals nothing about the account.
+ */
+function loginFailure(failure: ApiFailure, generic: string): string {
+  return failure.retryAfter === undefined ? generic : withRetryTime(failure.error, failure.retryAfter);
+}
 
 export default function LoginPage() {
   return (
@@ -78,13 +87,14 @@ function LoginInner() {
     e.preventDefault();
     setError(null);
     setState("logging_in");
-    const res = await api.login(username, password);
-    if (!res) {
+    const result = await api.login(username, password);
+    if (!result.ok) {
       setState("error");
-      setError("Invalid username or password.");
+      setError(loginFailure(result, "Invalid username or password."));
       setTimeout(() => setState("idle"), 1500);
       return;
     }
+    const res = result.data;
     if ("mfaRequired" in res && res.mfaRequired) {
       setChallengeToken(res.mfaChallengeToken);
       setMfaCode("");
@@ -104,9 +114,9 @@ function LoginInner() {
     setError(null);
     setState("verifying_mfa");
     const res = await api.verifyLoginMFA(challengeToken, mfaCode);
-    if (!res) {
+    if (!res.ok) {
       setState("error");
-      setError("Invalid authentication code.");
+      setError(loginFailure(res, "Invalid authentication code."));
       setTimeout(() => setState("idle"), 1500);
       return;
     }

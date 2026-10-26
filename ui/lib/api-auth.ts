@@ -16,6 +16,7 @@ import {
 } from "./api-request";
 
 import type {
+  ApiResult,
   ChangePasswordRequest,
   LoginResponse,
   LoginStartResponse,
@@ -26,30 +27,30 @@ import type {
 } from "./api";
 
 export const authAPI = {
-  login: async (username: string, password: string) => {
-    const res = await postJSON<LoginStartResponse>("/api/v1/auth/login", {
+  /** A failure carries the server's message, and Retry-After when rate limited. */
+  login: async (username: string, password: string): Promise<ApiResult<LoginStartResponse>> => {
+    const res = await postJSONResult<LoginStartResponse>("/api/v1/auth/login", {
       username,
       password,
     });
-    if (res && "token" in res && res.token) setSessionToken(res.token);
-    if (res && "token" in res && res.user?.role) setStoredRole(res.user.role);
-    if (res) {
-      clearAuthExpired();
-      setLastAuthError(null);
-    }
+    if (!res.ok) return res;
+    if ("token" in res.data && res.data.token) setSessionToken(res.data.token);
+    if ("token" in res.data && res.data.user?.role) setStoredRole(res.data.user.role);
+    clearAuthExpired();
+    setLastAuthError(null);
     return res;
   },
-  verifyLoginMFA: async (challengeToken: string, code: string) => {
-    const res = await postJSON<LoginResponse>("/api/v1/auth/login/mfa", {
+  /** A failure carries the server's message, and Retry-After while the code check is locked. */
+  verifyLoginMFA: async (challengeToken: string, code: string): Promise<ApiResult<LoginResponse>> => {
+    const res = await postJSONResult<LoginResponse>("/api/v1/auth/login/mfa", {
       challengeToken,
       code,
     });
-    if (res?.token) setSessionToken(res.token);
-    if (res?.user?.role) setStoredRole(res.user.role);
-    if (res) {
-      clearAuthExpired();
-      setLastAuthError(null);
-    }
+    if (!res.ok) return res;
+    if (res.data.token) setSessionToken(res.data.token);
+    if (res.data.user?.role) setStoredRole(res.data.user.role);
+    clearAuthExpired();
+    setLastAuthError(null);
     return res;
   },
   logout: async () => {
