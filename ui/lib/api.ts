@@ -85,6 +85,27 @@ export type { IEC104Inventory } from "./api-inventory";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 export type {
+  OpenVPNConfig,
+  OpenVPNManagedClientConfig,
+  OpenVPNManagedServerConfig,
+  OpenVPNProfileUploadResponse,
+  VPNConfig,
+  WGPeer,
+  WireGuardConfig,
+  WireGuardPeerStatus,
+  WireGuardStatus,
+} from "./api-vpn";
+export type {
+  ContentMatch,
+  IDSCondition,
+  IDSConfig,
+  IDSImportResult,
+  IDSRule,
+  IDSRuleSource,
+  RuleGroup,
+  YARAString,
+} from "./api-ids";
+export type {
   AVStatus, DHCPStatus, DNSStatus, NTPStatus, ProxyStatus, ProxyTelemetryStatus,
   ServiceMeter, ServicesStatus, SyslogAuditForwarder, SyslogAuditStatus, SyslogStatus, VPNStatus,
 } from "./api-service-status";
@@ -97,6 +118,8 @@ import { policyAPI } from "./api-policy";
 import { authAPI } from "./api-auth";
 import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
+import { vpnAPI } from "./api-vpn";
+import { idsAPI } from "./api-ids";
 
 import type { FirewallRule } from "./api-firewall";
 import type { HealthResponse } from "./api-health";
@@ -439,83 +462,6 @@ export type DHCPLease = {
   hostname?: string;
 };
 
-export type WGPeer = {
-  name?: string;
-  publicKey: string;
-  allowedIPs?: string[];
-  endpoint?: string;
-  persistentKeepalive?: number;
-};
-
-export type WireGuardConfig = {
-  enabled?: boolean;
-  interface?: string;
-  listenPort?: number;
-  listenZone?: string;
-  listenInterfaces?: string[];
-  addressCIDR?: string;
-  privateKey?: string;
-  peers?: WGPeer[];
-};
-
-export type OpenVPNConfig = {
-  enabled?: boolean;
-  mode?: string;
-  configPath?: string;
-  managed?: OpenVPNManagedClientConfig;
-  server?: OpenVPNManagedServerConfig;
-};
-
-export type OpenVPNManagedClientConfig = {
-  remote?: string;
-  port?: number;
-  proto?: string;
-  username?: string;
-  password?: string;
-  ca?: string;
-  cert?: string;
-  key?: string;
-};
-
-export type OpenVPNManagedServerConfig = {
-  listenPort?: number;
-  proto?: string;
-  listenZone?: string;
-  listenInterfaces?: string[];
-  tunnelCIDR?: string;
-  publicEndpoint?: string;
-  pushDNS?: string[];
-  pushRoutes?: string[];
-  clientToClient?: boolean;
-};
-
-export type VPNConfig = {
-  wireguard?: WireGuardConfig;
-  openvpn?: OpenVPNConfig;
-};
-
-export type OpenVPNProfileUploadResponse = {
-  configPath: string;
-  vpn: VPNConfig;
-};
-
-export type WireGuardPeerStatus = {
-  publicKey: string;
-  endpoint?: string;
-  lastHandshake?: string;
-  rxBytes?: number;
-  txBytes?: number;
-  allowedIPs?: string[];
-};
-
-export type WireGuardStatus = {
-  interface: string;
-  present: boolean;
-  publicKey?: string;
-  listenPort?: number;
-  peers?: WireGuardPeerStatus[];
-};
-
 export type ConntrackEntry = {
   proto: string;
   state?: string;
@@ -727,94 +673,6 @@ export type SystemInspection = {
   };
 };
 
-export type IDSCondition = {
-  all?: IDSCondition[];
-  any?: IDSCondition[];
-  not?: IDSCondition;
-  field?: string;
-  op?: string;
-  value?: unknown;
-};
-
-export type ContentMatch = {
-  pattern: string;
-  isHex?: boolean;
-  negate?: boolean;
-  nocase?: boolean;
-  depth?: number;
-  offset?: number;
-  distance?: number;
-  within?: number;
-};
-
-export type YARAString = {
-  name: string;
-  pattern: string;
-  type: string; // text|hex|regex
-  nocase?: boolean;
-  wide?: boolean;
-  ascii?: boolean;
-};
-
-export type IDSRule = {
-  id: string;
-  enabled?: boolean | null; // null/undefined = enabled
-  title?: string;
-  description?: string;
-  proto?: string;
-  kind?: string;
-  when?: IDSCondition;
-  severity?: string;
-  message?: string;
-  labels?: Record<string, string>;
-  // Multi-format fields
-  sourceFormat?: string;
-  action?: string;
-  srcAddr?: string;
-  dstAddr?: string;
-  srcPort?: string;
-  dstPort?: string;
-  contentMatches?: ContentMatch[];
-  yaraStrings?: YARAString[];
-  references?: string[];
-  cve?: string[];
-  mitreAttackIDs?: string[];
-  rawSource?: string;
-  conversionNotes?: string[];
-};
-
-export type RuleGroup = {
-  id: string;
-  name: string;
-  description?: string;
-  filter?: string;
-  enabled: boolean;
-  ruleCount?: number;
-};
-
-export type IDSConfig = {
-  enabled?: boolean;
-  rules?: IDSRule[];
-  ruleGroups?: RuleGroup[];
-};
-
-export type IDSImportResult = {
-  imported: number;
-  skipped: number;
-  total: number;
-  format: string;
-};
-
-export type IDSRuleSource = {
-  id: string;
-  name: string;
-  description: string;
-  url: string;
-  format: string;
-  license: string;
-  licenseNote?: string;
-};
-
 export type CLIExecuteResponse = {
   output: string;
   error?: string;
@@ -876,6 +734,8 @@ export const api = {
   ...policyAPI,
   ...dataplaneAPI,
   ...servicesAPI,
+  ...vpnAPI,
+  ...idsAPI,
   ...consoleAPI,
   ...inventoryAPI,
 };

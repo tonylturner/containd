@@ -1,6 +1,5 @@
 import { notifyConfigMutation } from "./config-events";
 import {
-  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -15,13 +14,10 @@ import type {
   DNSConfig,
   ForwardProxyConfig,
   NTPConfig,
-  OpenVPNProfileUploadResponse,
   ReverseProxyConfig,
   SyslogConfig,
   SystemInspection,
   SystemStats,
-  VPNConfig,
-  WireGuardStatus,
 } from "./api";
 import type { ServicesStatus } from "./api-service-status";
 
@@ -135,24 +131,4 @@ export const servicesAPI = {
   setDHCP: (cfg: DHCPConfig) =>
     postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
   listDHCPLeases: () => getJSONShaped<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases", { lists: ["leases"] }),
-  getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
-  setVPN: (cfg: VPNConfig) =>
-    postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
-  uploadOpenVPNProfile: (name: string, ovpn: string) =>
-    postJSONResult<OpenVPNProfileUploadResponse>(
-      "/api/v1/services/vpn/openvpn/profile",
-      { name, ovpn },
-    ),
-  listOpenVPNClients: () =>
-    getJSONShaped<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),
-  createOpenVPNClient: (name: string) =>
-    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", {
-      name,
-    }),
-  downloadOpenVPNClientURL: (name: string) =>
-    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`),
-  getWireGuardStatus: (iface?: string) =>
-    getJSON<WireGuardStatus>(
-      `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,
-    ),
 };
