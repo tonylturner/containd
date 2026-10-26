@@ -52,6 +52,10 @@ export type { IEC104Inventory } from "./api-inventory";
 export type { FirewallRulePatch, RulePreview } from "./api-network";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
+export type {
+  AVStatus, DHCPStatus, DNSStatus, NTPStatus, ProxyStatus, ProxyTelemetryStatus,
+  ServiceMeter, ServicesStatus, SyslogStatus, VPNStatus,
+} from "./api-service-status";
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
@@ -707,8 +711,6 @@ export type ReverseProxyConfig = {
   enabled?: boolean;
   sites?: ReverseProxySite[];
 };
-
-export type ServicesStatus = Record<string, unknown>;
 
 export type SystemStats = {
   cpu: { usagePercent: number; numCPU: number };

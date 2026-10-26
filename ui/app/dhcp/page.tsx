@@ -5,7 +5,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation } from "../../lib/api";
+import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation, type DHCPStatus } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
@@ -67,7 +67,7 @@ export default function DHCPPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<DHCPStatus | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
@@ -82,7 +82,7 @@ export default function DHCPPage() {
     setError(null);
     try {
       const svc = await api.getServicesStatus();
-      setStatus((svc as any)?.dhcp ?? null);
+      setStatus(svc?.dhcp ?? null);
       const s = await api.getDHCP();
       setCfg(normalize(s));
       toast("DHCP status refreshed", "success");

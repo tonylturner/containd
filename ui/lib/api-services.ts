@@ -20,10 +20,10 @@ import type {
   SyslogConfig,
   SystemInspection,
   SystemStats,
-  ServicesStatus,
   VPNConfig,
   WireGuardStatus,
 } from "./api";
+import type { ServicesStatus } from "./api-service-status";
 
 /** A custom ClamAV database stored on the engine. */
 export type AVDefinition = {

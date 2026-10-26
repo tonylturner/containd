@@ -4,7 +4,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type ServicesStatus, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
+import { api, isAdmin, type SyslogConfig, type SyslogForwarder, type SyslogStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
@@ -17,7 +17,7 @@ export default function SyslogPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<SyslogStatus | null>(null);
   const [newFwd, setNewFwd] = useState<SyslogForwarder>({
     address: "",
     port: 514,
@@ -33,8 +33,8 @@ export default function SyslogPage() {
     setLoading(true);
     setError(null);
     try {
-      const svc = (await api.getServicesStatus()) as ServicesStatus | any;
-      setStatus((svc as any)?.syslog ?? null);
+      const svc = await api.getServicesStatus();
+      setStatus(svc?.syslog ?? null);
       const s = await api.getSyslog();
       setCfg(
         s ?? {

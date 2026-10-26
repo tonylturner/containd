@@ -4,7 +4,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
+import { api, isAdmin, type NTPConfig, type NTPStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
@@ -16,7 +16,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 export default function NTPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<NTPStatus | null>(null);
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
     servers: [],
@@ -30,7 +30,7 @@ export default function NTPPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const svc = (await api.getServicesStatus()) as any;
+    const svc = await api.getServicesStatus();
     setStatus(svc?.ntp ?? null);
     const s = await api.getNTP();
     setCfg({
