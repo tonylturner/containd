@@ -97,8 +97,8 @@ func TestEvaluate(t *testing.T) {
 				t.Fatalf("codes = %v, want %v", codes(r), tc.codes)
 			}
 			for _, x := range r.Reasons {
-				if x.Message == "" || x.Matches != 0 {
-					t.Fatalf("reason %+v: want a message and no runtime matches", x)
+				if x.Message == "" || x.Matches != 0 || x.Runtime {
+					t.Fatalf("reason %+v: want a message and nothing from runtime", x)
 				}
 				if (x.Code == ExclusionOverlap || x.Code == DomainExclusion) && x.Value == "" {
 					t.Fatalf("exclusion reason %+v names no exclusion", x)

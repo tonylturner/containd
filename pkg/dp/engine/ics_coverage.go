@@ -38,8 +38,11 @@ func (e *Engine) ICSCoverage() []coverage.Rule {
 }
 
 // coverageOf evaluates snap statically, then adds what only the running
-// engine knows: whether it holds the configured queue, and how many flows
-// each exclusion has exempted since the last apply.
+// engine knows: whether it holds the configured queue (a Runtime reason), and
+// how many flows each exclusion has exempted since the last apply. Matches
+// only annotate the static exclusion reasons: a count is per exclusion, not
+// per rule, so it never adds a reason to a rule whose scope the exclusion
+// does not meet.
 func (e *Engine) coverageOf(snap *rules.Snapshot) []coverage.Rule {
 	e.flowMu.Lock()
 	s, hits := e.coverage, e.exclusionHits
@@ -57,7 +60,7 @@ func (e *Engine) coverageOf(snap *rules.Snapshot) []coverage.Rule {
 			}
 		}
 		if r.Mode == "enforce" && s.Enforcement && !bound {
-			r.Lower(coverage.Reason{Code: coverage.QueueUnavailable,
+			r.Lower(coverage.Reason{Code: coverage.QueueUnavailable, Runtime: true,
 				Message: "this engine does not hold the configured NFQUEUE, so the kernel drops the rule's traffic instead of inspecting it"})
 		}
 	}

@@ -82,7 +82,11 @@ Each lowered state carries reasons with a code and a message:
 | `exclusion-overlap` | An IP or CIDR exclusion meets the rule's addresses (not IEC 104). |
 | `domain-exclusion` | A domain exclusion can resolve into the rule's scope (not IEC 104). |
 
-Exclusion reasons name the exclusion in `value`. A learn rule keeps
+Exclusion reasons name the exclusion in `value`. Reasons that only the running
+engine can know (`queue-unavailable`) carry `runtime: true`; every other reason
+also appears in a static evaluation of the same rules and settings, so the
+candidate and the applied coverage differ in configuration only when they
+differ without runtime reasons and match counts. A learn rule keeps
 `monitoring` and lists the reasons that limit what it observes. Unrelated
 exclusions never lower a rule. Coverage appears in:
 

@@ -41,6 +41,13 @@ func wantCoverage(t *testing.T, e *Engine, when string, state coverage.State, co
 	if st := e.RulesetStatus(); !reflect.DeepEqual(st.ICSCoverage, got) {
 		t.Fatalf("%s: ruleset status coverage = %+v, want %+v", when, st.ICSCoverage, got)
 	}
+	for _, r := range got {
+		for _, x := range r.Reasons {
+			if x.Runtime != (x.Code == coverage.QueueUnavailable) {
+				t.Fatalf("%s: reason %+v has the wrong runtime flag", when, x)
+			}
+		}
+	}
 }
 
 // The configured queue protects only while this engine holds it.
@@ -96,7 +103,7 @@ func TestICSCoverageContradictorySnapshotAndFailedApply(t *testing.T) {
 func exclusionMatches(e *Engine, value string) uint64 {
 	for _, r := range e.ICSCoverage() {
 		for _, x := range r.Reasons {
-			if x.Value == value {
+			if x.Value == value && !x.Runtime {
 				return x.Matches
 			}
 		}
