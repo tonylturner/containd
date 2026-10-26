@@ -279,7 +279,7 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 	}
 
 	var out []dprules.LocalServiceRule
-	out = append(out, compileMgmtLocalInput(cfg)...)
+	out = append(out, ManagementLocalInput(cfg)...)
 	out = append(out, compileInfraServiceLocalInput(cfg)...)
 	out = append(out, compileProxyLocalInput(cfg)...)
 	out = append(out, compileVPNLocalInput(cfg)...)

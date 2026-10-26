@@ -138,6 +138,20 @@ fault: a validated commit or rollback resumes normal apply; factory reset also
 recovers. A later boot whose binding rediscovery resolves the conflict clears
 the persisted fault as well.
 
+#### Without a reservation
+
+Boot recovery does not need a reservation. Every boot validates the stored
+running configuration. If it fails, for example because an upgrade tightened
+validation, management records a boot fault and emits one
+`management.recovery.boot_fault` event (also in audit). Then the same rules
+apply as above. Management keeps serving with the stored listener settings.
+Stored services and runtime configuration are not replayed. The engine gets the
+recovery ruleset. Without a reservation, that ruleset also keeps the
+management listener INPUT allows compiled from the stored interface access, so
+management stays reachable exactly where it was. Everything else from the stored configuration is left out, and new transit is
+dropped. A valid commit or rollback, or a factory reset, leaves recovery. So
+does a later boot whose stored configuration is valid.
+
 **Recovery: new transit dropped.** Once the engine reports the recovery ruleset
 applied, all new forwarded connections are denied. Existing/related connections
 remain accepted by the ordinary compiler. INPUT defaults to drop with loopback,
@@ -177,8 +191,14 @@ bind availability is a runtime check.
 `GET /api/v1/system/management-reservation` requires the normal API authentication.
 It returns device, local host prefix, exact sources, HTTP port, engine guard
 health/fault history, the persistent boot fault (`bootFault`) and the last refused
-rollback. Without a reservation it returns exactly `{"active":false}`. Interfaces displays a read-only explanatory
+rollback. Without a reservation it returns `{"active":false}`, plus `bootFault`
+and `recovery` while a boot fault holds. Interfaces displays a read-only explanatory
 note; neither the view nor config imports can change the authority.
+
+Unauthenticated `/health` reports `managementRecovery` with a `state`
+(`inactive`, `active`, `pending`, `failed` or `unknown`) and a generic `reason`
+that does not name stored rules. While a boot fault holds, `enforcement` reports
+`unavailable`, because the stored policy is not applied.
 
 Unsafe manual rollback returns an error and records `config.rollback.refused`
 in structured logs plus a persistent operator fault. Unsafe timed rollback

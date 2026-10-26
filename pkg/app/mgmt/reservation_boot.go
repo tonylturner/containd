@@ -50,9 +50,12 @@ func validateReservedBootEnvironment(cfg *config.Config, r *mgmtpath.Reservation
 	return nil
 }
 
-func reservationBootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
+// bootConflict is why the stored running configuration must not be replayed
+// at this boot. Without a reservation that is only its own validation, which
+// an upgrade can tighten under an existing store.
+func bootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
 	if r == nil {
-		return nil
+		return cfg.Validate()
 	}
 	return errors.Join(cfg.Validate(), config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
 }
@@ -73,17 +76,18 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 	return &safe
 }
 
-func recordReservationBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
-	if r == nil {
-		return nil, nil
-	}
+// recordBootDecision persists every boot's recovery decision. A refused
+// stored configuration never stops management: replay is gated and the engine
+// gets the fail-closed recovery ruleset until a valid commit, rollback or
+// factory reset (see api/http ApplyBootConfig).
+func recordBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
 	store, ok := stores.store.(interface {
 		SetManagementBootFault(context.Context, string) error
 	})
 	if !ok {
 		return nil, errors.New("config store does not support management boot fault persistence")
 	}
-	conflict := reservationBootConflict(cfg, r)
+	conflict := bootConflict(cfg, r)
 	fault := ""
 	if conflict != nil {
 		fault = conflict.Error()
@@ -96,7 +100,10 @@ func recordReservationBootDecision(logger *zap.SugaredLogger, stores mgmtStores,
 		return nil, nil
 	}
 	now := time.Now().UTC()
-	const kind = "management.reservation.boot_fault"
+	kind := "management.recovery.boot_fault"
+	if r != nil {
+		kind = "management.reservation.boot_fault"
+	}
 	if err := stores.auditStore.Add(ctx, audit.Record{
 		Timestamp: now, Actor: "system", Source: "management",
 		Action: kind, Result: "fault", Detail: fault,

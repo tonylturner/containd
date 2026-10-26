@@ -204,9 +204,10 @@ observation is not authorization.
 2. Inspect `GET /api/v1/learn/profiles`.
 3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
-   (`status: staged`); it does not activate them. Generated rules use explicit
-   `ics.mode: "enforce"`, so review them even if global mode is learn. Staging
-   them is refused while `dataplane.nfqueueGroup` is 0.
+   (`status: staged`); it does not activate them. Generated rules leave
+   `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
+   when the global mode is `enforce`, and staging them is then refused while
+   `dataplane.nfqueueGroup` is 0. Set a per-rule mode in candidate to override.
 5. Review ordering, scope, and per-rule modes in candidate, then commit with
    `POST /api/v1/config/commit`. Changing only global mode does not override an
    explicit per-rule learn mode.

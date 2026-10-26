@@ -6,15 +6,23 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// RecoverySnapshot deliberately contains no stored policy or service input.
-// The compiler supplies established traffic, loopback and the env-backed
-// reserved INPUT allow; every new forwarded connection is dropped.
-func RecoverySnapshot() rules.Snapshot {
-	return rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny}
+// RecoverySnapshot deliberately contains no stored policy, NAT or service
+// input. The compiler supplies established traffic, loopback and the env-backed
+// reserved INPUT allow; every new forwarded connection is dropped. Without a
+// reservation the stored management listener access is the only management
+// path, so recovery keeps exactly that access and nothing else from stored.
+func RecoverySnapshot(stored *config.Config, r *mgmtpath.Reservation) rules.Snapshot {
+	snap := rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny}
+	if r == nil && stored != nil {
+		snap.LocalInput = compile.ManagementLocalInput(stored)
+	}
+	return snap
 }
 
 // ApplyBootConfig shares the promotion/replay lock so a delayed recovery apply
@@ -33,8 +41,16 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	if engine == nil {
 		return nil, errors.New("recovery engine unavailable")
 	}
+	r := config.ReservationForStore(store)
+	var stored *config.Config
+	if r == nil {
+		// Never drop transit with an INPUT chain that also drops management.
+		if stored, err = store.Load(ctx); err != nil {
+			return nil, fmt.Errorf("recovery management access: %w", err)
+		}
+	}
 	dp := config.DataPlaneConfig{Enforcement: true}
-	if err := config.ValidateManagementDataPlane(dp, config.ReservationForStore(store)); err != nil {
+	if err := config.ValidateManagementDataPlane(dp, r); err != nil {
 		return nil, err
 	}
 	if err := engine.Configure(ctx, dp); err != nil {
@@ -42,30 +58,54 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	}
 	// Unlike normal best-effort infrastructure apply, a failure here must not
 	// be downgraded to a warning or reported as successful recovery.
-	if err := engine.ApplyRules(ctx, RecoverySnapshot()); err != nil {
+	if err := engine.ApplyRules(ctx, RecoverySnapshot(stored, r)); err != nil {
 		return nil, fmt.Errorf("recovery ruleset: %w", err)
 	}
 	return nil, nil
 }
 
-// Observe the engine, not a successful HTTP POST or the guard's health. A
-// restarted/unreachable engine must never be advertised as fail-closed.
-// The engine compiles with authority management cannot see (its engine API
-// path, its reservation), so recovery is recognized by the snapshot version
-// the engine applied, not by recompiling the ruleset here.
+// Recovery states. Applied, pending and failed derive from what the engine
+// reports it applied; inactive means no boot fault, and unknown that the
+// fault could not be read.
+const (
+	recoveryInactive = "inactive"
+	recoveryApplied  = "active"
+	recoveryPending  = "pending"
+	recoveryFailed   = "failed"
+	recoveryUnknown  = "unknown"
+)
+
+// observeManagementRecovery reads the engine, not a successful HTTP POST or
+// the guard's health. A restarted/unreachable engine must never be advertised
+// as fail-closed. The engine compiles with authority management cannot see
+// (its engine API path, its reservation), so recovery is recognized by the
+// snapshot version the engine applied, not by recompiling the ruleset here.
+// detail may carry engine diagnostics and is for authenticated views only.
+func observeManagementRecovery(ruleset rulesetObservation) (state, detail string) {
+	status := ruleset.status
+	switch {
+	case ruleset.err != nil:
+		return recoveryPending, ruleset.err.Error()
+	case status.Error != "":
+		return recoveryFailed, status.Error
+	case status.AppliedAt.IsZero() || status.Ruleset == "" || status.SnapshotVersion != config.ManagementRecoveryVersion:
+		return recoveryPending, "ruleset not applied"
+	default:
+		return recoveryApplied, "new transit dropped"
+	}
+}
+
 func managementRecoveryStatus(ctx context.Context, engine EngineClient) string {
 	if engine == nil {
 		return "recovery pending: engine unavailable"
 	}
-	status, err := engine.RulesetStatus(ctx)
-	if err != nil {
-		return "recovery pending: " + err.Error()
+	state, detail := observeManagementRecovery(observeRuleset(ctx, engine))
+	switch state {
+	case recoveryApplied:
+		return "recovery: " + detail
+	case recoveryFailed:
+		return "recovery failed: " + detail
+	default:
+		return "recovery pending: " + detail
 	}
-	if status.Error != "" {
-		return "recovery failed: " + status.Error
-	}
-	if status.AppliedAt.IsZero() || status.Ruleset == "" || status.SnapshotVersion != RecoverySnapshot().Version {
-		return "recovery pending: ruleset not applied"
-	}
-	return "recovery: new transit dropped"
 }
