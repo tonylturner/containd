@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The engine image ships ClamAV, FreshClam and CA roots. The engine renders
+  and supervises clamd and a single FreshClam schedule, reports live readiness
+  and the definitions version, and validates custom definitions before
+  activating them with a clamd reload. ICAP `useTls` uses verified TLS 1.2 or
+  newer with no plaintext fallback.
 - The Sessions page and `GET /api/v1/conntrack` show the kernel's real IPv4
   and IPv6 connections, including NAT reply tuples, and report an unavailable
   backend as an error instead of an empty list. Kill now works for TCP and UDP:
@@ -80,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The engine is the only antivirus owner in split and combined deployments.
+  Management's AV status, update and custom-definition routes delegate to the
+  engine and return 503 when it is unreachable. A cron-style
+  `clamav.updateSchedule` is rejected at apply instead of silently becoming 6h.
+- The additional trusted CA bundle applies at runtime: it is sent to the
+  engine on upload and on every apply, ICAP TLS and FreshClam trust it, and an
+  upload the engine cannot apply returns 503.
 - The forwarding smoke (`scripts/smoke-forward.sh`) proves each deny against a
   live listener, proves masquerade by the source address the server sees and
   requires the DNAT counter to rise. `scripts/smoke-forward-mutations.sh`
@@ -116,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Antivirus scanning reports what the scanner said: clamd replies are parsed in
+  NUL mode, ICAP RESPMOD and OPTIONS follow RFC 3507, truncated or unknown
+  replies are errors instead of clean, and `timeoutSec`/`maxSizeBytes` apply to
+  both backends and reset correctly.
 - The firewall admits essential ICMPv6 to the appliance (neighbor discovery,
   destination unreachable, packet too big, time exceeded, parameter problem),
   so IPv6 interfaces keep working with enforcement on.

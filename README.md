@@ -64,6 +64,7 @@ commit-confirmed and rollback.
 - DNS- and TLS SNI-based [DPI domain exclusions](docs/mkdocs/ics-dpi.md#dpi-exclusions).
 - Candidate/running configuration with commit-confirmed and rollback: [config format](docs/mkdocs/config-format.md).
 - Web, SSH and REST management with embedded network services: [services](docs/mkdocs/services.md).
+- Live kernel connections with timed kill, and ClamAV or ICAP scanning of inspected HTTP content: [services](docs/mkdocs/services.md).
 
 See [architecture](docs/mkdocs/architecture.md) for the management, control and data planes.
 
