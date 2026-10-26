@@ -4,7 +4,7 @@ trap 'echo "FAIL: line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # A fully independent project: no published ports, shared images or host data.
 ROOT=$(git rev-parse --show-toplevel)
-PROJECT="containd-mgmt-c3-$(date +%s)-$$"
+PROJECT="containd-v033fix-mgmt-c3-$(date +%s)-$$"
 PREFIX=${MGMT_SMOKE_PREFIX:-10.217}
 if [[ ! "$PREFIX" =~ ^10\.[0-9]{1,3}$ ]] || (( ${PREFIX#10.} > 255 )); then
   echo "MGMT_SMOKE_PREFIX must be 10.<0..255>" >&2
@@ -13,7 +13,7 @@ fi
 mkdir -p "$ROOT/build"
 SCRATCH=$(mktemp -d "$ROOT/build/mgmt-reservation.XXXXXX")
 COMPOSE="$SCRATCH/compose.yml"
-IMAGE="containd-mgmt-reservation:$PROJECT"
+IMAGE="$PROJECT:local"
 compose() { docker compose -p "$PROJECT" -f "$COMPOSE" "$@"; }
 cleanup() {
   local status=$?
@@ -26,6 +26,7 @@ cleanup() {
   fi
   compose logs --no-color >"$SCRATCH/compose.log" 2>&1 || status=1
   compose down --volumes --remove-orphans || status=1
+  docker image rm "$IMAGE" >/dev/null || status=1
   echo "Diagnostics: $SCRATCH"
   exit "$status"
 }
