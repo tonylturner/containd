@@ -134,6 +134,7 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("    ct state invalid drop;\n")
 	c.writeManagementInput(buf)
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
+	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
