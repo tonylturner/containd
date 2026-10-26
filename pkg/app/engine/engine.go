@@ -159,6 +159,8 @@ func Run(ctx context.Context, opts Options) error {
 
 	mux := http.NewServeMux()
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
+	// Captures outlive their start request; close their files on shutdown.
+	defer func() { _ = pcapMgr.Stop() }()
 	mux.HandleFunc("/health", healthHandler(dpEngine, guard))
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if dpEngine == nil {
