@@ -89,6 +89,12 @@ agents.md
 linear-dashboard-cursor-rule.md
 docs/tasks.md
 docs/spec-archive/
+# Internal dev docs stay local.
+docs/audits/
+docs/iec104/
+docs/roadmap*
+docs/mkdocs/roadmap.md
+docs/mkdocs/audit-baseline.md
 
 # Editor/IDE
 .idea/

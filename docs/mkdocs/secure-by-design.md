@@ -1,6 +1,6 @@
 # Secure by Design
 
-containd uses the CISA Secure by Design badge as a statement of intent and transparency, not as a government certification or a claim that every pledge detail is already complete. This page explains what the CISA initiative asks for, how containd aligns with those goals today, where the current caveat is, and what remains on the roadmap.
+containd uses the CISA Secure by Design badge as a statement of intent and transparency, not as a government certification or a claim that every pledge detail is already complete. This page explains what the CISA initiative asks for, how containd aligns with those goals today, and which gaps remain.
 
 Official references:
 
@@ -44,13 +44,13 @@ CISA's examples also make several expectations clear:
 
 | Commitment | Status | containd today |
 | ---------- | ------ | -------------- |
-| Multi-factor authentication | Partial | Optional app-based TOTP MFA is built in for web sign-in to local accounts, including admin-enforced MFA with a 7-day grace period. SSH does not yet enforce MFA or forced password change ([roadmap](roadmap.md) item 1.2). |
+| Multi-factor authentication | Partial | Optional app-based TOTP MFA is built in for web sign-in to local accounts, including admin-enforced MFA with a 7-day grace period. SSH does not yet enforce MFA or forced password change. |
 | Reducing default passwords | Partial | Fresh installs still use a universal bootstrap password, but password change is mandatory on first login and the caveat is documented openly. |
 | Reducing an entire class of vulnerability | Partial | containd already emphasizes safer defaults, signed releases, SBOMs, scanning, and defensive validation, but this remains an ongoing engineering program rather than a finished milestone. |
 | Increasing customer installation of security patches | Partial | Releases, signed images, SBOMs, and update policy guidance are in place, but patch adoption still depends on operator action and is not measured centrally. |
 | Publishing a vulnerability disclosure policy | Done | Public `SECURITY.md` and machine-readable `security.txt` are implemented and shipped. |
 | Improving CVE transparency and completeness | Partial | containd now documents a GitHub advisory/CVE/CSAF process, but long-term completeness depends on continued execution as real advisories are published. |
-| Increasing the ability for customers to gather evidence of intrusions | Partial | Audit logs, events, DPI telemetry, syslog forwarding, and logging guidance are part of the base product. Audit coverage of account changes, syslog delivery of mixed event sources, and the configured SIEM export still have gaps ([roadmap](roadmap.md) items 1.9 and 3.3). |
+| Increasing the ability for customers to gather evidence of intrusions | Partial | Audit logs, events, DPI telemetry, syslog forwarding, and logging guidance are part of the base product. Audit coverage of account changes, syslog delivery of mixed event sources, and the configured SIEM export still have gaps. |
 
 ## containd's Position
 
@@ -58,7 +58,7 @@ containd is intended to meet the Secure by Design pledge in practice and align w
 
 - containd already implements a number of the expected secure-by-default controls in the base product.
 - containd has one visible current caveat: fresh installs still use a universal bootstrap password that must be changed on first login.
-- containd has completed the first wave of security-process work around MFA, disclosure policy, CSAF, logging guidance, and update policy, and now has a smaller follow-on roadmap focused on auth maturity and stronger bootstrap posture.
+- containd has completed the first wave of security-process work around MFA, disclosure policy, CSAF, logging guidance, and update policy, but auth maturity and stronger bootstrap posture remain incomplete.
 
 This is intentional transparency. The point of this page is to show both what is already true and what still needs to be strengthened.
 
@@ -273,7 +273,7 @@ Examples already present in containd:
 
 ### Lead From the Top
 
-For a project at containd's current stage, this means being willing to publish the security roadmap alongside the product roadmap and to treat security features as part of the base appliance, not premium extras. That is the intent of the current direction.
+For a project at containd's current stage, this means documenting security capabilities and gaps openly and treating security features as part of the base appliance, not premium extras.
 
 ## Secure Configuration Guidance for Labs and Classrooms
 
@@ -290,15 +290,12 @@ Because containd is often used to teach segmentation and secure operations, a "g
 
 The goal is not only to teach traffic segmentation. It is also to train students to recognize what a secure appliance posture looks like.
 
-## Roadmap
+## Known Gaps
 
-The security roadmap is part of the single [Product Roadmap](roadmap.md). The
-items that close the caveats on this page are:
-
-- one account-assurance contract for web, SSH, and CLI (item 1.2);
-- a strict deployment profile with a per-instance bootstrap instead of the universal bootstrap password (item 1.3);
-- complete audit evidence with visible delivery failures (item 1.9);
-- external identity (OIDC) and richer, resource-scoped roles (Stage 2 and Stage 4).
+- Web, SSH, and CLI do not yet apply consistent account-assurance requirements; SSH does not enforce MFA or forced password change.
+- Fresh installs use a universal bootstrap password rather than a per-instance credential.
+- Audit coverage and visibility into evidence-delivery failures are incomplete.
+- External identity (OIDC) and richer, resource-scoped roles are not implemented.
 
 ## Bottom Line
 
