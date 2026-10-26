@@ -71,7 +71,10 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
-    return { ok: true, data: await res.json() as ConntrackEntry[] };
+    const body: unknown = await res.json();
+    // A list is the only valid snapshot; anything else is not "verified empty".
+    if (!Array.isArray(body)) return { ok: false, error: "malformed connection list" };
+    return { ok: true, data: body as ConntrackEntry[] };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Network error" };
   }

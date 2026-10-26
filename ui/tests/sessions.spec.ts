@@ -6,7 +6,7 @@ const entry = {
   replySport: "8443", replyDport: "51001",
 };
 
-async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boolean; role?: string; partial?: boolean; entries?: unknown[] } = {}) {
+async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boolean; role?: string; partial?: boolean; entries?: unknown } = {}) {
   const writes: unknown[] = [];
   await page.addInitScript((role) => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -106,4 +106,11 @@ test("connections show the TAG labels that match them and filter by tag", async 
   await page.getByPlaceholder("Filter (ip, port, proto, state, tag)…").fill("ot.vendor");
   await expect(page.getByText("1 shown / 2 total")).toBeVisible();
   await expect(row("41001")).toHaveCount(0);
+});
+
+test("a malformed connection list is reported, not rendered", async ({ page }) => {
+  await mockAPI(page, { entries: {} });
+  await open(page);
+  await expect(page.getByRole("alert", { name: "Connections error" })).toContainText("malformed connection list");
+  await expect(page.getByText(/Verified empty/)).toHaveCount(0);
 });
