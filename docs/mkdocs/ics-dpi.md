@@ -217,9 +217,12 @@ observation is not authorization.
    `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
    when the global mode is `enforce`, and staging them is then refused while
    `dataplane.nfqueueGroup` is 0. Set a per-rule mode in candidate to override.
-5. Review ordering, scope, and per-rule modes in candidate, then commit with
-   `POST /api/v1/config/commit`. Changing only global mode does not override an
-   explicit per-rule learn mode.
+5. Review scope and per-rule modes in candidate, then commit with
+   `POST /api/v1/config/commit`. Rule order does not matter: a learned `ALLOW`
+   admits its traffic even past a `DENY` listed before it, and any `DENY` it
+   overlaps is shadowed (see
+   [Actions and precedence](policy-model.md#actions-and-precedence)). Changing
+   only global mode does not override an explicit per-rule learn mode.
 6. `DELETE /api/v1/learn` clears the profiles when no longer needed.
 
 IEC 104 tracking shares a **4,096-entry session table** across learn and enforce
