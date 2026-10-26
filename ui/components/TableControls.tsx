@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
 
-export function SearchBar({ value, onChange, placeholder, className = "" }: {
+export function SearchBar({ value, onChange, placeholder, className = "w-full max-w-sm" }: {
   value: string; onChange: (s: string) => void; placeholder?: string;
-  /** Wrapper classes, for width in a flex row. */
+  /** Wrapper width classes; the default fits a toolbar row. */
   className?: string;
 }) {
   return (

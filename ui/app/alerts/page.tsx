@@ -155,7 +155,7 @@ export default function AlertsPage() {
 
       {/* Search */}
       <div className="mb-3 max-w-lg">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, rule ID, IP..." />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, rule ID, IP..." className="w-full" />
       </div>
 
       {alerts.length === 0 ? (

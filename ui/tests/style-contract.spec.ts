@@ -75,3 +75,19 @@ for (const [path, placeholder] of [
     expect(iconBox.x + iconBox.width).toBeLessThan(inputBox.x + 36);
   });
 }
+
+test("a toolbar search field fits its placeholder", async ({ page }) => {
+  await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] } }));
+  await page.goto("/identities");
+  const input = page.getByPlaceholder("Search addresses or identities...", { exact: true });
+  await expect(input).toBeVisible();
+  expect(await input.evaluate((el: HTMLInputElement) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = `font: ${getComputedStyle(el).font}; visibility: hidden; position: absolute; white-space: pre`;
+    probe.textContent = el.placeholder;
+    document.body.append(probe);
+    const fits = probe.getBoundingClientRect().width <= el.clientWidth - 36 - 12;
+    probe.remove();
+    return fits;
+  })).toBe(true);
+});
