@@ -17,6 +17,7 @@ import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
+import { validatePort } from "../../lib/validate";
 
 /* ── helpers ───────────────────────────────────────────────────── */
 
@@ -351,28 +352,29 @@ function PortForwardsCard({
 
   const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
 
-  function validatePort(v: string): number | null {
-    const n = Number(v);
-    if (!Number.isFinite(n) || n <= 0 || n > 65535) return null;
-    return Math.trunc(n);
-  }
-
+  // One banner serves the whole row, so each message names its field.
   async function add() {
     setError(null);
-    const lp = validatePort(newListen);
-    if (!lp) {
-      setError("Listen port must be 1-65535.");
+    if (!newListen.trim()) {
+      setError("Listen port is required.");
+      return;
+    }
+    const listenError = validatePort(newListen);
+    if (listenError) {
+      setError(`Listen port: ${listenError}.`);
       return;
     }
     if (!newDestIp.trim()) {
       setError("Destination IP is required.");
       return;
     }
-    const dp = newDestPort.trim() ? validatePort(newDestPort) ?? undefined : undefined;
-    if (newDestPort.trim() && !dp) {
-      setError("Destination port must be 1-65535.");
+    const destPortError = validatePort(newDestPort);
+    if (destPortError) {
+      setError(`Destination port: ${destPortError}.`);
       return;
     }
+    const lp = Number(newListen.trim());
+    const dp = newDestPort.trim() ? Number(newDestPort.trim()) : undefined;
     const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `pf-${Date.now()}`;
     const pf: PortForward = {
       id,
