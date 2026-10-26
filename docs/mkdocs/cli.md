@@ -117,6 +117,40 @@ Notes:
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
 
+### SSH authentication and host keys
+
+`set system ssh allow-password false` stages an authoritative password disable,
+including in lab mode. Staging and commit both refuse this setting unless an
+existing admin has a usable public key in the effective authorized-keys directory.
+Enroll and test an admin key before disabling passwords. Keys for view-only or
+unknown users, empty files and malformed keys do not satisfy this check.
+HTTP management authentication is unchanged.
+
+When `allowPassword` is omitted or null, passwords are allowed in lab mode or
+when the authorized-keys directory is empty or cannot be read. `show system`
+and `show mgmt listeners` display this saved policy as `auto (bootstrap/lab)`;
+explicit values display `yes` or `no`. `show system ssh` reports the effective
+password policy and its source from the appliance, including any
+`CONTAIND_SSH_ALLOW_PASSWORD` override. An explicit saved `false` takes precedence
+over that environment variable; otherwise the environment override still applies.
+`CONTAIND_SSH_AUTH_KEYS_DIR` selects the
+effective keys directory ahead of the saved `authorizedKeysDir` setting.
+
+Committed password and authorized-keys-directory changes apply to new logins.
+Existing sessions remain open. If keys later disappear, passwords stay disabled;
+restore the keys or change the SSH policy through HTTP management. A wizard
+password change writes the user store immediately, rather than waiting for a
+config commit. A rejected password or store error stops the wizard and is not
+reported or audited as a successful change.
+
+`set system ssh host-key-rotation <days>` accepts 0 (disabled) through 36500.
+The server checks host-key age at startup and every minute while running.
+Committed rotation-setting changes take effect at the next check, without a
+restart. At the age boundary the server atomically publishes a new host key for
+new connections; existing sessions are unaffected. Rotation errors retain the
+active key and are logged. Clients with a pinned host key must verify the new
+fingerprint through a trusted channel before updating their known-hosts entry.
+
 ## ICS firewall rules
 
 `set firewall ics-rule <id> <action> <protocol> [options...]` accepts the

@@ -103,6 +103,9 @@ type MgmtConfig struct {
 	HSTSMaxAgeSeconds int `json:"hstsMaxAgeSeconds,omitempty"`
 }
 
+// MaxSSHHostKeyRotationDays bounds rotation ages to avoid duration overflow.
+const MaxSSHHostKeyRotationDays = 36500
+
 // SSHConfig controls the embedded SSH server (interactive CLI).
 type SSHConfig struct {
 	// ListenAddr is the address the SSH server listens on (inside the appliance/container).
@@ -111,8 +114,9 @@ type SSHConfig struct {
 	// AuthorizedKeysDir is a directory containing OpenSSH authorized_keys files.
 	// Implementations may look up keys by username (e.g. "<dir>/<username>.pub").
 	AuthorizedKeysDir string `json:"authorizedKeysDir,omitempty"`
-	// AllowPassword enables SSH password authentication. Should only be enabled in lab mode.
-	AllowPassword bool `json:"allowPassword,omitempty"`
+	// AllowPassword controls SSH password authentication. Nil uses bootstrap/lab defaults;
+	// an explicit false disables passwords, including in lab mode.
+	AllowPassword *bool `json:"allowPassword,omitempty"`
 	// Banner is the SSH login banner displayed before authentication.
 	Banner string `json:"banner,omitempty"`
 	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).

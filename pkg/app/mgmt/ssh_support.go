@@ -20,19 +20,21 @@ import (
 )
 
 type sshRuntimeConfig struct {
-	sshAddr       string
-	authKeysDir   string
-	hostKeyPath   string
-	bootstrapKey  string
-	bootstrapUser string
-	allowPassword bool
-	banner        string
-	rotationDays  int
-	shellMode     string
-	baseURL       string
+	sshAddr        string
+	authKeysDir    string
+	hostKeyPath    string
+	bootstrapKey   string
+	bootstrapUser  string
+	allowPassword  bool
+	passwordSource string
+	banner         string
+	rotationDays   int
+	shellMode      string
+	baseURL        string
 }
 
 func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error)) (string, bool) {
+	configureSSHPolicy(store, userStore)
 	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
 
 	opts := sshserver.Options{
@@ -43,11 +45,32 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 		AllowPassword:       rt.allowPassword,
 		Banner:              rt.banner,
 		HostKeyRotationDays: rt.rotationDays,
-		ShellMode:           rt.shellMode,
-		LabMode:             isLabMode(),
-		JWTSecret:           []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
-		UserStore:           userStore,
-		AuditStore:          auditStore,
+		HostKeyRotationDaysFunc: func(ctx context.Context) (int, error) {
+			if store == nil {
+				return rt.rotationDays, nil
+			}
+			running, err := store.Load(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return running.System.SSH.HostKeyRotationDays, nil
+		},
+		AuthPolicy: func(ctx context.Context) (bool, string, error) {
+			if store == nil {
+				return rt.allowPassword, rt.authKeysDir, nil
+			}
+			running, err := store.Load(ctx)
+			if err != nil {
+				return false, "", err
+			}
+			live := resolveSSHRuntimeConfig(running, httpAddr, loopbackAddr)
+			return live.allowPassword, live.authKeysDir, nil
+		},
+		ShellMode:  rt.shellMode,
+		LabMode:    isLabMode(),
+		JWTSecret:  []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
+		UserStore:  userStore,
+		AuditStore: auditStore,
 		AllowLocalIP: func(ip net.IP) bool {
 			if ip == nil || ip.IsLoopback() {
 				return true
@@ -88,6 +111,36 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 	return rt.sshAddr, true
 }
 
+func configureSSHPolicy(store config.Store, userStore users.Store) {
+	if reporter, ok := store.(interface {
+		SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error))
+	}); ok {
+		reporter.SetSSHRuntimePolicyReader(func(ctx context.Context) (config.SSHRuntimePolicy, error) {
+			running, err := store.Load(ctx)
+			if err != nil {
+				return config.SSHRuntimePolicy{}, err
+			}
+			rt := resolveSSHRuntimeConfig(running, "", "")
+			return config.SSHRuntimePolicy{
+				AllowPassword:       rt.allowPassword,
+				PasswordSource:      rt.passwordSource,
+				AuthorizedKeysDir:   rt.authKeysDir,
+				HostKeyRotationDays: rt.rotationDays,
+			}, nil
+		})
+	}
+	if validator, ok := store.(interface {
+		SetSSHAccessValidator(func(context.Context, config.SSHConfig) error)
+	}); ok {
+		validator.SetSSHAccessValidator(func(ctx context.Context, ssh config.SSHConfig) error {
+			candidate := &config.Config{}
+			candidate.System.SSH = ssh
+			rt := resolveSSHRuntimeConfig(candidate, "", "")
+			return sshserver.ValidateAdminAuthorizedKey(ctx, userStore, rt.authKeysDir)
+		})
+	}
+}
+
 func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr string) sshRuntimeConfig {
 	rt := sshRuntimeConfig{
 		sshAddr:       common.EnvTrimmed("CONTAIND_SSH_ADDR", ""),
@@ -122,24 +175,26 @@ func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr s
 	if env := common.EnvTrimmed("CONTAIND_SSH_SHELL_MODE", ""); env != "" {
 		rt.shellMode = env
 	}
-	rt.allowPassword = resolveSSHAllowPassword(cfg, rt.authKeysDir)
+	rt.allowPassword, rt.passwordSource = resolveSSHPasswordPolicy(cfg, rt.authKeysDir)
 	rt.baseURL = resolveSSHBaseURL(httpAddr, loopbackAddr)
 	return rt
 }
 
-func resolveSSHAllowPassword(cfg *config.Config, authKeysDir string) bool {
-	lab := isLabMode()
-	allowPassword := lab
-	if cfg != nil && cfg.System.SSH.AllowPassword {
-		allowPassword = true
-	}
-	if !allowPassword && !lab && authKeysDirNeedsBootstrap(authKeysDir) {
-		allowPassword = true
+func resolveSSHPasswordPolicy(cfg *config.Config, authKeysDir string) (bool, string) {
+	// A persisted disable is authoritative, including over environment/lab defaults.
+	if cfg != nil && cfg.System.SSH.AllowPassword != nil && !*cfg.System.SSH.AllowPassword {
+		return false, "config"
 	}
 	if env := common.EnvTrimmed("CONTAIND_SSH_ALLOW_PASSWORD", ""); env != "" {
-		return env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "yes")
+		return env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "yes"), "environment (CONTAIND_SSH_ALLOW_PASSWORD)"
 	}
-	return allowPassword
+	if cfg != nil && cfg.System.SSH.AllowPassword != nil {
+		return *cfg.System.SSH.AllowPassword, "config"
+	}
+	if isLabMode() {
+		return true, "lab default"
+	}
+	return authKeysDirNeedsBootstrap(authKeysDir), "bootstrap default"
 }
 
 func authKeysDirNeedsBootstrap(authKeysDir string) bool {

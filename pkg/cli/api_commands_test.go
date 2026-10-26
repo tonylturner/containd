@@ -185,7 +185,7 @@ func TestSystemCommandsAndViews(t *testing.T) {
 			},
 			SSH: config.SSHConfig{
 				ListenAddr:        ":2222",
-				AllowPassword:     true,
+				AllowPassword:     new(true),
 				AuthorizedKeysDir: "/data/ssh/authorized_keys.d",
 			},
 		},

@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -32,7 +33,12 @@ type Options struct {
 	AllowPassword       bool
 	Banner              string
 	HostKeyRotationDays int
-	LabMode             bool
+	// HostKeyRotationDaysFunc reads the running setting at each bounded check.
+	HostKeyRotationDaysFunc func(context.Context) (int, error)
+	// AuthPolicy reads the effective password setting and authorized-keys directory
+	// together. Nil uses AllowPassword and AuthorizedKeysDir.
+	AuthPolicy func(context.Context) (bool, string, error)
+	LabMode    bool
 	// ShellMode controls the default SSH login experience.
 	// "linux": drops into a real bash shell; "appliance" (default): the CLI REPL.
 	ShellMode string
@@ -49,8 +55,11 @@ type Server struct {
 	opts   Options
 	logger *zap.SugaredLogger
 
-	ln net.Listener
-	wg sync.WaitGroup
+	lnMu sync.Mutex
+	ln   net.Listener
+	wg   sync.WaitGroup
+
+	hostKeyClock hostKeyClock
 
 	pwLimiter *ratelimit.AttemptLimiter
 }
@@ -75,14 +84,19 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("authorized keys dir required")
 	}
 	return &Server{
-		opts:      opts,
-		logger:    logging.NewService("ssh"),
-		pwLimiter: ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
+		opts:         opts,
+		logger:       logging.NewService("ssh"),
+		pwLimiter:    ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
+		hostKeyClock: realHostKeyClock(),
 	}, nil
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	signer, err := ensureHostKey(s.opts.HostKeyPath, s.opts.HostKeyRotationDays)
+	days, err := s.rotationDays(ctx)
+	if err != nil {
+		return err
+	}
+	signer, err := ensureHostKeyAt(s.opts.HostKeyPath, days, s.hostKeyClock.now())
 	if err != nil {
 		return err
 	}
@@ -97,18 +111,34 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return "containd ICS/OT firewall\r\n"
 		},
 	}
-	cfg.AddHostKey(signer)
+	var current atomic.Pointer[ssh.ServerConfig]
+	current.Store(configWithHostKey(cfg, signer))
 
 	ln, err := net.Listen("tcp", s.opts.ListenAddr)
 	if err != nil {
 		return err
 	}
+	s.lnMu.Lock()
 	s.ln = ln
+	s.lnMu.Unlock()
 	s.logger.Infof("ssh listening on %s", s.opts.ListenAddr)
 
+	lifetime, cancel := context.WithCancel(ctx)
+	workersDone := make(chan struct{})
+	defer func() { cancel(); <-workersDone }()
 	go func() {
-		<-ctx.Done()
-		_ = s.Close()
+		defer close(workersDone)
+		rotationDone := make(chan struct{})
+		go func() {
+			defer close(rotationDone)
+			s.rotateHostKeys(lifetime, cfg, &current)
+		}()
+		select {
+		case <-ctx.Done():
+			_ = s.Close()
+		case <-lifetime.Done():
+		}
+		<-rotationDone
 	}()
 
 	for {
@@ -121,16 +151,19 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			continue
 		}
 		s.wg.Add(1)
-		go func(conn net.Conn) {
+		go func(conn net.Conn, connConfig *ssh.ServerConfig) {
 			defer s.wg.Done()
-			s.handleConn(conn, cfg)
-		}(c)
+			s.handleConn(conn, connConfig)
+		}(c, current.Load())
 	}
+	cancel()
 	s.wg.Wait()
 	return nil
 }
 
 func (s *Server) Close() error {
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
 	if s.ln != nil {
 		return s.ln.Close()
 	}

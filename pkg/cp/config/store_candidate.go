@@ -157,6 +157,9 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err := s.ValidateConfig(candidate); err != nil {
 		return err
 	}
+	if err := s.validateSSHAccessLocked(ctx, candidate); err != nil {
+		return err
+	}
 	running, err := readKindFrom(ctx, s.db, configKeyRunning, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err

@@ -105,7 +105,7 @@ func showSystem(api *API) Command {
 			if cfg.System.SSH.AuthorizedKeysDir != "" {
 				fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
 			}
-			fmt.Fprintf(out, "ssh.allow_password: %s\n", yesNoStr(cfg.System.SSH.AllowPassword))
+			fmt.Fprintf(out, "ssh.allow_password: %s\n", sshPasswordSetting(cfg.System.SSH.AllowPassword))
 			shellMode := cfg.System.SSH.ShellMode
 			if shellMode == "" {
 				shellMode = "appliance"
@@ -156,7 +156,7 @@ func showMgmtListeners(api *API) Command {
 			"tls_key_file":            firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "—"),
 			"trusted_ca_file":         firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "—"),
 			"ssh_listen":              firstNonEmpty(cfg.System.SSH.ListenAddr, ":2222"),
-			"ssh_allow_password":      yesNoStr(cfg.System.SSH.AllowPassword),
+			"ssh_allow_password":      sshPasswordSetting(cfg.System.SSH.AllowPassword),
 			"ssh_authorized_keys_dir": firstNonEmpty(cfg.System.SSH.AuthorizedKeysDir, "—"),
 		})
 
@@ -354,7 +354,7 @@ func setSystemSSHAllowPasswordAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg.System.SSH.AllowPassword = enabled
+		cfg.System.SSH.AllowPassword = &enabled
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }
@@ -393,7 +393,7 @@ func setSystemSSHHostKeyRotationAPI(api *API) Command {
 			return fmt.Errorf("usage: set system ssh host-key-rotation <days>")
 		}
 		days, err := strconv.Atoi(strings.TrimSpace(args[0]))
-		if err != nil || days < 0 {
+		if err != nil || days < 0 || days > config.MaxSSHHostKeyRotationDays {
 			return fmt.Errorf("invalid rotation days: %s", args[0])
 		}
 		cfg, err := loadCandidateOrRunning(ctx, api)
@@ -481,4 +481,11 @@ func boolDefault(v *bool, def bool) bool {
 		return def
 	}
 	return *v
+}
+
+func sshPasswordSetting(v *bool) string {
+	if v == nil {
+		return "auto (bootstrap/lab)"
+	}
+	return yesNoStr(*v)
 }

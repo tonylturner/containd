@@ -56,6 +56,10 @@ type SQLiteStore struct {
 	autoRollbackNotify chan<- struct{}
 	options            storeOptions
 	recoveryHoldsBanks bool // protected by mu; saved apply rows may still need their banks
+
+	// SSH callbacks are protected by mu.
+	sshAccessValidator     func(context.Context, SSHConfig) error
+	sshRuntimePolicyReader func(context.Context) (SSHRuntimePolicy, error)
 }
 
 // SetAutoRollbackNotify registers a best-effort notification after a successful
@@ -202,6 +206,9 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
+	}
+	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
