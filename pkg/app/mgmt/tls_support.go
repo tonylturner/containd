@@ -22,25 +22,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func resolveTLSFiles(cfg *config.Config) (certFile, keyFile string) {
-	certFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_CERT_FILE"))
-	keyFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_KEY_FILE"))
-	if certFile == "" && cfg != nil {
-		certFile = cfg.System.Mgmt.TLSCertFile
-	}
-	if keyFile == "" && cfg != nil {
-		keyFile = cfg.System.Mgmt.TLSKeyFile
-	}
-	if certFile == "" {
-		certFile = "/data/tls/server.crt"
-	}
-	if keyFile == "" {
-		keyFile = "/data/tls/server.key"
-	}
-	return certFile, keyFile
+	return mgmttls.ResolveFiles(cfg)
 }
 
 func hstsHandler(enabled bool, maxAgeSeconds int, next http.Handler) http.Handler {

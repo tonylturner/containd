@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -51,8 +52,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 		httpsAddr := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
 		httpEnabled := boolDefault(cfg.System.Mgmt.EnableHTTP, true)
 		httpsEnabled := boolDefault(cfg.System.Mgmt.EnableHTTPS, true)
-		certFile := firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "/data/tls/server.crt")
-		keyFile := firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "/data/tls/server.key")
+		certFile, keyFile := mgmttls.ResolveFiles(cfg)
 
 		resp := tlsInfoResponse{
 			HTTPListenAddr:  httpAddr,
@@ -115,8 +115,7 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		certFile := firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "/data/tls/server.crt")
-		keyFile := firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "/data/tls/server.key")
+		certFile, keyFile := mgmttls.ResolveFiles(cfg)
 
 		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
 			apiError(c, http.StatusBadRequest, "tlsCertFile must be under /data")
