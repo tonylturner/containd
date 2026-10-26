@@ -263,11 +263,11 @@ probe_dnp3_control() {
 }
 
 # assert_dynamic_block SRC PORT: the US DENY path still installs its
-# 10-minute dynamic block (src . dst . dport) in nft block_flows.
+# 10-minute dynamic block (src . dst . proto . dport) in nft block_flows.
 assert_dynamic_block() {
   local src=$1 port=$2 set
   set=$(compose exec -T engine nft list set inet containd block_flows 2>&1 | tr -d '\r')
-  if grep -Fq "$src . $MODBUS_DST . $port timeout 10m" <<<"$set"; then
+  if grep -Fq "$src . $MODBUS_DST . tcp . $port timeout 10m" <<<"$set"; then
     pass "US 10-minute dynamic block present for $src -> $MODBUS_DST:$port"
   else
     check_fail "US 10-minute dynamic block missing for $src -> $MODBUS_DST:$port: $(tr '\n' ' ' <<<"$set" | head -c 300)"
