@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -61,19 +62,37 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 	if !strings.Contains(compiled, "policy drop") || !strings.Contains(compiled, "10.99.99.10") {
 		t.Fatalf("recovery missing deny/reserved rule: %s", compiled)
 	}
+	// In split mode the engine also admits its non-loopback API path, which
+	// management cannot know: the engine's ruleset differs from any
+	// management compile, yet it is the recovery ruleset.
+	engineSide := enforce.NewCompiler()
+	engineSide.ManagementReservation = config.ReservationForStore(store)
+	engineSide.EngineAPI = &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("192.0.2.10"), Port: 8081}
+	split, err := engineSide.CompileFirewall(&engine.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if split == compiled {
+		t.Fatal("engine API path did not change the compiled ruleset")
+	}
+	recovery := RecoverySnapshot().Version
 	for _, tc := range []struct {
 		name   string
 		status dpengine.RulesetStatus
 		want   string
 	}{
 		{"not applied", dpengine.RulesetStatus{}, "recovery pending:"},
-		{"apply failed", dpengine.RulesetStatus{Ruleset: compiled, AppliedAt: time.Now(), Error: "nft failed"}, "recovery failed:"},
-		{"different ruleset", dpengine.RulesetStatus{Ruleset: compiled + "\n", AppliedAt: time.Now()}, "recovery pending:"},
-		{"applied", dpengine.RulesetStatus{Ruleset: compiled, AppliedAt: time.Now()}, "recovery: new transit dropped"},
+		{"apply failed", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: recovery, AppliedAt: time.Now(), Error: "nft failed"}, "recovery failed:"},
+		{"other snapshot applied", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: "compiled-0.1.7", AppliedAt: time.Now()}, "recovery pending:"},
+		{"version unreported", dpengine.RulesetStatus{Ruleset: compiled, AppliedAt: time.Now()}, "recovery pending:"},
+		{"no ruleset", dpengine.RulesetStatus{SnapshotVersion: recovery, AppliedAt: time.Now()}, "recovery pending:"},
+		{"never applied", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: recovery}, "recovery pending:"},
+		{"applied", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: recovery, AppliedAt: time.Now()}, "recovery: new transit dropped"},
+		{"applied with an engine API path", dpengine.RulesetStatus{Ruleset: split, SnapshotVersion: recovery, AppliedAt: time.Now()}, "recovery: new transit dropped"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine.ruleset = tc.status
-			got := managementRecoveryStatus(ctx, store, engine)
+			got := managementRecoveryStatus(ctx, engine)
 			if !strings.HasPrefix(got, tc.want) {
 				t.Fatalf("status = %q", got)
 			}

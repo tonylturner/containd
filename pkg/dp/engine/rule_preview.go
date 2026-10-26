@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -28,6 +29,9 @@ type PreviewRuleResponse struct {
 	// under the running enforcement, which explains an inactive ALLOW rule's
 	// zero matches; omitted when there are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
+	// ICSCoverage is the candidate's coverage under the running settings
+	// and runtime state; omitted for a rule without an ICS protocol.
+	ICSCoverage *coverage.Rule `json:"icsCoverage,omitempty"`
 }
 
 type PreviewTimeRange struct {
@@ -54,6 +58,9 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	queueID := e.enforcedQueueID()
 	effective, active := enforcedCandidate(entry, queueID)
 	result.Warnings = (&enforce.Compiler{QueueID: queueID}).RuleWarnings(&rules.Snapshot{Firewall: []rules.Entry{entry}})
+	if cov := e.coverageOf(&rules.Snapshot{Firewall: []rules.Entry{entry}}); len(cov) == 1 {
+		result.ICSCoverage = &cov[0]
+	}
 	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{effective}})
 	for _, ev := range evs {
 		if result.TimeRange == nil {

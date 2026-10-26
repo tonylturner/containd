@@ -487,8 +487,8 @@ type DataPlaneConfig struct {
 	// decoders → enforceDPIEvents, which evaluates the rule's ICS
 	// predicate (function-code allowlist, register ranges, etc.) and
 	// uses ApplyVerdict / BlockFlowTemp to block out-of-policy flows.
-	// Without this, ICS rules compile to plain accept and the
-	// function-code allowlist is never enforced. Distinct from
+	// Without it, ICS rules compile to plain accept/drop, so validation
+	// rejects any ICS rule in effective enforce mode. Distinct from
 	// NFLogGroup since the two kernel subsystems (NFLOG vs NFQUEUE)
 	// are independent. Recommended value: 101.
 	NFQueueGroup uint16 `json:"nfqueueGroup,omitempty"`

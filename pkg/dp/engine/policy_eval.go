@@ -31,32 +31,10 @@ func protocolPortMatches(entry rules.Entry, p rules.Protocol, state *flow.State,
 	return port >= min && port <= max
 }
 
-// isExcluded checks whether either endpoint of a flow matches a DPI exclusion.
+// isExcluded checks whether either endpoint of a flow matches a DPI
+// exclusion. Domain exclusions were decided by the pre-selection observer.
 func (e *Engine) isExcluded(state *flow.State) bool {
-	for _, excl := range e.dpiExclusions {
-		switch excl.Type {
-		case "ip":
-			ip := net.ParseIP(excl.Value)
-			if ip == nil {
-				continue
-			}
-			if state.Key.SrcIP.Equal(ip) || state.Key.DstIP.Equal(ip) {
-				return true
-			}
-		case "cidr":
-			_, cidr, err := net.ParseCIDR(excl.Value)
-			if err != nil {
-				continue
-			}
-			if cidr.Contains(state.Key.SrcIP) || cidr.Contains(state.Key.DstIP) {
-				return true
-			}
-		case "domain":
-			// The pre-selection observer has already pinned the flow decision.
-			continue
-		}
-	}
-	return e.domainExcluded(state)
+	return e.addressExclusion(state) != "" || e.domainExcluded(state)
 }
 
 // enforceDPIEvents evaluates decoded ICS events against the firewall rules

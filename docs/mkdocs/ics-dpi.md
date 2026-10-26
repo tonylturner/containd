@@ -7,12 +7,22 @@ not make it an enforceable firewall predicate.
 
 ## DPI Modes
 
-DPI mode resolves **per-rule `ics.mode` > global `dpiMode` > `learn`**.
+DPI mode resolves **per-rule `ics.mode` > global `dpiMode` > `learn`**. Both
+fields accept only `learn`, `enforce` or empty.
 
 - **Learn** records would-deny decisions without applying that DPI denial.
-- **Enforce** applies DPI policy decisions when the enforcement/capture path is
-  configured. AF_PACKET cannot drop the packet it observes; inline prevention
-  requires NFQUEUE. See [Enforcement](dataplane-enforcement.md).
+- **Enforce** drops a prohibited command inline, before it reaches the device.
+  That needs NFQUEUE: AF_PACKET capture only observes copies and cannot stop
+  the first command. Validation therefore rejects a rule that names an ICS
+  protocol and resolves to enforce while `dataplane.nfqueueGroup` is 0, at
+  candidate save, import and commit; set a nonzero queue or put the rule in
+  learn mode. A global `dpiMode: "enforce"` without such rules, and `mode` on a
+  rule without an ICS protocol, need no queue.
+
+Enforce mode alone does not prove protection: DPI switched off, a disabled
+decoder, nftables enforcement off or an overlapping exclusion each leave a rule
+unprotected or partly protected. Each ICS rule reports its actual coverage; see
+[ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 
 Global learn mode is **not a no-block switch**: explicit enforce-mode rules and
 independent nftables firewall decisions can still block traffic. Automatic
@@ -99,7 +109,10 @@ not a hostname-authentication boundary.
 
 Domain exclusions **never bypass IEC 104 inspection or its enforcement
 envelopes**. Existing IP/CIDR overlap validation remains in force for IEC 104
-enforce rules.
+enforce rules. For other protocols exclusions stay allowed: an IP or CIDR
+exclusion that meets a rule's addresses, and any domain exclusion, make the
+rule report partial coverage (see
+[ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage)).
 
 The existing DPI protocol statistics expose flow-hit totals in `eventCount`
 under `dpi_exclusion_sni` and `dpi_exclusion_dns`, and capacity-eviction totals
@@ -192,7 +205,8 @@ observation is not authorization.
 3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
    (`status: staged`); it does not activate them. Generated rules use explicit
-   `ics.mode: "enforce"`, so review them even if global mode is learn.
+   `ics.mode: "enforce"`, so review them even if global mode is learn. Staging
+   them is refused while `dataplane.nfqueueGroup` is 0.
 5. Review ordering, scope, and per-rule modes in candidate, then commit with
    `POST /api/v1/config/commit`. Changing only global mode does not override an
    explicit per-rule learn mode.

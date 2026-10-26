@@ -422,23 +422,26 @@ func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdic
 	}
 }
 
-// RulesetStatus returns the last compiled/applied nftables ruleset snapshot.
+// RulesetStatus returns the last compiled/applied nftables ruleset snapshot
+// and the live ICS coverage of the applied rules.
 func (e *Engine) RulesetStatus() RulesetStatus {
 	if e == nil {
 		return RulesetStatus{}
 	}
-	ptr := e.rulesetStatus.Load()
-	if ptr == nil {
-		return RulesetStatus{}
+	var st RulesetStatus
+	if ptr := e.rulesetStatus.Load(); ptr != nil {
+		st = *ptr
 	}
-	return *ptr
+	st.ICSCoverage = e.ICSCoverage()
+	return st
 }
 
-func (e *Engine) setRulesetStatus(ruleset string, warnings []enforce.RuleWarning, err error) {
+func (e *Engine) setRulesetStatus(version, ruleset string, warnings []enforce.RuleWarning, err error) {
 	st := &RulesetStatus{
-		Ruleset:   ruleset,
-		AppliedAt: time.Now().UTC(),
-		Warnings:  warnings,
+		Ruleset:         ruleset,
+		SnapshotVersion: version,
+		AppliedAt:       time.Now().UTC(),
+		Warnings:        warnings,
 	}
 	if err != nil {
 		st.Error = err.Error()

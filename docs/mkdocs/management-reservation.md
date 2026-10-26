@@ -149,7 +149,11 @@ routes or services in a still-running split engine are not torn down: recovery
 replaces enforcement, not the underlying network/service ownership state.
 
 The reservation API and Interfaces view report whether recovery enforcement is
-actually applied, pending or failed. Guard health or a successful recovery request
+actually applied, pending or failed. The engine reports the version of the
+snapshot it last applied; recovery counts as applied only when that is the
+recovery snapshot (`management-recovery`, a version stored configurations
+cannot use) and the apply succeeded, including in split mode where the engine
+also admits its own API address. Guard health or a successful recovery request
 alone does not establish that transit is blocked. A safe commit or rollback
 replaces recovery enforcement with the normal running configuration.
 

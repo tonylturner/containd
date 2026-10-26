@@ -34,9 +34,9 @@ const (
 	DPIDisabled Code = "dpi-disabled"
 	// DecoderDisabled: the rule's protocol decoder is switched off.
 	DecoderDisabled Code = "decoder-disabled"
-	// QueueUnavailable: runtime only; the configured queue is not bound by
-	// this engine, so in-scope traffic is dropped by the kernel rather than
-	// inspected.
+	// QueueUnavailable: runtime only (Reason.Runtime is set); the configured
+	// queue is not bound by this engine, so in-scope traffic is dropped by
+	// the kernel rather than inspected.
 	QueueUnavailable Code = "queue-unavailable"
 	// ExclusionOverlap: an IP or CIDR exclusion meets the rule's scope.
 	ExclusionOverlap Code = "exclusion-overlap"
@@ -46,12 +46,17 @@ const (
 
 // Reason is one cause with an operator-facing message. Value names the
 // exclusion for exclusion codes. Matches is the runtime count of flows the
-// exclusion actually bypassed; zero in static evaluations.
+// exclusion actually bypassed; zero in static evaluations. Runtime marks a
+// reason that only the running engine reports (queue-unavailable); a static
+// evaluation of the same snapshot and settings has every other reason, so a
+// candidate and an applied rule differ in configuration only when they
+// differ after dropping runtime reasons and ignoring Matches.
 type Reason struct {
 	Code    Code   `json:"code"`
 	Message string `json:"message"`
 	Value   string `json:"value,omitempty"`
 	Matches uint64 `json:"matches,omitempty"`
+	Runtime bool   `json:"runtime,omitempty"`
 }
 
 // Rule is the coverage of one firewall rule with an ICS protocol predicate.

@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // iec104Config returns a config whose dataplane can activate an IEC104
@@ -249,9 +251,11 @@ func TestSchemaVersion017(t *testing.T) {
 }
 
 // Both shipped RangerDanger US policies still load under strict
-// decoding, validate, and survive a marshal round trip unchanged.
+// decoding, validate, and survive a marshal round trip unchanged. The weak
+// policy has no semantic ICS rule; the improved one enforces Modbus and
+// DNP3 rules through NFQUEUE, so it passes the inline-path requirement.
 func TestRangerDangerUSPoliciesLoad(t *testing.T) {
-	for _, name := range []string{"substation-weak.json", "substation-improved.json"} {
+	for name, wantEnforce := range map[string]bool{"substation-weak.json": false, "substation-improved.json": true} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join("testdata", "rangerdanger", name))
 			if err != nil {
@@ -263,6 +267,15 @@ func TestRangerDangerUSPoliciesLoad(t *testing.T) {
 			}
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("validate: %v", err)
+			}
+			enforce := 0
+			for _, r := range cfg.Firewall.Rules {
+				if r.ICS.Protocol != "" && rules.EffectiveMode(r.ICS.Mode, cfg.DataPlane.DPIMode) == "enforce" {
+					enforce++
+				}
+			}
+			if (enforce > 0) != wantEnforce {
+				t.Fatalf("semantic enforce rules = %d, want any: %v", enforce, wantEnforce)
 			}
 			body, err := json.Marshal(&cfg)
 			if err != nil {

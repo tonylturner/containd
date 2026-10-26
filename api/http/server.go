@@ -309,6 +309,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
+		protected.GET("/dataplane/ics-coverage", getICSCoverageHandler(store, engine))
 		protected.POST("/dataplane/blocks/host", requireAdmin(), blockHostHandler(engine))
 		protected.POST("/dataplane/blocks/flow", requireAdmin(), blockFlowHandler(engine))
 		protected.GET("/pcap/config", getPCAPConfigHandler(store))
