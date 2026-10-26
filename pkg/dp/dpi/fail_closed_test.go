@@ -19,6 +19,7 @@ func feedVerify(r *reassembler, key string, seq uint32, verify bool, data ...byt
 func TestReassemblerVerifiesConsumedBytes(t *testing.T) {
 	for _, verify := range []bool{false, true} {
 		r := newReassembler(64, time.Minute)
+		r.open("f", 100, testNow, verify)
 		wantBuf(t, feedVerify(r, "f", 100, verify, 1, 2, 3, 4), 0, 1, 2, 3, 4)
 		r.trim("f", 0, 4)
 		wantBuf(t, feedVerify(r, "f", 104, verify, 5, 6), 4, 5, 6)
@@ -43,6 +44,7 @@ func TestReassemblerVerifiesConsumedBytes(t *testing.T) {
 // cannot be verified. Turning verification off drops the history.
 func TestReassemblerHistoryBound(t *testing.T) {
 	r := newReassembler(4, time.Minute)
+	r.open("f", 100, testNow, true)
 	for i := range uint32(3) {
 		b := byte(3 * i)
 		wantBuf(t, feedVerify(r, "f", 100+3*i, true, b, b+1, b+2), int64(3*i), b, b+1, b+2)
@@ -84,6 +86,7 @@ func TestInspectFailClosedStreamStaysFailed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, _, st := framedFixture()
+			mgr.Inspect(st, synSeg(0, true))
 			if res := mgr.Inspect(st, failClosedSeg(0, 0x01, 0xAA)); res.Err != nil || !reflect.DeepEqual(ranges(res), []frameRange{{0, 2}}) {
 				t.Fatalf("first frame Err=%v frames=%v", res.Err, ranges(res))
 			}
@@ -107,6 +110,7 @@ func TestInspectFailClosedStreamStaysFailed(t *testing.T) {
 			if _, err := mgr.OnFlowEnd(st); err != nil {
 				t.Fatal(err)
 			}
+			mgr.Inspect(st, synSeg(10, true))
 			fresh := mgr.Inspect(st, failClosedSeg(10, 0x00))
 			if fresh.Err != nil || !reflect.DeepEqual(ranges(fresh), []frameRange{{0, 1}}) {
 				t.Fatalf("after flow end Err=%v frames=%v", fresh.Err, ranges(fresh))
@@ -119,6 +123,7 @@ func TestInspectFailClosedStreamStaysFailed(t *testing.T) {
 // next packet, as a legacy stream does.
 func TestInspectFailedStreamRestartsWithoutFailClosed(t *testing.T) {
 	mgr, _, st := framedFixture()
+	mgr.Inspect(st, synSeg(0, true))
 	mgr.Inspect(st, failClosedSeg(0, 0xFF))
 	if res := mgr.Inspect(st, failClosedSeg(1, 0x00)); res.Err == nil {
 		t.Fatal("fail-closed stream did not stay failed")

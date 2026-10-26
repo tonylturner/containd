@@ -27,9 +27,12 @@ import (
 // stream until EndStream. A failed stream returns its error without
 // parsing. Feed, parse and trim are serialized across capture workers.
 //
-// A SYN anchors a legacy stream. On a live stream that fails closed, a SYN
-// with a new sequence number is a StreamResync error instead (see open);
-// the payload of a fail-closed RST is not fed, as no receiver delivers it.
+// A SYN anchors a legacy stream. A stream that fails closed has stricter
+// rules: a SYN with a new sequence number on its live stream is a
+// StreamResync error (see open), and its bytes are not framed when the
+// stream was picked up mid-connection, a StreamMidStream error without a
+// malformed event (see feed). The payload of a fail-closed RST is not
+// fed, as no receiver delivers it.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
@@ -70,8 +73,10 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		m.reassembler.sweep(now)
 		fed := m.reassembler.feed(key, pos, pkt.Payload, now, true, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
-		res.MidStream = !pkt.HasOffset && !fed.anchored
 		switch {
+		case fed.err != nil && fed.err.Kind == StreamMidStream:
+			fed.err.Proto = res.Proto
+			res.Err = fed.err // nothing was inspected: not malformed
 		case fed.err != nil:
 			errEvent = streamError(state, pkt, &res, fed.err)
 		case len(fed.buf) > 0:
@@ -79,7 +84,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
 		}
 	}
-	if errEvent != nil {
+	if res.Err != nil {
 		m.discard(key, pkt.HasOffset || pkt.FailClosed, res.Err)
 	}
 

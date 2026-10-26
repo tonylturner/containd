@@ -40,8 +40,8 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow. An
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
-// error, a SYN that would resynchronize its stream, or a decoder panic the
-// same way (failClosedRule).
+// error, a SYN that would resynchronize its stream, a stream picked up
+// mid-connection, or a decoder panic the same way (failClosedRule).
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
@@ -64,14 +64,20 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	e.observeDomainExclusions(state, &parsed)
 	shouldInspect := e.ShouldInspect(state, &parsed)
 	if cached, ok := e.verdictCache.Get(flowHash); ok {
-		if cached.Action != verdict.AllowContinue {
+		switch {
+		case cached.Action == verdict.AllowContinue:
+			// Inspectable flows must continue through DPI so later
+			// payload-bearing packets are decoded; otherwise a SYN/ACK
+			// could suppress the whole flow.
+			if !shouldInspect {
+				return acceptDecision
+			}
+		case parsed.TCPSyn && cached.Reason == failClosedMidStream:
+			// After a mid-stream pickup a SYN starts the client's next
+			// connection on the tuple, inspected from its first byte.
+			e.verdictCache.Invalidate(flowHash)
+		default:
 			return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
-		}
-		// Inspectable flows must continue through DPI so later
-		// payload-bearing packets are decoded; otherwise a SYN/ACK
-		// could suppress the whole flow.
-		if !shouldInspect {
-			return acceptDecision
 		}
 	}
 	if !shouldInspect {
@@ -105,8 +111,6 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	if scope != nil && isStreamFailure(res) {
 		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedReason(res.Err), res.Proto, res.Err)
 	}
-	// A stream picked up mid-connection (res.MidStream) is inspected from
-	// its first seen segment like any other.
 	return acceptDecision
 }
 

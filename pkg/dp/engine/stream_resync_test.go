@@ -11,6 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
@@ -222,28 +223,96 @@ func TestResyncPanicKeepsStreamFailed(t *testing.T) {
 	f.failedClosed("read tail on the failed stream", f.decide(8, ackPsh, read[8:]), "modbus-read", failClosedPanic, 1)
 }
 
-// TestResyncMidStreamPickupInspected keeps inspecting an enforce flow whose
-// stream is picked up mid-connection, without a handshake: from a frame
-// boundary its reads are allowed and its prohibited commands denied; inside
-// a frame it is framed from the first byte seen, and bytes that cannot
-// start a frame fail closed.
-func TestResyncMidStreamPickupInspected(t *testing.T) {
+// pickedUp requires the drop of a stream picked up mid-connection: one more
+// stream_midstream ics.decision for rule and no dynamic block.
+func (f *fcFlow) pickedUp(what string, d capture.Decision, rule string, before int) {
+	f.t.Helper()
+	if d.Action != capture.Drop || d.Reason != reasonStreamFailClosed {
+		f.t.Fatalf("%s: decision = %+v, want Drop by %s", what, d, reasonStreamFailClosed)
+	}
+	evs := failClosedEvents(f.e)
+	if len(evs) != before+1 {
+		f.t.Fatalf("%s: fail-closed events %d -> %d, want one more", what, before, len(evs))
+	}
+	ev := evs[0] // newest first
+	if ev.Attributes[eventfields.KeyRuleID] != rule || ev.Attributes[eventfields.KeyReason] != failClosedMidStream ||
+		ev.Attributes[eventfields.KeyDecision] != decisionDeny || ev.Attributes[eventfields.KeyMode] != "enforce" {
+		f.t.Fatalf("%s: event attributes %v, want deny by %s for %s", what, ev.Attributes, rule, failClosedMidStream)
+	}
+	select {
+	case got := <-f.up.calls:
+		f.t.Fatalf("%s: dynamic block %q for a mid-stream pickup", what, got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestResyncMidStreamPickupDropped picks up an enforce flow
+// mid-connection, as after an engine restart or once the engine forgot an
+// idle flow: its packets drop until the flow ends, without a flow block.
+// The client's next connection, on a new or the same source port, is
+// inspected from its first byte.
+func TestResyncMidStreamPickupDropped(t *testing.T) {
+	pickups := []struct {
+		name string
+		lose func(f *fcFlow, p firstCommandProtocol)
+	}{
+		{"connection seen after its handshake", func(*fcFlow, firstCommandProtocol) {}},
+		{"flow swept while idle", func(f *fcFlow, p firstCommandProtocol) {
+			f.syn()
+			f.accept("read before the sweep", p.read(1))
+			f.e.sweepFlows(time.Now().Add(time.Hour))
+		}},
+	}
 	for _, p := range firstCommandProtocols() {
-		t.Run(p.name+"/at a frame boundary", func(t *testing.T) {
-			f := newModeFlow(t, "enforce", p.port)
-			f.isn = 3_000_000
+		for _, pc := range pickups {
+			for _, reconnect := range []string{"new source port", "same source port"} {
+				t.Run(p.name+"/"+pc.name+"/"+reconnect, func(t *testing.T) {
+					f := newModeFlow(t, "enforce", p.port)
+					pc.lose(f, p)
+					rule := p.name + "-read"
+					f.pickedUp("read on the picked-up stream", f.decide(f.next, ackPsh, p.read(2)), rule, 0)
+					f.dropCachedAt(f.next, "read after the pickup", p.read(2))
+					f.e.verdictCache = NewVerdictCache(time.Minute, 16)
+					f.pickedUp("read past the cached denial", f.decide(f.next, ackPsh, p.read(2)), rule, 1)
+					if reconnect == "new source port" {
+						f.client++
+					}
+					f.isn, f.next = 800000, 0
+					f.syn()
+					hits := ruleHits(f.e, rule)
+					f.accept("read on the next connection", p.read(3))
+					if got := ruleHits(f.e, rule); got != hits+1 {
+						t.Fatalf("read rule hits %d -> %d, want the read decoded", hits, got)
+					}
+					c := p.denied[0]
+					f.deny("denied on the next connection", c.rule, c.frame)
+				})
+			}
+		}
+		t.Run(p.name+"/learn", func(t *testing.T) {
+			f := newModeFlow(t, "learn", p.port)
 			hits := ruleHits(f.e, p.name+"-read")
-			f.accept("first read seen", p.read(4))
+			f.accept("read without a handshake", p.read(1))
 			if got := ruleHits(f.e, p.name+"-read"); got != hits+1 {
 				t.Fatalf("read rule hits %d -> %d, want the read decoded", hits, got)
 			}
-			c := p.denied[0]
-			f.deny("denied", c.rule, c.frame)
+			f.noBlock("learn")
 		})
-		t.Run(p.name+"/inside a frame", func(t *testing.T) {
-			f := newModeFlow(t, "enforce", p.port)
-			f.isn = 3_000_000
-			f.failedClosed("tail of a read", f.decide(0, ackPsh, p.read(4)[4:]), p.name+"-read", failClosedStream, 0)
-		})
+	}
+}
+
+// TestResyncMidStreamPickupDropsFirstCommand sends a prohibited command as
+// the first payload of a connection seen without its handshake: it is
+// dropped as a mid-stream pickup, whatever the updater does.
+func TestResyncMidStreamPickupDropsFirstCommand(t *testing.T) {
+	for _, mode := range []string{"ok", "failing", "stalled"} {
+		for _, p := range firstCommandProtocols() {
+			for _, c := range p.denied {
+				t.Run(mode+"/"+p.name+"/"+c.name, func(t *testing.T) {
+					f := newFCFlow(t, mode, p.port)
+					f.pickedUp("denied without a handshake", f.decide(0, ackPsh, c.frame), p.name+"-read", 0)
+				})
+			}
+		}
 	}
 }

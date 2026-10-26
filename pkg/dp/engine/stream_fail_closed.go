@@ -27,15 +27,24 @@ import (
 // choose where framing resumes; only a FIN or RST in window ends it
 // before the flow does. Learn-only flows, packets that are not inline and
 // the IEC104 path keep passing such packets.
+//
+// A stream picked up mid-connection fails the same way, as an IEC104
+// session not observed from its SYN does: after an engine restart, after
+// the engine forgot an idle flow, or after the reassembly sweep dropped a
+// partial frame, framing could start inside a message. Its connection's
+// packets drop until the flow ends, but no flow block is installed: the
+// client's next connection anchors at its SYN and is inspected from its
+// first byte.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).
 	reasonStreamFailClosed = "stream_fail_closed"
 
 	// ics.decision reasons of a fail-closed denial.
-	failClosedStream = "stream_error"
-	failClosedResync = "stream_resync"
-	failClosedPanic  = "decoder_panic"
+	failClosedStream    = "stream_error"
+	failClosedResync    = "stream_resync"
+	failClosedMidStream = "stream_midstream"
+	failClosedPanic     = "decoder_panic"
 )
 
 // failClosedRule returns the first ICS rule, IEC104 rules aside, whose
@@ -114,6 +123,8 @@ func failClosedReason(err error) string {
 			return failClosedResync
 		case dpi.StreamDecoderPanic:
 			return failClosedPanic
+		case dpi.StreamMidStream:
+			return failClosedMidStream
 		}
 	}
 	return failClosedStream
@@ -122,7 +133,8 @@ func failClosedReason(err error) string {
 // failClosed drops the packet and denies its flow as a decoded denial does:
 // a cached deny, the dynamic flow block once the drop verdict is submitted,
 // and an ics.decision event naming the rule whose scope holds the flow and
-// the cause.
+// the cause. A mid-stream pickup gets no flow block, which would also stop
+// the client's next connection.
 func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket, scope *rules.Entry, reason, proto string, cause error) capture.Decision {
 	v := verdict.Verdict{Action: verdict.BlockFlowTemp, Reason: reason, TTL: dpiEnforceBlockTTL}
 	evalCtx := rules.EvalContext{
@@ -132,7 +144,9 @@ func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.Pa
 		Port:  strconv.Itoa(int(servicePort(state, parsed))),
 	}
 	e.verdictCache.Put(state.Key.Hash(), v)
-	e.afterDrop(tok, e.dynamicBlockJob(v, evalCtx))
+	if reason != failClosedMidStream {
+		e.afterDrop(tok, e.dynamicBlockJob(v, evalCtx))
+	}
 	if proto == "" {
 		proto = strings.ToLower(scope.ICS.Protocol)
 	}

@@ -41,6 +41,58 @@ func TestStreamResyncKernelOutOfWindowRST(t *testing.T) {
 	}
 }
 
+// TestStreamResyncKernelRestartPickup restarts the engine under an open
+// connection. The connection's next read is a mid-stream pickup and gets
+// no answer; a new connection from the same client address is not
+// blocked and its read is answered.
+func TestStreamResyncKernelRestartPickup(t *testing.T) {
+	ctx := newFirstCommandLab(t)
+	srv := startModbusRecorder(t)
+	e := startFirstCommandEngine(t, ctx)
+
+	const src = "198.18.50.41"
+	c := dialFirstCommand(ctx, t, src)
+	c.read()
+	snap := e.CurrentRules()
+	fresh, err := New(Config{
+		Enforce:      EnforceConfig{Enabled: true, TableName: "containd"},
+		DPIEnabled:   true,
+		DPIMode:      "enforce",
+		NFQueueGroup: fcQueue,
+		Events:       e.Events(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reconfigure(fresh); err != nil {
+		t.Fatalf("restart engine: %v", err)
+	}
+	if err := e.Start(ctx); err != nil {
+		t.Fatalf("start engine again: %v", err)
+	}
+	if err := e.ApplyRules(ctx, *snap); err != nil {
+		t.Fatalf("apply rules again: %v", err)
+	}
+
+	c.write(c.next(3, 0, 2))
+	c.expectSilence()
+	var conn net.Conn
+	err = inNetns(fcClientNS, func() (err error) {
+		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(src)}, Timeout: fcReplyWait}
+		conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(fcServerIP, "502"))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("reconnect from %s: %v", src, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	next := &fcClient{t: t, src: src, conn: conn.(*net.TCPConn), tid: 50}
+	next.read()
+	if fcs, _, _ := srv.seen(src); len(fcs) != 2 {
+		t.Fatalf("server answered FCs %v, want the read before the restart and the new connection's read", fcs)
+	}
+}
+
 // rawTCPSegment is an IPv4 TCP segment without payload.
 func rawTCPSegment(src, dst net.IP, sport, dport uint16, seq uint32, flags uint8) []byte {
 	src4, dst4 := src.To4(), dst.To4()

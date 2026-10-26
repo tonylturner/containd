@@ -113,6 +113,13 @@ func TestDeniedModbusWriteDropsCurrentPacket(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The connection is seen from its SYN; a stream picked up
+	// mid-connection fails closed without a flow block.
+	syn := modbusWritePacket(capture.NewToken(1, 6))
+	syn.Payload, syn.TCP.Seq, syn.TCP.Flags = nil, 999, capture.TCPFlagSYN
+	if got := e.handlePacket(syn); got.Action != capture.Accept {
+		t.Fatalf("SYN decision = %+v, want Accept", got)
+	}
 	tok := capture.NewToken(1, 7)
 	if got := e.handlePacket(modbusWritePacket(tok)); got.Action != capture.Drop {
 		t.Fatalf("denied write decision = %+v, want Drop", got)

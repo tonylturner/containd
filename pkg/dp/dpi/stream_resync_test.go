@@ -103,27 +103,24 @@ func TestCloseStreamInWindow(t *testing.T) {
 	wantClose(t, "RST at the next byte", mgr, st, rst, true)
 }
 
-// After an in-window close a SYN anchors a new stream normally (port
-// reuse), and data without one starts a stream mid-connection.
+// After an in-window close the stream takes no more bytes, since its
+// receiver delivers none, and a SYN anchors a new stream normally (port
+// reuse). Without fail-closed a segment after the close starts a new
+// stream.
 func TestCloseStreamThenNewConnection(t *testing.T) {
 	mgr, _, st := framedFixture()
 	mgr.Inspect(st, synSeg(100, true))
 	wantFrames(t, "frame", mgr.Inspect(st, failClosedSeg(100, 0x00)), frameRange{0, 1})
 	wantClose(t, "FIN", mgr, st, finSeg(101), true)
-	late := mgr.Inspect(st, failClosedSeg(102, 0x00))
-	wantFrames(t, "data after the FIN", late, frameRange{0, 1})
-	if !late.MidStream {
-		t.Fatal("data after the FIN is not a mid-stream start")
-	}
-	wantClose(t, "FIN of that stream", mgr, st, finSeg(103), true)
+	wantFrames(t, "data after the FIN", mgr.Inspect(st, failClosedSeg(102, 0xFF)))
+	wantFrames(t, "retransmitted data before the FIN", mgr.Inspect(st, failClosedSeg(100, 0x00)))
 	if res := mgr.Inspect(st, synSeg(9000, true)); res.Err != nil {
 		t.Fatalf("SYN of the next connection: %v", res.Err)
 	}
-	next := mgr.Inspect(st, failClosedSeg(9000, 0x01, 0xAA))
-	wantFrames(t, "first frame of the next connection", next, frameRange{0, 2})
-	if next.MidStream {
-		t.Fatal("the next connection's stream is not anchored at its SYN")
-	}
+	wantFrames(t, "first frame of the next connection", mgr.Inspect(st, failClosedSeg(9000, 0x01, 0xAA)), frameRange{0, 2})
+
+	wantClose(t, "FIN of the next connection", mgr, st, finSeg(9002), true)
+	wantFrames(t, "legacy segment after the FIN", mgr.Inspect(st, tcpSeg(9003, 0x00)), frameRange{0, 1})
 }
 
 // A RST in window ends the opposite direction too; one out of window ends
@@ -155,6 +152,7 @@ func TestCloseStreamKeepsFailedAndFailClosedStreams(t *testing.T) {
 	if failed.Err == nil {
 		t.Fatal("unframeable bytes did not fail")
 	}
+	mgr.Inspect(peer, synSeg(700, true))
 	mgr.Inspect(peer, failClosedSeg(700, 0x02, 0xB1))
 	for _, pkt := range []*ParsedPacket{rstSeg(100), finSeg(100), {Proto: "tcp", TCPRst: true}} {
 		wantClose(t, "close of the failed stream", mgr, st, pkt, false)
@@ -207,36 +205,107 @@ func TestOpenSYNOnLiveStream(t *testing.T) {
 	wantFrames(t, "legacy stream re-anchored", mgr.Inspect(st, tcpSeg(102, 0x00)), frameRange{0, 1})
 }
 
-// A stream that does not start at a SYN is reported as picked up
-// mid-stream: without a handshake, after its flow's end, and after the
-// idle sweep dropped its partial frame. Session streams never are.
-func TestInspectReportsMidStream(t *testing.T) {
-	mgr, _, st := framedFixture()
-	first := mgr.Inspect(st, failClosedSeg(100, 0x02, 0xA1))
-	if !first.MidStream {
-		t.Fatal("a stream without a handshake is not mid-stream")
+func wantMidStream(t *testing.T, what string, res InspectResult) {
+	t.Helper()
+	var se *StreamError
+	if !errors.As(res.Err, &se) || se.Kind != StreamMidStream || se.Proto != "mock" || !res.Framed || len(res.Frames) != 0 || len(res.Events) != 0 {
+		t.Fatalf("%s: Err=%v frames=%v events=%v, want a mock mid-stream failure and nothing parsed", what, res.Err, ranges(res), res.Events)
 	}
+}
+
+// A fail-closed stream picked up mid-connection fails without parsing a
+// byte and stays failed: without a handshake, after its flow's end, and
+// after the idle sweep dropped its partial frame. Session streams and
+// streams that do not fail closed are framed from their first byte.
+func TestInspectFailsMidStreamPickup(t *testing.T) {
+	mgr, _, st := framedFixture()
+	first := mgr.Inspect(st, failClosedSeg(100, 0x00))
+	wantMidStream(t, "first segment without a handshake", first)
+	if again := mgr.Inspect(st, failClosedSeg(101, 0x00)); again.Err != first.Err {
+		t.Fatalf("after the pickup Err = %v, want the stream failed", again.Err)
+	}
+	if res := mgr.Inspect(st, &ParsedPacket{Proto: "tcp", FailClosed: true}); res.Err != first.Err {
+		t.Fatalf("segment without payload Err = %v, want the stream failed", res.Err)
+	}
+	if _, held := mgr.reassembler.stats(); held != 0 {
+		t.Fatalf("picked-up stream holds %d bytes", held)
+	}
+
+	if _, err := mgr.OnFlowEnd(st); err != nil {
+		t.Fatal(err)
+	}
+	wantMidStream(t, "first segment after the flow's end", mgr.Inspect(st, failClosedSeg(300, 0x00)))
+
 	if _, err := mgr.OnFlowEnd(st); err != nil {
 		t.Fatal(err)
 	}
 	mgr.Inspect(st, synSeg(200, true))
-	anchored := mgr.Inspect(st, failClosedSeg(200, 0x02, 0xA1))
-	if anchored.MidStream {
-		t.Fatal("a stream anchored at its SYN is mid-stream")
-	}
+	wantFrames(t, "frame and partial frame", mgr.Inspect(st, failClosedSeg(200, 0x00, 0x02, 0xA1)), frameRange{0, 1})
 	mgr.reassembler.sweep(time.Now().Add(time.Hour))
-	swept := mgr.Inspect(st, failClosedSeg(202, 0xA2, 0x00))
-	if !swept.MidStream {
-		t.Fatal("a stream after the idle sweep dropped its partial frame is not mid-stream")
+	if _, held := mgr.reassembler.stats(); held != 0 {
+		t.Fatalf("after the idle sweep %d bytes held", held)
 	}
-	if _, err := mgr.OnFlowEnd(st); err != nil {
-		t.Fatal(err)
+	wantMidStream(t, "frame tail after the idle sweep", mgr.Inspect(st, failClosedSeg(203, 0xA2, 0x00)))
+
+	mgr, _, st = framedFixture()
+	wantFrames(t, "legacy pickup", mgr.Inspect(st, tcpSeg(100, 0x00)), frameRange{0, 1})
+	wantFrames(t, "session stream", mgr.Inspect(st, &ParsedPacket{Proto: "tcp", Payload: []byte{0x00}, HasOffset: true, Session: "s1", Dir: ClientToServer, FailClosed: true}), frameRange{0, 1})
+}
+
+// The idle sweep keeps a fail-closed stream that holds no partial frame:
+// its next bytes still start a frame. A stream it left lost, swept while
+// not failing closed, restarts as before.
+func TestSweepKeepsFailClosedPosition(t *testing.T) {
+	mgr, _, st := framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	wantFrames(t, "frame", mgr.Inspect(st, failClosedSeg(100, 0x01, 0xAA)), frameRange{0, 2})
+	mgr.reassembler.sweep(time.Now().Add(time.Hour))
+	wantFrames(t, "frame after the idle sweep", mgr.Inspect(st, failClosedSeg(102, 0x00)), frameRange{2, 3})
+	if streams, held := mgr.reassembler.stats(); streams != 1 || held != 1 {
+		t.Fatalf("after the sweep %d streams, %d bytes held (history from the last frame only)", streams, held)
 	}
-	if again := mgr.Inspect(st, failClosedSeg(300, 0x00)); !again.MidStream {
-		t.Fatal("a stream after its flow's end is not mid-stream")
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	mgr.Inspect(st, failClosedSeg(100, 0x02, 0xA1))
+	mgr.reassembler.sweep(time.Now().Add(time.Hour))
+	wantFrames(t, "legacy segment on the lost stream", mgr.Inspect(st, tcpSeg(102, 0x00)), frameRange{0, 1})
+
+	mgr.reassembler.sweep(time.Now().Add(2 * time.Hour))
+	if streams, _ := mgr.reassembler.stats(); streams != 0 {
+		t.Fatalf("after the sweep %d streams, want the idle legacy stream removed", streams)
 	}
-	if session := mgr.Inspect(st, sessionSeg("s1", ClientToServer, 0, 0x00)); session.MidStream {
-		t.Fatal("a session stream is mid-stream")
+}
+
+// A SYN on a stream that began without one and failed as picked up starts
+// the client's next connection. A lost stream was live: a SYN on it is a
+// resync, and once its next bytes failed it, a SYN leaves it failed.
+func TestOpenAfterMidStreamPickup(t *testing.T) {
+	mgr, _, st := framedFixture()
+	wantMidStream(t, "pickup", mgr.Inspect(st, failClosedSeg(100, 0x00)))
+	if res := mgr.Inspect(st, synSeg(5000, true)); res.Err != nil {
+		t.Fatalf("SYN of the next connection Err = %v", res.Err)
+	}
+	wantFrames(t, "first frame of the next connection", mgr.Inspect(st, failClosedSeg(5000, 0x00)), frameRange{0, 1})
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	mgr.Inspect(st, failClosedSeg(100, 0x02, 0xA1))
+	mgr.reassembler.sweep(time.Now().Add(time.Hour))
+	res := mgr.Inspect(st, synSeg(7000, true))
+	var se *StreamError
+	if !errors.As(res.Err, &se) || se.Kind != StreamResync {
+		t.Fatalf("SYN on the lost stream Err = %v, want a resync", res.Err)
+	}
+
+	mgr, _, st = framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	mgr.Inspect(st, failClosedSeg(100, 0x02, 0xA1))
+	mgr.reassembler.sweep(time.Now().Add(time.Hour))
+	lost := mgr.Inspect(st, failClosedSeg(102, 0xA2))
+	wantMidStream(t, "bytes after the lost frame", lost)
+	if again := mgr.Inspect(st, synSeg(7000, true)); again.Err != lost.Err {
+		t.Fatalf("SYN after the lost stream failed Err = %v, want it still failed", again.Err)
 	}
 }
 
@@ -262,6 +331,7 @@ func TestFailStreamKeepsStreamFailed(t *testing.T) {
 	if _, err := mgr.OnFlowEnd(st); err != nil {
 		t.Fatal(err)
 	}
+	mgr.Inspect(st, synSeg(105, true))
 	wantFrames(t, "after the flow's end", mgr.Inspect(st, failClosedSeg(105, 0x00)), frameRange{0, 1})
 
 	// The panic may come before the stream holds anything.

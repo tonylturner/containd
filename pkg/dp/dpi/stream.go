@@ -80,6 +80,11 @@ const (
 	// StreamDecoderPanic is a stream whose framing decoder panicked
 	// (Manager.FailStream).
 	StreamDecoderPanic
+	// StreamMidStream is a stream that fails closed but was picked up
+	// mid-connection: it began without an observed SYN (the flow was first
+	// seen after its handshake, or ended and was seen again), or the idle
+	// sweep dropped its partial frame. Its bytes need not start a frame.
+	StreamMidStream
 )
 
 func (k StreamErrKind) String() string {
@@ -96,6 +101,8 @@ func (k StreamErrKind) String() string {
 		return "resync"
 	case StreamDecoderPanic:
 		return "decoder_panic"
+	case StreamMidStream:
+		return "midstream"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}
@@ -120,13 +127,6 @@ type InspectResult struct {
 	Framed   bool           // a StreamDecoder handled this direction
 	NeedMore bool
 	Gap      bool // bytes buffered beyond a hole; nothing after it parsed
-	// MidStream: the legacy stream this packet's bytes joined began without
-	// an observed SYN, so its first bytes need not start a frame. A stream
-	// is picked up this way when its flow is first seen after the handshake
-	// (an engine restart, or a flow the engine swept), after the idle sweep
-	// removed it with any partial frame it held, and for data that follows
-	// an in-window close. Inspection proceeds the same either way.
-	MidStream bool
 	// Err is the framed decoder's *FrameError or a *StreamError. A legacy
 	// decoder's OnPacket error passes through unchanged, as OnPacket did.
 	Err error
