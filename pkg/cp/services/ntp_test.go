@@ -139,14 +139,27 @@ func TestApplyDisabledRemovesConfig(t *testing.T) {
 	}
 }
 
-func TestStatusReflectsState(t *testing.T) {
-	m := NewNTPManager(t.TempDir())
-	m.Supervise = false
+// isolateNTPManagerEnv points NewNTPManager away from host state: no chronyd
+// on the host, no supervision and no log file or syslog sink.
+func isolateNTPManagerEnv(t *testing.T, ntpdPath string) {
+	t.Helper()
+	t.Setenv("CONTAIND_NTPD_PATH", ntpdPath)
+	t.Setenv("CONTAIND_SUPERVISE_NTP", "0")
+	t.Setenv("CONTAIND_SERVICES_DIR", "")
+	t.Setenv("CONTAIND_LOG_FILE", "0")
+	t.Setenv("CONTAIND_LOG_SYSLOG_ADDR", "")
+}
 
-	_ = m.Apply(context.Background(), config.NTPConfig{
+func TestStatusReflectsState(t *testing.T) {
+	isolateNTPManagerEnv(t, filepath.Join(t.TempDir(), "absent", "chronyd"))
+	m := NewNTPManager(t.TempDir())
+
+	if err := m.Apply(context.Background(), config.NTPConfig{
 		Enabled: true,
 		Servers: []string{"pool.ntp.org", "time.google.com"},
-	})
+	}); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
 
 	status := m.Status()
 	if status["enabled"] != true {
@@ -156,11 +169,37 @@ func TestStatusReflectsState(t *testing.T) {
 		t.Errorf("status servers_count = %v, want 2", status["servers_count"])
 	}
 	// The supported implementation is chrony even when the binary is missing.
-	if status["ntpd_name"] != "chrony" {
-		t.Error("status should identify chrony")
+	if status["ntpd_name"] != "chrony" || status["ntpd_path"] != "" {
+		t.Errorf("status ntpd = %v at %q, want chrony with no path", status["ntpd_name"], status["ntpd_path"])
 	}
-	if status["running"] != false {
-		t.Error("status should show running=false when supervise is disabled")
+	if status["supervise"] != false || status["running"] != false {
+		t.Errorf("status supervise = %v, running = %v; want both false", status["supervise"], status["running"])
+	}
+}
+
+// A detected chronyd validates the rendered config with "-p -f <path>".
+func TestApplyValidatesWithDetectedChronyd(t *testing.T) {
+	bin := t.TempDir()
+	argsFile := filepath.Join(bin, "args")
+	chronyd := filepath.Join(bin, "chronyd")
+	if err := os.WriteFile(chronyd, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argsFile+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	isolateNTPManagerEnv(t, chronyd)
+	m := NewNTPManager(t.TempDir())
+
+	if err := m.Apply(context.Background(), config.NTPConfig{Enabled: true, Servers: []string{"pool.ntp.org"}}); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("chronyd was not run: %v", err)
+	}
+	if want := "-p\n-f\n" + m.configPath() + "\n"; string(args) != want {
+		t.Errorf("chronyd args = %q, want %q", args, want)
+	}
+	if status := m.Status(); status["enabled"] != true || status["ntpd_path"] != chronyd || status["last_error"] != "" {
+		t.Errorf("status = %v", status)
 	}
 }
 
