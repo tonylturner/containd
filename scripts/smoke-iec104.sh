@@ -512,6 +512,9 @@ assert_not_received() {
 
 # ---- monitoring (passes on the L4 path) -------------------------------------
 
+# shellcheck source=scripts/smoke-iec104-observe.sh
+source "$ROOT/scripts/smoke-iec104-observe.sh"
+
 log "Starting a long-lived control-centre session (STARTDT + station GI)..."
 compose exec -T cc pkill -f 'iec104ep cc' >/dev/null 2>&1 || true
 compose exec -d cc sh -c "iec104ep cc $RTU_IP $RTU_PORT >/tmp/cc.log 2>&1" >/dev/null 2>&1 || true
@@ -544,12 +547,17 @@ fi
 
 CC_SPONT_START=$(cc_count 'cot=3 ' cc.log)
 
+observe_clean
+observe_apci
+observe_inventory before-deny
+
 # ---- Enforcement assertions --------------------------------------------------
 
 # 1. First forbidden select and first forbidden execute are dropped; RTU point
 #    state unchanged. IOA 2002 is a real RTU command point the policy forbids.
 assert_not_received "first forbidden select is dropped before the RTU" commands_received \
   run_cmd select "$ALLOWED_CA" "$FORBIDDEN_IOA" "$DCS_OPEN"
+observe_denied
 assert_not_received "first forbidden execute is dropped before the RTU" commands_received \
   run_cmd direct "$ALLOWED_CA" "$FORBIDDEN_IOA" "$DCS_OPEN"
 
@@ -564,6 +572,7 @@ if [[ "$rc" == 0 && "$breaker_after" == "open" ]] && grep -q 'type=46 cot=10' "$
 else
   fail "allowed CA+IOA command did not complete" "exit $rc; breaker $breaker_before -> $breaker_after; $(tr '\n' ' ' <"$WORK_DIR/allow.out" | head -c 160)"
 fi
+observe_allowed
 run_cmd sbo "$ALLOWED_CA" "$ALLOWED_IOA" "$DCS_CLOSE" >/dev/null 2>&1 || true
 
 assert_not_received "wrong IOA (CA 1 / IOA $FORBIDDEN_IOA) is denied" commands_received \
@@ -835,6 +844,8 @@ else
     fail "telemetry went stale or the session dropped" "${stale}closes during the window: $closed_start -> $closed_end"
   fi
 fi
+
+observe_final
 
 # ---- summary ----------------------------------------------------------------
 
