@@ -26,6 +26,11 @@ type ParsedPacket struct {
 	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
 	TCPFin  bool   // the segment carries FIN
 	TCPRst  bool   // the segment carries RST
+	// TCPHandshake marks a SYN or SYN-ACK of a connection whose handshake
+	// the kernel's connection tracking has not seen complete. A fail-closed
+	// one without it anchors no stream: it was sent into an established
+	// connection.
+	TCPHandshake bool
 
 	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
 	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)

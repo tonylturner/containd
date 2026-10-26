@@ -246,7 +246,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	}
 	set := "@schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b"
 	for _, want := range []string{
-		"    tcp dport 502 queue num 100;\n    ct state established jump conditional_scope;\n",
+		"    tcp dport 502 jump ics_queue;\n    ct state established jump conditional_scope;\n",
 		"  chain conditional_scope {\n    meta l4proto tcp ct reply proto-src 502 goto conditional_policy;\n  }\n",
 		"    ct status dnat return;\n    meta l4proto tcp ct reply proto-src 502 ct original ip saddr @identity4_6f7073 meta time " + set + " return;\n    drop;\n",
 	} {
@@ -264,7 +264,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(text, "    tcp dport 502 queue num 100;\n") || strings.Contains(text, "identity4_") ||
+		if !strings.Contains(text, "    tcp dport 502 jump ics_queue;\n") || strings.Contains(text, "identity4_") ||
 			strings.Contains(text, "schedule_") || strings.Contains(text, conditionalScopeChain) {
 			t.Fatalf("queued %s rule was guarded:\n%s", a, text)
 		}

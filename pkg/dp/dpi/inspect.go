@@ -28,10 +28,11 @@ import (
 // parsing. Feed, parse and trim are serialized across capture workers.
 //
 // A SYN anchors a legacy stream. A stream that fails closed has stricter
-// rules: a SYN with a new sequence number on its live stream is a
-// StreamResync error (see open), and its bytes are not framed when the
-// stream was picked up mid-connection, a StreamMidStream error without a
-// malformed event (see feed). The payload of a fail-closed RST is not
+// rules: only a SYN of a handshake the kernel's connection tracking has
+// not seen complete (TCPHandshake) anchors it, a SYN with a new sequence
+// number on its live stream is a StreamResync error (see open), and its
+// bytes are not framed when the stream was picked up mid-connection, a
+// StreamMidStream error without a malformed event (see feed). The payload of a fail-closed RST is not
 // fed, as no receiver delivers it.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
@@ -54,7 +55,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	key, session, pos := streamKey(state, pkt)
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
-		if se := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed); se != nil {
+		if se := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake); se != nil {
 			errEvent = streamError(state, pkt, &res, se)
 		}
 	}

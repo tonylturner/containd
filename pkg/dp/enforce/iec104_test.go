@@ -72,7 +72,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 			`    iifname { "eth2" } oifname { "eth1" } tcp sport 2404 ip saddr { 10.70.0.5 } ip daddr { 10.60.60.0/24 } ` + envelopeJump + ";\n",
 			`    tcp dport 2404 ip saddr { 10.60.61.7 } ` + envelopeJump + ";\n",
 			`    tcp sport 2404 ip daddr { 10.60.61.7 } ` + envelopeJump + ";\n",
-			"    tcp dport 502 queue num 100;\n",
+			"    tcp dport 502 jump ics_queue;\n",
 			"    ct state { established, related } accept;\n",
 			"    tcp dport 2404 accept;\n",
 		}
@@ -87,7 +87,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 			}
 			last = i
 		}
-		if n := strings.Count(ruleset, "queue num 100"); n != 1 {
+		if n := strings.Count(ruleset, "jump "+ICSQueueChain); n != 1 {
 			t.Fatalf("open=%v: forward queue lines = %d, want only the modbus one:\n%s", open, n, ruleset)
 		}
 		if strings.Contains(ruleset, `log prefix "containd:a-iec-allow`) {

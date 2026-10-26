@@ -40,7 +40,11 @@ import (
 // partial frame, framing could start inside a message. Its connection's
 // packets drop until the flow ends, but no flow block is installed: the
 // client's next connection anchors at its SYN and is inspected from its
-// first byte.
+// first byte. Only a SYN or SYN-ACK of a handshake that the kernel's
+// connection tracking has not seen complete anchors a stream
+// (dpi.ParsedPacket.TCPHandshake): anchoring at one sent into an
+// established connection, such as a picked-up one, would let its sender
+// choose where framing starts.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).

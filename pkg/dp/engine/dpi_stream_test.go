@@ -48,7 +48,7 @@ func clientSegment(iface string, seq uint32, flags capture.TCPFlags, payload []b
 	if flags&capture.TCPFlagSYN != 0 {
 		seq--
 	}
-	return capture.Packet{
+	pkt := capture.Packet{
 		Timestamp: time.Now().UTC(),
 		Interface: iface,
 		SrcIP:     net.ParseIP("172.31.0.5"),
@@ -60,6 +60,8 @@ func clientSegment(iface string, seq uint32, flags capture.TCPFlags, payload []b
 		Payload:   payload,
 		TCP:       capture.TCPMeta{Valid: true, Seq: seq, Flags: capture.TCPFlags(flags)},
 	}
+	markHandshake(&pkt)
+	return pkt
 }
 
 func modbusEventsOldestFirst(e *Engine) []events.Event {

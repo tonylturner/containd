@@ -53,9 +53,10 @@ type lineForm struct {
 
 // actionForms lowers e's action for protocol p. counted is the rule's
 // counter statement; logStmt, when set, logs the packets the action
-// applies to. A queued rule's traffic goes to queueID whatever its action.
-// RATE_LIMIT, which needs lines per direction, is meterLines'.
-func actionForms(e rules.Entry, p rules.Protocol, queued bool, queueID int, counted, logStmt string) ([]lineForm, error) {
+// applies to. A queued rule's traffic goes to the engine's queue through
+// ICSQueueChain whatever its action. RATE_LIMIT, which needs lines per
+// direction, is meterLines'.
+func actionForms(e rules.Entry, p rules.Protocol, queued bool, counted, logStmt string) ([]lineForm, error) {
 	stmts := func(verdict string) string {
 		out := counted
 		if logStmt != "" {
@@ -67,7 +68,7 @@ func actionForms(e rules.Entry, p rules.Protocol, queued bool, queueID int, coun
 		return out
 	}
 	if queued {
-		return []lineForm{{stmts: stmts(fmt.Sprintf("queue num %d", queueID))}}, nil
+		return []lineForm{{stmts: stmts("jump " + ICSQueueChain)}}, nil
 	}
 	switch e.Action {
 	case rules.ActionAllow:

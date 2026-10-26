@@ -235,7 +235,8 @@ func TestUSRulesetUnchangedByEnvelopeState(t *testing.T) {
 	if got := nft.scripts[len(nft.scripts)-1]; got != before || len(nft.scripts) != 2 {
 		t.Fatalf("a US-only ruleset changed with the queue state (%d scripts):\n%s", len(nft.scripts), got)
 	}
-	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 101;`).MatchString(before) {
+	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(before) ||
+		!strings.Contains(before, "meta mark set meta mark and 0xf0ffffff queue num 101;") {
 		t.Fatalf("US Modbus steering missing:\n%s", before)
 	}
 }

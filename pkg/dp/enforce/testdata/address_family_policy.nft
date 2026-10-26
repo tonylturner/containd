@@ -56,6 +56,11 @@ table inet containd_policy {
   chain iec104_envelope {
     drop;
   }
+  chain ics_queue {
+    ct status assured meta mark set meta mark and 0xf0ffffff queue num 100;
+    ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 100;
+    meta mark set meta mark and 0xf0ffffff queue num 100;
+  }
   chain input {
     type filter hook input priority 0;
     policy drop;
@@ -76,8 +81,8 @@ table inet containd_policy {
     meta nfproto ipv6 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto udp ct reply proto-src 161 ct reply ip6 saddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
     tcp dport 2404 ip6 saddr { 2001:db8:3::/64 } ip6 daddr { 2001:db8:4::5/128 } counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
     tcp sport 2404 ip6 saddr { 2001:db8:4::5/128 } ip6 daddr { 2001:db8:3::/64 } counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
-    tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_422ef822fc6a32d2" queue num 100;
-    tcp dport 502 ip6 daddr { 2001:db8:1::/64 } counter name "rule_422ef822fc6a32d2" queue num 100;
+    tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_422ef822fc6a32d2" jump ics_queue;
+    tcp dport 502 ip6 daddr { 2001:db8:1::/64 } counter name "rule_422ef822fc6a32d2" jump ics_queue;
     ct state established jump conditional_scope;
     ct state { established, related } accept;
     ip saddr { 10.9.0.0/16 } counter name "rule_add44674026232fe";

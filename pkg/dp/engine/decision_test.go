@@ -117,6 +117,7 @@ func TestDeniedModbusWriteDropsCurrentPacket(t *testing.T) {
 	// mid-connection fails closed without a flow block.
 	syn := modbusWritePacket(capture.NewToken(1, 6))
 	syn.Payload, syn.TCP.Seq, syn.TCP.Flags = nil, 999, capture.TCPFlagSYN
+	markHandshake(&syn)
 	if got := e.handlePacket(syn); got.Action != capture.Accept {
 		t.Fatalf("SYN decision = %+v, want Accept", got)
 	}
