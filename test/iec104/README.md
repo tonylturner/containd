@@ -57,6 +57,22 @@ below ten minutes). Exit 0 is acceptance (everything passed); 1 is a `FAIL`
 or a setup error; 3 means the baseline passed but gate assertions remain.
 Passing with skips is not acceptance.
 
+The run also checks live observability:
+
+- Inventory identifies the control centre → RTU pair on port 2404 and CA 1 /
+  IOA 2001 type 46; allowed commands increase accepted counts, denied commands
+  increase only attempted counts, and all overflow counters stay zero.
+- Clean STARTDT, GI and monitoring produce no APCI anomaly events or alerts.
+  A malformer GI I-frame before STARTDT produces exactly one
+  `iec104_data_while_stopped` event and alert with the same session ID; that
+  session retains its enforce allow decision without a firewall abort or drop.
+- The flows API remains available. Settled holdback packet, byte and
+  oldest-pending gauges are zero in diagnostics and metrics; all abort totals
+  match between the two, with nonzero deny and queue-closure counts.
+
+Inventory snapshots, diagnostics, metrics, anomaly events and alerts are
+saved beside `results.json`.
+
 Two assertions use extra tooling. The stale-retransmit case (`malformer
 -scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and
 40406), sends a forbidden command, re-handshakes from the second port, then
