@@ -258,14 +258,19 @@ components:
       properties:
         state:
           type: string
-          enum: [enforcing, disabled, unavailable, unknown]
+          enum: [enforcing, degraded, disabled, unavailable, unknown]
           description: >
             Enforcing means enforcement enabled and an applied ruleset without
-            error. Disabled means dataplane.enforcement is false. Unavailable
-            means ruleset apply failure, a persisted replay/recovery fault, or
-            no applied ruleset while enforcement is on. Unknown means required
-            config/fault or engine state could not be read within the budget.
-        reason: {type: string, description: Generic summary for unavailable or unknown; otherwise empty}
+            error. Degraded means a ruleset is in force but the last apply
+            failed, leaving the previous ruleset in force, or the schedule
+            planner is degraded (a failing refill, or a schedule horizon that
+            ends within an hour). Disabled means
+            dataplane.enforcement is false. Unavailable means a ruleset apply
+            failure with no ruleset in force, a persisted replay/recovery fault,
+            or no applied ruleset while enforcement is on. Unknown means
+            required config/fault or engine state could not be read within the
+            budget.
+        reason: {type: string, description: Generic summary for degraded, unavailable or unknown; otherwise empty}
       example: {state: enforcing, reason: ""}
 
     ConfigApplyError:
@@ -427,6 +432,10 @@ components:
         eventCount: {type: integer, format: uint64}
         avDetected: {type: boolean}
         avBlocked: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+          description: Sorted TAG labels the flow's events carry; omitted when they carry none.
 
     FirewallRule:
       type: object
@@ -1795,11 +1804,18 @@ components:
             Merged into the stored schedule; unspecified fields are kept. Null
             clears the schedule (required before changing a rule to TAG).
     EngineRulesetStatus:
+      description: >-
+        The installed ruleset. A failed apply leaves it installed and in force, so ruleset, snapshotVersion,
+        appliedAt and warnings keep describing it; error, failedSnapshotVersion and failedAt describe the last
+        apply when it failed, until the next successful apply clears them.
       properties:
-        appliedAt: {format: date-time, type: string}
-        error: {type: string}
-        ruleset: {type: string}
-        snapshotVersion: {type: string, description: Version of the snapshot the last apply attempted, whether it succeeded or failed.}
+        appliedAt: {format: date-time, type: string, description: When the installed ruleset was applied; zero before the first success.}
+        error: {type: string, description: Error of the last apply when it failed.}
+        failedSnapshotVersion: {type: string, description: Version of the snapshot the last apply failed to install.}
+        failedAt: {format: date-time, type: string, description: When the last apply failed.}
+        ruleset: {type: string, description: Compiled text of the installed ruleset.}
+        snapshotVersion: {type: string, description: Version of the installed snapshot.}
+        schedulePlanner: {$ref: '#/components/schemas/SchedulePlannerStatus'}
         icsCoverage:
           type: array
           items: {$ref: '#/components/schemas/ICSCoverageRule'}
@@ -1809,8 +1825,25 @@ components:
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
-          description: Rules of the applied ruleset that match nothing or that an ALLOW shadows; omitted when there are none or the apply failed.
+          description: Rules of the installed ruleset that match nothing or that an ALLOW shadows; omitted when there are none.
       type: object
+    SchedulePlannerStatus:
+      type: object
+      required: [lastRefill, horizonEnd, state]
+      description: >-
+        The engine's schedule planner for the installed ruleset, present when it has scheduled rules. The
+        kernel's schedule time sets hold windows up to horizonEnd; the planner refills them when half of the
+        horizon has passed and after the wall clock steps.
+      properties:
+        lastRefill: {type: string, format: date-time, description: Start of the horizon the time sets hold.}
+        horizonEnd: {type: string, format: date-time, description: End of that horizon; beyond it a scheduled ALLOW stops matching and a scheduled DENY applies.}
+        lastError: {type: string, description: Error of the last refill when it failed; the next successful refill clears it.}
+        lastErrorAt: {type: string, format: date-time}
+        state:
+          type: string
+          enum: [ok, degraded]
+          description: Degraded while a refill is failing or the horizon ends within an hour.
+        reason: {type: string, description: Why the planner is degraded.}
     ICSCoverageRule:
       type: object
       required: [ruleId, protocol, mode, state]

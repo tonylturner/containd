@@ -21,7 +21,8 @@ type RuleCounters struct {
 }
 
 // ErrRuleCountersUnavailable reports that no applied ruleset can be read:
-// enforcement is off, nothing is applied yet, or the last apply failed.
+// enforcement is off or nothing is applied yet. A failed apply leaves the
+// installed ruleset, and its counters, in place.
 var ErrRuleCountersUnavailable = errors.New("rule counters unavailable")
 
 // RuleCounters reads the counters of the applied ruleset. It holds the
@@ -39,14 +40,8 @@ func (e *Engine) RuleCounters(ctx context.Context) (RuleCounters, error) {
 		return RuleCounters{}, fmt.Errorf("%w: nftables enforcement is not active", ErrRuleCountersUnavailable)
 	}
 	st := e.rulesetStatus.Load()
-	if st == nil {
-		return RuleCounters{}, fmt.Errorf("%w: no ruleset is applied", ErrRuleCountersUnavailable)
-	}
-	if st.Error != "" {
-		return RuleCounters{}, fmt.Errorf("%w: the last apply failed: %s", ErrRuleCountersUnavailable, st.Error)
-	}
 	snap := e.ruleSnap.Load()
-	if snap == nil {
+	if st == nil || st.AppliedAt.IsZero() || snap == nil {
 		return RuleCounters{}, fmt.Errorf("%w: no ruleset is applied", ErrRuleCountersUnavailable)
 	}
 	counters, err := reader.ReadCounters(ctx, table)

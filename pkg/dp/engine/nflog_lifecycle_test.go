@@ -110,10 +110,11 @@ func TestConcurrentReconfigureAndStartSerializeNFLogLifecycle(t *testing.T) {
 	firstBindEntered := make(chan struct{})
 	releaseFirstBind := make(chan struct{})
 	startNFLog = func(_ context.Context, _ uint16, sink capture.RuleHitSink, _ func(error)) (func(), error) {
-		store, ok := sink.(*events.Store)
+		hits, ok := sink.(nflogRuleHits)
 		if !ok {
 			return func() {}, errors.New("unexpected NFLOG sink type")
 		}
+		store := hits.e.eventStore
 
 		mu.Lock()
 		eventStores = append(eventStores, store)

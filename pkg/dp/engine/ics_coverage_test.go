@@ -92,8 +92,8 @@ func TestICSCoverageContradictorySnapshot(t *testing.T) {
 }
 
 // Applied coverage describes the rules in force. A failed apply leaves the
-// kernel ruleset and the engine snapshot unchanged, so the status carries
-// the failure (error and the failed snapshot's version) while the coverage
+// kernel ruleset and the engine snapshot unchanged, so the status adds the
+// failure (error and the failed snapshot's version) while the coverage
 // still describes the previous rules; with no earlier success it is empty.
 func TestICSCoverageAfterFailedApply(t *testing.T) {
 	applier := &recordingApplier{err: errors.New("nft apply failed")}
@@ -107,7 +107,7 @@ func TestICSCoverageAfterFailedApply(t *testing.T) {
 	if err := e.ApplyRules(context.Background(), first); err == nil {
 		t.Fatal("apply error swallowed")
 	}
-	if st := e.RulesetStatus(); st.Error == "" || st.SnapshotVersion != "v1" || st.ICSCoverage != nil {
+	if st := e.RulesetStatus(); st.Error == "" || st.FailedSnapshotVersion != "v1" || st.ICSCoverage != nil {
 		t.Fatalf("first failed apply: status %+v, want the error and no coverage", st)
 	}
 
@@ -125,7 +125,7 @@ func TestICSCoverageAfterFailedApply(t *testing.T) {
 		t.Fatal("apply error swallowed")
 	}
 	st := e.RulesetStatus()
-	if st.Error == "" || st.SnapshotVersion != "v3" {
+	if st.Error == "" || st.FailedSnapshotVersion != "v3" || st.SnapshotVersion != "v2" {
 		t.Fatalf("status after failed apply = %+v, want the failure", st)
 	}
 	if len(st.ICSCoverage) != 1 || st.ICSCoverage[0].RuleID != "running" || st.ICSCoverage[0].State != coverage.Monitoring {

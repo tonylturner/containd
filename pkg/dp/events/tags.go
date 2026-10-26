@@ -2,6 +2,8 @@
 
 package events
 
+import "sort"
+
 // KeyTags is the event attribute that carries a flow's TAG labels.
 const KeyTags = "tags"
 
@@ -17,5 +19,27 @@ func WithTags(attrs map[string]any, tags []string) map[string]any {
 		out[k] = v
 	}
 	out[KeyTags] = append([]string(nil), tags...)
+	return out
+}
+
+// labelSet collects the TAG labels of a flow's events.
+type labelSet map[string]struct{}
+
+func (s labelSet) add(labels []string) {
+	for _, l := range labels {
+		s[l] = struct{}{}
+	}
+}
+
+// sorted returns the labels in order, or nil when there are none.
+func (s labelSet) sorted() []string {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s))
+	for l := range s {
+		out = append(out, l)
+	}
+	sort.Strings(out)
 	return out
 }

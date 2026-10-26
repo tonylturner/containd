@@ -43,3 +43,19 @@ func TestTelemetryBankKeepsResets(t *testing.T) {
 		t.Fatalf("RESET not retained: %+v", s.denies.events)
 	}
 }
+
+// A flow summary lists the labels its events carry; a flow whose events
+// carry none has no tags.
+func TestFlowSummaryTags(t *testing.T) {
+	s := NewStore(8)
+	s.Append(Event{FlowID: "f1", Kind: "firewall.rule.hit", Attributes: WithTags(map[string]any{"action": "TAG"}, []string{"plc", "any"})})
+	s.Append(Event{FlowID: "f1", Kind: "firewall.rule.hit", Attributes: WithTags(nil, []string{"any", "ops"})})
+	s.Append(Event{FlowID: "f2", Kind: "firewall.rule.hit", Attributes: map[string]any{"action": "DENY"}})
+	got := map[string][]string{}
+	for _, f := range s.Flows(0) {
+		got[f.FlowID] = f.Tags
+	}
+	if want := map[string][]string{"f1": {"any", "ops", "plc"}, "f2": nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("flow tags = %v, want %v", got, want)
+	}
+}

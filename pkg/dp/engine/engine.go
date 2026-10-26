@@ -84,20 +84,25 @@ type Engine struct {
 	domains               *domainExclusions
 }
 
-// RulesetStatus captures the last compiled/applied ruleset and any error.
-// SnapshotVersion is the version of the snapshot the last apply attempted,
-// whether it succeeded or failed. Warnings lists the applied ruleset's rules
-// that match nothing (enforce.RuleWarnings); a failed apply carries none.
-// ICSCoverage is the live coverage of the ICS rules in force: after a failed
-// apply those of the previous snapshot (none before the first success),
-// never the failed one; omitted when there are none.
+// RulesetStatus describes the installed ruleset: its compiled text,
+// snapshot version, apply time and warnings (enforce.RuleWarnings), which a
+// failed apply leaves in place, as it leaves the ruleset installed. Error,
+// FailedSnapshotVersion and FailedAt describe the last apply when it
+// failed; the next successful apply clears them. ICSCoverage is the live
+// coverage of the ICS rules in force (none before the first success, never
+// a failed snapshot's); omitted when there are none. SchedulePlanner is the
+// schedule planner's state for the installed ruleset; omitted when it has
+// no scheduled rule.
 type RulesetStatus struct {
-	Ruleset         string                `json:"ruleset"`
-	SnapshotVersion string                `json:"snapshotVersion,omitempty"`
-	AppliedAt       time.Time             `json:"appliedAt"`
-	Error           string                `json:"error,omitempty"`
-	Warnings        []enforce.RuleWarning `json:"warnings,omitempty"`
-	ICSCoverage     []coverage.Rule       `json:"icsCoverage,omitempty"`
+	Ruleset               string                `json:"ruleset"`
+	SnapshotVersion       string                `json:"snapshotVersion,omitempty"`
+	AppliedAt             time.Time             `json:"appliedAt"`
+	Error                 string                `json:"error,omitempty"`
+	FailedSnapshotVersion string                `json:"failedSnapshotVersion,omitempty"`
+	FailedAt              *time.Time            `json:"failedAt,omitempty"`
+	Warnings              []enforce.RuleWarning `json:"warnings,omitempty"`
+	ICSCoverage           []coverage.Rule       `json:"icsCoverage,omitempty"`
+	SchedulePlanner       *SchedulePlan         `json:"schedulePlanner,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -376,7 +381,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(runCtx, e.nflogGroup, e.eventStore, func(perr error) {
+		stop, err := startNFLog(runCtx, e.nflogGroup, nflogRuleHits{e}, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
 		})
@@ -455,14 +460,13 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	}
 	var compiled string
 	var warnings []enforce.RuleWarning
-	var applyErr error
 
 	if e.compiler != nil {
 		start := time.Now()
-		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
-		if applyErr != nil {
-			e.setRulesetStatus(snap.Version, compiled, nil, applyErr)
-			return applyErr
+		var err error
+		if compiled, err = e.gate.apply(ctx, e.compiler, e.applier, &snap); err != nil {
+			e.recordApplyFailure(snap.Version, err)
+			return err
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
 		warnings = e.compiler.RuleWarnings(&snap)
@@ -471,7 +475,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.setRulesetStatus(snap.Version, compiled, warnings, nil)
+	e.rulesetStatus.Store(&RulesetStatus{Ruleset: compiled, SnapshotVersion: snap.Version, AppliedAt: time.Now().UTC(), Warnings: warnings})
 	e.resetExclusionHits()
 	return nil
 }

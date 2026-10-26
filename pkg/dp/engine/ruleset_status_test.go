@@ -33,11 +33,11 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 	}
 
 	applier.err = errors.New("nft apply failed")
-	if err := e.ApplyRules(context.Background(), snap); err == nil {
+	if err := e.ApplyRules(context.Background(), rules.Snapshot{Default: rules.ActionDeny}); err == nil {
 		t.Fatal("apply error swallowed")
 	}
-	if st := e.RulesetStatus(); st.Error == "" || st.Warnings != nil {
-		t.Fatalf("failed apply status = %+v, want an error and no warnings", st)
+	if st := e.RulesetStatus(); st.Error == "" || !reflect.DeepEqual(st.Warnings, want) {
+		t.Fatalf("failed apply status = %+v, want the error and the installed ruleset's warnings", st)
 	}
 
 	disabled, err := New(Config{})
@@ -52,24 +52,47 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 	}
 }
 
-// The status names the snapshot each apply attempted, applied or failed.
-func TestRulesetStatusRecordsSnapshotVersion(t *testing.T) {
+// A failed apply leaves the installed ruleset in place, and the status
+// keeps describing it, with the failed snapshot and its error added until
+// the next successful apply.
+func TestRulesetStatusKeepsInstalledRevisionOnFailedApply(t *testing.T) {
 	applier := &recordingApplier{}
 	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ApplyRules(context.Background(), rules.Snapshot{Version: "v1", Default: rules.ActionDeny}); err != nil {
-		t.Fatal(err)
-	}
-	if st := e.RulesetStatus(); st.SnapshotVersion != "v1" || st.Error != "" {
-		t.Fatalf("status after apply = %+v", st)
-	}
+	ctx := context.Background()
 	applier.err = errors.New("nft apply failed")
-	if err := e.ApplyRules(context.Background(), rules.Snapshot{Version: "v2", Default: rules.ActionDeny}); err == nil {
+	if err := e.ApplyRules(ctx, rules.Snapshot{Version: "v0", Default: rules.ActionDeny}); err == nil {
 		t.Fatal("apply error swallowed")
 	}
-	if st := e.RulesetStatus(); st.SnapshotVersion != "v2" || st.Error == "" {
-		t.Fatalf("status after failed apply = %+v, want v2 with its error", st)
+	if st := e.RulesetStatus(); st.SnapshotVersion != "" || !st.AppliedAt.IsZero() || st.Ruleset != "" || st.FailedSnapshotVersion != "v0" || st.FailedAt == nil || st.Error == "" {
+		t.Fatalf("status of a failed first apply = %+v, want nothing installed", st)
+	}
+	applier.err = nil
+	if err := e.ApplyRules(ctx, rules.Snapshot{Version: "v1", Default: rules.ActionDeny}); err != nil {
+		t.Fatal(err)
+	}
+	installed := e.RulesetStatus()
+	if installed.SnapshotVersion != "v1" || installed.Error != "" || installed.FailedSnapshotVersion != "" || installed.FailedAt != nil || installed.Ruleset == "" {
+		t.Fatalf("status after apply = %+v", installed)
+	}
+	applier.err = errors.New("nft apply failed")
+	if err := e.ApplyRules(ctx, rules.Snapshot{Version: "v2", Default: rules.ActionAllow}); err == nil {
+		t.Fatal("apply error swallowed")
+	}
+	st := e.RulesetStatus()
+	if st.SnapshotVersion != "v1" || !st.AppliedAt.Equal(installed.AppliedAt) || st.Ruleset != installed.Ruleset {
+		t.Fatalf("status after failed apply = %+v, want installed v1 %+v", st, installed)
+	}
+	if st.FailedSnapshotVersion != "v2" || st.FailedAt == nil || st.Error != "nft apply failed" {
+		t.Fatalf("failed apply not recorded: %+v", st)
+	}
+	applier.err = nil
+	if err := e.ApplyRules(ctx, rules.Snapshot{Version: "v3", Default: rules.ActionDeny}); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.RulesetStatus(); st.SnapshotVersion != "v3" || st.Error != "" || st.FailedSnapshotVersion != "" || st.FailedAt != nil {
+		t.Fatalf("status after the next apply = %+v", st)
 	}
 }

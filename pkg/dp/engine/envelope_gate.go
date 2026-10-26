@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -48,6 +49,9 @@ type envelopeGate struct {
 	planned time.Time
 	// clock plans schedule horizons; nil is time.Now.
 	clock func() time.Time
+	// plan is the planner's state for the installed ruleset; nil when that
+	// has no scheduled rule. Written under mu, read without it.
+	plan atomic.Pointer[SchedulePlan]
 }
 
 // now is the time schedule horizons start from.
@@ -107,6 +111,7 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	}
 	g.comp, g.applier = comp, applier
 	g.snap, g.planned = snap, comp.ScheduleFrom
+	g.plan.Store(newSchedulePlan(snap, comp))
 	g.installed = comp.SteersIEC104(snap)
 	g.open = g.installed && open
 	if g.ok != nil {
@@ -129,6 +134,7 @@ func (g *envelopeGate) release() error {
 		return err
 	}
 	g.comp, g.applier, g.snap = nil, nil, nil
+	g.plan.Store(nil)
 	g.installed, g.open = false, false
 	return nil
 }

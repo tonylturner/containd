@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/compile"
@@ -16,18 +19,26 @@ import (
 // input. The compiler supplies established traffic, loopback and the env-backed
 // reserved INPUT allow; every new forwarded connection is dropped. Without a
 // reservation the stored management listener access is the only management
-// path, so recovery keeps exactly that access and nothing else from stored.
+// path, so recovery keeps exactly that access and nothing else from stored:
+// the stored listeners and the appliance default listeners, which management
+// serves instead when the stored ones cannot be bound, on the interfaces that
+// stored access grants management.
 func RecoverySnapshot(stored *config.Config, r *mgmtpath.Reservation) rules.Snapshot {
 	snap := rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny}
 	if r == nil && stored != nil {
 		snap.LocalInput = compile.ManagementLocalInput(stored)
+		for _, rule := range compile.ManagementLocalInput(WithApplianceListeners(stored, nil)) {
+			if !slices.ContainsFunc(snap.LocalInput, func(have rules.LocalServiceRule) bool { return reflect.DeepEqual(have, rule) }) {
+				snap.LocalInput = append(snap.LocalInput, rule)
+			}
+		}
 	}
 	return snap
 }
 
 // ApplyBootConfig shares the promotion/replay lock so a delayed recovery apply
 // can never overwrite a newer safe commit, rollback or reset.
-func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) (warnings []string, applyErr error) {
+func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	runningConfigApplyMu.Lock()
 	defer runningConfigApplyMu.Unlock()
 	err := config.CheckManagementBootFault(ctx, store)
@@ -37,6 +48,33 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	if !errors.Is(err, config.ErrManagementBootFault) {
 		return nil, err
 	}
+	return applyRecoveryLocked(ctx, store, engine)
+}
+
+// reenterRecoveryLocked completes a running-state transition that failed
+// at runtime from management recovery. The store restored the refused
+// configuration without reapplying it (config.ApplyError.Recovery); the
+// engine gets the recovery ruleset again, and its outcome is the
+// transition's reapply result; its warnings are returned. Callers hold
+// runningConfigApplyMu.
+func reenterRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient, transitionErr error) []string {
+	var failure *config.ApplyError
+	if !errors.As(transitionErr, &failure) || !failure.Recovery {
+		return nil
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	warnings, err := applyRecoveryLocked(recoveryCtx, store, engine)
+	failure.ReapplyError = err
+	return warnings
+}
+
+// applyRecoveryLocked applies management recovery to the engine: the
+// fail-closed dataplane and RecoverySnapshot, then, without a reservation,
+// the stored addresses of the interfaces it admits management on
+// (recoveryAddresses). A failure to address them is a warning: the
+// recovery ruleset is in force. Callers hold runningConfigApplyMu.
+func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient) (warnings []string, applyErr error) {
 	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if engine == nil {
 		return nil, errors.New("recovery engine unavailable")
@@ -45,6 +83,7 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	var stored *config.Config
 	if r == nil {
 		// Never drop transit with an INPUT chain that also drops management.
+		var err error
 		if stored, err = store.Load(ctx); err != nil {
 			return nil, fmt.Errorf("recovery management access: %w", err)
 		}
@@ -58,10 +97,16 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	}
 	// Unlike normal best-effort infrastructure apply, a failure here must not
 	// be downgraded to a warning or reported as successful recovery.
-	if err := engine.ApplyRules(ctx, RecoverySnapshot(stored, r)); err != nil {
+	snap := RecoverySnapshot(stored, r)
+	if err := engine.ApplyRules(ctx, snap); err != nil {
 		return nil, fmt.Errorf("recovery ruleset: %w", err)
 	}
-	return nil, nil
+	if addressed := recoveryAddresses(stored, snap.LocalInput); len(addressed) > 0 {
+		if err := engine.ConfigureInterfaces(ctx, addressed); err != nil {
+			warnings = append(warnings, fmt.Sprintf("recovery interface addresses: %v", err))
+		}
+	}
+	return warnings, nil
 }
 
 // Recovery states. Applied, pending and failed derive from what the engine
@@ -79,19 +124,21 @@ const (
 // the guard's health. A restarted/unreachable engine must never be advertised
 // as fail-closed. The engine compiles with authority management cannot see
 // (its engine API path, its reservation), so recovery is recognized by the
-// snapshot version the engine applied, not by recompiling the ruleset here.
+// snapshot version of the ruleset the engine has installed, not by
+// recompiling the ruleset here. A failed apply leaves the installed ruleset
+// in force, so installed recovery stays applied whatever failed after it.
 // detail may carry engine diagnostics and is for authenticated views only.
 func observeManagementRecovery(ruleset rulesetObservation) (state, detail string) {
 	status := ruleset.status
 	switch {
 	case ruleset.err != nil:
 		return recoveryPending, ruleset.err.Error()
+	case rulesetInstalled(status) && status.SnapshotVersion == config.ManagementRecoveryVersion:
+		return recoveryApplied, "new transit dropped"
 	case status.Error != "":
 		return recoveryFailed, status.Error
-	case status.AppliedAt.IsZero() || status.Ruleset == "" || status.SnapshotVersion != config.ManagementRecoveryVersion:
-		return recoveryPending, "ruleset not applied"
 	default:
-		return recoveryApplied, "new transit dropped"
+		return recoveryPending, "ruleset not applied"
 	}
 }
 
