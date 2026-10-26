@@ -422,6 +422,8 @@ export type TLSInfo = {
   servedKeyFile?: string;
   servedCertSubject?: string;
   servedCertNotAfter?: string;
+  servedCertDnsNames?: string[];
+  servedCertIps?: string[];
 };
 
 /** Result of a management certificate upload: status "updated" when the

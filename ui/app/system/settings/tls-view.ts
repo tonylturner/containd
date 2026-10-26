@@ -20,6 +20,16 @@ export function formatTLSTime(value: string | undefined): string {
   return Number.isNaN(at.getTime()) ? value : at.toLocaleString();
 }
 
+/**
+ * A certificate's DNS and IP subject alternative names; "none" for a
+ * certificate without any, "—" when no certificate was read (no subject).
+ */
+function certSANs(dnsNames: string[] | undefined, ips: string[] | undefined, subject: string | undefined): string {
+  const names = [...(dnsNames ?? []), ...(ips ?? [])];
+  if (names.length > 0) return names.join(", ");
+  return subject ? "none" : "—";
+}
+
 /** The bound listener, plus its next-start row when the API says the next start binds another one. */
 function listenerRows(label: string, bound: string | undefined, changes: boolean, enabled: boolean, addr: string | undefined): TLSRow[] {
   const rows = [{ label, value: bound || "not bound" }];
@@ -41,6 +51,7 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
       { label: "Cert file", value: info.servedCertFile || "—" },
       { label: "Key file", value: info.servedKeyFile || "—" },
       { label: "Cert subject", value: info.servedCertSubject || "—" },
+      { label: "Cert SANs", value: certSANs(info.servedCertDnsNames, info.servedCertIps, info.servedCertSubject) },
       { label: "Cert expires", value: formatTime(info.servedCertNotAfter) },
     );
   } else {
@@ -58,6 +69,7 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
       { label: "Cert file (next start)", value: info.certFile || "—" },
       { label: "Key file (next start)", value: info.keyFile || "—" },
       { label: "Cert subject (next start)", value: info.certSubject || "—" },
+      { label: "Cert SANs (next start)", value: certSANs(info.certDnsNames, info.certIps, info.certSubject) },
       { label: "Cert expires (next start)", value: formatTime(info.certNotAfter) },
     );
   }

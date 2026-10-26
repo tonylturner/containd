@@ -1616,12 +1616,14 @@ components:
         certSubject: {type: string}
         certIssuer: {type: string}
         certNotAfter: {type: string}
-        certDnsNames: {type: array, items: {type: string}}
-        certIps: {type: array, items: {type: string}}
+        certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
+        certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
         servedCertNotAfter: {type: string, description: 'Expiry of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
+        servedCertDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the bound HTTPS listener serves; absent when none is bound or it has none'}
+        servedCertIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the bound HTTPS listener serves; absent when none is bound or it has none'}
     ConfigBackupInfo:
       type: object
       properties:
