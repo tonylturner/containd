@@ -63,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Syslog forwarders also send audit records, oldest first, as JSON
+  (`"kind":"audit"`) or RFC 5424 (MSGID `audit`). Each forwarder keeps a
+  cursor in the audit database, so records written during a collector outage
+  or before a restart are delivered later; a new forwarder starts at the
+  newest record. `GET /api/v1/services/status` reports the audit backlog and
+  last error per forwarder under `syslog.audit`.
+- The ruleset status reports schedule planner health (last refill, horizon
+  end, last error). A failing refill, or a schedule horizon within an hour of
+  its end, makes enforcement health `degraded`.
+- Kernel-logged `firewall.rule.hit` events carry TAG labels and a
+  per-direction `flowId`, and `/api/v1/flows` items carry `tags`.
 - Web UI: RESET, RATE_LIMIT and TAG rule actions with rate limit and tag
   fields; rule identities and schedules; an Identity Bindings page; per-rule hit
   counters; connection tags on Sessions; unbound-identity and shadowed rule
@@ -117,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A failed ruleset apply no longer hides the ruleset still in force. The
+  engine ruleset status keeps the installed revision and adds the failed
+  snapshot and its error, rule counters keep working, and health reports
+  `enforcement.state: degraded`.
 - The Secure by Design page maps all seven CISA pledge goals again and credits
   the default design. Operator steps are deployment guidance. Its one known gap:
   SSH accepts the bootstrap password before the forced first-login change.
@@ -181,6 +196,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A firewall rule naming a zone with no interfaces no longer makes nftables
+  reject the whole ruleset; the rule matches nothing and the ruleset warnings
+  name it (`zone`, with `zones`).
+- IPv6 source and destination CIDRs in firewall rules are written as `ip6`
+  matches, one line per address family for mixed rules, instead of an invalid
+  `ip` match; identity sets and `RATE_LIMIT` meters follow the rule's
+  families. A rule whose sources and destinations share no family is reported
+  (`addressFamily`).
+- `RATE_LIMIT` meters replies too, each direction of a flow in its own bucket.
+- When an identity binding is removed or a schedule window ends, replies and
+  server packets of ICS connections queued to the engine under a conditional
+  `ALLOW` stop too.
+- Interface names are validated before they reach nftables: an interface's
+  device, the name of an interface without a device, and DHCP listen devices
+  must be valid Linux interface names (1–15 bytes, no `/`, `:`, whitespace,
+  control characters, `"`, `*` or `\`, not `.` or `..`).
+- A commit, rollback or factory reset that fails during management recovery
+  returns to recovery instead of reapplying the refused configuration.
+- Without a reservation, stored management listeners that cannot be bound no
+  longer stop management: it serves the default listeners in management
+  recovery.
+- Management recovery without a reservation restores the stored static
+  addresses of management interfaces.
+- Syslog forwarding no longer stops after a configuration commit through the
+  API, and it starts at boot without needing another apply.
 - Disabling an ICS filter removes it from the rule. Before, the UI sent an
   empty patch and reported success while the filter stayed. Clearing a rule's
   description, logging, zones or address lists in the editor now clears them.
