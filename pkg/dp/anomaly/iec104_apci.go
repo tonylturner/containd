@@ -36,8 +36,9 @@ type IEC104APCIFinding struct {
 // for use. Storage is constant: two sequence windows and two TESTFR timers.
 // The owner serializes calls and discards the state when observation ends.
 type IEC104APCI struct {
-	started bool
-	dirs    [2]iec104APCIDirection
+	started         bool
+	stoppedReported bool // re-armed only by STARTDT con
+	dirs            [2]iec104APCIDirection
 }
 
 type iec104APCIDirection struct {
@@ -61,6 +62,7 @@ func (s *IEC104APCI) Observe(f IEC104APCIFrame, now time.Time) []IEC104APCIFindi
 		switch f.UFunction {
 		case "startdt_con":
 			s.started = true
+			s.stoppedReported = false
 		case "stopdt_con":
 			s.started = false
 		case "testfr_act":
@@ -73,7 +75,8 @@ func (s *IEC104APCI) Observe(f IEC104APCIFrame, now time.Time) []IEC104APCIFindi
 		}
 	case "I", "S":
 		if f.Format == "I" {
-			if !s.started {
+			if !s.started && !s.stoppedReported {
+				s.stoppedReported = true
 				out = append(out, IEC104APCIFinding{
 					Type: IEC104DataWhileStopped, Direction: f.Direction,
 					Message: "IEC 104 I-frame before STARTDT confirmation or after STOPDT confirmation",

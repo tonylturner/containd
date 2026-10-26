@@ -74,6 +74,51 @@ func TestIEC104APCISequences(t *testing.T) {
 	}
 }
 
+func TestIEC104APCIStoppedAlertOncePerPeriod(t *testing.T) {
+	var s IEC104APCI
+	now := time.Unix(1, 0)
+	alerts := 0
+	var ns uint16
+	send := func() {
+		t.Helper()
+		for _, f := range s.Observe(IEC104APCIFrame{Format: "I", Send: ns}, now) {
+			if f.Type != IEC104DataWhileStopped {
+				t.Fatalf("unexpected finding: %+v", f)
+			}
+			alerts++
+		}
+		ns++
+	}
+	u := func(fn string) {
+		t.Helper()
+		if got := s.Observe(IEC104APCIFrame{Direction: 1, Format: "U", UFunction: fn}, now); len(got) != 0 {
+			t.Fatal(got)
+		}
+	}
+	for range 100 {
+		send()
+	}
+	if alerts != 1 {
+		t.Fatalf("initial stopped period: alerts=%d, want 1", alerts)
+	}
+	// Neither repeated STOPDT confirmations nor STARTDT act re-arm it.
+	u("stopdt_con")
+	u("startdt_act")
+	send()
+	if alerts != 1 {
+		t.Fatalf("re-armed without STARTDT con: alerts=%d", alerts)
+	}
+	u("startdt_con")
+	send()
+	u("stopdt_con")
+	for range 100 {
+		send()
+	}
+	if alerts != 2 {
+		t.Fatalf("STOPDT -> STARTDT -> STOPDT: alerts=%d, want 2", alerts)
+	}
+}
+
 func TestIEC104APCIWrap(t *testing.T) {
 	s := IEC104APCI{started: true}
 	now := time.Unix(1, 0)
