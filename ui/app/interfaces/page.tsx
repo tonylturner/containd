@@ -13,6 +13,7 @@ import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { chipClass, InterfaceRow } from "./interface-row";
+import { BootFaultStatus } from "./boot-fault-notice";
 import type { ManagementReservation } from "../../lib/api-console";
 import { runtimeFor } from "../../lib/interface-addresses";
 
@@ -287,12 +288,7 @@ export default function InterfacesPage() {
             <p className="mt-1">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
           )}
           {reservation.bootFault && (
-            <div role="status" className="mt-2">
-              <p className="font-semibold">Configuration apply paused</p>
-              <p>{reservation.recovery || "recovery pending: ruleset not verified"}</p>
-              <p>{reservation.bootFault}</p>
-              <p>Reserved management remains available. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.</p>
-            </div>
+            <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved className="mt-2" />
           )}
           {!!reservation.listenerFaults?.length && (
             <div role="status" className="mt-2">
@@ -304,6 +300,11 @@ export default function InterfacesPage() {
             </div>
           )}
           {reservation.rollbackFault && <p className="mt-1">{reservation.rollbackFault}</p>}
+        </aside>
+      )}
+      {reservation && !reservation.active && reservation.bootFault && (
+        <aside aria-label="Boot fault" className="mb-4 text-sm">
+          <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved={false} />
         </aside>
       )}
       {!isAdmin() && (

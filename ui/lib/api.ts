@@ -13,6 +13,7 @@ export type HealthResponse = {
   time?: string;
   iec104Enforcement?: IEC104EnforcementHealth;
   icsEnforcement?: ICSEnforcementHealth;
+  managementRecovery?: ManagementRecoveryHealth;
 };
 
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
@@ -78,6 +79,7 @@ export type {
   ICSEnforcementHealth,
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
+export type { ManagementRecoveryHealth } from "./api-console";
 export type { IEC104Inventory } from "./api-inventory";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
@@ -96,6 +98,10 @@ import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
 import { fetchWithSession } from "./api-core";
+import {
+  normalizeManagementRecovery,
+  type ManagementRecoveryHealth,
+} from "./api-console";
 import type { FirewallRule } from "./api-firewall";
 import {
   normalizeICSEnforcementHealth,
@@ -937,7 +943,11 @@ export async function fetchHealth(
     );
     if (!res.ok) return null;
     const body = (await res.json()) as HealthResponse;
-    return { ...body, icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement) };
+    return {
+      ...body,
+      icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement),
+      managementRecovery: normalizeManagementRecovery(body?.managementRecovery),
+    };
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     return null;

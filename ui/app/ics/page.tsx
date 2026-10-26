@@ -20,6 +20,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
 import { RulePrecedenceNote } from "../firewall/firewall-rule-table";
+import { ManagementRecoveryBanner } from "../../components/ManagementRecoveryBanner";
 import {
   formatICSMode,
   PROTOCOL_KEYS,
@@ -115,6 +116,7 @@ export default function ICSPolicyPage() {
         </button>
       }
     >
+      <ManagementRecoveryBanner recovery={health?.managementRecovery} />
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}

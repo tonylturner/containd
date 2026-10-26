@@ -61,9 +61,3 @@ export function IEC104HealthIndicator({ health }: { health: IEC104EnforcementHea
   const view = iec104HealthIndicator(health);
   return <StatusIndicator status={view.status} label={view.label} sublabel={view.sublabel} />;
 }
-
-/** Shows the runtime IEC 104 enforcement state. */
-export function IEC104HealthStatus() {
-  const health = useHealth();
-  return <IEC104HealthIndicator health={health?.iec104Enforcement} />;
-}
