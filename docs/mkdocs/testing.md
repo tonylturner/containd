@@ -83,11 +83,11 @@ This route smoke is intentionally shallow:
 
 ### UI Build And Documentation
 
-For a production static export, `npm run build` also runs the docs prebuild.
-To include generated documentation in the export, install Python and the
-packages in `docs/requirements-mkdocs.txt`, and put `mkdocs` on `PATH` before
-building. The prebuild can reuse existing generated docs when MkDocs is
-unavailable; it does not generate missing docs without that toolchain.
+For a production static export, `npm run build` also runs the docs prebuild,
+which regenerates the embedded documentation on every build. Install Python and
+the packages in `docs/requirements-mkdocs.txt` and put `mkdocs` on `PATH`; the
+build fails without it. `CONTAIND_SKIP_DOCS=1` skips the docs only for builds
+that supply them separately, such as `build/Dockerfile.mgmt`.
 
 ## Forwarding Smoke
 
