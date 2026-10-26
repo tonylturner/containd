@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -129,6 +130,30 @@ func TestManagementListenersDisjointSSHBind(t *testing.T) {
 		cfg.System.SSH.ListenAddr = tc.ssh
 		if err := ValidateManagementListeners(cfg.System, r); err != nil {
 			t.Fatalf("disjoint SSH socket rejected: %v", err)
+		}
+	}
+}
+
+// The validator resolves listeners as management binds them: a blank
+// address is unset and binds the default, so a reservation on a default
+// port conflicts with it. The environment never takes part.
+func TestManagementListenersResolveBlankToDefault(t *testing.T) {
+	t.Setenv(EnvManagementHTTPSAddr, "127.0.0.1:9443")
+	t.Setenv(EnvSSHAddr, "127.0.0.1:9222")
+	for _, tc := range []struct {
+		port  uint16
+		field string
+		edit  func(*Config)
+	}{
+		{8443, "httpsListenAddr", func(c *Config) { c.System.Mgmt.HTTPSListenAddr = " " }},
+		{2222, "ssh.listenAddr", func(c *Config) { c.System.SSH.ListenAddr = " " }},
+	} {
+		cfg, r := reservationFixture()
+		r.Port = tc.port
+		cfg.System.Mgmt.HTTPListenAddr = fmt.Sprintf(":%d", tc.port)
+		tc.edit(cfg)
+		if err := ValidateManagementListeners(cfg.System, r); err == nil || !strings.Contains(err.Error(), tc.field) {
+			t.Errorf("port %d: err=%v, want %s conflict", tc.port, err, tc.field)
 		}
 	}
 }

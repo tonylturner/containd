@@ -230,13 +230,15 @@ func managementPort(p, d int) int {
 }
 
 // ValidateManagementListeners checks both HTTP aliases even if env precedence
-// would hide an attempted change. Runtime startup also checks effective env binds.
+// would hide an attempted change. It resolves the listeners without the
+// environment; runtime startup also checks effective env binds.
 func ValidateManagementListeners(s SystemConfig, r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
 	m := s.Mgmt
-	if m.EnableHTTP != nil && !*m.EnableHTTP {
+	l := ResolveManagementListeners(&Config{System: s}, noEnv)
+	if !l.HTTP.Enabled {
 		return managementConflict("system.mgmt.enableHTTP")
 	}
 	if m.RedirectHTTPToHTTPS != nil && *m.RedirectHTTPToHTTPS {
@@ -250,19 +252,21 @@ func ValidateManagementListeners(s SystemConfig, r *mgmtpath.Reservation) error 
 		}
 	}
 	if m.ListenAddr == "" && m.HTTPListenAddr == "" {
-		if err := r.ValidateListen(":8080"); err != nil {
+		if err := r.ValidateListen(l.HTTP.Addr); err != nil {
 			return err
 		}
 	}
-	httpAddr := managementDefault(m.HTTPListenAddr, managementDefault(m.ListenAddr, ":8080"))
-	if (m.EnableHTTPS == nil || *m.EnableHTTPS) && ManagementListenerConflictsHTTP(managementDefault(m.HTTPSListenAddr, ":8443"), httpAddr, true, r) {
+	if l.HTTPS.Enabled && ManagementListenerConflictsHTTP(l.HTTPS.Addr, l.HTTP.Addr, true, r) {
 		return managementConflict("system.mgmt.httpsListenAddr")
 	}
-	if ManagementListenerConflictsHTTP(managementDefault(s.SSH.ListenAddr, ":2222"), httpAddr, false, r) {
+	if ManagementListenerConflictsHTTP(l.SSH.Addr, l.HTTP.Addr, false, r) {
 		return managementConflict("system.ssh.listenAddr")
 	}
 	return nil
 }
+
+// noEnv is an environment that sets no listener variable.
+func noEnv(string) string { return "" }
 
 // ManagementListenerConflictsHTTP also protects the HTTP socket, not just its
 // reserved destination IP. A wildcard HTTP bind claims every local IPv4 address;
@@ -291,12 +295,6 @@ func ManagementListenerConflictsHTTP(addr, httpAddr string, withLoopback bool, r
 	a, ae := netip.ParseAddr(host)
 	ipv4 := ae != nil || a.Unmap().Is4()
 	return httpHost == "" || httpHost == "0.0.0.0" && ipv4 || ae == nil && a.Unmap() == netip.MustParseAddr("127.0.0.1")
-}
-func managementDefault(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
 }
 
 // ManagementListenerOverlaps is also used for environment-resolved listeners.

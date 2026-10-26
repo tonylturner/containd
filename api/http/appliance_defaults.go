@@ -31,15 +31,15 @@ func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtp
 	def := config.DefaultConfig()
 	config.ApplyBootstrapEnvDefaults(def)
 	def.System.Hostname = "containd"
-	def.System.Mgmt.ListenAddr = ":8080"
-	def.System.Mgmt.HTTPListenAddr = ":8080"
-	def.System.Mgmt.HTTPSListenAddr = ":8443"
+	def.System.Mgmt.ListenAddr = config.DefaultManagementHTTPAddr
+	def.System.Mgmt.HTTPListenAddr = config.DefaultManagementHTTPAddr
+	def.System.Mgmt.HTTPSListenAddr = config.DefaultManagementHTTPSAddr
 	t := true
 	def.System.Mgmt.EnableHTTP = &t
 	def.System.Mgmt.EnableHTTPS = &t
 	def.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
 	def.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
-	def.System.SSH.ListenAddr = ":2222"
+	def.System.SSH.ListenAddr = config.DefaultSSHAddr
 	def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 	if r != nil {
 		// Enforcement is part of the reservation substrate, not a student
