@@ -296,7 +296,7 @@ func (m *DNSManager) Status() map[string]any {
 		"enabled":              m.lastCfg.Enabled,
 		"listen_port":          firstNonZero(m.lastCfg.ListenPort, 53),
 		"configured_upstreams": len(m.lastCfg.UpstreamServers),
-		"last_render":          m.lastRender.Format(time.RFC3339Nano),
+		"last_render":          formatMaybe(m.lastRender),
 		"last_error":           m.lastError,
 		"installed":            m.UnboundPath != "",
 		"binary_path":          m.UnboundPath,

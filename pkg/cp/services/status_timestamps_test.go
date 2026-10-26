@@ -20,16 +20,22 @@ func TestStatusTimestampsOmitZeroTime(t *testing.T) {
 	ntp := NewNTPManager(dir)
 	proxy := NewProxyManager(ProxyOptions{BaseDir: dir})
 	dhcp := NewDHCPManager(dir)
+	vpn := NewVPNManager(dir)
+	dns := NewDNSManager(dir)
 
 	statuses := map[string]func() map[string]any{
 		"ntp":   ntp.Status,
 		"proxy": proxy.Status,
 		"dhcp":  dhcp.Status,
+		"vpn":   vpn.Status,
+		"dns":   dns.Status,
 	}
 	keys := map[string][]string{
 		"ntp":   {"last_render", "last_start", "last_stop"},
 		"proxy": {"last_render", "envoy_last_start", "nginx_last_start", "envoy_last_stop", "nginx_last_stop"},
 		"dhcp":  {"last_render"},
+		"vpn":   {"last_render"},
+		"dns":   {"last_render"},
 	}
 	for svc, status := range statuses {
 		got := status()
@@ -45,6 +51,8 @@ func TestStatusTimestampsOmitZeroTime(t *testing.T) {
 	proxy.lastEnvoyStart, proxy.lastNginxStart = when, when
 	proxy.lastEnvoyStop, proxy.lastNginxStop = when, when
 	dhcp.lastRender = when
+	vpn.lastRender = when
+	dns.lastRender = when
 	for svc, status := range statuses {
 		got := status()
 		for _, key := range keys[svc] {
