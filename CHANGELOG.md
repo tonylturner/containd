@@ -278,6 +278,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Web UI: the zone form refuses names longer than 125 bytes or with leading
+  or trailing whitespace before saving, as the server does, and shows the
+  server's error if one comes back.
 - A rule whose ICS `addresses` list holds only unparseable values no longer
   matches every address; it matches none.
 - Management-reservation validation treats a blank HTTPS or SSH listen
