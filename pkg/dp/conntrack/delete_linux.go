@@ -41,8 +41,7 @@ func Delete(ctx context.Context, req DeleteRequest) error {
 	p = append(p, nlAttrU16(3, uint16(req.Dport))...)
 	tuple := append(nlAttr(1|0x8000, ip), nlAttr(2|0x8000, p)...)
 	payload := append([]byte{family, 0, 0, 0}, nlAttr(1|0x8000, tuple)...)
-	_, err = exchange(ctx, 0x102, payload, false)
-	return err
+	return exchange(ctx, 0x102, payload, false, nil)
 }
 func protoToNum(p string) (int, error) {
 	switch strings.ToLower(strings.TrimSpace(p)) {

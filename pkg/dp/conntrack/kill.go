@@ -69,13 +69,13 @@ type RevokeFunc func(context.Context, []Entry, string, time.Duration) error
 func Kill(ctx context.Context, req KillRequest, revoke RevokeFunc) (KillResult, error) {
 	return kill(ctx, req, revoke, List, Delete)
 }
-func kill(ctx context.Context, req KillRequest, revoke RevokeFunc, list func(int) ([]Entry, error), del func(context.Context, DeleteRequest) error) (KillResult, error) {
+func kill(ctx context.Context, req KillRequest, revoke RevokeFunc, list func(context.Context, int) ([]Entry, error), del func(context.Context, DeleteRequest) error) (KillResult, error) {
 	result := KillResult{Closure: "not signalled"}
 	if err := req.Validate(); err != nil {
 		return result, err
 	}
 	result.Scope = req.Scope
-	entries, err := list(0)
+	entries, err := list(ctx, 0)
 	if err != nil {
 		return result, err
 	}

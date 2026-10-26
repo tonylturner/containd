@@ -28,7 +28,7 @@ func TestKillSteps(t *testing.T) {
 				}
 				blocked = true
 				return nil
-			}, func(int) ([]Entry, error) { return entries, nil }, func(_ context.Context, r DeleteRequest) error {
+			}, func(context.Context, int) ([]Entry, error) { return entries, nil }, func(_ context.Context, r DeleteRequest) error {
 				if !blocked {
 					t.Fatal("deleted before revoking")
 				}
@@ -53,7 +53,7 @@ func TestKillSteps(t *testing.T) {
 func TestKillUnavailableAndEmpty(t *testing.T) {
 	req := KillRequest{DeleteRequest: DeleteRequest{Proto: "udp", Src: "2001:db8::1", Dst: "2001:db8::2", Sport: 1000, Dport: 502}}
 	for _, err := range []error{errors.New("permission denied"), nil} {
-		_, got := kill(context.Background(), req, func(context.Context, []Entry, string, time.Duration) error { t.Fatal("must not revoke"); return nil }, func(int) ([]Entry, error) { return []Entry{}, err }, nil)
+		_, got := kill(context.Background(), req, func(context.Context, []Entry, string, time.Duration) error { t.Fatal("must not revoke"); return nil }, func(context.Context, int) ([]Entry, error) { return []Entry{}, err }, nil)
 		if got == nil {
 			t.Fatal("expected reason")
 		}

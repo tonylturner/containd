@@ -8,6 +8,7 @@ package conntrack
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -29,21 +30,27 @@ func nlAttrU16(typ uint16, v uint16) []byte {
 	return nlAttr(typ, b)
 }
 
-// exchange drains the entire dump, even when the caller only wants its first
-// records. An interrupted dump is never presented as a verified empty table.
-func exchange(ctx context.Context, typ uint16, payload []byte, dump bool) ([][]byte, error) {
+var errUnexpectedSender = errors.New("ctnetlink unexpected sender")
+
+// exchange sends one ctnetlink request and passes each reply record to record
+// as it arrives. Records alias the receive buffer and are valid only during the
+// call. exchange stops when record reports stop, the dump completes or the
+// request is acknowledged; record may be nil for an acknowledged request. An
+// interrupted dump is never presented as a verified empty table. exchange is
+// the only owner of the socket and closes it on every return.
+func exchange(ctx context.Context, typ uint16, payload []byte, dump bool, record func([]byte) (stop bool, err error)) error {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.NETLINK_NETFILTER)
 	if err != nil {
-		return nil, fmt.Errorf("ctnetlink socket: %w", err)
+		return fmt.Errorf("ctnetlink socket: %w", err)
 	}
 	defer unix.Close(fd)
 	if err = unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return nil, fmt.Errorf("ctnetlink bind: %w", err)
+		return fmt.Errorf("ctnetlink bind: %w", err)
 	}
 	seq := uint32(time.Now().UnixNano())
 	msg := make([]byte, 16+len(payload))
@@ -57,67 +64,101 @@ func exchange(ctx context.Context, typ uint16, payload []byte, dump bool) ([][]b
 	binary.NativeEndian.PutUint32(msg[8:], seq)
 	copy(msg[16:], payload)
 	if err = unix.Sendto(fd, msg, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return nil, fmt.Errorf("ctnetlink send: %w", err)
+		return fmt.Errorf("ctnetlink send: %w", err)
 	}
-	out := [][]byte{}
 	buf := make([]byte, 1<<20)
 	for {
 		if err = ctx.Err(); err != nil {
-			return nil, fmt.Errorf("ctnetlink receive: %w", err)
+			return fmt.Errorf("ctnetlink receive: %w", err)
 		}
 		ready := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		if _, err = unix.Poll(ready, 50); err == unix.EINTR {
 			continue
 		} else if err != nil {
-			return nil, err
+			return err
 		}
 		n, _, recvFlags, from, err := unix.Recvmsg(fd, buf, nil, unix.MSG_DONTWAIT)
 		if err == unix.EAGAIN || err == unix.EINTR {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("ctnetlink receive: %w", err)
-		}
-		if recvFlags&unix.MSG_TRUNC != 0 {
-			return nil, fmt.Errorf("ctnetlink truncated datagram")
+			return fmt.Errorf("ctnetlink receive: %w", err)
 		}
 		sender, ok := from.(*unix.SockaddrNetlink)
-		if !ok || sender.Pid != 0 {
-			return nil, fmt.Errorf("ctnetlink unexpected sender")
+		if !ok {
+			return errUnexpectedSender
 		}
-		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+		records, done, err := parseDatagram(buf[:n], recvFlags, sender.Pid, seq, dump)
 		if err != nil {
-			return nil, fmt.Errorf("ctnetlink messages: %w", err)
+			return err
 		}
-		for _, m := range msgs {
-			if m.Header.Seq != seq {
+		for _, r := range records {
+			if record == nil {
 				continue
 			}
-			if m.Header.Flags&unix.NLM_F_DUMP_INTR != 0 {
-				return nil, fmt.Errorf("conntrack dump interrupted")
-			}
-			switch m.Header.Type {
-			case unix.NLMSG_DONE:
-				if len(m.Data) >= 4 && int32(binary.NativeEndian.Uint32(m.Data)) != 0 {
-					return nil, fmt.Errorf("ctnetlink dump: %w", unix.Errno(-int32(binary.NativeEndian.Uint32(m.Data))))
-				}
-				return out, nil
-			case unix.NLMSG_ERROR:
-				if len(m.Data) < 4 {
-					return nil, fmt.Errorf("ctnetlink short acknowledgement")
-				}
-				code := int32(binary.NativeEndian.Uint32(m.Data))
-				if code != 0 {
-					return nil, fmt.Errorf("ctnetlink: %w", unix.Errno(-code))
-				}
-				if !dump {
-					return out, nil
-				}
-			default:
-				out = append(out, append([]byte(nil), m.Data...))
+			stop, err := record(r)
+			if err != nil || stop {
+				return err
 			}
 		}
+		if done {
+			return nil
+		}
 	}
+}
+
+// parseDatagram validates one received netlink datagram and returns the
+// payloads of its records for request seq, without copying them. done reports
+// the end of a dump, or the acknowledgement of a non-dump request. Messages
+// for other sequence numbers are ignored.
+func parseDatagram(data []byte, recvFlags int, senderPid, seq uint32, dump bool) (records [][]byte, done bool, err error) {
+	if recvFlags&unix.MSG_TRUNC != 0 {
+		return nil, false, fmt.Errorf("ctnetlink truncated datagram")
+	}
+	if senderPid != 0 {
+		return nil, false, errUnexpectedSender
+	}
+	msgs, err := syscall.ParseNetlinkMessage(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("ctnetlink messages: %w", err)
+	}
+	// ParseNetlinkMessage silently drops a trailing fragment shorter than a header.
+	consumed := 0
+	for _, m := range msgs {
+		consumed += nlAlign4(int(m.Header.Len))
+	}
+	if consumed != len(data) {
+		return nil, false, fmt.Errorf("ctnetlink messages: %d trailing bytes", len(data)-consumed)
+	}
+	for _, m := range msgs {
+		if m.Header.Seq != seq {
+			continue
+		}
+		if m.Header.Flags&unix.NLM_F_DUMP_INTR != 0 {
+			return nil, false, fmt.Errorf("conntrack dump interrupted")
+		}
+		switch m.Header.Type {
+		case unix.NLMSG_DONE:
+			if len(m.Data) >= 4 && int32(binary.NativeEndian.Uint32(m.Data)) != 0 {
+				return nil, false, fmt.Errorf("ctnetlink dump: %w", unix.Errno(-int32(binary.NativeEndian.Uint32(m.Data))))
+			}
+			return records, true, nil
+		case unix.NLMSG_ERROR:
+			if len(m.Data) < 4 {
+				return nil, false, fmt.Errorf("ctnetlink short acknowledgement")
+			}
+			code := int32(binary.NativeEndian.Uint32(m.Data))
+			if code != 0 {
+				return nil, false, fmt.Errorf("ctnetlink: %w", unix.Errno(-code))
+			}
+			if !dump {
+				return records, true, nil
+			}
+		default:
+			records = append(records, m.Data)
+		}
+	}
+	return records, false, nil
 }
 
 func attributes(data []byte) (map[uint16][]byte, error) {
