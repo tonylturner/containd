@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The web console's internal API calls over HTTPS verify the management
+  certificate and pin it, instead of skipping verification. The console never
+  falls back to the request's Host header and refuses redirects.
 - Release SBOMs are signed CycloneDX attestations bound to each image digest,
   and promotion verifies them. The management SBOM includes the UI's production
   npm packages. A manual release run can no longer move `:latest` to an older
@@ -24,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- DPI domain exclusions now work: a flow is excluded when its TLS SNI or an
+  observed DNS answer for its server address matches an exact name or a
+  `*.suffix`, decided at the first client payload. IEC 104 is never excluded
+  by domain. Invalid domain values are rejected at commit.
 - IEC 104 holdback-pressure diagnostics: a Diagnostics panel, a read-only
   `GET /api/v1/diagnostics/iec104` API and `containd_dp_iec104_*` Prometheus
   series show held packets and bytes, oldest pending age and sessions against
@@ -52,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Lab mode refuses every password change, for every user, through the
+  users store: web, admin, SSH menu and the setup wizard give the same reason.
 - UI builds always regenerate the embedded documentation and fail if MkDocs
   cannot produce it; `CONTAIND_SKIP_DOCS=1` is only for builds that supply the
   docs separately. UI builds use Node.js 24.
