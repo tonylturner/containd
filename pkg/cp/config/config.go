@@ -616,6 +616,16 @@ type FirewallConfig struct {
 	NAT           NATConfig `json:"nat,omitempty"`
 }
 
+// EffectiveDefaultAction is the action applied to forwarded traffic that no
+// rule matches. Only an explicit ALLOW allows; an omitted or empty
+// defaultAction means DENY.
+func (f FirewallConfig) EffectiveDefaultAction() Action {
+	if f.DefaultAction == ActionAllow {
+		return ActionAllow
+	}
+	return ActionDeny
+}
+
 // NATConfig defines minimal NAT behavior.
 // Phase-1 baseline:
 // - SNAT masquerade for selected source zones egressing a zone

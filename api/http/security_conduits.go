@@ -110,7 +110,7 @@ func computeConduitGlobals(cfg *config.Config) conduitGlobalState {
 		idsMode:       conduitIDSMode(cfg),
 		auditLogged:   conduitAuditLogged(cfg),
 		avEnabled:     cfg.Services.AV.Enabled,
-		defaultAction: cfg.Firewall.DefaultAction,
+		defaultAction: cfg.Firewall.EffectiveDefaultAction(),
 	}
 }
 
