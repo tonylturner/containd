@@ -36,11 +36,13 @@ services:
       - "12222:2222"
 
   lan_client:
-    image: curlimages/curl:8.11.1
+    image: python:3-alpine
     command: ["sleep", "infinity"]
     user: "0"
     cap_add:
       - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/forward:/opt/forward:ro
     networks:
       lan_net:
         ipv4_address: 172.31.0.3
@@ -49,10 +51,12 @@ services:
 
   lan_target:
     image: python:3-alpine
-    command: ["python", "-m", "http.server", "80"]
+    command: ["python", "/opt/forward/echo.py", "lan_target", "80", "22"]
     user: "0"
     cap_add:
       - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/forward:/opt/forward:ro
     networks:
       lan_net:
         ipv4_address: 172.31.0.4
@@ -61,10 +65,12 @@ services:
 
   wan_server:
     image: python:3-alpine
-    command: ["python", "-m", "http.server", "8080"]
+    command: ["python", "/opt/forward/echo.py", "wan_server", "8080", "8082"]
     user: "0"
     cap_add:
       - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/forward:/opt/forward:ro
     networks:
       wan_net:
         ipv4_address: 172.30.0.3
