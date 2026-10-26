@@ -71,7 +71,7 @@ export const servicesAPI = {
         body: form,
         headers: authHeaders(),
       });
-      if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+      if (handleUnauthorized(res)) return failureOf(res);
       clearAuthExpired();
       if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);
@@ -98,7 +98,7 @@ export const servicesAPI = {
           headers: authHeaders(),
         },
       );
-      if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+      if (handleUnauthorized(res)) return failureOf(res);
       clearAuthExpired();
       if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);

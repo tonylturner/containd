@@ -115,7 +115,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
       headers: authHeaders(),
       body: form,
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);

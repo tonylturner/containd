@@ -6,6 +6,7 @@ import {
 } from "./api-core";
 import {
   deleteJSONResult,
+  failureOf,
   getJSON,
   getJSONList,
   getJSONShaped,
@@ -53,7 +54,7 @@ export const policyAPI = {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ pem }),
       });
-      if (handleUnauthorized(res)) return { state: "failed", error: "Unauthorized" };
+      if (handleUnauthorized(res)) return { state: "failed", error: (await failureOf(res)).error };
       clearAuthExpired();
       const body = (await res.json().catch(() => ({}))) as {
         status?: string;

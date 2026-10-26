@@ -6,6 +6,8 @@ import { withRetryTime } from "../lib/utils";
 // After repeated failed authentication codes or current passwords the server
 // locks that check for the account and answers 429 with Retry-After. The UI
 // shows the server's message and the time to retry, never a generic failure.
+// A wrong current password or code answers 401: self-service forms show the
+// server's reason and stay signed in; the login page stays generic.
 
 type Reply = Parameters<Route["fulfill"]>[0];
 
@@ -121,3 +123,43 @@ test("Retry-After is read as seconds or an HTTP date", () => {
   expect(withRetryTime("locked", undefined)).toBe("locked");
   expect(withRetryTime("locked", 60, now)).toBe(`locked Try again after ${new Date(now + 60_000).toLocaleTimeString()}.`);
 });
+
+test("a wrong password on the login step stays a generic refusal", async ({ page }) => {
+  await openLogin(page, { "/api/v1/auth/login": { status: 401, json: { error: "invalid credentials" } } });
+  await page.getByRole("button", { name: "Login" }).click();
+  await expect(page.getByText("Invalid username or password.")).toBeVisible();
+  await expect(page.getByText("invalid credentials")).toHaveCount(0);
+});
+
+for (const flow of ["password change", "MFA disable"] as const) {
+  test(`a wrong current password on ${flow} shows the server's reason and stays signed in`, async ({ page }) => {
+    const message = "current password is incorrect";
+    const path = flow === "password change" ? "/api/v1/auth/me/password" : "/api/v1/auth/me/mfa/disable";
+    const sessionChecks: string[] = [];
+    page.on("request", (req) => {
+      if (new URL(req.url()).pathname === "/api/v1/auth/me") sessionChecks.push(req.url());
+    });
+    const dialog = await openProfile(page, flow === "password change" ? "Change password" : "Profile", {
+      [path]: { status: 401, json: { error: message } },
+    });
+    if (flow === "password change") {
+      await dialog.getByPlaceholder("Current password").fill("wrong");
+      await dialog.getByPlaceholder("New password (min 8 chars)").fill("a new long passphrase");
+      await dialog.getByRole("button", { name: "Update password" }).click();
+    } else {
+      await dialog.getByRole("button", { name: "MFA", exact: true }).click();
+      await dialog.getByLabel("Current password").fill("wrong");
+      await dialog.getByLabel("Authentication code").fill("123456");
+      await dialog.getByRole("button", { name: "Disable MFA" }).click();
+    }
+    await expect(dialog.getByText(message, { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Unauthorized")).toHaveCount(0);
+    // The 401 still starts the session-expired check; the session is valid,
+    // so it re-reads /auth/me and keeps the page.
+    const before = sessionChecks.length;
+    await expect.poll(() => sessionChecks.length, { timeout: 5_000 }).toBeGreaterThan(before);
+    await page.waitForLoadState("networkidle");
+    await expect(page).toHaveURL(/\/zones\/$/);
+    await expect(dialog.getByText(message, { exact: true })).toBeVisible();
+  });
+}

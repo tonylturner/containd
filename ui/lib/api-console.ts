@@ -46,7 +46,7 @@ export type ConntrackKillResult = {
 async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>> {
   try {
     const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     const body: unknown = await res.json();
