@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -150,10 +151,16 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 }
 
 type setTrustedCARequest struct {
-	PEM string `json:"pem"`
+	PEM   string `json:"pem"`
+	Clear bool   `json:"clear"`
 }
 
 func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
+	return trustedCAUploadHandler(store, "/data")
+}
+
+// trustedCAUploadHandler keeps the storage boundary explicit and testable.
+func trustedCAUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
@@ -165,13 +172,17 @@ func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		pemText := strings.TrimSpace(req.PEM)
-		if pemText == "" {
-			apiError(c, http.StatusBadRequest, "pem required")
+		if req.Clear && pemText != "" {
+			apiError(c, http.StatusBadRequest, "clear and pem are mutually exclusive")
 			return
 		}
-		if _, err := readAnyPEM(pemText); err != nil {
-			apiErrorDetail(c, http.StatusBadRequest, "invalid PEM", err.Error())
-			return
+		var data []byte
+		if !req.Clear {
+			if _, err := trust.Certificates([]byte(pemText)); err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "invalid PEM CA bundle", err.Error())
+				return
+			}
+			data = []byte(pemText + "\n")
 		}
 
 		cfg, err := store.Load(c.Request.Context())
@@ -179,38 +190,17 @@ func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		path := firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "/data/tls/trusted_ca.pem")
-		if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
+		path := firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
+		if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), filepath.Clean(dataDir)+string(os.PathSeparator)) {
 			apiError(c, http.StatusBadRequest, "trustedCAFile must be under /data")
 			return
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := os.WriteFile(path, []byte(pemText+"\n"), 0o644); err != nil {
+		if err := trust.WriteBundle(path, data); err != nil {
 			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "updated"})
 	}
-}
-
-func readAnyPEM(s string) ([]byte, error) {
-	var found bool
-	b := []byte(s)
-	for {
-		var block *pem.Block
-		block, b = pem.Decode(b)
-		if block == nil {
-			break
-		}
-		found = true
-	}
-	if !found {
-		return nil, errors.New("no PEM blocks found")
-	}
-	return []byte(s), nil
 }
 
 func readFirstCertDER(path string) ([]byte, error) {

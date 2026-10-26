@@ -88,6 +88,19 @@ canonical disclosure policy. The appliance serves `/.well-known/security.txt`.
 Published CSAF documents, including `containd-2026-001`, are indexed in
 [Advisories and CSAF](advisories.md).
 
+## Additional CA bundle storage
+
+Admins can replace or clear the additional CA bundle using
+`POST /api/v1/system/tls/trusted-ca`; see the
+[configuration reference](config-format.md#additional-ca-bundle) for validation
+and request formats. This does not replace the management server's TLS
+certificate or change browser trust.
+
+The bundle is currently storage-only: outbound clients, including FreshClam
+definition downloads, do not consume it. No automatic outbound trust reload is
+provided. Do not disable certificate verification to work around a rejected
+private-CA endpoint.
+
 ## Known Gaps
 
 - Web, SSH, and CLI do not apply consistent account-assurance requirements; SSH

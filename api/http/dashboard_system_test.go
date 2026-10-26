@@ -247,9 +247,6 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 		t.Fatalf("setTrustedCA invalid status/body = %d %s", rec.Code, rec.Body.String())
 	}
 
-	if _, err := readAnyPEM(certPEM); err != nil {
-		t.Fatalf("readAnyPEM(valid): %v", err)
-	}
 	if got, ok := parseDockerBindMount("/host/path:/container/path:ro"); !ok || got.Mode != "ro" {
 		t.Fatalf("parseDockerBindMount(valid) = %#v, %v", got, ok)
 	}
