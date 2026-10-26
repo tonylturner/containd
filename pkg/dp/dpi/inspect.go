@@ -22,8 +22,10 @@ import (
 // framed. A framed stream's buffer bounds, out-of-order bound and
 // conflicting overlaps are *StreamError; the manager adds their malformed
 // event. Any framed error discards the direction's buffer: a legacy stream
-// starts fresh with the next packet, a session stream stays failed until
-// EndStream. Feed, parse and trim are serialized across capture workers.
+// starts fresh with the next packet unless the packet asks to fail closed;
+// a fail-closed legacy stream stays failed until its flow ends, a session
+// stream until EndStream. A failed stream returns its error without
+// parsing. Feed, parse and trim are serialized across capture workers.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
@@ -47,10 +49,13 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
 		m.reassembler.open(key, pkt.TCPSeq, time.Now())
 	}
-	if stream && pkt.HasOffset {
+	if stream {
 		if err := m.reassembler.failure(key); err != nil {
-			res.Err = err // already reported with its event; not re-emitted
-			return res
+			if pkt.HasOffset || pkt.FailClosed {
+				res.Err = err // already reported with its event; not re-emitted
+				return res
+			}
+			m.reassembler.complete(key) // the flow no longer fails closed: start fresh
 		}
 	}
 
@@ -58,7 +63,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	if framer != nil && len(pkt.Payload) > 0 {
 		now := time.Now()
 		m.reassembler.sweep(now)
-		fed := m.reassembler.feed(key, pos, pkt.Payload, now, framer != nil, pkt.HasOffset)
+		fed := m.reassembler.feed(key, pos, pkt.Payload, now, framer != nil, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
 		switch {
 		case fed.err != nil:
@@ -70,7 +75,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
 		}
 		if res.Err != nil {
-			m.discard(key, pkt.HasOffset, res.Err)
+			m.discard(key, pkt.HasOffset || pkt.FailClosed, res.Err)
 		}
 	}
 
@@ -161,10 +166,11 @@ func frameContractViolation(v StreamView, sr StreamResult, continues bool) strin
 	return ""
 }
 
-// discard drops a direction's buffer after a framed error: a session
-// stream stays failed until EndStream, a legacy stream starts fresh.
-func (m *Manager) discard(key string, session bool, err error) {
-	if session {
+// discard drops a direction's buffer after a framed error: a session or
+// fail-closed stream stays failed until it ends, a legacy stream starts
+// fresh.
+func (m *Manager) discard(key string, keepFailed bool, err error) {
+	if keepFailed {
 		m.reassembler.fail(key, err)
 		return
 	}

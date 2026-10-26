@@ -24,6 +24,9 @@ func (c *Config) Validate() error {
 	if err := UpgradeInPlace(c); err != nil {
 		return err
 	}
+	if err := validateVersion(c.Version); err != nil {
+		return err
+	}
 	if err := validateHostname(c.System.Hostname); err != nil {
 		return err
 	}
@@ -55,6 +58,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateIEC104Policy(c); err != nil {
+		return err
+	}
+	if err := validateICSEnforcePath(c); err != nil {
 		return err
 	}
 	if err := validatePCAP(c.PCAP); err != nil {

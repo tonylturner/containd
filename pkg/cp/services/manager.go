@@ -85,13 +85,9 @@ func NewManager(opts ManagerOptions) *Manager {
 		m.NTP.OnEvent = m.recordServiceEvent
 	}
 	if m.DHCP != nil {
-		if setter, ok := any(m.DHCP).(interface {
-			SetMetricEmitter(func(service string, delta int))
-		}); ok {
-			setter.SetMetricEmitter(func(service string, delta int) {
-				m.IncrementServiceMetric(service, delta)
-			})
-		}
+		m.DHCP.SetMetricEmitter(func(delta int, failure bool) {
+			m.incrementServiceMetric("dhcp", delta, failure)
+		})
 	}
 	return m
 }

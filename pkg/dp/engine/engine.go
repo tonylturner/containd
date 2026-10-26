@@ -16,6 +16,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -58,11 +59,13 @@ type Engine struct {
 	rulesetStatus         atomic.Pointer[RulesetStatus]
 	avSink                AVSink
 	inspectAll            bool
-	dpiEnabled            bool           // master DPI on/off
-	dpiMode               string         // "learn" or "enforce"
-	dpiExclusions         []DPIExclusion // IPs/domains excluded from DPI
-	nflogGroup            uint16         // 0 disables nflog consumer + log clauses
-	nflogStop             func()         // stops the running nflog consumer; nil before Start or after disable
+	dpiEnabled            bool              // master DPI on/off
+	dpiMode               string            // "learn" or "enforce"
+	dpiExclusions         []DPIExclusion    // IPs/domains excluded from DPI
+	exclusionHits         *exclusionHits    // flows each exclusion exempted since the last apply
+	coverage              coverage.Settings // static coverage inputs of this configuration
+	nflogGroup            uint16            // 0 disables nflog consumer + log clauses
+	nflogStop             func()            // stops the running nflog consumer; nil before Start or after disable
 	onError               func(error)
 	nfqueueGroup          uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
 	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
@@ -82,13 +85,19 @@ type Engine struct {
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
-// Warnings lists the applied ruleset's rules whose predicates resolve toward
-// denial; a failed apply carries none.
+// SnapshotVersion is the version of the snapshot the last apply attempted,
+// whether it succeeded or failed. Warnings lists the applied ruleset's rules
+// whose predicates resolve toward denial; a failed apply carries none.
+// ICSCoverage is the live coverage of the ICS rules in force: after a failed
+// apply those of the previous snapshot (none before the first success),
+// never the failed one; omitted when there are none.
 type RulesetStatus struct {
-	Ruleset   string                `json:"ruleset"`
-	AppliedAt time.Time             `json:"appliedAt"`
-	Error     string                `json:"error,omitempty"`
-	Warnings  []enforce.RuleWarning `json:"warnings,omitempty"`
+	Ruleset         string                `json:"ruleset"`
+	SnapshotVersion string                `json:"snapshotVersion,omitempty"`
+	AppliedAt       time.Time             `json:"appliedAt"`
+	Error           string                `json:"error,omitempty"`
+	Warnings        []enforce.RuleWarning `json:"warnings,omitempty"`
+	ICSCoverage     []coverage.Rule       `json:"icsCoverage,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -127,7 +136,8 @@ type Config struct {
 	// of accept/drop on rules with an ICS predicate, and the capture
 	// manager runs an NFQUEUE consumer at that group. Zero disables
 	// (ICS rules fall back to plain accept/drop with no function-code
-	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
+	// inspection, so management validation refuses ICS rules in enforce
+	// mode). See config.DataPlaneConfig.NFQueueGroup
 	// for full rationale.
 	NFQueueGroup uint16
 
@@ -175,6 +185,8 @@ func New(cfg Config) (*Engine, error) {
 		dpiEnabled:            cfg.DPIEnabled,
 		dpiMode:               cfg.DPIMode,
 		dpiExclusions:         cfg.DPIExclusions,
+		exclusionHits:         newExclusionHits(cfg.DPIExclusions),
+		coverage:              coverageSettings(cfg),
 		domains:               newDomainExclusions(cfg.DPIExclusions),
 		nflogGroup:            cfg.NFLogGroup,
 		nfqueueGroup:          cfg.NFQueueGroup,
@@ -293,6 +305,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
 	e.dpiExclusions = fresh.dpiExclusions
+	e.exclusionHits = fresh.exclusionHits
+	e.coverage = fresh.coverage
 	e.domains = fresh.domains
 	e.nflogGroup = fresh.nflogGroup
 	e.nfqueueGroup = fresh.nfqueueGroup
@@ -442,7 +456,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		start := time.Now()
 		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
 		if applyErr != nil {
-			e.setRulesetStatus(compiled, nil, applyErr)
+			e.setRulesetStatus(snap.Version, compiled, nil, applyErr)
 			return applyErr
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
@@ -452,7 +466,8 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.setRulesetStatus(compiled, warnings, nil)
+	e.setRulesetStatus(snap.Version, compiled, warnings, nil)
+	e.resetExclusionHits()
 	return nil
 }
 
@@ -586,6 +601,9 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	e.flowMu.Lock()
 	state := e.connectionStateLocked(pkt, now)
 	state.Touch(uint64(len(pkt.Payload)), now)
+	if state.Packets == 1 && state.Key.Dir == flow.DirForward {
+		e.countAddressExclusionLocked(state)
+	}
 	// Only check if sweep is due under the existing lock; do the actual
 	// sweep outside the critical path if needed.
 	needsSweep := now.Sub(e.lastSweep) >= 30*time.Second

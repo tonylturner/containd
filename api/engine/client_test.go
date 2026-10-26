@@ -16,6 +16,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
@@ -365,7 +366,9 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(pcap.AnalysisResult{PacketCount: 2, Protocols: map[string]int{"modbus": 1}})
 	})
 	mux.HandleFunc("/internal/ruleset_status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{Ruleset: "loaded"})
+		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{Ruleset: "loaded", ICSCoverage: []coverage.Rule{
+			{RuleID: "read", Protocol: "modbus", Mode: "enforce", State: coverage.Partial,
+				Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Message: "excluded", Value: "10.0.0.2", Matches: 3}}}}})
 	})
 
 	srv := httptest.NewServer(mux)
@@ -454,7 +457,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("AnalyzePcapByName = %#v, %v", analysis, err)
 	}
 	ruleset, err := c.RulesetStatus(ctx)
-	if err != nil || ruleset.Ruleset != "loaded" {
+	if err != nil || ruleset.Ruleset != "loaded" || len(ruleset.ICSCoverage) != 1 || ruleset.ICSCoverage[0].Reasons[0].Matches != 3 {
 		t.Fatalf("RulesetStatus = %#v, %v", ruleset, err)
 	}
 }

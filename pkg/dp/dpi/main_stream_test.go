@@ -18,12 +18,12 @@ func TestMainFeedAccumulatesData(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	buf1 := r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false).buf
+	buf1 := r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false, false).buf
 	if !bytes.Equal(buf1, []byte{0x01, 0x02}) {
 		t.Fatalf("first feed: got %x, want 0102", buf1)
 	}
 
-	buf2 := r.feed("flow1", position{kind: posSeq, seq: 102}, []byte{0x03, 0x04}, now, false, false).buf
+	buf2 := r.feed("flow1", position{kind: posSeq, seq: 102}, []byte{0x03, 0x04}, now, false, false, false).buf
 	if !bytes.Equal(buf2, []byte{0x01, 0x02, 0x03, 0x04}) {
 		t.Fatalf("second feed: got %x, want 01020304", buf2)
 	}
@@ -41,8 +41,8 @@ func TestMainFeedSlidingWindow(t *testing.T) {
 	r := newReassembler(4, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03}, now, false, false)
-	buf := r.feed("flow1", position{kind: posSeq, seq: 103}, []byte{0x04, 0x05, 0x06}, now, false, false).buf
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03}, now, false, false, false)
+	buf := r.feed("flow1", position{kind: posSeq, seq: 103}, []byte{0x04, 0x05, 0x06}, now, false, false, false).buf
 
 	// 6 bytes total, max 4 -> oldest 2 bytes discarded
 	want := []byte{0x03, 0x04, 0x05, 0x06}
@@ -55,8 +55,8 @@ func TestMainCompleteRemovesStream(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01}, now, false, false)
-	r.feed("flow2", position{kind: posSeq, seq: 200}, []byte{0x02}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01}, now, false, false, false)
+	r.feed("flow2", position{kind: posSeq, seq: 200}, []byte{0x02}, now, false, false, false)
 
 	if r.activeStreams != 2 {
 		t.Fatalf("before complete: active=%d, want 2", r.activeStreams)
@@ -68,7 +68,7 @@ func TestMainCompleteRemovesStream(t *testing.T) {
 	}
 
 	// Feed to flow1 again should start fresh.
-	buf := r.feed("flow1", position{kind: posSeq, seq: 300}, []byte{0xAA}, now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 300}, []byte{0xAA}, now, false, false, false).buf
 	if !bytes.Equal(buf, []byte{0xAA}) {
 		t.Fatalf("after complete+feed: got %x, want aa", buf)
 	}
@@ -78,8 +78,8 @@ func TestMainSweepRemovesIdleStreams(t *testing.T) {
 	r := newReassembler(0, 5*time.Second)
 	t0 := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01}, t0, false, false)
-	r.feed("flow2", position{kind: posSeq, seq: 200}, []byte{0x02}, t0.Add(4*time.Second), false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01}, t0, false, false, false)
+	r.feed("flow2", position{kind: posSeq, seq: 200}, []byte{0x02}, t0.Add(4*time.Second), false, false, false)
 
 	// At t0+6s, flow1 is 6s idle (>5s), flow2 is 2s idle (<5s).
 	r.sweep(t0.Add(6 * time.Second))
@@ -89,7 +89,7 @@ func TestMainSweepRemovesIdleStreams(t *testing.T) {
 	}
 
 	// Verify flow2 still works.
-	buf := r.feed("flow2", position{kind: posSeq, seq: 201}, []byte{0x03}, t0.Add(6*time.Second), false, false).buf
+	buf := r.feed("flow2", position{kind: posSeq, seq: 201}, []byte{0x03}, t0.Add(6*time.Second), false, false, false).buf
 	if !bytes.Equal(buf, []byte{0x02, 0x03}) {
 		t.Fatalf("flow2 after sweep: got %x, want 0203", buf)
 	}
@@ -99,10 +99,10 @@ func TestMainTrimConsumedBytes(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03, 0x04, 0x05}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03, 0x04, 0x05}, now, false, false, false)
 	r.trim("flow1", 0, 3)
 
-	buf := r.feed("flow1", position{kind: posSeq, seq: 105}, []byte{0x06}, now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 105}, []byte{0x06}, now, false, false, false).buf
 	want := []byte{0x04, 0x05, 0x06}
 	if !bytes.Equal(buf, want) {
 		t.Fatalf("after trim+feed: got %x, want %x", buf, want)
@@ -114,17 +114,17 @@ func TestMainFeedOutOfOrder(t *testing.T) {
 	now := time.Now()
 
 	// Send segment 1 (seq=100, 2 bytes).
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false, false)
 
 	// Send segment 3 (seq=105, 2 bytes) — skipping segment 2.
-	buf := r.feed("flow1", position{kind: posSeq, seq: 105}, []byte{0x05, 0x06}, now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 105}, []byte{0x05, 0x06}, now, false, false, false).buf
 	// Should only have segment 1 data; segment 3 is buffered OOO.
 	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
 		t.Fatalf("after OOO: got %x, want 0102", buf)
 	}
 
 	// Send segment 2 (seq=102, 3 bytes) — fills the gap.
-	buf = r.feed("flow1", position{kind: posSeq, seq: 102}, []byte{0x03, 0x04, 0x77}, now, false, false).buf
+	buf = r.feed("flow1", position{kind: posSeq, seq: 102}, []byte{0x03, 0x04, 0x77}, now, false, false, false).buf
 	// Now all three segments should be flushed in order.
 	want := []byte{0x01, 0x02, 0x03, 0x04, 0x77, 0x05, 0x06}
 	if !bytes.Equal(buf, want) {
@@ -137,9 +137,9 @@ func TestMainFeedRetransmission(t *testing.T) {
 	now := time.Now()
 
 	// Send segment 1.
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false, false)
 	// Retransmit segment 1.
-	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02}, now, false, false, false).buf
 	// Should still have only 2 bytes.
 	if !bytes.Equal(buf, []byte{0x01, 0x02}) {
 		t.Fatalf("after retransmit: got %x, want 0102", buf)
@@ -155,12 +155,12 @@ func TestMainFeedSequenceZeroIsTracked(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x01, 0x02}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x01, 0x02}, now, false, false, false)
 	// A retransmission at seq 0 must not be appended again.
-	if buf := r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x01, 0x02}, now, false, false).buf; !bytes.Equal(buf, []byte{0x01, 0x02}) {
+	if buf := r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x01, 0x02}, now, false, false, false).buf; !bytes.Equal(buf, []byte{0x01, 0x02}) {
 		t.Fatalf("seq 0 retransmission appended: %x", buf)
 	}
-	if buf := r.feed("flow1", position{kind: posSeq, seq: 2}, []byte{0x03}, now, false, false).buf; !bytes.Equal(buf, []byte{0x01, 0x02, 0x03}) {
+	if buf := r.feed("flow1", position{kind: posSeq, seq: 2}, []byte{0x03}, now, false, false, false).buf; !bytes.Equal(buf, []byte{0x01, 0x02, 0x03}) {
 		t.Fatalf("segment after seq 0: got %x", buf)
 	}
 }
@@ -169,13 +169,13 @@ func TestMainFeedSequenceWrap(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posSeq, seq: 0xFFFFFFFE}, []byte{0x01, 0x02}, now, false, false)
-	buf := r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x03, 0x04}, now, false, false).buf
+	r.feed("flow1", position{kind: posSeq, seq: 0xFFFFFFFE}, []byte{0x01, 0x02}, now, false, false, false)
+	buf := r.feed("flow1", position{kind: posSeq, seq: 0}, []byte{0x03, 0x04}, now, false, false, false).buf
 	if !bytes.Equal(buf, []byte{0x01, 0x02, 0x03, 0x04}) {
 		t.Fatalf("across wrap: got %x", buf)
 	}
 	// Retransmission of the pre-wrap segment.
-	buf = r.feed("flow1", position{kind: posSeq, seq: 0xFFFFFFFE}, []byte{0x01, 0x02}, now, false, false).buf
+	buf = r.feed("flow1", position{kind: posSeq, seq: 0xFFFFFFFE}, []byte{0x01, 0x02}, now, false, false, false).buf
 	if !bytes.Equal(buf, []byte{0x01, 0x02, 0x03, 0x04}) {
 		t.Fatalf("pre-wrap retransmission appended: %x", buf)
 	}
@@ -185,8 +185,8 @@ func TestMainFeedWithoutSequenceAppends(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	now := time.Now()
 
-	r.feed("flow1", position{kind: posAppend}, []byte{0x01}, now, false, false)
-	buf := r.feed("flow1", position{kind: posAppend}, []byte{0x01}, now, false, false).buf
+	r.feed("flow1", position{kind: posAppend}, []byte{0x01}, now, false, false, false)
+	buf := r.feed("flow1", position{kind: posAppend}, []byte{0x01}, now, false, false, false).buf
 	if !bytes.Equal(buf, []byte{0x01, 0x01}) {
 		t.Fatalf("unsequenced segments: got %x, want 0101", buf)
 	}
@@ -197,10 +197,10 @@ func TestMainFeedPartialRetransmission(t *testing.T) {
 	now := time.Now()
 
 	// Send 3 bytes at seq 100.
-	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03}, now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 100}, []byte{0x01, 0x02, 0x03}, now, false, false, false)
 
 	// Send overlapping segment: seq 101, 4 bytes — 2 bytes overlap, 2 new.
-	buf := r.feed("flow1", position{kind: posSeq, seq: 101}, []byte{0x02, 0x03, 0x04, 0x05}, now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 101}, []byte{0x02, 0x03, 0x04, 0x05}, now, false, false, false).buf
 	want := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	if !bytes.Equal(buf, want) {
 		t.Fatalf("partial retransmit: got %x, want %x", buf, want)
@@ -223,10 +223,10 @@ func TestMainFeedQueuedSegmentTailPastNextSeq(t *testing.T) {
 	data := mainSeqBytes(40) // seq 100..140
 
 	r.open("flow1", 100, now)
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false)
 	// 100..130 overlaps the queued 120..140; its tail 130..140 must still
 	// be appended.
-	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:30], now, false, false).buf
+	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:30], now, false, false, false).buf
 	if !bytes.Equal(buf, data) {
 		t.Fatalf("got %x, want %x", buf, data)
 	}
@@ -238,11 +238,11 @@ func TestMainFeedOOOSameSeqKeepsLongerCopy(t *testing.T) {
 	data := mainSeqBytes(40)
 
 	r.open("flow1", 100, now)
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:25], now, false, false)
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:25], now, false, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false)
 	// A shorter copy arriving after the longer one adds nothing.
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:30], now, false, false)
-	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:20], now, false, false).buf
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:30], now, false, false, false)
+	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:20], now, false, false, false).buf
 	if !bytes.Equal(buf, data) {
 		t.Fatalf("got %x, want %x", buf, data)
 	}
@@ -254,12 +254,12 @@ func TestMainFeedOOOPartialAndContainedOverlaps(t *testing.T) {
 	data := mainSeqBytes(60)
 
 	r.open("flow1", 100, now)
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false) // queued
-	r.feed("flow1", position{kind: posSeq, seq: 130}, data[30:50], now, false, false) // overlaps its tail
-	r.feed("flow1", position{kind: posSeq, seq: 115}, data[15:25], now, false, false) // overlaps its head
-	r.feed("flow1", position{kind: posSeq, seq: 132}, data[32:38], now, false, false) // contained in a queued one
-	r.feed("flow1", position{kind: posSeq, seq: 150}, data[50:60], now, false, false) // adjacent
-	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:15], now, false, false).buf
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:40], now, false, false, false) // queued
+	r.feed("flow1", position{kind: posSeq, seq: 130}, data[30:50], now, false, false, false) // overlaps its tail
+	r.feed("flow1", position{kind: posSeq, seq: 115}, data[15:25], now, false, false, false) // overlaps its head
+	r.feed("flow1", position{kind: posSeq, seq: 132}, data[32:38], now, false, false, false) // contained in a queued one
+	r.feed("flow1", position{kind: posSeq, seq: 150}, data[50:60], now, false, false, false) // adjacent
+	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:15], now, false, false, false).buf
 	if !bytes.Equal(buf, data) {
 		t.Fatalf("got %x, want %x", buf, data)
 	}
@@ -273,14 +273,14 @@ func TestMainFeedOOOCoveringSegmentReplacesQueued(t *testing.T) {
 	r.open("flow1", 100, now)
 	for i := 0; i < maxOOOSegments; i++ {
 		off := 10 + 2*i
-		r.feed("flow1", position{kind: posSeq, seq: uint32(100 + off)}, data[off:off+1], now, false, false)
+		r.feed("flow1", position{kind: posSeq, seq: uint32(100 + off)}, data[off:off+1], now, false, false, false)
 	}
 	// One segment covering every queued one frees their slots, so the
 	// next out-of-order segment must not be taken for a lost gap.
-	r.feed("flow1", position{kind: posSeq, seq: 110}, data[10:10+2*maxOOOSegments], now, false, false)
-	r.feed("flow1", position{kind: posSeq, seq: 130}, data[30:40], now, false, false)
-	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:30], now, false, false)
-	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:10], now, false, false).buf
+	r.feed("flow1", position{kind: posSeq, seq: 110}, data[10:10+2*maxOOOSegments], now, false, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 130}, data[30:40], now, false, false, false)
+	r.feed("flow1", position{kind: posSeq, seq: 120}, data[20:30], now, false, false, false)
+	buf := r.feed("flow1", position{kind: posSeq, seq: 100}, data[0:10], now, false, false, false).buf
 	if !bytes.Equal(buf, data) {
 		t.Fatalf("got %x, want %x", buf, data)
 	}
@@ -365,7 +365,7 @@ func TestMainFeedShuffledOverlappingSegmentsLoseNoByte(t *testing.T) {
 		r.open("flow1", base, now)
 		var buf []byte
 		for _, s := range order {
-			buf = r.feed("flow1", position{kind: posSeq, seq: base + uint32(s.start)}, data[s.start:s.end], now, false, false).buf
+			buf = r.feed("flow1", position{kind: posSeq, seq: base + uint32(s.start)}, data[s.start:s.end], now, false, false, false).buf
 			if !bytes.HasPrefix(data, buf) {
 				t.Fatalf("trial %d: stream %x diverges from %x (order %v)", trial, buf, data, order)
 			}

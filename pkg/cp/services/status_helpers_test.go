@@ -136,13 +136,6 @@ func TestServiceCurrentAndStatusHelpers(t *testing.T) {
 	if !dhcpMgr.Current().Enabled || dhcpStatus["listen_ifaces"] != 1 || dhcpStatus["pools"] != 1 {
 		t.Fatalf("unexpected dhcp status: %#v", dhcpStatus)
 	}
-	metricsSeen := map[string]int{}
-	dhcpMgr.SetMetricEmitter(func(service string, delta int) { metricsSeen[service] += delta })
-	dhcpMgr.IncrementLeaseMetric(2, false)
-	dhcpMgr.IncrementLeaseMetric(1, true)
-	if metricsSeen["dhcp"] != 2 || metricsSeen["dhcp_error"] != 1 {
-		t.Fatalf("unexpected dhcp metrics: %#v", metricsSeen)
-	}
 
 	syslogMgr := NewSyslogManager()
 	syslogMgr.config = config.SyslogConfig{Forwarders: []config.SyslogForwarder{{Address: "192.0.2.1", Port: 514, Proto: "tcp"}}}

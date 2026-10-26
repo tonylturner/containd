@@ -216,7 +216,7 @@ func (m *NTPManager) Status() map[string]any {
 		"max_poll_seconds": maxPoll,
 		"enabled":          m.lastCfg.Enabled,
 		"servers_count":    len(m.lastCfg.Servers),
-		"last_render":      m.lastRender.Format(time.RFC3339Nano),
+		"last_render":      formatMaybe(m.lastRender),
 		"last_error":       m.lastError,
 		"interval_seconds": interval,
 		"supervise":        m.Supervise,
@@ -224,8 +224,8 @@ func (m *NTPManager) Status() map[string]any {
 		"ntpd_name":        m.NTPDName,
 		"running":          running,
 		"pid":              pid,
-		"last_start":       m.lastStart,
-		"last_stop":        m.lastStop,
+		"last_start":       formatMaybe(m.lastStart),
+		"last_stop":        formatMaybe(m.lastStop),
 		"last_exit":        m.lastExit,
 	}
 }

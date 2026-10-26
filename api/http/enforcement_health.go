@@ -8,6 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 // Record failed replay as well as failed compensation. An engine ruleset can
@@ -26,10 +28,29 @@ func recordRuntimeApplyResult(ctx context.Context, store config.Store, applyErr 
 	return errors.Join(applyErr, runtimeStore.SetRuntimeApplyFault(healthCtx, fault))
 }
 
+// rulesetObservation is one read of the engine's ruleset status, shared by
+// the health objects derived from it. err is set when the engine is absent
+// or could not answer within the health budget.
+type rulesetObservation struct {
+	status dpengine.RulesetStatus
+	err    error
+}
+
+func observeRuleset(ctx context.Context, engine EngineClient) rulesetObservation {
+	if engine == nil {
+		return rulesetObservation{err: errors.New("no engine")}
+	}
+	status, err := engine.RulesetStatus(ctx)
+	if err == nil {
+		err = ctx.Err()
+	}
+	return rulesetObservation{status: status, err: err}
+}
+
 // enforcementHealth reports general firewall state separately from IEC104.
 // Snapshot faults take precedence over configured mode: failed compensation or
 // replay makes the live state uncertain, including a failed disable request.
-func enforcementHealth(ctx context.Context, snapshot config.HealthSnapshot, snapshotErr error, engine EngineClient) gin.H {
+func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, ruleset rulesetObservation) gin.H {
 	health := gin.H{"state": "unknown", "reason": "configuration health unavailable"}
 	if snapshotErr != nil {
 		return health
@@ -48,13 +69,9 @@ func enforcementHealth(ctx context.Context, snapshot config.HealthSnapshot, snap
 		health["reason"] = ""
 		return health
 	}
-	if engine == nil {
-		health["reason"] = "engine ruleset status unavailable"
-		return health
-	}
-	status, err := engine.RulesetStatus(ctx)
+	status := ruleset.status
 	switch {
-	case err != nil || ctx.Err() != nil:
+	case ruleset.err != nil:
 		health["reason"] = "engine ruleset status unavailable"
 	case status.Error != "":
 		health["state"] = "unavailable"
@@ -67,4 +84,13 @@ func enforcementHealth(ctx context.Context, snapshot config.HealthSnapshot, snap
 		health["reason"] = ""
 	}
 	return health
+}
+
+// icsEnforcementHealth summarizes the applied ICS rule coverage as counts
+// only: health is unauthenticated, so it names no rule or exclusion.
+func icsEnforcementHealth(ruleset rulesetObservation) coverage.Summary {
+	if ruleset.err != nil {
+		return coverage.Summary{State: coverage.SummaryUnknown}
+	}
+	return coverage.Summarize(ruleset.status.ICSCoverage)
 }

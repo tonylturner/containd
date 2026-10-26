@@ -17,6 +17,7 @@ import (
 
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
@@ -150,7 +151,7 @@ func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	health := enforcementHealth(context.Background(), snapshot, nil, engine)
+	health := enforcementHealth(snapshot, nil, observeRuleset(context.Background(), engine))
 	if health["state"] != "unavailable" || health["reason"] == "" || len(health) != 2 {
 		t.Fatalf("health fault hidden or shape changed: %v", health)
 	}
@@ -194,7 +195,7 @@ func TestHealthEnforcementStates(t *testing.T) {
 			cfg := config.DefaultConfig()
 			cfg.DataPlane.Enforcement = tc.enabled
 			engine := &healthRulesetEngine{mockEngine: &mockEngine{ruleset: tc.status}, err: tc.engineErr}
-			health := enforcementHealth(context.Background(), config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, engine)
+			health := enforcementHealth(config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, observeRuleset(context.Background(), engine))
 			if health["state"] != tc.want || len(health) != 2 {
 				t.Fatalf("health: %v want %s", health, tc.want)
 			}
@@ -411,6 +412,43 @@ func TestHealthSharesOneObservationDeadline(t *testing.T) {
 				if body.Enforcement.State != "unknown" || body.Binding.State != "unknown" {
 					t.Fatalf("timed out observation reported known: %s", rec.Body)
 				}
+			}
+		})
+	}
+}
+
+func TestHealthReportsICSEnforcementCounts(t *testing.T) {
+	applied := []coverage.Rule{
+		{RuleID: "secret-rule-a", Protocol: "modbus", Mode: "enforce", State: coverage.Enforcing},
+		{RuleID: "secret-rule-b", Protocol: "dnp3", Mode: "enforce", State: coverage.Partial,
+			Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Value: "192.0.2.44", Message: "excluded"}}},
+		{RuleID: "secret-rule-c", Protocol: "modbus", Mode: "learn", State: coverage.Monitoring},
+	}
+	for _, tc := range []struct {
+		name   string
+		engine EngineClient
+		want   map[string]any
+	}{
+		{"no engine", nil, map[string]any{"state": "unknown", "enforcing": 0.0, "partial": 0.0, "notEnforcing": 0.0, "monitoring": 0.0}},
+		{"engine error", &healthRulesetEngine{mockEngine: &mockEngine{}, err: errors.New("refused")},
+			map[string]any{"state": "unknown", "enforcing": 0.0, "partial": 0.0, "notEnforcing": 0.0, "monitoring": 0.0}},
+		{"no semantic rule", &mockEngine{}, map[string]any{"state": "none", "enforcing": 0.0, "partial": 0.0, "notEnforcing": 0.0, "monitoring": 0.0}},
+		{"worst enforce state", &mockEngine{ruleset: dpengine.RulesetStatus{ICSCoverage: applied}},
+			map[string]any{"state": "partial", "enforcing": 1.0, "partial": 1.0, "notEnforcing": 0.0, "monitoring": 1.0}},
+		{"learn only", &mockEngine{ruleset: dpengine.RulesetStatus{ICSCoverage: applied[2:]}},
+			map[string]any{"state": "monitoring", "enforcing": 0.0, "partial": 0.0, "notEnforcing": 0.0, "monitoring": 1.0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := healthBody(t, tc.engine)
+			if code != http.StatusOK {
+				t.Fatalf("liveness = %d", code)
+			}
+			if got := body["icsEnforcement"]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("icsEnforcement = %v, want %v", got, tc.want)
+			}
+			raw, _ := json.Marshal(body)
+			if strings.Contains(string(raw), "secret-rule") || strings.Contains(string(raw), "192.0.2.44") {
+				t.Fatalf("unauthenticated health names rules or exclusions: %s", raw)
 			}
 		})
 	}

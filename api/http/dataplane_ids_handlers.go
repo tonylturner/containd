@@ -18,6 +18,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpids "github.com/tonylturner/containd/pkg/cp/ids"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
@@ -66,6 +67,10 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 		}
 		if len(preview.Warnings) > 0 {
 			resp["warnings"] = preview.Warnings
+		}
+		// Static candidate coverage; engineStatus carries the applied one.
+		if cov := coverage.Evaluate(&preview.Snapshot, cfg.DataPlane.CoverageSettings()); len(cov) > 0 {
+			resp["icsCoverage"] = cov
 		}
 		if engine != nil {
 			type rulesetStatusClient interface {

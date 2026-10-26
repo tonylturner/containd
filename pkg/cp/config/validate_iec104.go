@@ -5,9 +5,11 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"slices"
 	"strings"
+
+	"github.com/tonylturner/containd/pkg/dp/coverage"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // IEC 60870-5-104 predicate limits.
@@ -116,18 +118,6 @@ func validateIEC104IOA(ranges []IOARange, ruleID string) error {
 	return nil
 }
 
-// effectiveICSMode resolves a rule's ICS mode the way the engine does:
-// rule mode > global dpiMode > learn.
-func effectiveICSMode(ruleMode, globalMode string) string {
-	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
-		return m
-	}
-	if m := strings.ToLower(strings.TrimSpace(globalMode)); m != "" {
-		return m
-	}
-	return "learn"
-}
-
 // validateIEC104Policy checks what needs the whole config: which types an
 // ALLOW rule may name, and the static causes that keep an IEC104 enforce
 // envelope from activating. Commit, candidate and import all
@@ -138,7 +128,7 @@ func validateIEC104Policy(c *Config) error {
 		if r.ICS.Protocol != ICSProtocolIEC104 {
 			continue
 		}
-		mode := effectiveICSMode(r.ICS.Mode, c.DataPlane.DPIMode)
+		mode := rules.EffectiveMode(r.ICS.Mode, c.DataPlane.DPIMode)
 		if r.Action == ActionAllow && mode != "learn" {
 			if err := validateIEC104AllowTypes(r); err != nil {
 				return err
@@ -179,60 +169,15 @@ func validateIEC104Activation(dp DataPlaneConfig, enforce []Rule) error {
 	if dp.NFQueueGroup == 0 {
 		return fmt.Errorf("rule %s: iec104 enforce needs NFQUEUE capture; set dataplane.nfqueueGroup to a non-zero queue", first)
 	}
+	// Domain exclusions never exempt the envelope, so only IP and CIDR
+	// exclusions can overlap it.
 	for _, r := range enforce {
 		for _, excl := range dp.DPIExclusions {
-			if dpiExclusionOverlapsRule(excl, r) {
+			x := coverage.Exclusion{Value: excl.Value, Type: excl.Type}
+			if coverage.ExclusionOverlaps(x, r.Sources, r.Destinations) {
 				return fmt.Errorf("rule %s: dpi exclusion %q overlaps the iec104 enforce envelope", r.ID, excl.Value)
 			}
 		}
 	}
 	return nil
-}
-
-// dpiExclusionOverlapsRule reports whether an IP or CIDR exclusion can
-// match a flow of the rule's L3 scope. The engine checks both endpoints of
-// a flow, so an exclusion overlaps when it meets either side. An empty side
-// matches any address. VPN tokens resolve elsewhere, so they count as
-// overlapping. Domain exclusions cannot bypass IEC104 inspection: the engine
-// keeps port 2404 and its enforcement envelope inspected regardless of DNS/SNI.
-func dpiExclusionOverlapsRule(excl DPIExclusion, r Rule) bool {
-	var exclNet *net.IPNet
-	switch excl.Type {
-	case "domain":
-		return false
-	case "ip":
-		ip := net.ParseIP(strings.TrimSpace(excl.Value))
-		if ip == nil {
-			return false
-		}
-		if ip4 := ip.To4(); ip4 != nil {
-			ip = ip4
-		}
-		bits := 8 * len(ip)
-		exclNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)}
-	case "cidr":
-		_, n, err := net.ParseCIDR(strings.TrimSpace(excl.Value))
-		if err != nil {
-			return false
-		}
-		exclNet = n
-	default:
-		return false
-	}
-	return cidrsOverlap(r.Sources, exclNet) || cidrsOverlap(r.Destinations, exclNet)
-}
-
-func cidrsOverlap(side []string, n *net.IPNet) bool {
-	if len(side) == 0 {
-		return true
-	}
-	for _, s := range side {
-		if isSpecialCIDRToken(s) {
-			return true
-		}
-		if _, c, err := net.ParseCIDR(s); err == nil && cidrOverlap(c, n) {
-			return true
-		}
-	}
-	return false
 }

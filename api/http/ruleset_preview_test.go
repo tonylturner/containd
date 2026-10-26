@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -64,8 +65,46 @@ func TestRulesetPreviewOmitsEmptyWarnings(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil)
 	getRulesetPreviewHandler(&mockStore{cfg: cfg}, engine)(c)
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"warnings"`) {
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"warnings"`) || strings.Contains(rec.Body.String(), `"icsCoverage"`) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The candidate's coverage is evaluated from the candidate settings and the
+// compiled snapshot; engineStatus keeps the applied coverage the engine
+// reported, so the two can differ.
+func TestRulesetPreviewCarriesCandidateCoverage(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, DPIEnabled: true, DPIMode: "enforce", NFQueueGroup: 101,
+		DPIExclusions: []config.DPIExclusion{{Value: "10.1.0.4", Type: "ip"}}}
+	snap := rules.Snapshot{Firewall: []rules.Entry{
+		{ID: "read", Destinations: []string{"10.1.0.4/32"}, ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}}, Action: rules.ActionAllow},
+		{ID: "l4", Action: rules.ActionAllow},
+	}}
+	applied := dpengine.RulesetStatus{Ruleset: "applied", ICSCoverage: []coverage.Rule{
+		{RuleID: "read", Protocol: "modbus", Mode: "enforce", State: coverage.NotEnforcing,
+			Reasons: []coverage.Reason{{Code: coverage.QueueUnavailable, Message: "queue"}}},
+	}}
+	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: applied}, result: dpengine.RulesetPreview{Snapshot: snap, Ruleset: "compiled"}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil)
+	getRulesetPreviewHandler(&mockStore{cfg: cfg}, engine)(c)
+	var got struct {
+		ICSCoverage  []coverage.Rule        `json:"icsCoverage"`
+		EngineStatus dpengine.RulesetStatus `json:"engineStatus"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	want := []coverage.Rule{{RuleID: "read", Protocol: "modbus", Mode: "enforce", State: coverage.Partial,
+		Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Value: "10.1.0.4",
+			Message: "DPI exclusion 10.1.0.4 meets this rule's addresses; its flows skip inspection"}}}}
+	if !reflect.DeepEqual(got.ICSCoverage, want) {
+		t.Fatalf("icsCoverage = %+v, want %+v", got.ICSCoverage, want)
+	}
+	if !reflect.DeepEqual(got.EngineStatus, applied) {
+		t.Fatalf("engineStatus = %+v, want %+v", got.EngineStatus, applied)
 	}
 }
 

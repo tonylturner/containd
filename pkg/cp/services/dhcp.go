@@ -26,7 +26,7 @@ type DHCPManager struct {
 	lastRender time.Time
 	lastError  string
 
-	onMetric func(service string, delta int)
+	onMetric func(delta int, failure bool)
 	log      *zap.SugaredLogger
 }
 
@@ -112,26 +112,23 @@ func (m *DHCPManager) Status() map[string]any {
 		"listen_ifaces": len(m.lastCfg.ListenIfaces),
 		"pools":         len(m.lastCfg.Pools),
 		"reservations":  len(m.lastCfg.Reservations),
-		"last_render":   m.lastRender.Format(time.RFC3339Nano),
+		"last_render":   formatMaybe(m.lastRender),
 		"last_error":    m.lastError,
 		"note":          "DHCP runtime is handled by the engine; this status reflects config render state.",
 	}
 }
 
-// IncrementLeaseMetric can be called by the DHCP runtime (when added) to track issued leases.
+// IncrementLeaseMetric can be called by the DHCP runtime (when added) to track
+// issued leases; failures count on the DHCP error meter.
 func (m *DHCPManager) IncrementLeaseMetric(delta int, failure bool) {
 	if m == nil || m.onMetric == nil {
 		return
 	}
-	if failure {
-		m.onMetric("dhcp", 0)
-		m.onMetric("dhcp_error", delta)
-		return
-	}
-	m.onMetric("dhcp", delta)
+	m.onMetric(delta, failure)
 }
 
-// SetMetricEmitter is used by the top-level manager to provide IncrementServiceMetric callback.
-func (m *DHCPManager) SetMetricEmitter(fn func(service string, delta int)) {
+// SetMetricEmitter is used by the top-level manager to feed the DHCP lease
+// and lease-failure meters.
+func (m *DHCPManager) SetMetricEmitter(fn func(delta int, failure bool)) {
 	m.onMetric = fn
 }

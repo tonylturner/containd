@@ -799,8 +799,8 @@ func TestObjectCRUD(t *testing.T) {
 func TestApplyICSTemplateModeEnforce(t *testing.T) {
 	// Apply-time mode=enforce should overwrite ICSPredicate.Mode on
 	// every generated rule. This is the lab path: bypass monitor-first
-	// for pedagogical clarity.
-	store := &mockStore{cfg: config.DefaultConfig()}
+	// for pedagogical clarity. Enforce needs the inline path.
+	store := &mockStore{cfg: inlineConfig()}
 	s := NewServer(store, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/templates/ics/apply", bytes.NewBufferString(`{
@@ -823,6 +823,36 @@ func TestApplyICSTemplateModeEnforce(t *testing.T) {
 	}
 	if found != 2 {
 		t.Fatalf("expected 2 tpl-modbus-* rules persisted, found %d", found)
+	}
+}
+
+// inlineConfig is the default config with an NFQUEUE inline path.
+func inlineConfig() *config.Config {
+	cfg := config.DefaultConfig()
+	cfg.DataPlane.NFQueueGroup = 101
+	return cfg
+}
+
+// Staging enforce-mode ICS rules without an inline path is refused, and the
+// candidate stays unchanged.
+func TestApplyICSTemplateModeEnforceNeedsInlinePath(t *testing.T) {
+	for _, tc := range []struct{ path, body string }{
+		{"/api/v1/templates/ics/apply", `{"template":"modbus_read_only","mode":"enforce"}`},
+		{"/api/v1/templates/apply", `{"name":"modbus-read-only","mode":"enforce"}`},
+	} {
+		store := &mockStore{cfg: config.DefaultConfig()}
+		before := len(store.cfg.Firewall.Rules)
+		s := NewServer(store, nil)
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, tc.path, bytes.NewBufferString(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "dataplane.nfqueueGroup") {
+			t.Fatalf("%s: got %d body=%s, want 400 naming dataplane.nfqueueGroup", tc.path, rec.Code, rec.Body.String())
+		}
+		if len(store.cfg.Firewall.Rules) != before {
+			t.Fatalf("%s: refused apply changed the candidate rules", tc.path)
+		}
 	}
 }
 
@@ -869,7 +899,7 @@ func TestApplyICSTemplateModeInvalid(t *testing.T) {
 func TestApplyGenericTemplateModeEnforce(t *testing.T) {
 	// Generic /api/v1/templates/apply endpoint also accepts mode and
 	// applies it to the rules from the registry.
-	store := &mockStore{cfg: config.DefaultConfig()}
+	store := &mockStore{cfg: inlineConfig()}
 	s := NewServer(store, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/templates/apply", bytes.NewBufferString(`{

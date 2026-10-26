@@ -52,9 +52,13 @@ type stream struct {
 	synSeen bool
 	synSeq  uint32 // payload sequence following the SYN, for late capture copies
 	keep    bool   // session stream: lifetime owned by the caller, never idle-swept
+	// verify keeps consumed bytes in hist so that a retransmission of them
+	// is compared too; it follows the latest segment's request.
+	verify bool
 
 	base       int64  // absolute offset of buf[0]; the consumed watermark
 	buf        []byte // contiguous bytes from base
+	hist       []byte // verify: the last consumed bytes, [base-len(hist), base)
 	ooo        []oooSegment
 	lastUpdate time.Time
 
@@ -71,6 +75,9 @@ func (s *stream) stored() int {
 	}
 	return n
 }
+
+// held is every byte the stream keeps: stored bytes and consumed history.
+func (s *stream) held() int { return s.stored() + len(s.hist) }
 
 // feedResult is the stream state after one segment.
 type feedResult struct {
@@ -124,7 +131,7 @@ func (r *reassembler) open(key string, seq uint32, now time.Time) {
 			s.lastUpdate = now
 			return
 		}
-		r.bytesBuffered -= s.stored()
+		r.bytesBuffered -= s.held()
 	} else {
 		r.activeStreams++
 	}
@@ -134,9 +141,13 @@ func (r *reassembler) open(key string, seq uint32, now time.Time) {
 // feed adds one segment. A new stream starts at offset 0 in the given
 // position mode; strict and keep are fixed at creation.
 //
-// Bytes below the consumed watermark are duplicates. Bytes the stream
-// still holds are compared byte for byte; a difference is a conflict.
-func (r *reassembler) feed(key string, pos position, payload []byte, now time.Time, strict, keep bool) feedResult {
+// Bytes the stream still holds are compared byte for byte; a difference is
+// a conflict. Bytes below the consumed watermark are duplicates; with
+// verify set on a strict stream they are compared with the consumed
+// history as well, and a consumed byte older than the history cannot be
+// verified. verify applies from this segment on; turning it off drops the
+// history.
+func (r *reassembler) feed(key string, pos position, payload []byte, now time.Time, strict, keep, verify bool) feedResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -150,9 +161,13 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 		return feedResult{failed: s.failed}
 	}
 	s.lastUpdate = now
-	before := s.stored()
+	before := s.held()
+	s.verify = strict && verify
+	if !s.verify {
+		s.hist = nil
+	}
 	err := s.add(s.resolve(pos), payload, r.maxSize)
-	r.bytesBuffered += s.stored() - before
+	r.bytesBuffered += s.held() - before
 	return feedResult{
 		buf:  append([]byte(nil), s.buf...),
 		base: s.base,
@@ -199,12 +214,15 @@ func (s *stream) add(off int64, data []byte, maxSize int) *StreamError {
 }
 
 // dropHeld removes the bytes of data at off that the stream has already
-// consumed or still holds contiguously, comparing the held ones. It reports
-// whether any byte was a repeat.
+// consumed or still holds contiguously, comparing the held ones (and, with
+// verify, the consumed ones). It reports whether any byte was a repeat.
 func (s *stream) dropHeld(off int64, data []byte) ([]byte, int64, bool, *StreamError) {
 	dup := false
 	if off < s.base { // already consumed
 		cut := min(s.base-off, int64(len(data)))
+		if err := s.verifyConsumed(off, data[:cut]); err != nil {
+			return nil, off, true, err
+		}
 		data, off, dup = data[cut:], off+cut, true
 	}
 	if end := s.end(); off < end && len(data) > 0 {
@@ -216,6 +234,23 @@ func (s *stream) dropHeld(off int64, data []byte) ([]byte, int64, bool, *StreamE
 		data, off, dup = data[n:], off+n, true
 	}
 	return data, off, dup, nil
+}
+
+// verifyConsumed compares consumed bytes at off with the history of a
+// verify stream. Other streams do not compare consumed bytes.
+func (s *stream) verifyConsumed(off int64, data []byte) *StreamError {
+	if !s.verify {
+		return nil
+	}
+	histBase := s.base - int64(len(s.hist))
+	if off < histBase {
+		return &StreamError{Kind: StreamUnverifiedRetransmission, Offset: off}
+	}
+	held := s.hist[off-histBase : off-histBase+int64(len(data))]
+	if i := firstDiff(held, data); i >= 0 {
+		return &StreamError{Kind: StreamOverlapConflict, Offset: off + int64(i)}
+	}
+	return nil
 }
 
 // checkOOOOverlap compares data at off with every buffered out-of-order
@@ -330,7 +365,8 @@ func firstDiff(a, b []byte) int {
 }
 
 // trim consumes the first n bytes of the stream if its watermark is still
-// base (the view that was parsed).
+// base (the view that was parsed). A verify stream moves them into its
+// history, which keeps the last maxSize consumed bytes.
 func (r *reassembler) trim(key string, base int64, n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -338,25 +374,32 @@ func (r *reassembler) trim(key string, base int64, n int) {
 	if !ok || s.base != base || n <= 0 {
 		return
 	}
+	before := s.held()
 	n = min(n, len(s.buf))
+	if s.verify {
+		s.hist = append(s.hist, s.buf[:n]...)
+		if excess := len(s.hist) - r.maxSize; excess > 0 {
+			s.hist = s.hist[excess:]
+		}
+	}
 	s.buf = s.buf[n:]
 	s.base += int64(n)
-	r.bytesBuffered -= n
+	r.bytesBuffered += s.held() - before
 }
 
-// fail discards a session stream's bytes and marks it failed until
-// complete; later feeds return err.
+// fail discards a stream's bytes and marks it failed until complete;
+// later feeds return err.
 func (r *reassembler) fail(key string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if s, ok := r.streams[key]; ok {
-		r.bytesBuffered -= s.stored()
-		s.buf, s.ooo = nil, nil
+		r.bytesBuffered -= s.held()
+		s.buf, s.ooo, s.hist = nil, nil, nil
 		s.failed = err
 	}
 }
 
-// failure returns the error a session stream failed with, or nil.
+// failure returns the error a stream failed with, or nil.
 func (r *reassembler) failure(key string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -371,15 +414,16 @@ func (r *reassembler) complete(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if s, ok := r.streams[key]; ok {
-		r.bytesBuffered -= s.stored()
+		r.bytesBuffered -= s.held()
 		delete(r.streams, key)
 		r.activeStreams--
 	}
 }
 
 // sweep removes streams idle longer than idleTimeout, except session
-// streams, whose lifetime the caller owns (EndStream). It runs at most once
-// per idleTimeout.
+// streams, whose lifetime the caller owns (EndStream), and failed streams,
+// which hold no bytes and stay failed until their flow ends. It runs at
+// most once per idleTimeout.
 func (r *reassembler) sweep(now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -388,8 +432,8 @@ func (r *reassembler) sweep(now time.Time) {
 	}
 	r.lastSweep = now
 	for key, s := range r.streams {
-		if !s.keep && now.Sub(s.lastUpdate) > r.idleTimeout {
-			r.bytesBuffered -= s.stored()
+		if !s.keep && s.failed == nil && now.Sub(s.lastUpdate) > r.idleTimeout {
+			r.bytesBuffered -= s.held()
 			delete(r.streams, key)
 			r.activeStreams--
 		}
