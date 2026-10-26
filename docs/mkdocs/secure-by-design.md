@@ -1,9 +1,12 @@
 # Secure by Design
 
 containd uses the CISA Secure by Design badge as a statement of intent and
-transparency, **not government certification** or a claim that every pledge goal
-is complete. This page describes operator controls and their limits, not a
-compliance score.
+transparency, **not government certification**. This page maps the seven pledge
+goals to containd's design and defaults.
+
+A goal is met when the shipped design meets it by default, without extra
+configuration. Steps that an operator takes for a specific deployment are in
+[Deployment hardening](#deployment-hardening). They do not change a status.
 
 Official references:
 
@@ -11,90 +14,217 @@ Official references:
 - [CISA pledge](https://www.cisa.gov/securebydesign/pledge)
 - [Secure by Design principles](https://www.cisa.gov/sites/default/files/2023-10/SecureByDesign_1025_508c.pdf)
 
-## 1. Multi-Factor Authentication
+## Status at a glance
 
-Local web/API accounts support TOTP MFA, JWT sessions, and `admin`/`view` roles.
-Administrators can require MFA, with a seven-day enrollment grace period.
-Authentication and logging are part of the base appliance.
+| Pledge goal | Status | Default design |
+| ----------- | ------ | -------------- |
+| 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account; admins can require it. SSH does not use it. |
+| 2. Default passwords | Gap | Forced first-login change on web/API. SSH accepts the bootstrap password before that change. |
+| 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
+| 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
+| 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
+| 6. CVE transparency | Met | CSAF 2.0 advisories with CWE, served provider metadata. |
+| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding and metrics in the base product. Some account changes are not audited. |
 
-These controls differ by channel:
+- **Met**: the design and its defaults deliver the goal.
+- **Met with caveat**: the design delivers the goal. A stated limit or trade-off
+  remains.
+- **Gap**: a design decision blocks the goal. See [Known gaps](#known-gaps).
 
-- MFA and forced first-login password change apply to web/API access. The SSH
-  appliance shell does **not** enforce MFA or forced password change, even in
-  standard mode. Restrict SSH reachability and prefer keys.
-- Changing a password or MFA settings does not revoke existing sessions.
-- TOTP is local-account only. SMS, external OIDC identity, and resource-scoped
-  roles are not implemented.
+containd has no paid tier. Every security feature on this page is in the base
+product.
 
-## 2. Default Passwords
+## Pledge goals
 
-Fresh local-account installs start with the universal bootstrap credential
-`containd / containd`. Standard deployments require a password change on first
-web/API login. This is not a per-instance secret and is not safe to expose to a
-shared network before setup. Keep management private, set a unique non-empty
-`CONTAIND_JWT_SECRET`, change the password immediately, and configure SSH keys.
+### 1. Multi-Factor Authentication
 
-### Lab-mode credential pinning
+What the design delivers by default:
 
-`CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops:
-it pins `containd / containd` and refuses every password change for every user,
-on every path, with the same reason.
+- Every local web/API account can enroll app-based TOTP MFA.
+- Admins can require MFA for an account. After a seven-day enrollment grace
+  period, that account can reach only MFA setup until it enrolls.
+- Sessions are server-side records behind signed JWTs, with a 30-minute idle
+  limit and a 4-hour maximum. Logout revokes the session. Outside lab mode,
+  management refuses to start with an empty or example `CONTAIND_JWT_SECRET`.
+- API routes enforce the `admin` or `view` role. SSH accepts only `admin`
+  accounts.
+- Web/API login and SSH password login are rate-limited.
+
+Caveats:
+
+- SSH accepts a password or a public key. It does not use TOTP, and an MFA
+  requirement on an account does not apply to SSH. See [Known gaps](#known-gaps).
+- A password or MFA change does not end the account's other active sessions.
+  They end at the idle or maximum session limit.
+- MFA is local-account TOTP. SMS is intentionally not supported. External
+  identity (OIDC single sign-on) and resource-scoped roles are not implemented.
+
+### 2. Default Passwords
+
+What the design delivers by default:
+
+- A fresh install seeds one admin account, `containd` / `containd`, and marks it
+  for a forced password change.
+- Until that change, a web/API session can reach only its own session, logout
+  and the password-change endpoint.
+- A new password needs at least 8 characters with an uppercase letter, a
+  lowercase letter and a digit, so the bootstrap value cannot be kept.
+
+The bootstrap credential is universal, not per instance. This is a deliberate
+trade-off: containd often runs in offline labs and classrooms that have no
+channel to distribute a per-instance secret. The forced change limits the
+credential's life on web/API.
+
+The SSH path does not have this protection. See [Known gaps](#known-gaps).
+
+#### Lab-mode credential pinning
+
+`CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops.
+It is off by default and in the supplied Compose file. It pins
+`containd` / `containd` and refuses every password change for every user, on
+every path, with the same reason:
 
 - `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`.
-- `POST /api/v1/auth/me/password` returns 403.
-- `POST /api/v1/users/:id/password` also returns 403, including for admins.
-- The SSH console's "Reset admin password" menu option prints the reason and
-  changes nothing; the setup wizard prints the reason, skips its password step
-  and continues with the remaining steps.
+- `POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` return
+  403, also for admins.
+- The SSH console's "Reset admin password" option and the setup wizard's
+  password step print the reason and change nothing. The wizard continues with
+  its other steps.
 - Seeding the default admin at first boot and after a factory reset is not a
   password change and is unaffected.
-- The SSH admin shell on `:2222` uses the same pinned credential and does not
-  provide a substitute MFA safeguard.
 
-Use lab mode only for single-tenant, isolated or offline training environments
+Lab mode also relaxes web/API authentication. Every request gets admin access.
+With a JWT secret, any validly signed, unexpired token passes without a session
+lookup. Without a secret, any nonempty token passes. Factory reset does not
+revoke lab tokens. SSH password login is on by default, uses the same pinned
+credential, and has no MFA.
+
+Use lab mode only for single-tenant, isolated or offline training environments,
 with HTTP and SSH bound to loopback or an instructor-private network. Do not use
-it on hostile/shared networks or for real ICS deployments. A compromised lab
+it on hostile or shared networks, or for real ICS deployments. A compromised lab
 credential compromises that deployment's management boundary.
 
-Password changes remain refused while lab mode is enabled. To return to
-standard authentication, remove the flag or set it to `0`, restart, and use the
-standard authenticated password-change flow. Disabling the flag is not itself a
-password rotation. Recreating a container with the same data volume does not
-clear stored accounts; do not rely on redeployment as a credential reset. If
-access is lost, keep the appliance isolated; disabling lab mode does not reset
-or recover credentials.
+To return to standard authentication, remove the flag or set it to `0`, restart,
+and change the password through the standard flow. Disabling the flag does not
+rotate, reset or recover credentials. Recreating a container with the same data
+volume keeps the stored accounts.
 
-## Deployment hardening
+### 3. Reducing Entire Classes of Vulnerability
 
-- Keep `CONTAIND_LAB_MODE=0` except in the isolated cases above.
-- Use a unique JWT signing secret, HTTPS, and TOTP for administrative web access.
-- Limit HTTP and SSH exposure; do not assume web account assurances apply to SSH.
-- Isolate the **unauthenticated engine API**. Combined mode binds it to
-  `127.0.0.1:8081` by default. Split engine mode requires `CONTAIND_ENGINE_ADDR`
-  to name the engine's address on a trusted private management network and
-  refuses loopback or wildcard listeners. While enforcing, the firewall admits
-  the API from loopback and on that address's interface only. See
-  [Threat Model](threat-model.md#management-plane-to-dataplane) and
+What the design delivers by default:
+
+- **Memory safety.** containd's management plane, control plane, dataplane and
+  protocol decoders are Go, built with cgo disabled. Untrusted packets are parsed
+  in memory-safe code. Embedded third-party services, such as ClamAV, are covered
+  by the SBOM and image scanning instead.
+- **Default deny.** Forwarded traffic that no rule allows is dropped. Only an
+  explicit `ALLOW` default action changes this.
+- **Fail closed, without lockout.** Every boot validates the stored running
+  configuration. If it is invalid, management enters recovery: new transit is
+  dropped and management stays reachable where it was. A reserved management
+  path, when declared, compiles into every firewall as an independent allow, so
+  policy cannot lock out the management network. See
   [Reserved Management Path](management-reservation.md).
-- Keep default-deny firewall policy and commit only the minimum required allows.
-  Ensure network topology routes the protected traffic through the appliance.
-- Preserve audit records and verify off-box log delivery. Service syslog and
-  application syslog sinks are available; the DPI SIEM exporter is not wired.
-  See [Logging and Evidence](logging-evidence.md).
-- Install supported security updates using the [Update Policy](update-policy.md).
-  Patch adoption is operator-managed; no aggregate adoption telemetry is published.
+- **Isolated engine API.** The engine API is unauthenticated, so its reach is
+  limited by design. Combined mode binds it to `127.0.0.1:8081`. Split engine
+  mode refuses to start without `CONTAIND_ENGINE_ADDR` and refuses loopback or
+  wildcard listeners, except on a reserved management path, where both processes
+  share one network namespace. While enforcing, the firewall admits the API from loopback
+  and on that address's interface only. See
+  [Threat Model](threat-model.md#management-plane-to-dataplane).
+- **Web defenses.** Auth cookies use `SameSite=Strict`. Cookie-authenticated
+  unsafe requests must be same-origin. Sensitive endpoints are rate-limited.
+- **Build gates.** CI runs race-enabled tests, golangci-lint and Semgrep. It
+  fails on unsuppressed HIGH/CRITICAL Trivy findings in the management image
+  (suppressions are in `.trivyignore`). A clean scan is not proof that no
+  vulnerability exists.
 
-## Supply chain and disclosure
+### 4. Security Patches
 
-Releases include signed images, SBOMs, and versioned release notes. CI scans the
-management image for unsuppressed HIGH/CRITICAL Trivy findings using
-`.trivyignore`; this is not proof of an absence of vulnerabilities. See
-[SBOMs and signatures](sbom.md).
+What the design delivers by default:
+
+- Releases ship as versioned container images, signed with Cosign, with SBOM
+  attestations. `:latest` moves only to signed stable releases.
+- An update replaces the image. Configuration, users and audit data persist on
+  the `/data` volume.
+- If an upgrade tightens validation and the stored configuration fails it,
+  management boots into fail-closed recovery. It does not refuse to start, and it
+  does not apply a configuration it cannot validate.
+
+Caveat: containd does not update itself or check for updates. ICS appliances
+often run offline and under change control, so the operator schedules each
+update. containd does not send telemetry, so patch adoption is not measured. See
+[Update Policy](update-policy.md) and [SBOMs and signatures](sbom.md).
+
+### 5. Vulnerability Disclosure Policy
 
 [SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) is the
 canonical disclosure policy. The appliance serves `/.well-known/security.txt`.
-Published CSAF documents, including `containd-2026-001`, are indexed in
+
+### 6. CVE Transparency and Completeness
+
+containd publishes CSAF 2.0 advisories with CWE classification, and the appliance
+serves CSAF provider metadata at `/.well-known/csaf/provider-metadata.json`.
+Release notes and the changelog name security-relevant fixes. Published
+advisories, including `containd-2026-001`, are indexed in
 [Advisories and CSAF](advisories.md).
+
+### 7. Evidence of Intrusions
+
+What the design delivers by default:
+
+- A persistent audit database records web/API logins and MFA changes, SSH logins,
+  logouts and CLI commands, configuration saves and commits, factory resets and
+  management boot faults.
+- `GET /api/v1/events` exposes firewall, DPI, IDS, AV, proxy and service events.
+  Separate bounded banks keep firewall denies and IEC 104 incident evidence,
+  so routine traffic does not evict them.
+- The service syslog forwarder sends engine and service events over UDP or TCP,
+  as JSON or RFC 5424. Application logs can go to a remote syslog sink.
+- `/metrics` exposes Prometheus metrics.
+
+Caveats:
+
+- User creation, change and deletion, password changes, and management TLS
+  certificate replacement through the web/API do not write audit records.
+- Audit records stay in the local database. The syslog forwarder does not carry
+  them.
+- Event history is bounded and in memory, and syslog forwarding is best-effort.
+- The top-level `export` setting is not used at runtime. Use the syslog
+  forwarder.
+
+See [Logging and Evidence](logging-evidence.md).
+
+## Known gaps
+
+**SSH accepts the bootstrap credential without the forced change (goal 2).**
+On a fresh install with no SSH keys, SSH password login is on, SSH listens on
+`:2222`, and default interface access allows SSH on every interface. SSH accepts
+`containd` / `containd` before anyone changes it. SSH also ignores an account's
+MFA requirement. An SSH session can open a Linux shell in the appliance
+container, which runs as root. The bootstrap credential therefore gives full
+appliance access over SSH until someone changes the password through the web
+UI, the API or the SSH menu.
+
+## Deployment hardening
+
+These steps adapt a deployment to its network. They are guidance, not gaps.
+
+- Change the bootstrap password before management is reachable from a shared
+  network. Then enroll an admin SSH key and disable SSH password login; the SSH
+  setup wizard offers both steps and refuses a change that would lock out SSH.
+- Require MFA for administrative accounts.
+- Keep `CONTAIND_LAB_MODE=0` except in the isolated cases above.
+- Use a unique JWT secret. Replace the generated self-signed HTTPS certificate,
+  and prefer HTTPS.
+- Remove HTTP, HTTPS and SSH access from interfaces that do not need management.
+- In split mode, set `CONTAIND_ENGINE_ADDR` to the engine's address on a trusted
+  private management network.
+- Commit only the allow rules you need. Make sure the network routes protected
+  traffic through the appliance.
+- Configure a syslog forwarder, verify delivery, and collect audit records
+  off-box.
+- Install supported security updates; see [Update Policy](update-policy.md).
 
 ## Additional CA bundle
 
@@ -110,15 +240,3 @@ Other clients keep their own trust: the web console's loopback connection pins
 the configured management certificate, OpenVPN tunnels use their per-tunnel CA,
 and browsers and remote CLI hosts use their own trust stores. Do not disable
 certificate verification to work around a rejected private-CA endpoint.
-
-## Known Gaps
-
-- Web, SSH, and CLI do not apply consistent account-assurance requirements; SSH
-  does not enforce MFA or forced password change.
-- Password/MFA changes do not revoke existing sessions.
-- Fresh installs use a universal bootstrap password rather than a per-instance
-  credential; lab mode deliberately retains it.
-- Audit coverage and visibility into evidence-delivery failures are incomplete.
-  Event caches and best-effort syslog do not guarantee complete durable history.
-- DPI CEF/JSON/Syslog export configuration has no runtime consumer.
-- External identity (OIDC) and richer, resource-scoped roles are not implemented.
