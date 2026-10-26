@@ -89,7 +89,7 @@ func TestMenuResetPasswordHidesInputAndConfirms(t *testing.T) {
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
 		t.Fatalf("password was not updated: %v", err)
 	}
-	if len(audits.records) != 1 || audits.records[0].Action != "user.password.set" {
+	if len(audits.records) != 1 || audits.records[0].Action != "auth.password.change" {
 		t.Fatalf("audit: %+v", audits.records)
 	}
 }

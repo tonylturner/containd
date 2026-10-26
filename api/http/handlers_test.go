@@ -211,6 +211,8 @@ func (m *mockUserStore) RevokeSession(_ context.Context, id string) error {
 	return nil
 }
 
+func (m *mockUserStore) SubscribeSessionRevocations(func([]string)) func() { return func() {} }
+
 func (m *mockUserStore) Close() error { return nil }
 
 // ---------------------------------------------------------------------------

@@ -116,17 +116,8 @@ func (s *interactiveSession) askNewPassword(prompt string) (string, bool) {
 	return pw, true
 }
 
-func (s *interactiveSession) writeAudit(action, target string) {
-	if s.server.opts.AuditStore == nil {
-		return
-	}
-	_ = s.server.opts.AuditStore.Add(s.ctx, audit.Record{
-		Actor:  s.username,
-		Source: "ssh",
-		Action: action,
-		Target: target,
-		Result: "success",
-	})
+func (s *interactiveSession) writeAudit(rec audit.Record) {
+	s.server.audit(s.username, rec)
 }
 
 // readLineInteractive reads one line from a terminal session, echoing each

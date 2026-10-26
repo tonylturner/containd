@@ -245,9 +245,11 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	}
 
 	pwcb := srv.passwordCallback()
+	// The bootstrap admin must change its password in a keyboard-interactive step.
 	perms, err := pwcb(testConnMetadata{user: "containd"}, []byte("containd"))
-	if err != nil || perms == nil {
-		t.Fatalf("passwordCallback admin error=%v perms=%#v", err, perms)
+	var partial *ssh.PartialSuccessError
+	if !errors.As(err, &partial) || partial.Next.KeyboardInteractiveCallback == nil || perms != nil {
+		t.Fatalf("passwordCallback bootstrap admin error=%v perms=%#v", err, perms)
 	}
 	if _, err := pwcb(testConnMetadata{user: "viewer"}, []byte(viewerPassword)); err == nil {
 		t.Fatal("expected non-admin ssh password auth to be rejected")

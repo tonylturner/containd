@@ -104,8 +104,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	cfg := &ssh.ServerConfig{
-		PasswordCallback:  s.passwordCallback(),
-		PublicKeyCallback: s.publicKeyCallback(),
+		PasswordCallback:          s.passwordCallback(),
+		PublicKeyCallback:         s.publicKeyCallback(),
+		VerifiedPublicKeyCallback: s.verifiedPublicKeyCallback(),
 		BannerCallback: func(conn ssh.ConnMetadata) string {
 			if s.opts.Banner != "" {
 				return s.opts.Banner + "\r\n"
@@ -124,6 +125,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.ln = ln
 	s.lnMu.Unlock()
 	s.logger.Infof("ssh listening on %s", s.opts.ListenAddr)
+	if !s.opts.LabMode {
+		defer s.opts.UserStore.SubscribeSessionRevocations(s.closeRevokedSessions)()
+	}
 
 	lifetime, cancel := context.WithCancel(ctx)
 	workersDone := make(chan struct{})
@@ -215,6 +219,10 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	s.connMu.Lock()
 	conn.sessionID = sessionID
 	s.connMu.Unlock()
+	if sessionID != "" {
+		// Credential changes made by this connection keep its own session.
+		connCtx = users.WithActingSession(connCtx, sessionID)
+	}
 	if s.opts.AuditStore != nil {
 		_ = s.opts.AuditStore.Add(connCtx, audit.Record{
 			Actor:  username,

@@ -2268,6 +2268,7 @@ paths:
     post:
       summary: Enable TOTP MFA for the current user
       tags: [Auth]
+      description: Ends the account's other sessions, including its SSH connections. The calling session stays signed in.
       requestBody:
         required: true
         content:
@@ -2284,6 +2285,7 @@ paths:
     post:
       summary: Disable TOTP MFA for the current user
       tags: [Auth]
+      description: Ends the account's other sessions, including its SSH connections. The calling session stays signed in.
       requestBody:
         required: true
         content:
@@ -2695,6 +2697,7 @@ paths:
     delete:
       summary: Delete a user (admin)
       tags: [Users]
+      description: Deletes the user's sessions and closes their SSH connections.
       parameters:
       - $ref: "#/components/parameters/pathId"
       responses:
@@ -2705,6 +2708,7 @@ paths:
     post:
       summary: Disable or reset MFA for a user (admin)
       tags: [Users]
+      description: Ends the user's sessions, including SSH connections, except the calling session.
       parameters:
       - $ref: "#/components/parameters/pathId"
       responses:
@@ -4104,7 +4108,7 @@ paths:
     post:
       summary: Change own password
       tags: [Auth]
-      description: Requires the current password. Lab mode refuses the change with 403 before checking the request.
+      description: Requires the current password. The new password must differ from the current one. A change ends the account's other sessions, including its SSH connections; the calling session stays signed in. Lab mode refuses the change with 403 before checking the request.
       requestBody:
         required: true
         content:
@@ -4117,7 +4121,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
         '400':
-          description: Invalid JSON, missing current or new password, or rejected new password
+          description: Invalid JSON, missing current or new password, or a new password that fails the password rules or matches the current one
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4159,7 +4163,7 @@ paths:
     post:
       summary: Set user password (admin)
       tags: [Users]
-      description: Lab mode refuses the change with 403.
+      description: The new password must differ from the current one. A change ends the user's sessions, including SSH connections, except the calling session. Lab mode refuses the change with 403.
       requestBody:
         required: true
         content:

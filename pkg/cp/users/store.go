@@ -64,11 +64,15 @@ type Store interface {
 	GetSession(ctx context.Context, id string) (*Session, error)
 	TouchSession(ctx context.Context, id string, idleTTL time.Duration, maxTTL time.Duration) (*Session, error)
 	RevokeSession(ctx context.Context, id string) error
+	SubscribeSessionRevocations(fn func(sessionIDs []string)) func()
 	Close() error
 }
 
+// SQLiteStore keeps accounts and sessions. SetPassword, SetTOTP and
+// DisableTOTP revoke the account's other sessions in the same transaction.
 type SQLiteStore struct {
-	db *sql.DB
+	db          *sql.DB
+	revocations revocationHub
 }
 
 // ResetToDefaultAdmin replaces users and sessions with the default admin atomically.
@@ -184,6 +188,11 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 type userDB interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type userQuerier interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
 func ensureDefaultAdmin(ctx context.Context, db userDB) error {
@@ -309,12 +318,27 @@ func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, erro
 	return &u, nil
 }
 
+// PasswordPolicyError reports a new password that the password rules refuse.
+type PasswordPolicyError struct{ reason string }
+
+func (e *PasswordPolicyError) Error() string { return e.reason }
+
+// IsPasswordPolicyError reports whether err refuses a password on policy
+// grounds (rules or reuse) rather than a store failure.
+func IsPasswordPolicyError(err error) bool {
+	var policy *PasswordPolicyError
+	return errors.As(err, &policy)
+}
+
+// ErrPasswordReuse refuses a new password that matches the current one.
+var ErrPasswordReuse error = &PasswordPolicyError{reason: "new password must differ from the current password"}
+
 func validatePassword(pw string) error {
 	if pw == "" {
-		return errors.New("password required")
+		return &PasswordPolicyError{reason: "password required"}
 	}
 	if len(pw) < 8 {
-		return errors.New("password must be at least 8 characters")
+		return &PasswordPolicyError{reason: "password must be at least 8 characters"}
 	}
 	var hasUpper, hasLower, hasDigit bool
 	for _, r := range pw {
@@ -328,7 +352,7 @@ func validatePassword(pw string) error {
 		}
 	}
 	if !hasUpper || !hasLower || !hasDigit {
-		return errors.New("password must contain uppercase, lowercase, and a digit")
+		return &PasswordPolicyError{reason: "password must contain uppercase, lowercase, and a digit"}
 	}
 	return nil
 }
@@ -432,6 +456,11 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("begin delete: %w", err)
 	}
+	removed, err := activeSessionIDs(ctx, tx, id, "")
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("delete sessions: %w", err)
@@ -449,11 +478,14 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete: %w", err)
 	}
+	s.revocations.publish(removed)
 	return nil
 }
 
-// SetPassword replaces a user's password. It is the single entry point for
-// password changes and returns ErrPasswordChangeLabMode in lab mode.
+// SetPassword replaces a user's password and revokes the account's other
+// sessions. It is the single entry point for password changes: it returns
+// ErrPasswordChangeLabMode in lab mode and ErrPasswordReuse when the new
+// password matches the current one.
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {
 	if err := CheckPasswordChange(); err != nil {
 		return err
@@ -461,49 +493,60 @@ func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password strin
 	if err := validatePassword(password); err != nil {
 		return err
 	}
+	current, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(current.PasswordHash), []byte(password)) == nil {
+		return ErrPasswordReuse
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
-	if err != nil {
-		return fmt.Errorf("set password: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.updateCredential(ctx, "set password", id, `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
 }
 
+// SetTOTP enables TOTP with secret and revokes the account's other sessions.
 func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) error {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return errors.New("totp secret required")
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
-	if err != nil {
-		return fmt.Errorf("set totp: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.updateCredential(ctx, "set totp", id, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
 }
 
+// DisableTOTP removes TOTP and revokes the account's other sessions.
 func (s *SQLiteStore) DisableTOTP(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
+	return s.updateCredential(ctx, "disable totp", id, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
+}
+
+// updateCredential applies one credential update and revokes the account's
+// other sessions atomically, then notifies revocation subscribers.
+func (s *SQLiteStore) updateCredential(ctx context.Context, op, id, query string, args ...any) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("disable totp: %w", err)
+		return fmt.Errorf("begin %s: %w", op, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	revoked, err := revokeOtherSessions(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %s: %w", op, err)
+	}
+	s.revocations.publish(revoked)
 	return nil
 }
 

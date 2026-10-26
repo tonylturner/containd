@@ -267,7 +267,7 @@ func TestInteractiveHelpers(t *testing.T) {
 		t.Fatalf("execWithOutput err=%v out=%q rw=%q", err, out.String(), rw.String())
 	}
 
-	session.writeAudit("ssh.test", "target")
+	session.writeAudit(audit.Record{Action: "ssh.test", Target: "target"})
 	if len(auditStore.records) != 1 || auditStore.records[0].Action != "ssh.test" {
 		t.Fatalf("unexpected audit records: %#v", auditStore.records)
 	}
@@ -547,7 +547,7 @@ func TestWizardPasswordSuccessAuthenticates(t *testing.T) {
 	if !session.wizardPromptPassword() || !strings.Contains(output.String(), "password updated") {
 		t.Fatal(output.String())
 	}
-	if len(audits.records) != 1 || audits.records[0].Action != "user.password.set" {
+	if len(audits.records) != 1 || audits.records[0].Action != "auth.password.change" {
 		t.Fatalf("audit: %+v", audits.records)
 	}
 	if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte(password)); err != nil {
