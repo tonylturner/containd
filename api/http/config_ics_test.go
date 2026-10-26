@@ -18,7 +18,7 @@ import (
 )
 
 func TestGetConfigPreservesRangerDangerFirewallHash(t *testing.T) {
-	submitted, err := os.ReadFile(filepath.Join("..", "..", "docs", "iec104", "testdata", "exact-policy.json"))
+	submitted, err := os.ReadFile(filepath.Join("testdata", "rangerdanger-substation-weak.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
