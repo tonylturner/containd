@@ -9,14 +9,14 @@ COPY docs/mkdocs ./mkdocs
 RUN pip install --no-cache-dir -r ./requirements-mkdocs.txt
 RUN mkdocs build -f ./mkdocs.yml -d /out/docs
 
-FROM --platform=$BUILDPLATFORM node:20-alpine AS ui-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 COPY ui ./
 COPY --from=docs-builder /out/docs ./public/docs
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build && test -f out/index.html
+ENV NEXT_TELEMETRY_DISABLED=1 CONTAIND_SKIP_DOCS=1
+RUN npm run build && test -f out/index.html && test -f out/docs/index.html
 
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
 ARG TARGETARCH
