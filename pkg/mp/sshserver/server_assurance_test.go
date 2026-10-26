@@ -58,8 +58,12 @@ func serveSSH(t *testing.T, srv *Server) string {
 	t.Helper()
 	srv.opts.ListenAddr = "127.0.0.1:0"
 	ctx, cancel := context.WithCancel(context.Background())
+	if err := srv.Listen(ctx); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
-	go func() { done <- srv.ListenAndServe(ctx) }()
+	go func() { done <- srv.Serve(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -71,18 +75,7 @@ func serveSSH(t *testing.T, srv *Server) string {
 			t.Error("SSH server did not stop")
 		}
 	})
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		srv.lnMu.Lock()
-		ln := srv.ln
-		srv.lnMu.Unlock()
-		if ln != nil {
-			return ln.Addr().String()
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("SSH listener unavailable")
-	return ""
+	return srv.Addr().String()
 }
 
 func newAssuranceServer(t *testing.T) (*Server, *users.SQLiteStore, *syncAuditStore) {

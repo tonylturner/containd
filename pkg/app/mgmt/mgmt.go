@@ -46,7 +46,6 @@ type mgmtStores struct {
 type mgmtListenerConfig struct {
 	httpAddr            string
 	httpsAddr           string
-	sshAddr             string
 	httpLoopbackAddr    string
 	httpsLoopbackAddr   string
 	enableHTTP          bool
@@ -291,7 +290,6 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	listenerCfg := mgmtListenerConfig{
 		httpAddr:      listeners.HTTP.Addr,
 		httpsAddr:     listeners.HTTPS.Addr,
-		sshAddr:       listeners.SSH.Addr,
 		enableHTTP:    listeners.HTTP.Enabled,
 		enableHTTPS:   listeners.HTTPS.Enabled,
 		optionalFault: optionalFault,
@@ -326,21 +324,25 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 // publishBoundManagement records the sockets b holds as this process's
 // bound management: every compile in this process admits them until the
 // next start, and the console and SSH CLI sessions call them on loopback
-// (see httpapi.LoopbackManagementAPI).
+// (see httpapi.LoopbackManagementAPI). SSH is not bound yet: startSSH adds
+// it once its socket binds (publishBoundSSH).
 func publishBoundManagement(lc mgmtListenerConfig, b mgmtBinds) {
-	served := lc.servedManagement(b)
-	httpapi.SetServedManagement(served)
-	config.SetBoundManagementListeners(lc.served(b, served))
+	httpapi.SetServedManagement(lc.servedManagement(b))
+	config.SetBoundManagementListeners(b.record())
 }
 
-// served is the listeners b holds: HTTP and HTTPS at the address their own
-// socket bound, else at their loopback socket, and off when neither bound;
-// and SSH, which starts best effort after them whenever its CLI sessions
-// have one of them to call on loopback.
-func (lc mgmtListenerConfig) served(b mgmtBinds, served httpapi.ServedManagement) config.ManagementListeners {
-	l := config.ManagementListeners{HTTP: b.http.record(), HTTPS: b.https.record()}
-	l.SSH = config.ManagementListener{Addr: lc.sshAddr, Enabled: httpapi.CheckLoopbackManagement(l, served) == nil}
-	return l
+// publishBoundSSH adds the SSH socket bound at addr to the bound management
+// that publishBoundManagement recorded. Both run once, in order, at startup.
+func publishBoundSSH(addr string) {
+	bound := config.BoundManagementListeners()
+	bound.SSH = config.ManagementListener{Addr: addr, Enabled: true}
+	config.SetBoundManagementListeners(bound)
+}
+
+// record is the HTTP and HTTPS listeners b holds, each at the address its
+// own socket bound, else at its loopback socket, and off when neither bound.
+func (b mgmtBinds) record() config.ManagementListeners {
+	return config.ManagementListeners{HTTP: b.http.record(), HTTPS: b.https.record()}
 }
 
 // servedManagement is what the listeners b holds serve beyond their

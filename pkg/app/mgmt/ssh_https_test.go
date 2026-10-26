@@ -191,27 +191,27 @@ func TestSSHStaysOffWithoutManagementAPI(t *testing.T) {
 	}
 }
 
-// The bound record claims SSH whenever its CLI sessions have a listener to
-// call on loopback; the served certificate is the bound HTTPS listener's.
-func TestServedListenersRecordSSH(t *testing.T) {
-	lc := mgmtListenerConfig{sshAddr: ":2222", tlsCert: "/c", tlsKey: "/k"}
+// The HTTP and HTTPS binds never record SSH, which startSSH records once its
+// own socket binds; the served certificate is the bound HTTPS listener's.
+func TestBindsRecordNoSSH(t *testing.T) {
+	lc := mgmtListenerConfig{tlsCert: "/c", tlsKey: "/k"}
 	for _, tc := range []struct {
 		name        string
 		http, https boundListener
-		ssh, cert   bool
+		cert        bool
 	}{
-		{name: "HTTP", http: boundListener{addr: "[::]:8080"}, ssh: true},
-		{name: "HTTPS", https: boundListener{addr: "[::]:8443"}, ssh: true, cert: true},
-		{name: "HTTP with a loopback socket", http: boundListener{addr: "10.10.10.10:8080", loopback: "127.0.0.1:8080"}, ssh: true},
+		{name: "HTTP", http: boundListener{addr: "[::]:8080"}},
+		{name: "HTTPS", https: boundListener{addr: "[::]:8443"}, cert: true},
+		{name: "HTTP with a loopback socket", http: boundListener{addr: "10.10.10.10:8080", loopback: "127.0.0.1:8080"}},
 		{name: "HTTP not on loopback", http: boundListener{addr: "10.10.10.10:8080"}},
-		{name: "HTTPS loopback socket only", https: boundListener{loopback: "127.0.0.1:8443"}, ssh: true, cert: true},
+		{name: "HTTPS loopback socket only", https: boundListener{loopback: "127.0.0.1:8443"}, cert: true},
 		{name: "none"},
 	} {
 		b := mgmtBinds{http: tc.http, https: tc.https}
-		served := lc.servedManagement(b)
-		if got := lc.served(b, served).SSH.Enabled; got != tc.ssh {
-			t.Errorf("%s: SSH recorded %v", tc.name, got)
+		if got := b.record().SSH; got != (config.ManagementListener{}) {
+			t.Errorf("%s: SSH recorded %+v", tc.name, got)
 		}
+		served := lc.servedManagement(b)
 		if (served.CertFile == "/c" && served.KeyFile == "/k") != tc.cert {
 			t.Errorf("%s: served = %+v", tc.name, served)
 		}

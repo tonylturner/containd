@@ -35,11 +35,11 @@ func TestManagementInputAdmitsServedListeners(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			binds := configuredBinds(listener)
-			served := listener.served(binds, listener.servedManagement(binds))
-			for i, l := range []config.ManagementListener{served.HTTP, served.HTTPS, served.SSH} {
+			served := configuredBinds(listener).record()
+			ssh := config.ManagementListener{Addr: resolveSSHRuntimeConfig(stored).sshAddr, Enabled: true}
+			for i, l := range []config.ManagementListener{served.HTTP, served.HTTPS, ssh} {
 				if l.Port() != tc.want[i] {
-					t.Fatalf("served listeners = %+v, want ports %v", served, tc.want)
+					t.Fatalf("served listeners = %+v, SSH %+v, want ports %v", served, ssh, tc.want)
 				}
 			}
 			admitted := map[int]bool{}

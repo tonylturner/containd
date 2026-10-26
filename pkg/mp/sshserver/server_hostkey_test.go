@@ -123,8 +123,12 @@ func TestRunningHostKeyRotationPreservesSession(t *testing.T) {
 			}
 			srv.hostKeyClock = clock.clock()
 			ctx, cancel := context.WithCancel(context.Background())
+			if err := srv.Listen(ctx); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
 			done := make(chan error, 1)
-			go func() { done <- srv.ListenAndServe(ctx) }()
+			go func() { done <- srv.Serve(ctx) }()
 			t.Cleanup(func() {
 				cancel()
 				select {
@@ -143,9 +147,7 @@ func TestRunningHostKeyRotationPreservesSession(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("server did not start")
 			}
-			srv.lnMu.Lock()
-			addr := srv.ln.Addr().String()
-			srv.lnMu.Unlock()
+			addr := srv.Addr().String()
 			connect := func() (*ssh.Client, string) {
 				t.Helper()
 				var fingerprint string

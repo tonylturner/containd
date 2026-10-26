@@ -34,9 +34,12 @@ type sshRuntimeConfig struct {
 	shellMode      string
 }
 
-// startSSH starts the SSH server, whose CLI sessions call the management
-// listeners this process has bound (see httpapi.LoopbackManagementAPI); it
-// stays off with a fault when they have none to call.
+// startSSH binds the SSH socket and serves it best effort: SSH CLI sessions
+// call the management listeners this process has bound (see
+// httpapi.LoopbackManagementAPI). It records SSH as bound management only
+// once its socket bound, and returns that socket's address. SSH stays off
+// with a fault when CLI sessions have no listener to call or the socket does
+// not bind; neither stops HTTP or HTTPS.
 func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
 	configureSSHPolicy(store, userStore)
 	rt := resolveSSHRuntimeConfig(cfg)
@@ -106,26 +109,32 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
-	for _, notify := range ready {
-		notify(srv)
-	}
-
 	if rt.bootstrapKey != "" {
 		if err := srv.SeedAuthorizedKey(rt.bootstrapUser, rt.bootstrapKey); err != nil {
 			logger.Errorf("ssh bootstrap key seed failed: %v", err)
 		}
 	}
 
+	if err := srv.Listen(ctx); err != nil {
+		err = fmt.Errorf("ssh disabled: %s: %w", rt.sshAddr, err)
+		logger.Warn(err)
+		if optionalFault != nil {
+			optionalFault(err)
+		}
+		return "", false
+	}
+	for _, notify := range ready {
+		notify(srv)
+	}
+	addr := srv.Addr().String()
+	publishBoundSSH(addr)
 	go func() {
-		if err := srv.ListenAndServe(ctx); err != nil {
+		if err := srv.Serve(ctx); err != nil {
 			logger.Errorf("ssh server exited: %v", err)
-			if optionalFault != nil {
-				optionalFault(fmt.Errorf("ssh %s: %w", rt.sshAddr, err))
-			}
 		}
 	}()
-	logger.Infof("ssh enabled on %s (admin only)", rt.sshAddr)
-	return rt.sshAddr, true
+	logger.Infof("ssh enabled on %s (admin only)", addr)
+	return addr, true
 }
 
 func configureSSHPolicy(store config.Store, userStore users.Store) {
