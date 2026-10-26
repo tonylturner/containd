@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bind the unauthenticated engine API to `127.0.0.1:8081` by default in combined
+  mode and starter/dev Compose; explicit `CONTAIND_ENGINE_ADDR` overrides still
+  apply, and split engine mode retains `:8081`. Management derives its local
+  engine URL from the same listener setting, including with a reservation.
+
 ### Changed
 
 - Commit, commit-confirmed and rollback now fail on every firewall ruleset or
@@ -23,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reorganized documentation navigation and standardized changelog categories and version links.
 - Focus update and reserved-management documentation on operator behavior and
   limitations; consolidate VPN guidance under System Services.
+- Pass `CONTAIND_ALLOWED_ORIGINS` through starter/dev Compose and remove the
+  ineffective `CONTAIND_MODE` knob from Compose environment lists and the example
+  environment file; select split modes with command overrides.
 
 ### Fixed
 

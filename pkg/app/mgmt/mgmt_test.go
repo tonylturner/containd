@@ -59,10 +59,27 @@ func TestResolveEngineURL(t *testing.T) {
 
 	t.Run("derives loopback url in combined mode", func(t *testing.T) {
 		t.Setenv("CONTAIND_ENGINE_URL", "")
-		t.Setenv("CONTAIND_ENGINE_ADDR", ":8081")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "")
+		t.Setenv("NGFW_ENGINE_ADDR", "")
 		got := resolveEngineURL(logger, Options{Combined: true})
 		if got != "http://127.0.0.1:8081" {
 			t.Fatalf("resolveEngineURL combined=%q, want %q", got, "http://127.0.0.1:8081")
+		}
+	})
+
+	t.Run("derives explicit combined listener", func(t *testing.T) {
+		t.Setenv("CONTAIND_ENGINE_URL", "")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "127.0.0.1:9091")
+		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:9091" {
+			t.Fatalf("resolveEngineURL override = %q", got)
+		}
+	})
+
+	t.Run("preserves explicit combined URL", func(t *testing.T) {
+		t.Setenv("CONTAIND_ENGINE_URL", "http://127.0.0.1:8081")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "")
+		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:8081" {
+			t.Fatalf("resolveEngineURL explicit combined = %q", got)
 		}
 	})
 
