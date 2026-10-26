@@ -4,6 +4,7 @@
 package sshserver
 
 import (
+	"net"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -12,19 +13,42 @@ import (
 )
 
 // Outside lab mode, every refused login check writes an ssh.login denied
-// record naming the account and client address, never the secret tried. Each
-// refusal also counts against the client's login limit, and attempts the
+// record naming the account and client address, never the secret tried; a
+// factor lock writes one record however often it is tried. Each refused
+// credential also counts against the client's login limit, and attempts the
 // limit blocks are refused before any check and write nothing, so one client
 // address writes at most the limit's attempts per block period for an account.
+// An expired MFA enrollment grace refuses the right credentials, so that
+// refusal is recorded without counting.
 
 // refuseLogin counts a failed check against the client's limit, records it
 // outside lab mode and returns err for the client.
 func (s *Server) refuseLogin(conn ssh.ConnMetadata, detail string, err error) error {
-	s.pwLimiter.Fail(limiterKey(conn.RemoteAddr(), conn.User()))
-	if !s.opts.LabMode {
-		s.auditLogin(conn, "denied", detail)
-	}
+	s.countRefusal(conn.RemoteAddr(), conn.User(), detail, true)
 	return err
+}
+
+// countRefusal is the one place a refused login check counts against the
+// limit of the client address and account. Outside lab mode it also writes
+// the ssh.login denied record when record is set; a caller clears record for
+// a refusal that is counted but already recorded, such as the later refusals
+// of one factor lock.
+func (s *Server) countRefusal(remote net.Addr, user, detail string, record bool) {
+	s.pwLimiter.Fail(limiterKey(remote, user))
+	if record && !s.opts.LabMode {
+		s.recordDenial(remote, user, detail)
+	}
+}
+
+// recordDenial writes an ssh.login denied record for the account and client
+// address.
+func (s *Server) recordDenial(remote net.Addr, user, detail string) {
+	s.audit(user, audit.Record{
+		Action: "ssh.login",
+		Target: remote.String(),
+		Result: "denied",
+		Detail: detail,
+	})
 }
 
 // keyRefusals collects the public keys refused on one connection. A client
@@ -65,12 +89,6 @@ func (s *Server) recordKeyRefusals(r *keyRefusals) {
 	remote := r.conn.RemoteAddr()
 	for _, user := range r.accounts {
 		refusal := r.byUser[user]
-		s.pwLimiter.Fail(limiterKey(remote, user))
-		s.audit(user, audit.Record{
-			Action: "ssh.login",
-			Target: remote.String(),
-			Result: "denied",
-			Detail: refusal.reason + ": " + strings.Join(refusal.fingerprints, ", "),
-		})
+		s.countRefusal(remote, user, refusal.reason+": "+strings.Join(refusal.fingerprints, ", "), true)
 	}
 }
