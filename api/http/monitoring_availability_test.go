@@ -22,6 +22,7 @@ import (
 type monitoringEngine struct {
 	*runtimeMockEngine
 	err       error
+	rules     []config.Rule
 	mutations int
 }
 
@@ -32,7 +33,7 @@ func (m *monitoringEngine) ListLearnProfiles(context.Context) ([]learn.LearnedPr
 	return nil, m.err
 }
 func (m *monitoringEngine) GenerateLearnRules(context.Context) ([]config.Rule, error) {
-	return nil, m.err
+	return m.rules, m.err
 }
 func (m *monitoringEngine) ClearLearnData(context.Context) error { m.mutations++; return m.err }
 func (m *monitoringEngine) ClearAnomalies(context.Context) error { m.mutations++; return m.err }
@@ -63,6 +64,7 @@ var monitoringOperations = []struct {
 	{"DELETE", "/anomalies", "", "engine anomalies unavailable", `{"status":"ok"}`, 200, true},
 	{"GET", "/learn/profiles", "", "engine learning unavailable", "[]", 200, false},
 	{"POST", "/learn/generate", "{}", "engine learning unavailable", "[]", 200, false},
+	{"POST", "/learn/apply", "{}", "engine learning unavailable", `{"count":0,"status":"no rules to apply"}`, 200, false},
 	{"DELETE", "/learn", "", "engine learning unavailable", `{"status":"cleared"}`, 200, true},
 	{"GET", "/signatures", "", "engine signatures unavailable", "[]", 200, false},
 	{"POST", "/signatures", `{"id":"custom","name":"Custom","severity":"high","conditions":[{"field":"proto","op":"equals","value":"modbus"}]}`, "engine signatures unavailable", "", 200, true},
@@ -159,5 +161,40 @@ func TestMonitoringOpenAPIUnavailableResponses(t *testing.T) {
 		if ref != "#/components/schemas/ErrorResponse" {
 			t.Errorf("%s %s 503 schema: %q", op.method, path, ref)
 		}
+	}
+}
+
+func TestLearnApplyValidationAndStaging(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		action config.Action
+		status int
+		header string
+	}{
+		{"invalid rule", config.Action("invalid"), http.StatusBadRequest, ""},
+		{"valid rule", config.ActionAllow, http.StatusOK, "staged"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := stageStore(t)
+			engine := &monitoringEngine{runtimeMockEngine: newRuntimeMockEngine(), rules: []config.Rule{{ID: "learned-apply", Action: tc.action}}}
+			server := NewServerWithEngine(store, nil, engine)
+			rec := requestStage(t, server, "POST", "/learn/apply", nil)
+			if rec.Code != tc.status || rec.Header().Get(configResponseHeader) != tc.header {
+				t.Fatalf("status=%d header=%q body=%s", rec.Code, rec.Header().Get(configResponseHeader), rec.Body)
+			}
+			candidate, err := store.LoadCandidate(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, rule := range candidate.Firewall.Rules {
+				if rule.ID == "learned-apply" {
+					found = true
+				}
+			}
+			if found != (tc.status == http.StatusOK) {
+				t.Fatalf("candidate contains generated rule: %v", found)
+			}
+		})
 	}
 }

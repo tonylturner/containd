@@ -3054,10 +3054,15 @@ paths:
       summary: Stage learned rules (admin)
       tags: [Learn]
       responses:
+        "503":
+          description: Engine capability missing or unavailable; no rules staged.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: 'Rules staged, or no rules to apply (no staging header for the no-op).', content: {application/json: {schema: {
                   type: object, properties: {status: {type: string}, count: {type: integer}, rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}}}}},
           headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
-        "400": {description: Learn mode not available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Generated rules or candidate configuration failed validation, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
   /learn:

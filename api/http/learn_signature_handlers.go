@@ -57,12 +57,12 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 	return func(c *gin.Context) {
 		lc, ok := engine.(LearnClient)
 		if !ok || lc == nil {
-			apiError(c, http.StatusBadRequest, "learn mode not available")
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		generated, err := lc.GenerateLearnRules(c.Request.Context())
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		if len(generated) == 0 {

@@ -38,7 +38,7 @@ The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 ## Monitoring Availability
 
 Flows, protocol/top-talker statistics, anomalies, learning profiles and rule
-generation, signatures and matches, interface runtime state and simulation
+generation and apply, signatures and matches, interface runtime state and simulation
 return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
 when the required engine capability is missing or its call fails. The same
 convention applies to anomaly/learning clears, signature writes and simulation
