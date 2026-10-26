@@ -55,6 +55,7 @@ type SQLiteStore struct {
 	pendingTimer       *time.Timer
 	autoRollbackNotify chan<- struct{}
 	options            storeOptions
+	recoveryHoldsBanks bool // protected by mu; saved apply rows may still need their banks
 }
 
 // SetAutoRollbackNotify registers a best-effort notification after a successful
@@ -84,7 +85,7 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	if err := wipeAllTx(ctx, tx); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
@@ -192,7 +193,7 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if err := writeConfigTx(ctx, tx, configKeyRunning, cfg); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return s.commitStateTx(ctx, tx)
 }
 
 func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) error {
@@ -210,7 +211,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if err := writeConfigTx(ctx, tx, kind, cfg); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return s.commitStateTx(ctx, tx)
 }
 
 // Load returns a consistent running configuration including its IDS bank.
@@ -432,7 +433,7 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return s.commitStateTx(ctx, tx)
 }
 
 func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {

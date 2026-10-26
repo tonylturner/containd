@@ -202,7 +202,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
@@ -262,7 +262,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyPending, bootFaultKey); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()

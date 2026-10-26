@@ -9,9 +9,8 @@ import (
 	"fmt"
 )
 
-// Generations are immutable. References live in the config rows, so recovery's
-// saved rows pin every historical bank without copying it. Reclamation is
-// deliberately deferred; reset and wipe must not delete recovery's generations.
+// Generations are immutable. Config rows own references; state transactions
+// reclaim unreferenced generations unless an apply is holding recovery rows.
 func createBankTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) (int64, error) {
 	if rules == nil {
 		rules = []IDSRule{}
@@ -139,5 +138,5 @@ func (s *SQLiteStore) extractBanks(ctx context.Context) error {
 			runningID = id
 		}
 	}
-	return tx.Commit()
+	return s.commitStateTx(ctx, tx)
 }

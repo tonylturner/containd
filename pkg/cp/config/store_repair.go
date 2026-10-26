@@ -62,7 +62,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return nil, err
 	}
 	return running, nil

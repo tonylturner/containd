@@ -31,7 +31,7 @@ func (s *SQLiteStore) resetLocked(ctx context.Context, defaults *Config) error {
 	if err := writeRunningTx(ctx, tx, defaults); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
