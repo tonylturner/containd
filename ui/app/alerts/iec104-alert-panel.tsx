@@ -5,7 +5,7 @@ import type { TelemetryEvent } from "../../lib/api";
 import type { EvidenceView } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
 
-/** Detail panel for an IEC 104 decision, verdict or session event. */
+/** Detail panel for IEC 104 enforcement evidence or APCI observations. */
 export function IEC104EvidencePanel({
   event,
   evidence,
@@ -32,7 +32,7 @@ export function IEC104EvidencePanel({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <DetailSection label="IEC 104 Enforcement">
+        <DetailSection label="IEC 104 Evidence">
           <DetailRow label="Event" value={event.kind} mono />
           {evidence.rows.map((row) => (
             <DetailRow key={row.label} label={row.label} value={row.value} mono />
@@ -40,7 +40,7 @@ export function IEC104EvidencePanel({
           <DetailRow label="Time" value={new Date(event.timestamp).toLocaleString()} />
           {evidence.sessionId && (
             <a
-              href={`/events/?filter=iec104&session=${encodeURIComponent(evidence.sessionId)}`}
+              href={`/events/?${event.proto === "ids" ? "" : "filter=iec104&"}session=${encodeURIComponent(evidence.sessionId)}`}
               className="inline-block text-xs text-[var(--amber)] hover:text-[var(--amber)]"
             >
               Open session events &rarr;
@@ -57,9 +57,9 @@ export function IEC104EvidencePanel({
 
         <DetailSection label="Meaning">
           <div className="text-xs text-[var(--text-muted)] leading-relaxed">
-            A decision records what a rule decided. An APDU was delivered only if no
-            verdict lists it as dropped. A decoded command is an attempt, not an
-            actuation.
+            A decision records what a rule decided, not proof of delivery. A
+            decoded command is an attempt, not an actuation. APCI anomalies are
+            observations and do not change firewall decisions.
           </div>
         </DetailSection>
       </div>

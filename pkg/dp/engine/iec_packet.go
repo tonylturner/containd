@@ -430,6 +430,7 @@ func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 }
 
 func (t *iecTable) closeLocked(s *iecSession, now time.Time) {
+	s.apci = nil
 	s.state, s.endedAt = iecClosed, now
 	t.dpi.EndStream(s.id)
 }
@@ -512,6 +513,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	}
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
+		s.observeAPCILocked(dir, f, &res.acts, now)
 		d.frames = append(d.frames, iecFrame{start: f.Start, end: f.End})
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
@@ -531,6 +533,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 }
 
 func (t *iecTable) stopParseLocked(s *iecSession) {
+	s.apci = nil
 	if !s.stopParse {
 		s.stopParse = true
 		t.dpi.EndStream(s.id)

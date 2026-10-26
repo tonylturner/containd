@@ -93,6 +93,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldP
 		}
 	}
 	s.state, s.endedAt = iecAborted, now
+	s.apci = nil
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
