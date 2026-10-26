@@ -108,6 +108,7 @@ type SimulationClient interface {
 
 // InventoryClient is an optional interface for querying the ICS asset inventory.
 type InventoryClient interface {
+	IEC104Inventory(ctx context.Context) (inventory.IEC104Snapshot, error)
 	ListInventory(ctx context.Context) ([]inventory.DiscoveredAsset, error)
 	GetInventoryAsset(ctx context.Context, ip string) (*inventory.DiscoveredAsset, error)
 	ClearInventory(ctx context.Context) error
@@ -316,6 +317,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/pcap/analyze/:name", requireAdmin(), analyzePCAPNameHandler(engine))
 		protected.GET("/diagnostics/iec104", iec104DiagnosticsHandler(engine))
 		protected.GET("/inventory", listInventoryHandler(engine))
+		protected.GET("/inventory/iec104", iec104InventoryHandler(engine))
 		protected.GET("/inventory/:ip", getInventoryAssetHandler(engine))
 		protected.DELETE("/inventory", requireAdmin(), clearInventoryHandler(engine))
 		protected.GET("/signatures", listSignaturesHandler(engine))

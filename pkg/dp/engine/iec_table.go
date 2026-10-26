@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -80,7 +81,8 @@ type iecSession struct {
 	stopParse  bool // learn envelope: parsing stopped after a stream error
 	reconnects bool // first STARTDT con counts as a reconnect
 	reset      *iecReset
-	next       *iecSession // new incarnation whose handshake is pending
+	next       *iecSession         // new incarnation whose handshake is pending
+	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
 }
 
 // iecDir is one direction of a session (client→server or server→client).
@@ -281,6 +283,7 @@ func (t *iecTable) expire() {
 				t.deleteLocked(key, s)
 			}
 		default:
+			s.expireAPCILocked(&acts, now)
 			if len(s.held) > 0 && now.Sub(s.held[0].since) > iecPendingTimeout {
 				acts.merge(t.abortLocked(s, abortTimeout, "", nil, now))
 			} else if now.Sub(s.lastSeen) > iecIdleTTL {
@@ -299,6 +302,7 @@ func (t *iecTable) expire() {
 }
 
 func (t *iecTable) deleteLocked(key iecKey, s *iecSession) {
+	s.apci = nil
 	if s.state == iecAborted {
 		t.tombstones--
 	}

@@ -48,6 +48,8 @@ export {
   uploadPcap,
 } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
+export type { IEC104Inventory } from "./api-inventory";
+import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
 import { networkAPI } from "./api-network";
@@ -958,4 +960,5 @@ export const api = {
   ...dataplaneAPI,
   ...servicesAPI,
   ...consoleAPI,
+  ...inventoryAPI,
 };

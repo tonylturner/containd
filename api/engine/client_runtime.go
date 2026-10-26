@@ -149,7 +149,7 @@ func (c *HTTPClient) ListInventory(ctx context.Context) ([]inventory.DiscoveredA
 		return nil, err
 	}
 	if out == nil {
-		return []inventory.DiscoveredAsset{}, nil
+		return nil, fmt.Errorf("invalid engine inventory list")
 	}
 	return out, nil
 }

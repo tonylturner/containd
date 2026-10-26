@@ -26,16 +26,20 @@ type DiscoveredAsset struct {
 	Peers            []string  `json:"peers,omitempty"`
 }
 
-// Inventory maintains a thread-safe map of discovered ICS assets.
+// Inventory maintains bounded, thread-safe legacy assets and a separately
+// synchronized passive IEC 104 inventory. Construct it with New.
 type Inventory struct {
-	mu     sync.RWMutex
-	assets map[string]*DiscoveredAsset
+	mu       sync.RWMutex
+	assets   *bounded[string, *DiscoveredAsset]
+	overflow InventoryOverflow
+	iec104   iec104Store
 }
 
 // New creates a new empty Inventory.
 func New() *Inventory {
 	return &Inventory{
-		assets: make(map[string]*DiscoveredAsset),
+		assets: newBounded[string, *DiscoveredAsset](MaxAssets),
+		iec104: newIEC104Store(),
 	}
 }
 
@@ -80,7 +84,7 @@ func (inv *Inventory) recordModbus(srcIP, dstIP string, ev dpi.Event) {
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, fc)
 	src.UnitIDs = addUint8Unique(src.UnitIDs, unitID)
-	src.Peers = addStringUnique(src.Peers, dstIP)
+	src.Peers = inv.addPeer(src.Peers, dstIP)
 
 	// Destination is the slave (receives requests).
 	dst := inv.getOrCreate(dstIP, "modbus", now)
@@ -89,7 +93,7 @@ func (inv *Inventory) recordModbus(srcIP, dstIP string, ev dpi.Event) {
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, fc)
 	dst.UnitIDs = addUint8Unique(dst.UnitIDs, unitID)
-	dst.Peers = addStringUnique(dst.Peers, srcIP)
+	dst.Peers = inv.addPeer(dst.Peers, srcIP)
 }
 
 func (inv *Inventory) recordDNP3(srcIP, dstIP string, ev dpi.Event) {
@@ -118,16 +122,16 @@ func (inv *Inventory) recordDNP3(srcIP, dstIP string, ev dpi.Event) {
 	src.LastSeen = now
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, fc)
-	src.StationAddresses = addUint16Unique(src.StationAddresses, srcAddr)
-	src.Peers = addStringUnique(src.Peers, dstIP)
+	src.StationAddresses = inv.addStationAddress(src.StationAddresses, srcAddr)
+	src.Peers = inv.addPeer(src.Peers, dstIP)
 
 	dst := inv.getOrCreate(dstIP, "dnp3", now)
 	dst.Role = "slave"
 	dst.LastSeen = now
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, fc)
-	dst.StationAddresses = addUint16Unique(dst.StationAddresses, dstAddr)
-	dst.Peers = addStringUnique(dst.Peers, srcIP)
+	dst.StationAddresses = inv.addStationAddress(dst.StationAddresses, dstAddr)
+	dst.Peers = inv.addPeer(dst.Peers, srcIP)
 }
 
 func (inv *Inventory) recordCIP(srcIP, dstIP string, ev dpi.Event) {
@@ -149,38 +153,31 @@ func (inv *Inventory) recordCIP(srcIP, dstIP string, ev dpi.Event) {
 	src.LastSeen = now
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, sc)
-	src.Peers = addStringUnique(src.Peers, dstIP)
+	src.Peers = inv.addPeer(src.Peers, dstIP)
 
 	dst := inv.getOrCreate(dstIP, "cip", now)
 	dst.Role = "server"
 	dst.LastSeen = now
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, sc)
-	dst.Peers = addStringUnique(dst.Peers, srcIP)
+	dst.Peers = inv.addPeer(dst.Peers, srcIP)
 }
 
 // getOrCreate returns the existing asset or creates a new one. Must be called with inv.mu held.
 func (inv *Inventory) getOrCreate(ip, protocol string, now time.Time) *DiscoveredAsset {
-	a, ok := inv.assets[ip]
-	if !ok {
-		a = &DiscoveredAsset{
-			IP:        ip,
-			Protocol:  protocol,
-			FirstSeen: now,
-			LastSeen:  now,
-		}
-		inv.assets[ip] = a
-	}
-	return a
+	return inv.assets.observe(ip, time.Now(), func() *DiscoveredAsset {
+		return &DiscoveredAsset{IP: ip, Protocol: protocol, FirstSeen: now, LastSeen: now}
+	}, &inv.overflow.Assets)
 }
 
 // List returns all discovered assets sorted by IP.
 func (inv *Inventory) List() []DiscoveredAsset {
-	inv.mu.RLock()
-	defer inv.mu.RUnlock()
-	out := make([]DiscoveredAsset, 0, len(inv.assets))
-	for _, a := range inv.assets {
-		out = append(out, *a)
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+	inv.assets.expire(time.Now())
+	out := make([]DiscoveredAsset, 0, len(inv.assets.items))
+	for _, e := range inv.assets.items {
+		out = append(out, cloneAsset(e.Value.(*entry[string, *DiscoveredAsset]).value))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].IP < out[j].IP
@@ -190,21 +187,28 @@ func (inv *Inventory) List() []DiscoveredAsset {
 
 // Get returns the discovered asset for a specific IP, if any.
 func (inv *Inventory) Get(ip string) (*DiscoveredAsset, bool) {
-	inv.mu.RLock()
-	defer inv.mu.RUnlock()
-	a, ok := inv.assets[ip]
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+	a, ok := inv.assets.get(ip, time.Now())
 	if !ok {
 		return nil, false
 	}
-	cp := *a
+	cp := cloneAsset(a)
 	return &cp, true
 }
 
-// Clear resets the inventory.
+// Clear resets both inventories and their overflow counters.
 func (inv *Inventory) Clear() {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
-	inv.assets = make(map[string]*DiscoveredAsset)
+	inv.assets = newBounded[string, *DiscoveredAsset](MaxAssets)
+	inv.overflow = InventoryOverflow{}
+	inv.iec104.mu.Lock()
+	inv.iec104.pairs = newBounded[pairKey, *pairState](MaxIEC104Pairs)
+	inv.iec104.overflow = InventoryOverflow{}
+	inv.iec104.busyObservations.Store(0)
+	inv.iec104.busyOutcomes.Store(0)
+	inv.iec104.mu.Unlock()
 }
 
 // addUint8Unique appends v to slice if not already present.
@@ -217,22 +221,38 @@ func addUint8Unique(s []uint8, v uint8) []uint8 {
 	return append(s, v)
 }
 
-// addUint16Unique appends v to slice if not already present.
-func addUint16Unique(s []uint16, v uint16) []uint16 {
+// addStationAddress bounds the otherwise unbounded DNP3 address list.
+func (inv *Inventory) addStationAddress(s []uint16, v uint16) []uint16 {
 	for _, x := range s {
 		if x == v {
 			return s
 		}
+	}
+	if len(s) == MaxStationAddresses {
+		inv.overflow.StationAddresses++
+		return s
 	}
 	return append(s, v)
 }
 
-// addStringUnique appends v to slice if not already present.
-func addStringUnique(s []string, v string) []string {
+func (inv *Inventory) addPeer(s []string, v string) []string {
 	for _, x := range s {
 		if x == v {
 			return s
 		}
 	}
+	if len(s) == MaxPeers {
+		inv.overflow.Peers++
+		return s
+	}
 	return append(s, v)
+}
+
+func cloneAsset(a *DiscoveredAsset) DiscoveredAsset {
+	cp := *a
+	cp.UnitIDs = append([]uint8(nil), a.UnitIDs...)
+	cp.FunctionCodes = append([]uint8(nil), a.FunctionCodes...)
+	cp.StationAddresses = append([]uint16(nil), a.StationAddresses...)
+	cp.Peers = append([]string(nil), a.Peers...)
+	return cp
 }
