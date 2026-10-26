@@ -282,7 +282,7 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("ntp")}
         >
           <div className="flex items-center gap-2 text-sm text-[var(--text)]">
-            <span>OpenNTPD client</span>
+            <span>chrony NTP client</span>
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
           <p className="mt-2 text-xs text-[var(--text-muted)]">

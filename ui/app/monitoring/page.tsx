@@ -178,7 +178,7 @@ export default function MonitoringOverviewPage() {
           label: "NTP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
           status: (services as any)?.ntp?.running ? "running" : "stopped",
-          hint: "OpenNTPD client",
+          hint: "chrony NTP client",
         },
         {
           key: "dhcp",

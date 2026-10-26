@@ -155,7 +155,7 @@ export default function NTPPage() {
             <div className="md:col-span-2">
               Binary:{" "}
               <span className="text-[var(--text)]">
-                {status?.ntpd_path || status?.openntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
+                {status?.ntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
               </span>
             </div>
             {status?.last_error ? (
@@ -178,7 +178,7 @@ export default function NTPPage() {
       <Card>
         <h2 className="text-lg font-semibold text-[var(--text)]">Client</h2>
         <p className="mt-1 text-sm text-[var(--text)]">
-          Configure the embedded OpenNTPD client.
+          Configure the embedded chrony NTP client.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">

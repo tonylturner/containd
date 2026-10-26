@@ -172,7 +172,7 @@ func renderServicesTable(out io.Writer, payload map[string]any) error {
 		rows = append(rows, row{Name: "dns", Enabled: yesNo(enabled), State: runState(enabled, enabled), Detail: detail})
 	}
 
-	// NTP (openntpd)
+	// NTP (chrony)
 	if ntp, ok := payload["ntp"].(map[string]any); ok {
 		enabled := boolAny(ntp["enabled"])
 		servers := fmtAny(ntp["servers_count"])

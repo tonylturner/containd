@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DHCP `authoritative` is stored and applied; it defaults to off. Authoritative
+  servers send DHCPNAK for a requested address that is not leasable on the
+  served link; non-authoritative servers stay silent. Both modes adopt a free
+  in-pool address that a client renews or reboots with after lease data is lost,
+  so it is not handed out twice. Relayed requests and requests for another
+  server are ignored.
+- NTP status reports the polling interval chrony was configured with.
+- Service reconfiguration can no longer be overwritten by a stale worker.
 - Port forwards and masquerade compile from the configured zones: custom zone
   names work, disabled forwards emit nothing, and the ruleset never references
   an undeclared set.
@@ -126,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The unused OpenNTPD fallback; chrony is the only NTP daemon the images ship.
 - Removed the redundant documentation-directory landing page and the unsupported SIGHUP reload claim.
 - Remove the incomplete host/systemd deployment guide; Docker Compose remains
   the documented appliance installation path.
