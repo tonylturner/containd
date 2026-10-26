@@ -191,6 +191,7 @@ components:
         time: {type: string, format: date-time}
         iec104Enforcement: {$ref: "#/components/schemas/IEC104Enforcement"}
         enforcement: {$ref: "#/components/schemas/EnforcementHealth"}
+        icsEnforcement: {$ref: "#/components/schemas/ICSEnforcementHealth"}
         ipv4Forwarding:
           type: string
           enum: [enabled, disabled, unknown]
@@ -480,6 +481,9 @@ components:
           `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
           IP/CIDR `dataplane.dpiExclusions` entry overlaps an enforce rule's
           sources or destinations.
+        - Any other rule naming an ICS protocol whose effective mode is enforce
+          is rejected on save, candidate, commit and import while
+          `dataplane.nfqueueGroup` is 0.
       properties:
         protocol:
           type: string
@@ -638,6 +642,10 @@ components:
             start: {type: string, format: date-time}
             end: {type: string, format: date-time}
         total_events: {type: integer, description: Total events evaluated}
+        icsCoverage:
+          allOf:
+          - {$ref: '#/components/schemas/ICSCoverageRule'}
+          description: Coverage of the previewed rule under the running engine; omitted for a rule without an ICS protocol.
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
@@ -813,7 +821,7 @@ components:
         dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
         dpiIcsProtocols: {additionalProperties: {type: boolean}, type: object}
         dpiMock: {type: boolean}
-        dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode.}
+        dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
         enforceTable:
           type: string
@@ -1718,11 +1726,54 @@ components:
         appliedAt: {format: date-time, type: string}
         error: {type: string}
         ruleset: {type: string}
+        snapshotVersion: {type: string, description: Version of the snapshot the last apply attempted, whether it succeeded or failed.}
+        icsCoverage:
+          type: array
+          items: {$ref: '#/components/schemas/ICSCoverageRule'}
+          description: >-
+            Live coverage of the ICS rules in force, in rule ID order, with runtime reasons. After a failed
+            apply it still describes the previous rules (empty before the first success). Omitted when there are none.
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
           description: Rules of the applied ruleset whose predicates resolve toward denial; omitted when there are none or the apply failed.
       type: object
+    ICSCoverageRule:
+      type: object
+      required: [ruleId, protocol, mode, state]
+      description: Whether a firewall rule naming an ICS protocol actually stops a prohibited command.
+      properties:
+        ruleId: {type: string}
+        protocol: {type: string}
+        mode: {type: string, enum: [learn, enforce], description: Effective mode (rule mode, then dataplane.dpiMode, then learn).}
+        state: {type: string, enum: [monitoring, enforcing, partial, not_enforcing]}
+        reasons:
+          type: array
+          items: {$ref: '#/components/schemas/ICSCoverageReason'}
+    ICSCoverageReason:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [no-inline-path, enforcement-disabled, dpi-disabled, decoder-disabled, queue-unavailable, exclusion-overlap, domain-exclusion]
+        message: {type: string}
+        value: {type: string, description: The exclusion, for exclusion codes.}
+        matches: {type: integer, description: Connections the exclusion exempted since the last apply; applied coverage only.}
+        runtime: {type: boolean, description: True for reasons only the running engine reports (queue-unavailable).}
+    ICSEnforcementHealth:
+      type: object
+      required: [state, enforcing, partial, notEnforcing, monitoring]
+      description: Counts of applied ICS rules by coverage state; names no rule or exclusion.
+      properties:
+        state:
+          type: string
+          enum: [none, monitoring, enforcing, partial, not_enforcing, unknown]
+          description: none without ICS rules, the worst state among enforce rules, monitoring when all are learn, unknown when the engine cannot be read.
+        enforcing: {type: integer}
+        partial: {type: integer}
+        notEnforcing: {type: integer}
+        monitoring: {type: integer}
     RuleWarning:
       type: object
       required: [ruleId, predicate, action, message]
@@ -4382,6 +4433,35 @@ paths:
         in: query
         required: false
         schema: {type: string}
+  /dataplane/ics-coverage:
+    get:
+      summary: ICS rule coverage of the candidate and the applied rules
+      tags: [Dataplane]
+      description: >-
+        Readable by any authenticated user; carries no ruleset. Each side is reported independently:
+        an invalid candidate sets candidateError and omits candidate, an unreadable engine sets
+        engineStatusError and omits applied. Compare candidate and applied without reasons marked
+        runtime and without matches.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidate:
+                    type: array
+                    items: {$ref: '#/components/schemas/ICSCoverageRule'}
+                    description: Static coverage of the candidate, in rule ID order; empty without ICS rules.
+                  candidateError: {type: string, description: Why the candidate does not validate.}
+                  applied:
+                    type: array
+                    items: {$ref: '#/components/schemas/ICSCoverageRule'}
+                    description: Live coverage of the rules in force; after a failed apply, the previous rules.
+                  appliedAt: {type: string, format: date-time, description: Time of the last apply attempt; omitted before any.}
+                  applyError: {type: string, description: Error of the last apply attempt, if it failed.}
+                  engineStatusError: {type: string}
   /dataplane/blocks/host:
     post:
       summary: Block an IPv4 host immediately (admin)
@@ -4447,6 +4527,10 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/RuleWarning'}
                     description: Candidate rules whose predicates resolve toward denial, in rule ID order; omitted when there are none.
+                  icsCoverage:
+                    type: array
+                    items: {$ref: '#/components/schemas/ICSCoverageRule'}
+                    description: Static coverage of the candidate's ICS rules, in rule ID order; omitted when there are none.
                   engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
                   engineStatusError: {type: string}
         '400':
