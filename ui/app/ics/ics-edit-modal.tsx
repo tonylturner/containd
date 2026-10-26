@@ -6,6 +6,7 @@ import {
   api,
   type FirewallRule,
   type ICSPredicate,
+  type ICSPredicatePatch,
   type RulePreview,
 } from "../../lib/api";
 import { InfoTip } from "../../components/InfoTip";
@@ -33,7 +34,8 @@ export function EditICSModal({
   rule: FirewallRule;
   globalMode?: ICSMode;
   onClose: () => void;
-  onSave: (ics: ICSPredicate | undefined) => void;
+  /** The predicate to stage; undefined removes it. */
+  onSave: (ics: ICSPredicatePatch | undefined) => void;
 }) {
   const [enabled, setEnabled] = useState(!!rule.ics?.protocol);
   const [protocol, setProtocol] = useState(rule.ics?.protocol ?? "modbus");
@@ -88,7 +90,8 @@ export function EditICSModal({
       setError(built.error);
       return;
     }
-    onSave(built.ics);
+    // Rule updates merge, so inheriting clears a stored mode with an empty one.
+    onSave(built.ics && mode === "" && rule.ics?.mode ? { ...built.ics, mode: "" } : built.ics);
   }
 
   // Previews the whole rule with the edited predicate, so the zones, sources,
@@ -163,16 +166,15 @@ export function EditICSModal({
                 <InfoTip label="Safe learning only alerts; enforce will block on match." />
               </label>
               <select
+                aria-label="Safety mode"
                 value={mode}
                 onChange={(e) => setMode(e.target.value as ICSModeSelection)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
               >
-                {!rule.ics?.mode && (
-                  <option value="">
-                    Inherit ({globalMode === "enforce" ? "enforce" : "learning"})
-                  </option>
-                )}
+                <option value="">
+                  Inherit global ({globalMode === "enforce" ? "enforce" : "learning"})
+                </option>
                 <option value="learn">Safe learning (alert-only)</option>
                 <option value="enforce">Enforce (block)</option>
               </select>

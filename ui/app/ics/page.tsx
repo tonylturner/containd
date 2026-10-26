@@ -11,7 +11,7 @@ import {
   isAdmin,
   type DataPlaneConfig,
   type FirewallRule,
-  type ICSPredicate,
+  type ICSPredicatePatch,
 } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
@@ -86,7 +86,7 @@ export default function ICSPolicyPage() {
 
   // The editor reports a disabled filter as no predicate; null clears the
   // stored one, where an omitted key would keep it.
-  async function onSave(id: string, ics: ICSPredicate | undefined) {
+  async function onSave(id: string, ics: ICSPredicatePatch | undefined) {
     setError(null);
     const result = await api.updateFirewallRule(id, { ics: ics ?? null });
     if (!result.ok) {
