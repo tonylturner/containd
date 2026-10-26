@@ -8,6 +8,7 @@ import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
 import { formatICSMode } from "../ics/ics-shared";
 import { zoneName } from "./firewall-utils";
+import { RuleCountersCell, RuleCountersNote, type CountersState } from "./firewall-rule-counters";
 import {
   actionInfo,
   actionVariant,
@@ -69,6 +70,7 @@ export function FirewallRuleTable({
   zones,
   dpiMode,
   coverage,
+  counters,
   onEdit,
   onDelete,
 }: {
@@ -76,12 +78,14 @@ export function FirewallRuleTable({
   zones: Zone[];
   dpiMode: string | undefined;
   coverage: ICSCoverageView;
+  counters: CountersState;
   onEdit: (rule: FirewallRule) => void;
   onDelete: (id: string) => void;
 }) {
   return (
     <>
       <RulePrecedenceNote />
+    <RuleCountersNote counters={counters} />
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
@@ -93,6 +97,7 @@ export function FirewallRuleTable({
               <th className="px-3 py-3">Conditions</th>
               <th className="px-3 py-3">ICS Filter</th>
               <th className="px-3 py-3">Action</th>
+            <th className="px-3 py-3">Hits</th>
               <th className="px-3 py-3">Log</th>
               <th className="px-3 py-3 text-right">Actions</th>
             </tr>
@@ -100,7 +105,7 @@ export function FirewallRuleTable({
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4" colSpan={9}>
+                <td className="px-4 py-4" colSpan={10}>
                   <EmptyState
                     title="No firewall rules configured"
                     description="Create rules below to control traffic between zones."
@@ -141,6 +146,9 @@ export function FirewallRuleTable({
                 </td>
                 <td className="px-3 py-3">
                   <ActionCell rule={r} />
+                </td>
+                <td className="px-3 py-3">
+                  <RuleCountersCell rule={r} counters={counters} />
                 </td>
                 <td className="px-3 py-3">
                   {r.log ? (

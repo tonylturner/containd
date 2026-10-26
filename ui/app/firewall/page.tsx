@@ -40,6 +40,7 @@ import { RuleWarningList } from "./firewall-rule-warnings";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
 import { tagsInUse } from "./firewall-rule-policy";
+import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
 
 // This page should own firewall page orchestration and top-level state.
@@ -54,6 +55,7 @@ export default function FirewallPage() {
   const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [counters, setCounters] = useState<CountersState>(null);
   const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [rulesetError, setRulesetError] = useState("");
@@ -105,14 +107,16 @@ export default function FirewallPage() {
   ];
 
   async function refresh() {
-    const [r, z, n, rt, dp] = await Promise.all([
+    const [r, z, n, rt, dp, c] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
       api.getNAT(),
       api.getRouting(),
       fetchDataPlane(),
+      api.getRuleCounters(),
     ]);
     setRules(r ?? []);
+    setCounters(c);
     setZones(z ?? []);
     setNat(n ?? { enabled: false });
     setRouting(rt);
@@ -457,6 +461,7 @@ export default function FirewallPage() {
         zones={zones}
         dpiMode={dpiConfig.dpiMode}
         coverage={coverage.view}
+        counters={counters}
         onEdit={setEditing}
         onDelete={(id) => {
           confirm.open({

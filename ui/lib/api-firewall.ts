@@ -5,7 +5,11 @@ import {
   patchJSONResult,
   postJSONResult,
 } from "./api-request";
-import { normalizeFirewallRule, normalizeFirewallRules } from "./api-normalize";
+import {
+  normalizeFirewallRule,
+  normalizeFirewallRules,
+  normalizeRuleAction,
+} from "./api-normalize";
 import { normalizeICSCoverageRule, type ICSCoverageRule } from "./api-ics-coverage";
 
 import type { ApiResult } from "./api";
@@ -124,6 +128,50 @@ export type RulePreview = {
 };
 
 /**
+ * Kernel accounting of one rule of the applied ruleset. A TAG rule counts
+ * the connection openers it labels; excessDrops is RATE_LIMIT only.
+ */
+export type RuleCount = {
+  ruleId: string;
+  action: RuleAction;
+  packets: number;
+  bytes: number;
+  excessDrops?: number;
+};
+
+/** Per-rule counters of the applied ruleset; every apply restarts them at `since`. */
+export type RuleCounters = {
+  snapshotVersion: string;
+  since: string;
+  rules: RuleCount[];
+};
+
+function counter(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** Null unless the body is a counters snapshot; a malformed entry is dropped. */
+export function normalizeRuleCounters(value: unknown): RuleCounters | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { snapshotVersion, since, rules } = value as Record<string, unknown>;
+  if (typeof since !== "string" || since === "" || !Array.isArray(rules)) return null;
+  return {
+    snapshotVersion: typeof snapshotVersion === "string" ? snapshotVersion : "",
+    since,
+    rules: rules.flatMap((r) => {
+      const rec = (r ?? {}) as Record<string, unknown>;
+      const packets = counter(rec.packets);
+      const bytes = counter(rec.bytes);
+      if (typeof rec.ruleId !== "string" || packets === null || bytes === null) return [];
+      const count: RuleCount = { ruleId: rec.ruleId, action: normalizeRuleAction(rec.action), packets, bytes };
+      const excess = counter(rec.excessDrops);
+      if (excess !== null) count.excessDrops = excess;
+      return [count];
+    }),
+  };
+}
+
+/**
  * One firewall.identityBindings entry of the candidate: a unicast address
  * bound to 1-16 labels that rule identities match exactly.
  */
@@ -175,6 +223,14 @@ export const firewallAPI = {
   },
   deleteFirewallRule: (id: string) =>
     deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+
+  /** 502/503 when the engine has no readable applied ruleset; the error says why. */
+  getRuleCounters: async (): Promise<ApiResult<RuleCounters>> => {
+    const res = await getJSONResult<unknown>("/api/v1/firewall/counters");
+    if (!res.ok) return res;
+    const counters = normalizeRuleCounters(res.data);
+    return counters ? { ok: true, data: counters } : { ok: false, error: "malformed counters response" };
+  },
 
   listIdentityBindings: async (): Promise<ApiResult<IdentityBinding[]>> => {
     const res = await getJSONResult<unknown>("/api/v1/identities");

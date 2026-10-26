@@ -296,6 +296,13 @@ function responseFor(pathname: string) {
   ) {
     return json(malformedFirewallRules);
   }
+  if (pathname === "/api/v1/firewall/counters") {
+    return json({
+      snapshotVersion: "v1",
+      since: "2026-03-14T00:00:00Z",
+      rules: malformedFirewallRules.map((r) => ({ ruleId: r.id, action: r.action, packets: 10, bytes: 600 })),
+    });
+  }
   if (pathname === "/api/v1/audit") return json(auditRecords);
   if (pathname === "/api/v1/firewall/nat") {
     return json({ enabled: false, sourceZones: [], portForwards: [] });

@@ -64,6 +64,8 @@ export type {
   Protocol,
   RateLimit,
   RuleAction,
+  RuleCount,
+  RuleCounters,
   RulePreview,
   RuleSchedule,
   RuleWarning,
