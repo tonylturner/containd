@@ -10,7 +10,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
-	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
@@ -74,20 +73,22 @@ func topTalkersHandler(dpEngine *engine.Engine) http.HandlerFunc {
 
 func inventoryHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		inv := dpEngine.Inventory()
+		if inv == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]string{"error": "inventory unavailable"})
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
-			var list []inventory.DiscoveredAsset
-			if inv := dpEngine.Inventory(); inv != nil {
-				list = inv.List()
+			if r.URL.Query().Get("section") == "iec104" {
+				writeJSON(w, inv.SnapshotIEC104())
+				return
 			}
-			if list == nil {
-				list = []inventory.DiscoveredAsset{}
-			}
-			writeJSON(w, list)
+			writeJSON(w, inv.List())
 		case http.MethodDelete:
-			if inv := dpEngine.Inventory(); inv != nil {
-				inv.Clear()
-			}
+			inv.Clear()
 			writeJSON(w, map[string]string{"status": "cleared"})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -108,7 +109,9 @@ func inventoryItemHandler(dpEngine *engine.Engine) http.HandlerFunc {
 		}
 		inv := dpEngine.Inventory()
 		if inv == nil {
-			http.Error(w, "inventory unavailable", http.StatusServiceUnavailable)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]string{"error": "inventory unavailable"})
 			return
 		}
 		asset, ok := inv.Get(ip)
