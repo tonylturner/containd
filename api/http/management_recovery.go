@@ -48,31 +48,36 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	if !errors.Is(err, config.ErrManagementBootFault) {
 		return nil, err
 	}
-	return nil, applyRecoveryLocked(ctx, store, engine)
+	return applyRecoveryLocked(ctx, store, engine)
 }
 
 // reenterRecoveryLocked completes a running-state transition that failed
 // at runtime from management recovery. The store restored the refused
 // configuration without reapplying it (config.ApplyError.Recovery); the
 // engine gets the recovery ruleset again, and its outcome is the
-// transition's reapply result. Callers hold runningConfigApplyMu.
-func reenterRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient, transitionErr error) {
+// transition's reapply result; its warnings are returned. Callers hold
+// runningConfigApplyMu.
+func reenterRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient, transitionErr error) []string {
 	var failure *config.ApplyError
 	if !errors.As(transitionErr, &failure) || !failure.Recovery {
-		return
+		return nil
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	failure.ReapplyError = applyRecoveryLocked(recoveryCtx, store, engine)
+	warnings, err := applyRecoveryLocked(recoveryCtx, store, engine)
+	failure.ReapplyError = err
+	return warnings
 }
 
 // applyRecoveryLocked applies management recovery to the engine: the
-// fail-closed dataplane and RecoverySnapshot. Callers hold
-// runningConfigApplyMu.
-func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient) (applyErr error) {
+// fail-closed dataplane and RecoverySnapshot, then, without a reservation,
+// the stored addresses of the interfaces it admits management on
+// (recoveryAddresses). A failure to address them is a warning: the
+// recovery ruleset is in force. Callers hold runningConfigApplyMu.
+func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient) (warnings []string, applyErr error) {
 	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if engine == nil {
-		return errors.New("recovery engine unavailable")
+		return nil, errors.New("recovery engine unavailable")
 	}
 	r := config.ReservationForStore(store)
 	var stored *config.Config
@@ -80,22 +85,28 @@ func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineC
 		// Never drop transit with an INPUT chain that also drops management.
 		var err error
 		if stored, err = store.Load(ctx); err != nil {
-			return fmt.Errorf("recovery management access: %w", err)
+			return nil, fmt.Errorf("recovery management access: %w", err)
 		}
 	}
 	dp := config.DataPlaneConfig{Enforcement: true}
 	if err := config.ValidateManagementDataPlane(dp, r); err != nil {
-		return err
+		return nil, err
 	}
 	if err := engine.Configure(ctx, dp); err != nil {
-		return fmt.Errorf("recovery dataplane: %w", err)
+		return nil, fmt.Errorf("recovery dataplane: %w", err)
 	}
 	// Unlike normal best-effort infrastructure apply, a failure here must not
 	// be downgraded to a warning or reported as successful recovery.
-	if err := engine.ApplyRules(ctx, RecoverySnapshot(stored, r)); err != nil {
-		return fmt.Errorf("recovery ruleset: %w", err)
+	snap := RecoverySnapshot(stored, r)
+	if err := engine.ApplyRules(ctx, snap); err != nil {
+		return nil, fmt.Errorf("recovery ruleset: %w", err)
 	}
-	return nil
+	if addressed := recoveryAddresses(stored, snap.LocalInput); len(addressed) > 0 {
+		if err := engine.ConfigureInterfaces(ctx, addressed); err != nil {
+			warnings = append(warnings, fmt.Sprintf("recovery interface addresses: %v", err))
+		}
+	}
+	return warnings, nil
 }
 
 // Recovery states. Applied, pending and failed derive from what the engine

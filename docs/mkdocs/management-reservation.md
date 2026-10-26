@@ -153,8 +153,13 @@ recovery ruleset. Without a reservation, that ruleset also keeps the
 management listener INPUT allows compiled from the stored interface access, so
 management stays reachable exactly where it was. It admits the appliance
 default listeners (HTTP 8080, HTTPS 8443, SSH 2222) on the same interfaces as
-well. Everything else from the stored configuration is left out, and new transit is
-dropped.
+well. Management can depend on a static address that containd assigned and
+that a new container's interfaces lack, so once the recovery ruleset is
+applied, management also restores the stored static addresses of the
+physical interfaces whose devices that ruleset admits management on: the
+addresses only, without zones, gateways, VLANs, bridges or DHCP. A failure to
+address them is logged as a warning. Everything else from the stored
+configuration is left out, and new transit is dropped.
 
 Stored management listener settings that cannot be bound (an address the
 host no longer has, a port another process holds) do not stop management
