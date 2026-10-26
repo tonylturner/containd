@@ -157,17 +157,6 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
    SUB-COMPONENTS
    ════════════════════════════════════════════════════════════════════ */
 
-function KV({ k, v, vc }: { k: string; v: string; vc?: string }) {
-  return (
-    <div className={s.kvRow}>
-      <span className={s.kvKey}>{k}</span>
-      <span className={`${s.kvVal} ${vc ? s[vc] || "" : ""}`} style={vc ? { color: `var(--topo-${vc === "green" ? "green" : vc === "cyan" ? "cyan" : vc === "amber" ? "" : ""})` } : undefined}>
-        {v}
-      </span>
-    </div>
-  );
-}
-
 function KVc({ k, v, color }: { k: string; v: string; color?: string }) {
   return (
     <div className={s.kvRow}>
