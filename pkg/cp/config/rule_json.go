@@ -11,7 +11,7 @@ import (
 var ruleJSONKeys = []string{
 	"id", "description", "sourceZones", "destZones", "sources",
 	"destinations", "protocols", "identities", "ics", "schedule",
-	"action", "log",
+	"action", "rateLimit", "tag", "log",
 }
 
 // UnmarshalJSON rejects unknown and duplicate rule keys instead of silently

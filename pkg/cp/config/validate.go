@@ -398,6 +398,9 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 		if r.Action != ActionAllow && r.Action != ActionDeny {
 			return fmt.Errorf("rule %s has invalid action %q", r.ID, r.Action)
 		}
+		if r.RateLimit != nil || r.Tag != "" {
+			return fmt.Errorf("rule %s: rateLimit and tag need the RATE_LIMIT and TAG actions, which are not supported yet", r.ID)
+		}
 		for _, z := range append(r.SourceZones, r.DestZones...) {
 			if z == "" {
 				return fmt.Errorf("rule %s has empty zone reference", r.ID)

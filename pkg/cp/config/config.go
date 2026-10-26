@@ -614,6 +614,15 @@ type FirewallConfig struct {
 	DefaultAction Action    `json:"defaultAction"`
 	Rules         []Rule    `json:"rules"`
 	NAT           NATConfig `json:"nat,omitempty"`
+	// IdentityBindings are admin-set, durable source-IP tags. A rule's
+	// identities match a flow whose opener IP is bound to any of them.
+	IdentityBindings []IdentityBinding `json:"identityBindings,omitempty"`
+}
+
+// IdentityBinding tags one IPv4 or IPv6 address with identity labels.
+type IdentityBinding struct {
+	IP         string   `json:"ip"`
+	Identities []string `json:"identities"`
 }
 
 // EffectiveDefaultAction is the action applied to forwarded traffic that no
@@ -779,10 +788,29 @@ type IDSCondition struct {
 
 type Action string
 
+// Firewall rule actions. ALLOW, DENY and RESET are terminal; any matching
+// ALLOW takes precedence over every DENY and RESET. RATE_LIMIT and TAG are
+// effects: they never admit traffic on their own, and the packet continues
+// to the terminal decision. The default action is ALLOW or DENY only.
 const (
 	ActionAllow Action = "ALLOW"
 	ActionDeny  Action = "DENY"
+	// ActionReset rejects back to the sender: TCP RST for TCP, ICMP
+	// destination unreachable (administratively prohibited) otherwise.
+	ActionReset Action = "RESET"
+	// ActionRateLimit drops packets above Rule.RateLimit, counted per
+	// directional 5-tuple.
+	ActionRateLimit Action = "RATE_LIMIT"
+	// ActionTag labels matching flows and their events with Rule.Tag.
+	ActionTag Action = "TAG"
 )
+
+// RateLimitConfig is a packet policer for one directional 5-tuple. Excess
+// packets are dropped; nothing is queued or shaped.
+type RateLimitConfig struct {
+	PacketsPerSecond uint32 `json:"packetsPerSecond"`
+	Burst            uint32 `json:"burst,omitempty"` // packets; 0 means PacketsPerSecond
+}
 
 // ScheduleConfig restricts a firewall rule to a recurring time window.
 type ScheduleConfig struct {
@@ -804,7 +832,11 @@ type Rule struct {
 	ICS          ICSPredicate    `json:"ics"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`
-	Log          bool            `json:"log,omitempty"` // log matching traffic
+	// RateLimit is required for RATE_LIMIT and forbidden otherwise.
+	RateLimit *RateLimitConfig `json:"rateLimit,omitempty"`
+	// Tag is required for TAG and forbidden otherwise.
+	Tag string `json:"tag,omitempty"`
+	Log bool   `json:"log,omitempty"` // log matching traffic
 }
 
 type Protocol struct {
