@@ -16,8 +16,8 @@ import (
 )
 
 // netnsLab routes between a client and a target network namespace through
-// this namespace's forward chain. Tests using it flush the nft ruleset, so
-// they run only when CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable
+// this namespace's forward chain. Tests using it replace containd's nft
+// tables and enable forwarding in this namespace, so they run only when CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable
 // privileged Linux container with nft, iproute2 and Python, for example:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/enforce.test ./pkg/dp/enforce
@@ -70,7 +70,8 @@ func (l *netnsLab) run(t *testing.T, args ...string) string {
 	return string(out)
 }
 
-// apply compiles snap with c and installs it in this namespace.
+// apply compiles snap with c and installs it in this namespace. The tables
+// c owns are removed when the calling (sub)test ends.
 func (l *netnsLab) apply(t *testing.T, c *Compiler, snap *rules.Snapshot) {
 	t.Helper()
 	text, err := c.CompileFirewall(snap)
@@ -78,7 +79,14 @@ func (l *netnsLab) apply(t *testing.T, c *Compiler, snap *rules.Snapshot) {
 		t.Fatal(err)
 	}
 	assertDeclaredSets(t, text)
-	if err := NewNftApplier().Apply(l.ctx, text); err != nil {
+	l.nft(t, text)
+	t.Cleanup(func() { l.nft(t, c.DeleteTables()) })
+}
+
+// nft applies an nft script in this namespace.
+func (l *netnsLab) nft(t *testing.T, script string) {
+	t.Helper()
+	if err := NewNftApplier().Apply(l.ctx, script); err != nil {
 		t.Fatal(err)
 	}
 }

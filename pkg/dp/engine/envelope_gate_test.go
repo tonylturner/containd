@@ -11,12 +11,14 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // nftModel replays applied scripts like the kernel would for the envelope
-// chain: a full ruleset sets it, a switch replaces its rule.
+// chain of table containd: replacing or deleting the table sets or removes
+// it, a switch replaces its rule.
 type nftModel struct {
 	mu       sync.Mutex
 	scripts  []string
@@ -32,7 +34,7 @@ func (m *nftModel) Apply(_ context.Context, script string) error {
 		return errors.New("nft: netlink busy")
 	}
 	m.scripts = append(m.scripts, script)
-	if strings.HasPrefix(script, "flush ruleset") {
+	if strings.Contains(script, enforce.DeleteTable("containd")) {
 		m.envelope = ""
 		if i := strings.Index(script, "chain iec104_envelope {\n    "); i >= 0 {
 			m.envelope = envelopeState(script[i+len("chain iec104_envelope {\n    "):])

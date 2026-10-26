@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,8 +96,8 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatalf("apply rules: %v", err)
 	}
-	if applier.ruleset == "" || applier.ruleset == "flush ruleset\n" {
-		t.Fatalf("expected compiled ruleset to be applied")
+	if !strings.Contains(applier.ruleset, "table inet containd {\n") {
+		t.Fatalf("expected compiled ruleset to be applied, got %q", applier.ruleset)
 	}
 	if got := e.CurrentRules(); got == nil || got.Version != "2" {
 		t.Fatalf("expected snapshot version 2 after apply, got %+v", got)

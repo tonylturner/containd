@@ -14,6 +14,11 @@ that field to true in candidate and commit for kernel rule application. Starting
 capture or seeing decoded events does not prove that firewall policy is installed. Review the ruleset preview and engine status
 through `GET /api/v1/dataplane/ruleset` and check for apply errors.
 
+The engine owns only its own nftables tables, named after `dataplane.enforceTable`
+(default `containd`). Each apply replaces the policy table `inet <enforceTable>`
+in one transaction; other tables in the namespace, such as Docker's embedded DNS
+rules or the DHCP redirect table `inet containd_dhcp`, are left untouched.
+
 nftables cannot evaluate identity or schedule predicates. On a rule it decides,
 an `ALLOW` with either predicate is not installed, and a `DENY` drops without
 the predicate's condition. See
@@ -53,6 +58,11 @@ Administrators can request temporary blocks through:
 
 - `POST /api/v1/dataplane/blocks/host`
 - `POST /api/v1/dataplane/blocks/flow`
+
+Temporary blocks live in their own nftables table, `inet <enforceTable>_blocks`
+(default `inet containd_blocks`, sets `block_hosts` and `block_flows`). They drop
+forwarded traffic before the policy table's rules, including established
+connections, and they persist across commits until their timeouts expire.
 
 See [API Reference](api-reference.md) for request fields. A decision or block
 request is not proof of delivery prevention; inspect verdict/apply errors and
