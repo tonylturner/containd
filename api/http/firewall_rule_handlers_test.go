@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,6 +14,60 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+func TestMergeRulePatch(t *testing.T) {
+	existing := config.Rule{
+		ID: "r1", Description: "old", Action: config.ActionAllow, Log: true,
+		Sources: []string{"10.0.0.1/32"},
+		ICS:     config.ICSPredicate{Protocol: "iec104"},
+		Schedule: &config.ScheduleConfig{
+			DaysOfWeek: []string{"Monday"}, StartTime: "09:00", EndTime: "17:00", Timezone: "UTC",
+		},
+	}
+	for _, tc := range []struct {
+		name, body string
+		want       config.Rule
+	}{
+		{"nested fields", `{"schedule":{"endTime":"18:00"},"description":"new","log":false}`,
+			config.Rule{
+				ID: "r1", Description: "new", Action: config.ActionAllow,
+				Sources: existing.Sources, ICS: existing.ICS,
+				Schedule: &config.ScheduleConfig{
+					DaysOfWeek: []string{"Monday"}, StartTime: "09:00", EndTime: "18:00", Timezone: "UTC",
+				},
+			}},
+		{"null and arrays", `{"schedule":null,"sources":[]}`,
+			config.Rule{
+				ID: "r1", Description: "old", Action: config.ActionAllow, Log: true,
+				Sources: []string{}, ICS: existing.ICS,
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var patch map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.body), &patch); err != nil {
+				t.Fatal(err)
+			}
+			got, err := mergeRulePatch(existing, patch)
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("merge = %+v, %v; want %+v", got, err, tc.want)
+			}
+			if existing.Schedule.EndTime != "17:00" || existing.Sources[0] != "10.0.0.1/32" {
+				t.Fatal("patch mutated the original rule")
+			}
+		})
+	}
+	for _, body := range []string{
+		`{"state":["on"]}`, `{"log":"yes"}`, `{"schedule":{"endTime":42}}`,
+	} {
+		var patch map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &patch); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := mergeRulePatch(existing, patch); err == nil {
+			t.Fatalf("accepted invalid patch %s", body)
+		}
+	}
+}
 
 func iecPatchStore(ics config.ICSPredicate) *mockStore {
 	return &mockStore{cfg: &config.Config{

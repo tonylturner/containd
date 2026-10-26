@@ -13,8 +13,8 @@ import (
 // apduSeenMax bounds the APDU IDs remembered for rate deduplication.
 const apduSeenMax = 4096
 
-// IEC104RoleViolation reports the B profile role and cause restrictions of
-// spec §7.3 from a malformed event's decoded identity: a monitor-direction
+// IEC104RoleViolation reports role and cause violations from a malformed
+// event's decoded identity: a monitor-direction
 // type (1..44) sent by the client, or a control or system command (cause 6
 // activation or 8 deactivation) sent by the server.
 func IEC104RoleViolation(attrs map[string]any) bool {

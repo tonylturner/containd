@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checkpoint-1 helpers; sourced by preflight-iec104.sh after its run state is set.
+# Preflight helpers; sourced by preflight-iec104.sh after its run state is set.
 
 compose() {
   docker compose --project-name "$PROJECT" --project-directory "$ROOT" -f "$COMPOSE_FILE" "$@"

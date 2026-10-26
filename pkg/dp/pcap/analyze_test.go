@@ -235,8 +235,8 @@ func TestAnalyzePacketCounting(t *testing.T) {
 		t.Errorf("ByteCount = %d, want %d", result.ByteCount, expectedBytes)
 	}
 	// The two frames are byte-identical at the same TCP sequence number: the
-	// second is a retransmission, so its message is decoded once (contracts
-	// K2, K8). TestAnalyzeCountsEveryMessage covers two distinct messages.
+	// second is a retransmission, so its message is decoded once.
+	// TestAnalyzeCountsEveryMessage covers two distinct messages.
 	if len(result.Events) != 1 {
 		t.Errorf("len(Events) = %d, want 1", len(result.Events))
 	}

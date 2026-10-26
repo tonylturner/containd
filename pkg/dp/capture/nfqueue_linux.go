@@ -16,7 +16,7 @@ import (
 )
 
 // inlineMaxPacketLen copies whole packets to userspace: an inline verdict
-// must judge every payload byte (milestone B §8.1).
+// must judge every payload byte.
 const inlineMaxPacketLen = 65535
 
 // nfqueueSource captures packets via NFQUEUE and delivers them inline: the

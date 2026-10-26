@@ -17,7 +17,7 @@ var newInjector = session.NewInjector
 // initIEC builds the IEC104 session table of one engine configuration. An
 // inline (NFQUEUE) engine opens the reset injector; when it cannot, the
 // configuration is kept, enforce envelopes fail closed and health reports
-// it (spec §8.3).
+// it.
 func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	store := e.eventStore
 	emit := func(evs []events.Event) {
@@ -52,7 +52,7 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	e.hooks.iec = t
 }
 
-// IEC104Enforcement reports IEC104 enforcement health (contracts K6).
+// IEC104Enforcement reports IEC104 enforcement health.
 func (e *Engine) IEC104Enforcement() IEC104Enforcement {
 	if e == nil || e.iec == nil {
 		return IEC104Enforcement{Healthy: true}

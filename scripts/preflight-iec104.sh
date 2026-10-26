@@ -91,7 +91,7 @@ if ! grep -q 'via 10.250.0.2' "$RESULTS_DIR/client-route.txt" ||
   fatal "The endpoints are not routed through the firewall or nft queue 101 is absent"
 fi
 
-printf '\nRunning checkpoint-1 scenarios on Docker Desktop (project %s)\n\n' "$PROJECT"
+printf '\nRunning NFQUEUE verdict and TCP reset scenarios on Docker Desktop (project %s)\n\n' "$PROJECT"
 
 # 1. Deferred ACCEPT: the handler returns with the packet held; a timer submits
 # ACCEPT about 300 ms later and the server application must get exactly the data.

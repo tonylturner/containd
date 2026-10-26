@@ -297,7 +297,7 @@ func conntrackHandler() http.HandlerFunc {
 	}
 }
 
-// healthHandler is engine liveness plus IEC104 enforcement health (K6).
+// healthHandler is engine liveness plus IEC104 enforcement health.
 func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, healthResponse{

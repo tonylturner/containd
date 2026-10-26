@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -86,20 +87,32 @@ func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func mergeJSONObject(dst, patch map[string]interface{}) map[string]interface{} {
+func mergeJSONObject(dst, patch map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if dst == nil {
-		dst = map[string]interface{}{}
+		dst = map[string]json.RawMessage{}
 	}
 	for key, value := range patch {
-		if existing, ok := dst[key].(map[string]interface{}); ok {
-			if nested, ok := value.(map[string]interface{}); ok {
-				dst[key] = mergeJSONObject(existing, nested)
-				continue
+		if bytes.HasPrefix(bytes.TrimSpace(dst[key]), []byte("{")) &&
+			bytes.HasPrefix(bytes.TrimSpace(value), []byte("{")) {
+			var existing, nested map[string]json.RawMessage
+			if err := json.Unmarshal(dst[key], &existing); err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(value, &nested); err != nil {
+				return nil, err
+			}
+			merged, err := mergeJSONObject(existing, nested)
+			if err != nil {
+				return nil, err
+			}
+			value, err = json.Marshal(merged)
+			if err != nil {
+				return nil, err
 			}
 		}
 		dst[key] = value
 	}
-	return dst
+	return dst, nil
 }
 
 // updateFirewallRuleHandler merges a JSON patch into a rule. The "ics"
@@ -165,19 +178,17 @@ func mergeRulePatch(existing config.Rule, patch map[string]json.RawMessage) (con
 	if err != nil {
 		return config.Rule{}, err
 	}
-	var merged map[string]interface{}
+	var merged map[string]json.RawMessage
 	if err := json.Unmarshal(currentJSON, &merged); err != nil {
 		return config.Rule{}, err
 	}
-	generic := make(map[string]interface{}, len(patch))
-	for key, raw := range patch {
-		var value interface{}
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return config.Rule{}, err
-		}
-		generic[key] = value
+	// Keep values as JSON until the strict, concrete Rule decode below.
+	// In particular, nested schedule patches retain unspecified fields.
+	merged, err = mergeJSONObject(merged, patch)
+	if err != nil {
+		return config.Rule{}, err
 	}
-	mergedJSON, err := json.Marshal(mergeJSONObject(merged, generic))
+	mergedJSON, err := json.Marshal(merged)
 	if err != nil {
 		return config.Rule{}, err
 	}

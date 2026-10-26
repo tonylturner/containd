@@ -6,7 +6,7 @@ import type {
   TelemetryEvent,
 } from "./api";
 
-// Wire decoding of IEC 104 enforcement evidence events (spec §8.4). Events
+// Wire decoding of IEC 104 enforcement evidence events. Events
 // come from the bounded event ring as untyped attribute maps; these readers
 // return a typed view only when the required keys have the documented types.
 
@@ -70,7 +70,7 @@ export function iec104SessionID(ev: TelemetryEvent): string | undefined {
 export function parseICSEvidence(ev: TelemetryEvent): ICSEvidence | null {
   if (ev.proto !== "iec104" || !ev.attributes) return null;
   const a = ev.attributes;
-  // §8.4 says every evidence event carries session_id; an engine-wide health
+  // Session-scoped evidence carries session_id; an engine-wide health
   // change may have none, so a missing ID reads as "" rather than hiding it.
   const sessionID = str(a, "session_id") ?? "";
 

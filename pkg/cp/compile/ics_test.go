@@ -92,7 +92,7 @@ func TestCompileSnapshotUsesICSPredicate(t *testing.T) {
 	}
 }
 
-// Spec §4.1 item 2: direction and objectClasses used to be dropped by the
+// Direction and objectClasses used to be dropped by the
 // compiler, so a direction-scoped rule matched both directions and a CIP
 // object-class rule matched every class. They are now compiled and enforced.
 func TestCompileSnapshotEnforcesDirectionAndObjectClasses(t *testing.T) {

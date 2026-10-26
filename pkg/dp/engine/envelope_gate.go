@@ -18,7 +18,7 @@ import (
 const envelopeSwitchTimeout = 5 * time.Second
 
 // envelopeGate keeps the nft IEC104 envelope chain fail closed until this
-// engine owns its queue (contracts K8): envelope traffic is queued only
+// engine owns its queue: envelope traffic is queued only
 // while the queue the installed ruleset steers to is bound by this engine,
 // and dropped in every other state. Another process that holds the queue
 // number therefore never decides envelope traffic.
@@ -108,8 +108,9 @@ func (g *envelopeGate) own(group uint16) {
 func (e *Engine) bindGate() {
 	health := e.iec.health
 	e.hooks.gate, e.hooks.group = e.gate, e.nfqueueGroup
+	fault := func(reason string) { health.fault(faultSteering, reason) }
+	ok := func() { health.clear(faultSteering) }
 	e.gate.mu.Lock()
-	e.gate.fault = func(reason string) { health.fault(faultSteering, reason) }
-	e.gate.ok = func() { health.clear(faultSteering) }
+	e.gate.fault, e.gate.ok = fault, ok
 	e.gate.mu.Unlock()
 }

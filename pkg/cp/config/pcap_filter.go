@@ -44,8 +44,8 @@ func parsePCAPPort(value string) (uint16, error) {
 			return 0, fmt.Errorf("invalid port")
 		}
 	}
-	port, err := strconv.Atoi(value)
-	if err != nil || port < 1 || port > 65535 {
+	port, err := strconv.ParseUint(value, 10, 16)
+	if err != nil || port == 0 {
 		return 0, fmt.Errorf("port out of range")
 	}
 	return uint16(port), nil

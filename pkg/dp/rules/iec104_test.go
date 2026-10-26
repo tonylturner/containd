@@ -44,7 +44,7 @@ func iecEntry(id string, action Action, ics ICSPredicate) Entry {
 	}
 }
 
-// euPolicy is the spec §12.4 rule block behind a broad L4 ALLOW on 2404
+// euPolicy scopes interrogation and breaker control behind a broad L4 ALLOW on 2404
 // and an ALLOW default, neither of which may take part in IEC evaluation.
 func euPolicy() *Snapshot {
 	return &Snapshot{
@@ -228,7 +228,7 @@ func TestIEC104Envelope(t *testing.T) {
 		wantIn   bool
 		wantMode string
 	}{
-		{"no IEC rules (milestone A, US)", []Entry{l4}, "enforce", session, false, ""},
+		{"L4 rule alone creates no IEC104 inspection envelope", []Entry{l4}, "enforce", session, false, ""},
 		{"enforce rule", []Entry{l4, enforceRule}, "learn", session, true, "enforce"},
 		{"rule learn beats global enforce", []Entry{learnRule}, "enforce", session, true, "learn"},
 		{"blank rule mode inherits global", []Entry{inherit}, "Enforce", session, true, "enforce"},

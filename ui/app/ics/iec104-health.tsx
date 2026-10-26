@@ -11,7 +11,7 @@ type Indicator = {
   sublabel?: string;
 };
 
-/** Maps K6 health to the indicator. Unhealthy is amber with its reason. */
+/** Maps IEC104 enforcement health to the indicator. Unhealthy is amber with its reason. */
 export function iec104HealthIndicator(
   health: IEC104EnforcementHealth | undefined,
 ): Indicator {

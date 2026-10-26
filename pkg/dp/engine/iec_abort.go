@@ -61,10 +61,10 @@ type resetTarget struct {
 
 var targetNames = [2]string{"client", "server"}
 
-// abortLocked runs steps 1 and 3 of the abort transaction (spec §8.2): it
-// marks the incarnation aborted before anything is released, drops every
+// abortLocked begins the abort transaction: it marks the incarnation
+// aborted before anything is released, drops every
 // held packet (returned in drops) and the current packet cur, and keeps the
-// session as a tombstone. The resets (step 2) start once every drop has its
+// session as a tombstone. The resets start once every drop has its
 // verdict completion. A learn envelope never aborts; callers ensure that.
 func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
@@ -147,7 +147,7 @@ func dirLetter(dir int) byte {
 }
 
 // resetTargets computes one RST per endpoint: for target X, seq is the end
-// of the last byte forwarded to X (spec §8.2 step 2). Without both ISNs the
+// of the last byte forwarded to X. Without both ISNs the
 // connection was never established and nothing is reset.
 func resetTargets(s *iecSession) *iecReset {
 	c2s, s2c := s.dirs[iecDirClient], s.dirs[iecDirSrv]
@@ -238,7 +238,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 }
 
 // sendReset sends one RST and reports it. A failure keeps the session
-// dropped and makes enforcement unhealthy (spec §8.3).
+// dropped and makes enforcement unhealthy.
 func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 	err := errInjectorUnavailable
 	if t.injector != nil {
@@ -348,7 +348,7 @@ func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
 
 // onSourceDown aborts every enforce session when the inline queue goes
 // down: its held packets are gone and its byte ledger can no longer be
-// trusted (spec §8.3). The kernel already dropped the held packets; their
+// trusted. The kernel already dropped the held packets; their
 // completions (ErrQueueClosed) finish the aborts.
 func (t *iecTable) onSourceDown() {
 	var acts iecActions

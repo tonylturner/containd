@@ -7,13 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-26
+
+### Security
+
+- Upgrade the Go toolchain and both Docker builders to 1.26.10 to fix
+  CVE-2026-111943 in `crypto/x509`.
+- Update the pinned Wolfi base image so the runtime images ship the fixed
+  `ca-certificates-bundle` (CVE-2026-111943) and brotli libraries
+  (CVE-2026-111497).
+
+### Changed
+
+- IEC 104 diagnostics name the supported type set: unsupported types report
+  `type N is not in the supported IEC 104 type set`, and the
+  `IEC104-MALFORMED` / `IEC104-UNSUPPORTED` signature descriptions state the
+  actual checks.
+
+### Removed
+
+- The Roadmap and Audit Baseline documentation pages. They held internal
+  planning material; Secure by Design now lists the known security gaps
+  directly.
+
+### Fixed
+
+- Allow IEC 104 reconnects on retained aborted or closed tuples when the
+  session table is full, without exceeding the tracking limit.
+- Bound IEC 104 learn-mode session tracking to the shared 4,096-entry
+  table. Connections that cannot be tracked are accepted without stream
+  inspection and reported as `ics.session` untracked/bound events.
+  Enforce-mode midstream traffic can no longer bypass the table limit.
+- Keep firewall rule patches as raw JSON until concrete rule validation,
+  preserving nested schedule patches without deserializing to `interface{}`.
+  Parse PCAP ports as checked unsigned 16-bit values and construct envelope
+  gate callbacks outside the mutex's critical section.
+
 ## [0.1.33] - 2026-10-25
 
 ### Added
 
-- Product roadmap page (Docs → Roadmap) built from the 2026-10-25 maturity
-  audit, with the audit reports kept in `docs/audits/2026-10-25/`. Secure by
-  Design now marks MFA and intrusion evidence as Partial and states the SSH
+- Secure by Design now marks MFA and intrusion evidence as Partial and states the SSH
   and session-revocation caveats.
 
 - Query retained events server-side by IEC session/APDU, flow, kind, protocol,

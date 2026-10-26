@@ -73,9 +73,9 @@ func analysisRecords(res *AnalysisResult) (recs []string, malformed int) {
 	return recs, malformed
 }
 
-// TestAnalyzeUsesTCPSequence pins offline parity with the live engine
-// (contracts K8): every message is parsed once, retransmissions are not
-// parsed again, and events before a stream error are kept.
+// TestAnalyzeUsesTCPSequence pins offline parity with the live engine:
+// every message is parsed once, retransmissions are not parsed again, and
+// events before a stream error are kept.
 func TestAnalyzeUsesTCPSequence(t *testing.T) {
 	const ack, psh = 0x10, 0x08
 	data := buildPCAP([][]byte{

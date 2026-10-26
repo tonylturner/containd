@@ -1,6 +1,6 @@
 # IEC 60870-5-104 reference captures (lib60870 wire traffic)
 
-Test data for the milestone B decoder (lane L1) and engine (lane L4). The
+Test data for the IEC104 decoder and enforcement engine. The
 pcaps hold protocol bytes only; they contain no lib60870 code. They are
 Apache-2.0 test data under the repository licence. The programs that produced
 them (`test/iec104/endpoint/`) are GPLv3 and are not part of containd.
@@ -137,7 +137,7 @@ The control centre closes last with FIN.
 
 Types 45, 47-51, 58-64 and 103-107, SQ = 1 objects, IPv4 fragments and
 out-of-order delivery are not here; use documented synthetic fixtures for
-those (spec §9). The `abort-reconnect` evidence comes from
+those. The `abort-reconnect` evidence comes from
 `scripts/smoke-iec104.sh` once the integrated engine resets sessions.
 
 ## Go decoder regression corpus

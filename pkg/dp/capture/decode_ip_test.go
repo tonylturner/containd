@@ -77,9 +77,9 @@ func TestDecodeIPPacketIPv6UDP(t *testing.T) {
 	}
 }
 
-// TestDecodeIPDeliveryUnchanged pins which packets reach the handler: only
-// those the pre-milestone-B decoder accepted. Everything else is still
-// accepted inside capture, now with a reason.
+// TestDecodeIPDeliveryUnchanged pins which packets reach the observational
+// handler: only packets whose transport header decodes, even if marked invalid.
+// Packets that cannot be decoded are accepted inside capture with a reason.
 func TestDecodeIPDeliveryUnchanged(t *testing.T) {
 	withFrag := func(frag uint16, raw []byte) []byte {
 		raw[6], raw[7] = byte(frag>>8), byte(frag)

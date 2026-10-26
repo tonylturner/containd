@@ -26,7 +26,7 @@ var acceptDecision = capture.Decision{Action: capture.Accept}
 
 // invalidPacketDecision decides a packet whose tuple cannot be trusted.
 // Inside an IEC104 envelope (the nft envelope mark is set) it is dropped
-// (fragments, IPv6 extension headers and truncated packets, spec §8.1);
+// (fragments, IPv6 extension headers and truncated packets);
 // everything else passes as before.
 func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 	if envelopeMarked(pkt) {
@@ -36,8 +36,8 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 }
 
 // handleFlowPacket is the wire-oriented path for every protocol except
-// IEC104 sessions. A denied ICS message drops the current packet (spec §4.1
-// #1) and installs the existing dynamic flow block once the drop verdict is
+// IEC104 sessions. A denied ICS message drops the current packet
+// and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow.
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture.Decision {
 	e.recordPacketStats(pkt, state)
@@ -76,12 +76,12 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 	}
 	if isIECPort(pkt) {
 		// IEC104 is parsed only on a session tracked from its SYN
-		// (HasOffset, contracts K2); outside every envelope it passes
+		// (HasOffset); outside every envelope it passes
 		// unparsed, as before.
 		return acceptDecision
 	}
 	// Events come before the error: a stream error's malformed event is
-	// already among them, and the packet itself passes (spec §4.2).
+	// already among them, and the packet itself passes.
 	evs, _ := e.dpiMgr.OnPacket(state, &parsed)
 	e.RecordDPIEvents(state, &parsed, evs)
 	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, evs)
@@ -157,7 +157,7 @@ func isIECPort(pkt capture.Packet) bool {
 }
 
 // envelopeMarked reports a packet nft steered to the queue under an IEC104
-// envelope rule (contracts K1 envelope mark).
+// envelope rule (the nft envelope mark).
 func envelopeMarked(pkt capture.Packet) bool {
 	return pkt.HasMark && enforce.EnvelopeMarked(pkt.Mark)
 }

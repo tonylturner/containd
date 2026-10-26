@@ -211,7 +211,7 @@ func TestValidateIEC104EnforceStaticCauses(t *testing.T) {
 	})
 }
 
-// E3: commit, candidate and import all save through the store, which
+// Commit, candidate and import all save through the store, which
 // validates before it writes anything.
 func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cfg.db"))
@@ -248,7 +248,7 @@ func TestSchemaVersion017(t *testing.T) {
 	}
 }
 
-// Spec §6.2: both shipped RangerDanger US policies still load under strict
+// Both shipped RangerDanger US policies still load under strict
 // decoding, validate, and survive a marshal round trip unchanged.
 func TestRangerDangerUSPoliciesLoad(t *testing.T) {
 	for _, name := range []string{"substation-weak.json", "substation-improved.json"} {

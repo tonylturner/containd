@@ -76,7 +76,7 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 		if out.IPv4Forwarding != netcfg.ReadIPv4ForwardingStatus() {
 			t.Fatalf("ipv4Forwarding = %q, want %q", out.IPv4Forwarding, netcfg.ReadIPv4ForwardingStatus())
 		}
-		// No IEC104 rule is loaded: inactive with no fault (K6).
+		// No IEC104 rule is loaded: inactive with no fault.
 		if out.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: false, Healthy: true}) {
 			t.Fatalf("iec104Enforcement = %+v", out.IEC104Enforcement)
 		}

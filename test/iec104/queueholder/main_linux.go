@@ -2,7 +2,7 @@
 
 // Command queueholder binds an NFQUEUE number before the containd engine
 // does, so the harness can prove what the engine does when its queue bind
-// fails at start (milestone B E3, §8.3, contracts K6). It is test tooling for
+// fails at start. It is test tooling for
 // scripts/smoke-iec104.sh and runs inside the firewall container.
 //
 // It accepts every packet it receives. That is the strict case: a foreign

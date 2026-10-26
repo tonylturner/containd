@@ -13,9 +13,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
 )
 
-// Readers use the eventfields accessors on these keys (spec §4 "ICS field
-// drift"); the decoder must emit values those accessors read exactly. The
-// object_groups wire key stays a comma-separated string.
+// Readers use the eventfields accessors on these keys; the decoder must emit
+// values those accessors read exactly. The object_groups wire key stays a
+// comma-separated string.
 func TestDecodedFieldsReadThroughAccessors(t *testing.T) {
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 20000), time.Now())
 	cases := []struct {

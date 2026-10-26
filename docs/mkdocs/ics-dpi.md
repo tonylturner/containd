@@ -139,6 +139,16 @@ The inventory module (`pkg/dp/inventory`) passively identifies ICS assets from o
 
 ## Learn Mode
 
+IEC 104 tracking shares a 4,096-entry session table across learn and enforce
+envelopes (including retained closed sessions and abort tombstones). At capacity,
+new learn-mode connections are **accepted without stream inspection**, not
+blocked or reset. Each untracked SYN emits an `ics.session` event with
+`outcome: untracked`, `mode: learn`, `reason: bound`, and `limit: 4096`, on
+the client/server tuple without a session or APDU ID. Subsequent midstream
+traffic is accepted without allocating state. Existing tracked connections
+continue to be inspected; new SYNs can be tracked again when entries expire.
+Enforce envelopes remain fail closed when tracking capacity is exhausted.
+
 The learn module (`pkg/dp/learn`) records traffic profiles during a learning period. Once sufficient data is collected, it generates allowlist firewall rules that match observed behavior. The workflow is:
 
 1. Set DPI mode to **learn** via the UI or API.

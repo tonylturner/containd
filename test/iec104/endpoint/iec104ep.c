@@ -1,12 +1,12 @@
 /*
- * containd milestone B IEC 60870-5-104 truth-harness endpoint.
+ * containd IEC 60870-5-104 truth-harness endpoint.
  * Copyright (C) 2026 The containd contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * This program links lib60870-C (MZ Automation, GPLv3-or-commercial), so it
  * is a GPLv3 combined work. It is built ONLY into the harness test image
  * (test/iec104/endpoint/Dockerfile) and is never linked into containd, which
- * stays Apache-2.0 with its own Go IEC104 parser (milestone B spec D3). The
+ * stays Apache-2.0 with its own Go IEC104 parser. The
  * two talk only over the wire (TCP/2404). The corresponding source for the
  * pinned lib60870 release and this file ship in the image under
  * /usr/share/src, alongside the GPLv3 licence under /usr/share/licenses.
@@ -79,7 +79,7 @@ isCommandPoint(int ca, int ioa)
 }
 
 #define SELECT_TIMEOUT_MS 3000
-#define RECONNECT_DELAY_MS 1000 /* control centre reconnect delay (B1: <= 1 s) */
+#define RECONNECT_DELAY_MS 1000 /* control centre reconnect delay (<= 1 s) */
 
 static volatile bool running = true;
 static bool tripActive = false;
@@ -650,7 +650,7 @@ openConnection(const char* host, int port)
 static int
 runCc(const char* host, int port)
 {
-    /* A real control centre (milestone B B1): after the session closes or is
+    /* A real control centre: after the session closes or is
      * reset, wait at most 1 s, reconnect, STARTDT and re-run station GI. Each
      * session logs "t=<ms> CC connected"; closes log "t=<ms> CONN closed". */
     signal(SIGINT, sigint_handler);
