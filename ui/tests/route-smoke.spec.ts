@@ -18,6 +18,7 @@ const routes = [
   "/flows",
   "/forbidden",
   "/ics",
+  "/identities",
   "/ids",
   "/interfaces",
   "/login",

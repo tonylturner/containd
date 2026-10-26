@@ -58,6 +58,7 @@ export type {
   FirewallRulePatch,
   ICSPredicate,
   ICSPredicatePatch,
+  IdentityBinding,
   IEC104Class,
   IOARange,
   Protocol,

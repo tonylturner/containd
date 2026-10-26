@@ -1,6 +1,7 @@
 import {
   deleteJSONResult,
   getJSON,
+  getJSONResult,
   patchJSONResult,
   postJSONResult,
 } from "./api-request";
@@ -122,6 +123,25 @@ export type RulePreview = {
   icsCoverage?: ICSCoverageRule;
 };
 
+/**
+ * One firewall.identityBindings entry of the candidate: a unicast address
+ * bound to 1-16 labels that rule identities match exactly.
+ */
+export type IdentityBinding = {
+  ip: string;
+  identities: string[];
+};
+
+function normalizeIdentityBindings(value: unknown): IdentityBinding[] {
+  const mappings = (value as { mappings?: unknown } | null)?.mappings;
+  if (!Array.isArray(mappings)) return [];
+  return mappings.flatMap((m) => {
+    const { ip, identities } = (m ?? {}) as Record<string, unknown>;
+    if (typeof ip !== "string" || !Array.isArray(identities)) return [];
+    return [{ ip, identities: identities.filter((id): id is string => typeof id === "string") }];
+  });
+}
+
 export const firewallAPI = {
   listFirewallRules: async (signal?: AbortSignal) => {
     const rules = await getJSON<unknown>("/api/v1/firewall/rules", signal);
@@ -155,4 +175,14 @@ export const firewallAPI = {
   },
   deleteFirewallRule: (id: string) =>
     deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+
+  listIdentityBindings: async (): Promise<ApiResult<IdentityBinding[]>> => {
+    const res = await getJSONResult<unknown>("/api/v1/identities");
+    return res.ok ? { ok: true, data: normalizeIdentityBindings(res.data) } : res;
+  },
+  /** Stages the binding, replacing any existing binding of its address. */
+  setIdentityBinding: (b: IdentityBinding) =>
+    postJSONResult<IdentityBinding>("/api/v1/identities", b),
+  deleteIdentityBinding: (ip: string) =>
+    deleteJSONResult(`/api/v1/identities/${encodeURIComponent(ip)}`),
 };
