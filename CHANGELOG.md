@@ -207,6 +207,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The ICS and firewall pages label enforcement health "ICS connection reset unhealthy" when the engine fails to reset a Modbus or DNP3 connection it picked up mid-stream and no IEC 104 enforce envelope is active.
+- System Settings shows the certificate and key files the bound HTTPS listener serves, and marks saved files that are served from the next start. A certificate upload that is stored for the next start is reported as a warning instead of "updated".
 - `GET /api/v1/system/tls` adds `servedCertFile` and `servedKeyFile`, the
   files the bound HTTPS listener serves now. A certificate upload returns
   status `updated` when the listener serves the uploaded files (from its next
