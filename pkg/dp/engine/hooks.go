@@ -36,7 +36,7 @@ func newInlineHooks(onError func(error)) *inlineHooks {
 
 // onVerdict handles one verdict completion. Follow-up I/O registered for the
 // token (a dynamic block) is queued now that its drop is submitted.
-func (h *inlineHooks) onVerdict(tok capture.Token, _ capture.Verdict, err error) {
+func (h *inlineHooks) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	if job := h.after.take(tok); job != nil && !h.blocks.submit(job) {
 		h.reportWorkerOverflow("block worker queue full")
 	}
@@ -46,7 +46,7 @@ func (h *inlineHooks) onVerdict(tok capture.Token, _ capture.Verdict, err error)
 			h.onError(err)
 		}
 	}
-	h.iec.onVerdict(tok, err)
+	h.iec.onVerdict(tok, v, err)
 }
 
 // onSource handles inline source state changes. A source that goes down

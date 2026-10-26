@@ -345,8 +345,10 @@ All inventory reads require an authenticated management session:
 An unavailable engine returns **503** with `{"error":"engine inventory unavailable"}`
 for these operations, never a fabricated empty list. A reachable empty inventory
 returns `[]` for the legacy list and `pairs: []` in the IEC 104 snapshot. The
-engine observation feed is not connected yet, so the IEC section remains empty
-unless supplied with observations. The read model does not generate policy.
+engine feeds the IEC section from decoded traffic. Accepted command counts are
+credited only in inline enforce mode, after the decision allowed the command and
+every packet that carried it completed an Accept verdict; learn and monitor
+modes record attempts and points only. The read model does not generate policy.
 
 The IEC response has this shape (a populated observation example):
 
