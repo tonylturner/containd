@@ -10,9 +10,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +40,10 @@ type tlsInfoResponse struct {
 	// bound.
 	BoundHTTPListenAddr  string `json:"boundHttpListenAddr,omitempty"`
 	BoundHTTPSListenAddr string `json:"boundHttpsListenAddr,omitempty"`
+	// HTTPListenChanges and HTTPSListenChanges report that the next start
+	// binds another listener than the bound one (see listenerChanges).
+	HTTPListenChanges  bool `json:"httpListenChanges"`
+	HTTPSListenChanges bool `json:"httpsListenChanges"`
 
 	// CertFile and KeyFile are the files the HTTPS listener serves when
 	// management next starts with this configuration, and the Cert fields
@@ -85,6 +92,8 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			HTTPSEnabled:         listeners.HTTPS.Enabled,
 			BoundHTTPListenAddr:  boundAddr(bound.HTTP),
 			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
+			HTTPListenChanges:    listenerChanges(bound.HTTP, listeners.HTTP),
+			HTTPSListenChanges:   listenerChanges(bound.HTTPS, listeners.HTTPS),
 			CertFile:             cleanFilePath(certFile),
 			KeyFile:              cleanFilePath(keyFile),
 			ServedCertFile:       cleanFilePath(served.CertFile),
@@ -119,6 +128,46 @@ func boundAddr(l config.ManagementListener) string {
 		return ""
 	}
 	return l.Addr
+}
+
+// listenerChanges reports that next binds another listener than bound: one
+// of them is served and the other not, or they differ in host or port. The
+// bound record names its socket's address, so every wildcard spelling of
+// next ("", 0.0.0.0, ::) is the wildcard socket a TCP listen binds, which
+// the record spells [::] (0.0.0.0 without IPv6). A host name differs from
+// every bound address: the next start resolves it afresh.
+func listenerChanges(bound, next config.ManagementListener) bool {
+	if !bound.Enabled || !next.Enabled {
+		return bound.Enabled != next.Enabled
+	}
+	b, boundOK := listenEndpoint(bound.Addr)
+	n, nextOK := listenEndpoint(next.Addr)
+	return !boundOK || !nextOK || b != n
+}
+
+// listenEndpoint is the IP and port a TCP listen on addr binds, with every
+// wildcard host as the unspecified IPv6 address; false when addr is not an
+// IP or empty host with a numeric port.
+func listenEndpoint(addr string) (netip.AddrPort, bool) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return netip.AddrPort{}, false
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return netip.AddrPort{}, false
+	}
+	ip := netip.IPv6Unspecified()
+	if host != "" {
+		parsed, err := netip.ParseAddr(host)
+		if err != nil {
+			return netip.AddrPort{}, false
+		}
+		if parsed = parsed.Unmap(); !parsed.IsUnspecified() {
+			ip = parsed
+		}
+	}
+	return netip.AddrPortFrom(ip, uint16(p)), true
 }
 
 // cleanFilePath cleans a file path as sameFilePath compares it; empty stays

@@ -9,7 +9,9 @@ const saved = {
   certFile: "/data/tls/server.crt", keyFile: "/data/tls/server.key",
   certSubject: "CN=saved", certNotAfter: "2027-01-01T00:00:00Z",
 };
-const bound = { boundHttpListenAddr: ":8080", boundHttpsListenAddr: ":8443" };
+// Bound listeners are named by their sockets' addresses: a wildcard listen
+// is [::]. The API says whether the next start binds another listener.
+const bound = { boundHttpListenAddr: "[::]:8080", boundHttpsListenAddr: "[::]:8443", httpListenChanges: false, httpsListenChanges: false };
 const served = { servedCertSubject: "CN=served", servedCertNotAfter: "2026-12-01T00:00:00Z" };
 const iso = (v: string | undefined) => v ?? "—";
 const rows = (list: TLSRow[]) => Object.fromEntries(list.map((r) => [r.label, r.value]));
@@ -18,8 +20,8 @@ test("listeners and files served now equal to the next start show once", () => {
   const view = tlsView({ ...saved, ...bound, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
   expect(view).toEqual({
     rows: [
-      { label: "HTTP listen", value: ":8080" },
-      { label: "HTTPS listen", value: ":8443" },
+      { label: "HTTP listen", value: "[::]:8080" },
+      { label: "HTTPS listen", value: "[::]:8443" },
       { label: "Cert file", value: "/data/tls/server.crt" },
       { label: "Key file", value: "/data/tls/server.key" },
       { label: "Cert subject", value: "CN=served" },
@@ -41,20 +43,32 @@ test("saved files that differ from the served ones are served from the next star
 });
 
 test("listeners that the next start binds differently show both", () => {
-  const view = tlsView({ ...saved, httpEnabled: false, httpsListenAddr: ":9443", ...bound, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
+  const view = tlsView({
+    ...saved, httpEnabled: false, httpsListenAddr: ":9443", ...bound, httpListenChanges: true, httpsListenChanges: true,
+    ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile,
+  }, iso);
   expect(view.rows.slice(0, 4)).toEqual([
-    { label: "HTTP listen", value: ":8080" },
+    { label: "HTTP listen", value: "[::]:8080" },
     { label: "HTTP listen (next start)", value: "disabled" },
-    { label: "HTTPS listen", value: ":8443" },
+    { label: "HTTPS listen", value: "[::]:8443" },
     { label: "HTTPS listen (next start)", value: ":9443" },
   ]);
   expect(view.note).toBeUndefined();
 });
 
+test("a listener bound at a specific address in place of the wildcard shows the next start", () => {
+  const view = tlsView({ ...saved, ...bound, boundHttpListenAddr: "192.0.2.10:8080", httpListenChanges: true, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
+  expect(view.rows.slice(0, 3)).toEqual([
+    { label: "HTTP listen", value: "192.0.2.10:8080" },
+    { label: "HTTP listen (next start)", value: ":8080" },
+    { label: "HTTPS listen", value: "[::]:8443" },
+  ]);
+});
+
 test("without a bound HTTPS listener the saved files wait for the next start", () => {
-  const view = tlsView({ ...saved, boundHttpListenAddr: ":8080" }, iso);
+  const view = tlsView({ ...saved, boundHttpListenAddr: "[::]:8080", httpListenChanges: false, httpsListenChanges: true }, iso);
   expect(rows(view.rows)).toEqual({
-    "HTTP listen": ":8080",
+    "HTTP listen": "[::]:8080",
     "HTTPS listen": "not bound",
     "HTTPS listen (next start)": ":8443",
     "Cert file": "no HTTPS listener bound",
@@ -138,7 +152,8 @@ test("settings page marks saved files that differ from the served ones", async (
   await expect(card.getByText("Cert file (next start)")).toBeVisible();
   await expect(card.getByText("/data/tls/server.crt")).toBeVisible();
   await expect(card.getByText("they are served from the next management start")).toBeVisible();
-  await expect(card.getByText("HTTPS listen (next start)")).toHaveCount(0);
+  await expect(card.getByText("[::]:8080")).toBeVisible();
+  await expect(card.getByText(/listen \(next start\)/)).toHaveCount(0);
 });
 
 test("stored certificate upload is a warning, not an update", async ({ page }) => {

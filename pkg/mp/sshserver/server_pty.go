@@ -120,14 +120,7 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 	}()
 
 	// Wait for bash to exit.
-	exitCode := 0
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-	}
-
-	sendExitStatus(ch, uint32(exitCode))
+	s.sendShellExit(ch, cmd.Wait())
 }
 
 // startLinuxShellInline launches a bash shell from within the appliance REPL.

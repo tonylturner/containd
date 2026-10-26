@@ -1599,7 +1599,11 @@ components:
         CONTAIND_MGMT_HTTPS_ADDR take precedence over the saved addresses, then
         the defaults :8080 and :8443 apply. A saved listener change binds at the
         next start. boundHttpListenAddr and boundHttpsListenAddr are the
-        listeners management has bound now. certFile and keyFile, and the
+        listeners management has bound now, at their sockets' addresses (a
+        wildcard listen is [::]:port). httpListenChanges and
+        httpsListenChanges report whether the next start binds another
+        listener than the bound one; every wildcard spelling of the same port
+        is the same listener. certFile and keyFile, and the
         certificate fields, are the files the HTTPS listener serves at the next
         start: CONTAIND_TLS_CERT_FILE and CONTAIND_TLS_KEY_FILE, then the saved
         paths, then the defaults. servedCertFile and servedKeyFile, and the
@@ -1614,6 +1618,8 @@ components:
         httpsEnabled: {type: boolean}
         boundHttpListenAddr: {type: string, description: 'Address of the bound HTTP listener; absent when none is bound'}
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
+        httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
+        httpsListenChanges: {type: boolean, description: 'True when the next start binds another HTTPS listener than the bound one, or binds one where none is bound, or none where one is'}
         certFile: {type: string}
         keyFile: {type: string}
         certSubject: {type: string}

@@ -5,8 +5,9 @@ export type TLSRow = { label: string; value: string };
 /**
  * The Management HTTPS readout: what the bound listeners serve now, plus a
  * "(next start)" row wherever the next management start serves something
- * else. `note` says why the certificate files differ. The API cleans file
- * paths, so equal strings name the same file.
+ * else, as the API reports for each listener. `note` says why the
+ * certificate files differ. The API cleans file paths, so equal strings name
+ * the same file.
  */
 export type TLSView = { rows: TLSRow[]; note?: string };
 
@@ -19,11 +20,10 @@ export function formatTLSTime(value: string | undefined): string {
   return Number.isNaN(at.getTime()) ? value : at.toLocaleString();
 }
 
-function listenerRows(label: string, bound: string | undefined, enabled: boolean, addr: string | undefined): TLSRow[] {
-  const now = bound || "";
-  const next = enabled ? addr || "" : "";
-  const rows = [{ label, value: now || "not bound" }];
-  if (now !== next) rows.push({ label: `${label} (next start)`, value: next || "disabled" });
+/** The bound listener, plus its next-start row when the API says the next start binds another one. */
+function listenerRows(label: string, bound: string | undefined, changes: boolean, enabled: boolean, addr: string | undefined): TLSRow[] {
+  const rows = [{ label, value: bound || "not bound" }];
+  if (changes) rows.push({ label: `${label} (next start)`, value: (enabled && addr) || "disabled" });
   return rows;
 }
 
@@ -32,8 +32,8 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
     return { rows: ["HTTP listen", "HTTPS listen", "Cert file", "Key file", "Cert expires"].map((label) => ({ label, value: "—" })) };
   }
   const rows = [
-    ...listenerRows("HTTP listen", info.boundHttpListenAddr, info.httpEnabled, info.httpListenAddr),
-    ...listenerRows("HTTPS listen", info.boundHttpsListenAddr, info.httpsEnabled, info.httpsListenAddr),
+    ...listenerRows("HTTP listen", info.boundHttpListenAddr, info.httpListenChanges, info.httpEnabled, info.httpListenAddr),
+    ...listenerRows("HTTPS listen", info.boundHttpsListenAddr, info.httpsListenChanges, info.httpsEnabled, info.httpsListenAddr),
   ];
   const bound = Boolean(info.servedCertFile);
   if (bound) {
