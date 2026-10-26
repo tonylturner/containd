@@ -20,7 +20,7 @@ import {
 
 const empty: IEC104Draft = iec104DraftFrom(undefined);
 
-test("EU breaker rule serialises as the spec §12.4 wire shape", () => {
+test("EU breaker rule serialises to the IEC 104 rule wire shape", () => {
   const draft: IEC104Draft = {
     ...empty,
     typeIds: "46",
@@ -98,7 +98,7 @@ test("saving an inherited IEC 104 mode omits the mode override", () => {
   expect(unsupported.ok).toBe(false);
 });
 
-test("client checks mirror the K5 ranges", () => {
+test("client checks mirror the server IEC 104 field ranges", () => {
   const bad: Array<[Partial<IEC104Draft>, RegExp]> = [
     [{ typeIds: "0" }, /outside 1-255/],
     [{ typeIds: "256" }, /outside 1-255/],
