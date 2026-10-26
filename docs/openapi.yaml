@@ -646,8 +646,8 @@ components:
             an inactive ALLOW rule matches nothing. Omitted when there are none.
     AVConfig:
       properties:
-        blockTtlSeconds: {type: integer}
-        cacheTtl: {type: integer}
+        blockTtlSeconds: {type: integer, minimum: 0, description: Seconds a detected malware flow stays blocked; 0 selects 600}
+        cacheTtl: {type: integer, format: int64, minimum: 0, description: Verdict cache lifetime in nanoseconds; 0 selects 10 minutes}
         clamav: {$ref: '#/components/schemas/ClamAVConfig'}
         enabled: {type: boolean}
         failOpenIcs: {type: boolean}
