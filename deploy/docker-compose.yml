@@ -115,11 +115,9 @@ services:
       - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
       - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
       # The engine API is unauthenticated; management JWT auth does not protect it.
-      # For trusted host diagnostics only: set CONTAIND_ENGINE_ADDR=:8081 and
-      # uncomment the loopback host mapping below. This also exposes the API to
-      # attached container networks: never allow untrusted peers there.
-      # In reserved mode the engine must stay loopback-bound; do not publish it.
-      # - "127.0.0.1:${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
+      # It stays on the container's loopback and is never published. For host
+      # diagnostics, call it inside the container, for example
+      # `docker compose exec containd curl -s http://127.0.0.1:8081/health`.
     volumes:
       - ./data:/data
       # ClamAV signature databases survive container replacement.

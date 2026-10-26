@@ -70,8 +70,10 @@ or recover credentials.
 - Use a unique JWT signing secret, HTTPS, and TOTP for administrative web access.
 - Limit HTTP and SSH exposure; do not assume web account assurances apply to SSH.
 - Isolate the **unauthenticated engine API**. Combined mode binds it to
-  `127.0.0.1:8081` by default; split engine mode defaults to `:8081` and requires
-  a trusted private network. `CONTAIND_ENGINE_ADDR` overrides the bind. See
+  `127.0.0.1:8081` by default. Split engine mode requires `CONTAIND_ENGINE_ADDR`
+  to name the engine's address on a trusted private management network and
+  refuses loopback or wildcard listeners. While enforcing, the firewall admits
+  the API from loopback and on that address's interface only. See
   [Threat Model](threat-model.md#management-plane-to-dataplane) and
   [Reserved Management Path](management-reservation.md).
 - Keep default-deny firewall policy and commit only the minimum required allows.

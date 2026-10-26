@@ -70,30 +70,27 @@ there is no Compose `CONTAIND_MODE` selector. For split deployments, run
 
 - Combined mode defaults the engine listener to `127.0.0.1:8081` and auto-wires
   `CONTAIND_ENGINE_URL` to `http://127.0.0.1:8081` when unset.
-- Split engine mode defaults to `:8081`; point management's
-  `CONTAIND_ENGINE_URL` (including scheme) at that engine on a trusted private network.
-- `CONTAIND_ENGINE_ADDR` overrides the engine listener.
+- Split engine mode has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
+  engine's address on the management network, for example `10.10.0.2:8081`, and
+  point management's `CONTAIND_ENGINE_URL` (including scheme) at it. The engine
+  refuses to start without one: a loopback listener is out of reach of
+  management in another container, and a wildcard listener serves every network
+  without enforcement and only loopback with it. The exception is a
+  [reserved management path](management-reservation.md), which puts both
+  processes in one network namespace and requires a loopback listener.
+- `CONTAIND_ENGINE_ADDR` overrides the combined-mode listener.
 
 **The engine API is unauthenticated and can change appliance state. Management
-JWT authentication does not protect it.** Restrict reachability to the management
-process or a trusted private network. Do not publish it for ordinary UI access.
-A loopback-bound container listener is not reachable through Docker port mapping.
-If host diagnostics genuinely require publication, override the listener and add
-this mapping to the engine-containing service, on an otherwise isolated network:
+JWT authentication does not protect it.** While enforcing, the firewall admits
+it from loopback and, when the listener names one address, on that address's
+own interface only; no zone reaches it otherwise. Without enforcement, every
+network that can route to the listener reaches it, so keep a split engine's
+management network private. Do not publish the engine API. For host
+diagnostics, call it inside the container:
 
-```yaml
-services:
-  containd:
-    environment:
-      CONTAIND_ENGINE_ADDR: ":8081"
-    ports:
-      - "127.0.0.1:18081:8081"
+```sh
+docker compose exec containd curl -s http://127.0.0.1:8081/health
 ```
-
-This restricts the **host** mapping to loopback, not access from other containers
-on the engine's networks. Every attached network must still be trusted. Leave
-this override off for a [reserved management path](management-reservation.md),
-which requires a loopback engine bind.
 
 ### Low ports (DNS / DHCP)
 
@@ -162,11 +159,10 @@ If you set an AUTO override, keep it aligned with the intended network.
 - `CONTAIND_PUBLISH_HTTP_PORT`: host port for HTTP UI/API → container `8080`.
 - `CONTAIND_PUBLISH_HTTPS_PORT`: host port for HTTPS UI/API → container `8443`.
 - `CONTAIND_PUBLISH_SSH_PORT`: host port for SSH → container `2222`.
-- Engine port `8081` is not published by default. See the trust boundary and
-  loopback-only diagnostic mapping above; setting a port variable alone does not
-  enable the commented-out mapping in the starter.
+- Engine port `8081` is never published. See the trust boundary and in-container
+  diagnostics above.
 
-Smoke harness: `deploy/docker-compose.smoke.yml` publishes the engine API on host `18081` to avoid collisions and drives the mgmt API on `18080`.
+Smoke harness: `deploy/docker-compose.smoke.yml` drives the mgmt API on host `18080` to avoid collisions; the smoke scripts call the engine API inside the container with `docker compose exec`.
 
 ### Persistent data paths (inside container)
 
