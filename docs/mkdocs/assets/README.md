@@ -1,1 +1,1 @@
-Place documentation images/diagrams here and reference them from Markdown as `assets/<file>`.
+Place documentation images and diagrams here. Markdown files at `docs/mkdocs/` root reference them as `assets/<file>`.

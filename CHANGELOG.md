@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Condensed the project overview and centralized contributor setup and verification;
+  documented SSH authentication limits, the engine API trust boundary and the published advisory.
+- Reorganized documentation navigation and standardized changelog categories and version links.
+
+### Removed
+
+- Removed the redundant documentation-directory landing page and the unsupported SIGHUP reload claim.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security

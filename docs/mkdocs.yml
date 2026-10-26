@@ -7,7 +7,6 @@ site_dir: ../site
 
 # Source-directory notes are for contributors, not rendered site pages.
 exclude_docs: |
-  /README.md
   /assets/README.md
 
 theme:
@@ -54,7 +53,6 @@ nav:
       - Deploy with Docker Compose: docker-compose.md
       - Customizing Lab Compose: lab-compose.md
       - Windows / WSL Notes: windows-wsl.md
-      - Host Deploy Notes: deploy-host.md
   - Operations:
       - CLI: cli.md
       - Services: services.md
@@ -63,10 +61,6 @@ nav:
       - Overview: architecture.md
       - Dataplane: dataplane.md
       - Enforcement: dataplane-enforcement.md
-      - eBPF: ebpf.md
-      - Testing and Coverage: testing.md
-      - Performance Baseline: performance.md
-      - Code Boundaries: code-boundaries.md
   - Policy:
       - Policy Model: policy-model.md
       - ICS DPI: ics-dpi.md
@@ -83,3 +77,7 @@ nav:
   - Supply Chain:
       - SBOM: sbom.md
       - Third-Party Licenses: SPDX.md
+  - Contributors:
+      - Testing and Coverage: testing.md
+      - Performance Baseline: performance.md
+      - Code Boundaries: code-boundaries.md

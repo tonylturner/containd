@@ -16,9 +16,8 @@ Welcome to the containd documentation. This content is rendered in-app (Help ico
 - **Security posture**: [Secure by Design](secure-by-design.md) explains how containd aligns with CISA Secure by Design goals, [Advisories and CSAF](advisories.md) documents the disclosure process, and [Logging and Evidence](logging-evidence.md) plus [Update Policy](update-policy.md) describe operational expectations.
 - **Supply chain**: [SBOM](sbom.md) -- software bill of materials, image signing, vulnerability scanning.
 - **Licensing**: [Third-Party Licenses](SPDX.md) -- component-level SPDX license tracking.
-- **Config reload**: The containd process accepts `SIGHUP` for configuration reload (partial -- not all subsystems reload yet).
+- **Apply configuration**: Review and commit the candidate configuration; see the [configuration lifecycle](config-format.md).
 
-## Documentation notes
+## Release history
 
-- Images and diagrams should go under `docs/mkdocs/assets/` and be referenced as `assets/<file>`.
 - See [CHANGELOG.md](https://github.com/tonylturner/containd/blob/main/CHANGELOG.md) for release history.
