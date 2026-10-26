@@ -113,6 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `show syslog status` shows audit record forwarding: totals, backlog and, per
+  forwarder, cursor, backlog, last send and last error.
 - Syslog forwarders also send audit records, oldest first, as JSON
   (`"kind":"audit"`) or RFC 5424 (MSGID `audit`). Each forwarder keeps a
   cursor in the audit database, so records written during a collector outage
@@ -250,6 +252,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Management INPUT admits the listeners management serves: HTTPS on its
+  default port when its settings are unset, the addresses set by
+  `CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR` and `CONTAIND_SSH_ADDR`,
+  and, until a restart binds a committed listener change, the listeners still
+  bound. Management recovery admits the bound listeners instead of always
+  adding the appliance defaults.
+- Zones whose names differ only in case, spaces, hyphens or underscores get
+  separate nftables interface sets; before, their sets merged, so local input
+  and NAT rules for one also matched the others' interfaces. Zone sets are
+  named `zone_<hex-encoded name>`; a zone with interfaces can have a name of at
+  most 125 bytes.
+- The rule impact preview no longer warns that a zone has no interfaces when
+  the running configuration assigns some.
+- After enforcement is turned off, the ruleset status reports no installed
+  ruleset instead of the deleted one.
+- The engine ends the inspection streams of a connection it forgets when a
+  handshake contradicts the connection's recorded direction, so failed and
+  fail-closed streams no longer stay in memory until the next reconfiguration.
+- The syslog forwarder no longer reads its format without a lock while a
+  configuration is applied.
+- `show syslog status` and `show services status` print the forwarders'
+  protocols.
 - A firewall rule naming a zone with no interfaces no longer makes nftables
   reject the whole ruleset; the rule matches nothing and the ruleset warnings
   name it (`zone`, with `zones`).
