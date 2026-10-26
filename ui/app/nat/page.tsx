@@ -15,26 +15,22 @@ import {
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
+import { SkeletonList } from "../../components/Skeleton";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
 import { validateIPv4, validatePort } from "../../lib/validate";
+import { zoneLabel, zoneName } from "../../lib/zones";
 
-/* ── helpers ───────────────────────────────────────────────────── */
-
-function zoneLabel(zone: Zone): string {
-  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
-}
-
-function zoneName(zones: Zone[], name: string): string {
-  const match = zones.find((z) => z.name === name);
-  return match ? zoneLabel(match) : name;
-}
+const UNAVAILABLE = "NAT settings unavailable — the server did not return the NAT configuration and zones.";
 
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
+  // Until the first answer the settings are unknown, not disabled or empty.
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -69,8 +65,16 @@ export default function NATPage() {
 
   async function refresh() {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
-    setZones(z ?? []);
-    setNat(n ?? { enabled: false });
+    // Saving from stand-in settings would overwrite the real ones, so an
+    // unavailable answer hides the cards until the next success.
+    if (z && n) {
+      setLoadError(null);
+      setZones(z);
+      setNat(n);
+    } else {
+      setLoadError(UNAVAILABLE);
+    }
+    setLoading(false);
   }
 
   useConfigRefresh(refresh);
@@ -96,7 +100,7 @@ export default function NATPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      <TipsBanner tips={tips} className="mb-4" />
+      {!loading && !loadError && <TipsBanner tips={tips} className="mb-4" />}
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -108,6 +112,11 @@ export default function NATPage() {
         </div>
       )}
 
+      {loadError ? (
+        <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {loadError}
+        </div>
+      ) : loading ? <SkeletonList rows={4} /> : <>
       <NATCard
         zones={zones}
         nat={nat}
@@ -149,6 +158,7 @@ export default function NATPage() {
           refresh();
         }}
       />
+      </>}
     </Shell>
   );
 }
@@ -331,7 +341,7 @@ function PortForwardsCard({
   onSave: (cfg: NATConfig) => void;
 }) {
   const [items, setItems] = useState<PortForward[]>(nat.portForwards ?? []);
-  const [newIngress, setNewIngress] = useState("wan");
+  const [ingressChoice, setIngressChoice] = useState("");
   const [newProto, setNewProto] = useState<"tcp" | "udp">("tcp");
   const [newListen, setNewListen] = useState("");
   const [newDestIp, setNewDestIp] = useState("");
@@ -350,11 +360,20 @@ function PortForwardsCard({
     .filter((z) => z.value);
   zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
+  // The chosen ingress zone while it exists; otherwise the zone named "wan"
+  // if there is one, else none, and Add asks for a choice.
+  const hasZone = (name: string) => zoneOptions.some((z) => z.value === name);
+  const newIngress = hasZone(ingressChoice) ? ingressChoice : hasZone("wan") ? "wan" : "";
+
   const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
 
   // One banner serves the whole row, so each message names its field.
   async function add() {
     setError(null);
+    if (!newIngress) {
+      setError("Ingress zone is required.");
+      return;
+    }
     if (!newListen.trim()) {
       setError("Listen port is required.");
       return;
@@ -384,7 +403,7 @@ function PortForwardsCard({
     const pf: PortForward = {
       id,
       enabled: true,
-      ingressZone: newIngress.trim(),
+      ingressZone: newIngress,
       proto: newProto,
       listenPort: lp,
       destIp: newDestIp.trim(),
@@ -465,10 +484,16 @@ function PortForwardsCard({
         {isAdmin() && (
           <div className="grid gap-2 md:grid-cols-6">
             <select
+              aria-label="Ingress zone"
               value={newIngress}
-              onChange={(e) => setNewIngress(e.target.value)}
+              onChange={(e) => setIngressChoice(e.target.value)}
               className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             >
+              {!newIngress && (
+                <option value="" disabled>
+                  ingress: choose a zone
+                </option>
+              )}
               {zoneOptions.map((z) => (
                 <option key={z.value} value={z.value}>
                   ingress:{z.label}

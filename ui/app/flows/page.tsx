@@ -25,7 +25,10 @@ function FlowsInner() {
   const [error, setError] = useState<string | null>(null);
   const [showAVOnly, setShowAVOnly] = useState(false);
   const searchParams = useSearchParams();
+  // Until the first answer the list is unknown, not empty; polls keep the
+  // current rows while they run.
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   const PAGE_SIZE = 100;
   const [showAll, setShowAll] = useState(false);
@@ -57,7 +60,7 @@ function FlowsInner() {
   // A failed load clears the error only on the next success, so the earlier
   // list stays hidden instead of reappearing while a retry is in flight.
   const load = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
+    setBusy(true);
     try {
       const list = await api.listFlows(200, signal);
       if (list) {
@@ -69,6 +72,8 @@ function FlowsInner() {
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError(UNAVAILABLE);
+    } finally {
+      setBusy(false);
     }
     setLoading(false);
   }, []);
@@ -116,11 +121,11 @@ function FlowsInner() {
       {error && (
         <div role="status" className="mb-4 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
           <p>{error}</p>
-          <button onClick={() => load()} disabled={loading} className="mt-2 rounded-xs border px-3 py-1 disabled:opacity-50">Retry</button>
+          <button onClick={() => load()} disabled={busy} className="mt-2 rounded-xs border px-3 py-1 disabled:opacity-50">Retry</button>
         </div>
       )}
 
-      {!error && <>
+      {!error && (loading ? <SkeletonList rows={4} /> : <>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
         <div className="w-full text-(--text-muted)">
           Live flow summaries show active conversations, AV flags and the labels of the TAG rules that matched them. Use Events for raw telemetry and Alerts for IDS investigations.
@@ -145,7 +150,7 @@ function FlowsInner() {
         </a>
       </div>
 
-      {!loading && flows.length === 0 ? (
+      {flows.length === 0 ? (
         <EmptyState
           title="No flows yet"
           description="Enable DPI capture or learning mode to generate flow records."
@@ -165,15 +170,7 @@ function FlowsInner() {
               </tr>
             </thead>
             <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-6">
-                    <SkeletonList rows={4} />
-                  </td>
-                </tr>
-              )}
-              {!loading && visibleFlows
-                .map((f) => (
+              {visibleFlows.map((f) => (
                 <tr
                   key={f.session_id ?? f.flowId}
                   className={`table-row-hover transition-ui border-t ${
@@ -227,7 +224,7 @@ function FlowsInner() {
               ))}
             </tbody>
           </table>
-          {!loading && filteredFlows.length > 0 && (
+          {filteredFlows.length > 0 && (
             <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-(--text-muted)">
               <span>Showing {visibleFlows.length} of {filteredFlows.length} flows</span>
               {hasMore && (
@@ -250,7 +247,7 @@ function FlowsInner() {
           )}
         </div>
       )}
-      </>}
+      </>)}
     </Shell>
   );
 }

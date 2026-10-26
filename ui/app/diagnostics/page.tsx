@@ -6,6 +6,7 @@ import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } fro
 import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
 import { formatEndpoint } from "../../lib/endpoint";
+import { isIPv4, validatePort } from "../../lib/validate";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
@@ -103,25 +104,10 @@ async function runCLI(line: string): Promise<CmdResult> {
 
 function firstIPv4(addrs: string[] | undefined | null): string | null {
   for (const a of addrs ?? []) {
-    const s = a.trim();
-    if (!s) continue;
-    const ip = s.split("/")[0]?.trim();
-    if (!ip) continue;
-    if (ip.split(".").length === 4) return ip;
+    const ip = a.split("/")[0].trim();
+    if (isIPv4(ip)) return ip;
   }
   return null;
-}
-
-function isIPv4(input: string): boolean {
-  const s = input.trim();
-  if (!s) return false;
-  const parts = s.split(".");
-  if (parts.length !== 4) return false;
-  return parts.every((p) => {
-    if (!p.match(/^[0-9]+$/)) return false;
-    const n = Number(p);
-    return Number.isInteger(n) && n >= 0 && n <= 255;
-  });
 }
 
 export default function DiagnosticsPage() {
@@ -653,7 +639,7 @@ export default function DiagnosticsPage() {
                   disabled={blockDisabled}
                   onClick={() => {
                     if (!blockHostIP.trim()) return;
-                    if (!isIPv4(blockHostIP)) {
+                    if (!isIPv4(blockHostIP.trim())) {
                       setBlockErr("Enter a valid IPv4 address for host block.");
                       setBlockMsg(null);
                       return;
@@ -733,13 +719,12 @@ export default function DiagnosticsPage() {
                   disabled={blockDisabled}
                   onClick={() => {
                     if (!blockFlowSrc.trim() || !blockFlowDst.trim() || !blockFlowPort.trim()) return;
-                    if (!isIPv4(blockFlowSrc) || !isIPv4(blockFlowDst)) {
+                    if (!isIPv4(blockFlowSrc.trim()) || !isIPv4(blockFlowDst.trim())) {
                       setBlockErr("Enter valid IPv4 addresses for flow block.");
                       setBlockMsg(null);
                       return;
                     }
-                    const portNum = Number(blockFlowPort.trim());
-                    if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+                    if (validatePort(blockFlowPort)) {
                       setBlockErr("Enter a valid destination port (1-65535).");
                       setBlockMsg(null);
                       return;

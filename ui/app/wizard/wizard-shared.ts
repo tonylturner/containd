@@ -1,4 +1,3 @@
-import type { Zone } from "../../lib/api";
 import { validateIPv4, validatePort } from "../../lib/validate";
 
 export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
@@ -11,10 +10,6 @@ export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   mms: { label: "IEC 61850 MMS", port: 102 },
   iec104: { label: "IEC 60870-5-104", port: 2404 },
 };
-
-export function zoneLabel(zone: Zone): string {
-  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
-}
 
 /**
  * Why the publish-service server address cannot be staged, or null when it
