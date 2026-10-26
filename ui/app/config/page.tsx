@@ -1,9 +1,12 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
+import type { ConfigDiff } from "../../lib/api-config";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
@@ -44,8 +47,9 @@ function ConfigPage() {
   const searchParams = useSearchParams();
   const initialTab = parseTab(searchParams.get("tab"));
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [running, setRunning] = useState<ConfigBundle | null>(null);
-  const [candidate, setCandidate] = useState<ConfigBundle | null>(null);
+  const [configDiff, setConfigDiff] = useState<ConfigDiff | null>();
+  const running = configDiff?.running ?? null;
+  const candidate = configDiff?.candidate ?? null;
   const [candidateText, setCandidateText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState("60");
@@ -61,14 +65,15 @@ function ConfigPage() {
 
   async function refresh() {
     const d = await api.diffConfig();
-    setRunning(d?.running ?? null);
-    setCandidate(d?.candidate ?? null);
+    setConfigDiff(d);
     setCandidateText(
       JSON.stringify(d?.candidate ?? d?.running ?? {}, null, 2),
     );
     if (d?.running) setRunningLoadedAt(new Date());
     if (d?.candidate) setCandidateLoadedAt(new Date());
   }
+
+  useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -90,7 +95,7 @@ function ConfigPage() {
         return;
       }
       setCandidateLoadedAt(new Date());
-      setStatus(statusWithWarning("Candidate saved.", res.warning));
+      setStatus(statusWithWarning("Candidate staged — commit to apply.", res.warning));
       refresh();
     } catch (e) {
       setStatus("Invalid JSON.");
@@ -107,7 +112,7 @@ function ConfigPage() {
     }
     setCandidateText(JSON.stringify(running, null, 2));
     setCandidateLoadedAt(new Date());
-    setStatus(statusWithWarning("Candidate replaced with running.", res.warning));
+    setStatus(statusWithWarning("Candidate replaced with running and staged — commit to apply.", res.warning));
     refresh();
   }
 
@@ -126,7 +131,6 @@ function ConfigPage() {
         const result = await api.commit();
         if (result.ok) {
           setStatus(statusWithWarning("Committed.", result.warning));
-          window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Commit failed: ${result.error}`);
         }
@@ -174,7 +178,6 @@ function ConfigPage() {
         const result = await api.rollback();
         if (result.ok) {
           setStatus(statusWithWarning("Rolled back.", result.warning));
-          window.dispatchEvent(new CustomEvent("containd:config:committed"));
         } else {
           setStatus(`Rollback failed: ${result.error}`);
         }
@@ -212,7 +215,7 @@ function ConfigPage() {
       const text = await uploadFile.text();
       const parsed = JSON.parse(text) as ConfigBundle;
       const res = await api.importConfig(parsed);
-      setStatus(res.ok ? statusWithWarning("Config restored.", res.warning) : `Restore failed: ${res.error}`);
+      setStatus(res.ok ? statusWithWarning("Config import staged — commit to apply.", res.warning) : `Restore failed: ${res.error}`);
       refresh();
     } catch {
       setStatus("Invalid JSON file.");
@@ -281,8 +284,8 @@ function ConfigPage() {
     [running],
   );
   const diffBlocks = useMemo(
-    () => buildDiffBlocks(running, candidate),
-    [running, candidate],
+    () => buildDiffBlocks(configDiff),
+    [configDiff],
   );
 
   const viewerConfig = viewerSource === "running" ? running : candidate;
@@ -310,7 +313,7 @@ function ConfigPage() {
   const ifaceCount = running?.interfaces?.length ?? 0;
   const ruleCount = running?.firewall?.rules?.length ?? 0;
   const assetCount = running?.assets?.length ?? 0;
-  const idsRuleCount = (running as any)?.ids?.rules?.length ?? 0;
+  const idsRuleCount = configDiff?.idsBank.running.count ?? 0;
   const objectCount = running?.objects?.length ?? 0;
   const dpiMode = (running as any)?.dataplane?.dpiMode ?? "off";
   const tips: Tip[] = [
@@ -323,7 +326,7 @@ function ConfigPage() {
     {
       id: "config:restore",
       title: "Restore carefully",
-      body: "Restore replaces the live config; use commit-confirmed if you need a safe rollback window.",
+      body: "Restore replaces the candidate config; use commit-confirmed if you need a safe rollback window.",
       when: () => canEdit,
     },
     {
@@ -383,7 +386,7 @@ function ConfigPage() {
           className={`mb-4 rounded-sm px-4 py-3 text-sm ${
             status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
               ? "border border-red-500/30 bg-red-500/10 text-red-400"
-              : status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
+              : status.includes("staged") || status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                 : "border border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
           }`}
@@ -449,7 +452,7 @@ function ConfigPage() {
                   return;
                 }
                 const res = await api.restoreIDSRules(rules);
-                setStatus(res.ok ? `Restored ${res.data.count} IDS rules.` : `Restore failed: ${res.error}`);
+                setStatus(res.ok ? `IDS restore staged (${res.data.count} rules) — commit to apply.` : `Restore failed: ${res.error}`);
                 refresh();
               } catch {
                 setStatus("Invalid JSON file.");
@@ -468,6 +471,7 @@ function ConfigPage() {
             selectedItem={selectedItem}
             blockValue={blockValue}
             viewerConfig={viewerConfig}
+            idsBankCount={configDiff?.idsBank[viewerSource].count ?? null}
             setSelectedRef={(node) => {
               selectedRef.current = node;
             }}
@@ -502,7 +506,7 @@ function ConfigPage() {
                   onClick={copyRunningToCandidate}
                   className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
                 >
-                  Copy live → staged
+                  Copy running → staged
                 </button>
                 <button
                   onClick={saveCandidate}
@@ -517,6 +521,7 @@ function ConfigPage() {
             Changes here are saved but not active until you review and commit them.
           </div>
           <textarea
+            aria-label="Staged config JSON"
             value={candidateText}
             onChange={(e) => setCandidateText(e.target.value)}
             readOnly={!canEdit}
@@ -529,11 +534,11 @@ function ConfigPage() {
       {tab === "running" && (
         <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
           <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <div>Live config</div>
+            <div>Running config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
           </div>
           <div className="mb-3 text-xs text-[var(--text-muted)]">
-            This is the config currently applied on the appliance.
+            This is the last committed config, not proof of live enforcement.
           </div>
           <pre>{runningText}</pre>
         </div>
@@ -543,21 +548,31 @@ function ConfigPage() {
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
             <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
-              Staged config looks older than live config. Copy live → staged first if you want to review your latest active state.
+              Staged config looks older than running config. Copy running → staged first if you want to review your latest committed state.
             </div>
           )}
-          {!candidate ? (
+          {configDiff === undefined ? (
+            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
+              Loading configuration changes…
+            </div>
+          ) : configDiff === null ? (
+            <div role="alert" className="rounded-sm border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 shadow-card">
+              Unable to load configuration changes. Use Refresh to try again.
+            </div>
+          ) : !candidate ? (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
               No staged config to compare. Save staged changes to review them here.
             </div>
-          ) : diffBlocks.length === 0 ? (
+          ) : !configDiff.changed ? (
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
-              No differences between live and staged config.
+              No differences between running and staged config.
             </div>
           ) : (
             diffBlocks.map((block) => (
               <div
                 key={block.key}
+                role="region"
+                aria-label={`${block.label} changes`}
                 className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card"
               >
                 <div className="mb-3 flex items-center justify-between">
@@ -565,28 +580,48 @@ function ConfigPage() {
                     <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">Changed block</div>
                     <div className="text-sm font-semibold text-[var(--text)]">{block.label}</div>
                   </div>
-                  <div className="text-xs text-[var(--text-muted)]">
-                    {block.diff.filter((l) => l.type === "add").length} added ·{" "}
-                    {block.diff.filter((l) => l.type === "del").length} removed
-                  </div>
-                </div>
-                <div className="grid gap-1 rounded-sm border border-amber-500/[0.15] bg-black/60 p-3 text-xs text-[var(--text)]">
-                  {block.diff.map((line, idx) => (
-                    <div
-                      key={`${block.key}-${idx}`}
-                      className={
-                        line.type === "add"
-                          ? "rounded bg-mint/20 px-2 py-0.5 text-mint"
-                          : "rounded bg-rose-500/20 px-2 py-0.5 text-rose-200"
-                      }
-                    >
-                      <span className="mr-2 inline-block w-3 text-center">
-                        {line.type === "add" ? "+" : "-"}
-                      </span>
-                      <span className="font-mono">{line.line}</span>
+                  {block.diff.length > 0 && (
+                    <div className="text-xs text-[var(--text-muted)]">
+                      {block.diff.filter((l) => l.type === "add").length} added ·{" "}
+                      {block.diff.filter((l) => l.type === "del").length} removed
                     </div>
-                  ))}
+                  )}
                 </div>
+                {block.hiddenChanges && (
+                  <p className="text-sm text-[var(--text)]">Secret values changed (hidden).</p>
+                )}
+                {block.idsBank && (
+                  <div className="mb-3 grid gap-1 text-xs text-[var(--text)]">
+                    <div className="font-semibold">IDS rule bank</div>
+                    <div>
+                      Running: {block.idsBank.running.count.toLocaleString()} rules · SHA-256{" "}
+                      <span className="font-mono">{block.idsBank.running.sha256.slice(0, 12)}</span>
+                    </div>
+                    <div>
+                      Staged: {block.idsBank.candidate.count.toLocaleString()} rules · SHA-256{" "}
+                      <span className="font-mono">{block.idsBank.candidate.sha256.slice(0, 12)}</span>
+                    </div>
+                  </div>
+                )}
+                {block.diff.length > 0 && (
+                  <div className="grid gap-1 rounded-sm border border-amber-500/[0.15] bg-black/60 p-3 text-xs text-[var(--text)]">
+                    {block.diff.map((line, idx) => (
+                      <div
+                        key={`${block.key}-${idx}`}
+                        className={
+                          line.type === "add"
+                            ? "rounded bg-mint/20 px-2 py-0.5 text-mint"
+                            : "rounded bg-rose-500/20 px-2 py-0.5 text-rose-200"
+                        }
+                      >
+                        <span className="mr-2 inline-block w-3 text-center">
+                          {line.type === "add" ? "+" : "-"}
+                        </span>
+                        <span className="break-all font-mono whitespace-pre-wrap">{line.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}

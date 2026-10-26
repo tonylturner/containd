@@ -34,11 +34,11 @@ func TestManagerStartValidatesInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
-	firstErr := m.Start(context.Background(), func(Packet) {})
+	firstErr := m.Start(context.Background(), func(Packet) Decision { return Decision{} })
 	if firstErr == nil || !strings.Contains(firstErr.Error(), "interface doesnotexist not found") {
 		t.Fatalf("first Start error = %v, want missing-interface error", firstErr)
 	}
-	secondErr := m.Start(context.Background(), func(Packet) {})
+	secondErr := m.Start(context.Background(), func(Packet) Decision { return Decision{} })
 	if secondErr == nil || secondErr.Error() != firstErr.Error() || strings.Contains(secondErr.Error(), "stopped") {
 		t.Fatalf("second Start error = %v, want same missing-interface error as first: %v", secondErr, firstErr)
 	}
@@ -52,7 +52,7 @@ func TestManagerStopBeforeStartIsIdempotent(t *testing.T) {
 	}
 	m.Stop()
 	m.Stop()
-	if err := m.Start(context.Background(), func(Packet) {}); err == nil || !strings.Contains(err.Error(), "stopped") {
+	if err := m.Start(context.Background(), func(Packet) Decision { return Decision{} }); err == nil || !strings.Contains(err.Error(), "stopped") {
 		t.Fatalf("Start after Stop error = %v, want stopped manager error", err)
 	}
 }

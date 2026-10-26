@@ -5,7 +5,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -23,9 +23,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
-	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 const dpiEnforceBlockTTL = 10 * time.Minute
@@ -36,41 +36,47 @@ type captureRunner interface {
 	Start(context.Context, capture.Handler) error
 	Stop()
 	Interfaces() []string
+	Settler() capture.Settler
 }
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
-	capture         captureRunner
-	runCapture      captureRunner
-	runCancel       context.CancelFunc
-	runDone         chan struct{}
-	ruleSnap        atomic.Pointer[rules.Snapshot]
-	started         atomic.Bool
-	compiler        *enforce.Compiler
-	applier         enforce.Applier
-	updater         enforce.Updater
-	dpiMgr          *dpi.Manager
-	eventStore      *events.Store
-	rulesetStatus   atomic.Pointer[RulesetStatus]
-	avSink          AVSink
-	inspectAll      bool
-	dpiEnabled      bool           // master DPI on/off
-	dpiMode         string         // "learn" or "enforce"
-	dpiExclusions   []DPIExclusion // IPs/domains excluded from DPI
-	nflogGroup      uint16         // 0 disables nflog consumer + log clauses
-	nflogStop       func()         // stops the running nflog consumer; nil before Start or after disable
-	onError         func(error)
-	nfqueueGroup    uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
-	lifecycleMu     sync.Mutex // serializes Start and Reconfigure
-	flowMu          sync.Mutex
-	flows           map[string]*flow.State
-	lastSweep       time.Time
-	verdictCache    *VerdictCache
-	inventory       *inventory.Inventory
-	anomalyDetector *anomaly.Detector
-	learner         *learn.Learner
-	sigEngine       *signatures.Engine
-	stats           *stats.Tracker
+	managementReservation *mgmtpath.Reservation
+	capture               captureRunner
+	runCapture            captureRunner
+	runCancel             context.CancelFunc
+	runDone               chan struct{}
+	ruleSnap              ruleSnapshots
+	started               atomic.Bool
+	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
+	compiler              *enforce.Compiler
+	applier               enforce.Applier
+	updater               enforce.Updater
+	dpiMgr                *dpi.Manager
+	eventStore            *events.Store
+	rulesetStatus         atomic.Pointer[RulesetStatus]
+	avSink                AVSink
+	inspectAll            bool
+	dpiEnabled            bool           // master DPI on/off
+	dpiMode               string         // "learn" or "enforce"
+	dpiExclusions         []DPIExclusion // IPs/domains excluded from DPI
+	nflogGroup            uint16         // 0 disables nflog consumer + log clauses
+	nflogStop             func()         // stops the running nflog consumer; nil before Start or after disable
+	onError               func(error)
+	nfqueueGroup          uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
+	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
+	flowMu                sync.Mutex
+	flows                 map[string]*flow.State
+	lastSweep             time.Time
+	verdictCache          *VerdictCache
+	inventory             *inventory.Inventory
+	anomalyDetector       *anomaly.Detector
+	learner               *learn.Learner
+	sigEngine             *signatures.Engine
+	stats                 *stats.Tracker
+	hooks                 *inlineHooks
+	iec                   *iecTable
+	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -81,14 +87,18 @@ type RulesetStatus struct {
 }
 
 type EnforceConfig struct {
-	Enabled   bool
-	TableName string
-	Applier   enforce.Applier
-	Updater   enforce.Updater
+	ManagementReservation *mgmtpath.Reservation
+	Enabled               bool
+	TableName             string
+	Applier               enforce.Applier
+	Updater               enforce.Updater
 }
 
 type Config struct {
 	Capture capture.Config
+	// Events is shared by every configuration of a live engine. Nil allocates
+	// a private 4096-event store for a standalone engine.
+	Events *events.Store
 	// OnError is the fallback for capture errors and also receives non-fatal NFLOG registration errors.
 	OnError         func(error)
 	Enforce         EnforceConfig
@@ -113,6 +123,10 @@ type Config struct {
 	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
 	// for full rationale.
 	NFQueueGroup uint16
+
+	// ResetInjector sends the IEC104 abort resets. Nil opens the platform
+	// injector when NFQueueGroup is set.
+	ResetInjector session.Injector
 }
 
 // DPIExclusion represents an IP, CIDR, or domain excluded from DPI.
@@ -122,6 +136,9 @@ type DPIExclusion struct {
 }
 
 func New(cfg Config) (*Engine, error) {
+	if cfg.Enforce.ManagementReservation != nil && !cfg.Enforce.Enabled {
+		return nil, fmt.Errorf("dataplane.enforcement=false conflicts with reserved management path")
+	}
 	if cfg.Capture.OnError == nil {
 		cfg.Capture.OnError = cfg.OnError
 	}
@@ -135,21 +152,26 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.Mode = "nfqueue"
 		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
 	}
+	hooks := newInlineHooks(cfg.OnError)
+	cfg.Capture.OnVerdict = hooks.onVerdict
+	cfg.Capture.OnSource = hooks.onSource
 	capManager, err := capture.NewManager(cfg.Capture)
 	if err != nil {
 		return nil, err
 	}
 	e := &Engine{
-		capture:       capManager,
-		onError:       cfg.OnError,
-		inspectAll:    cfg.InspectAll,
-		dpiEnabled:    cfg.DPIEnabled,
-		dpiMode:       cfg.DPIMode,
-		dpiExclusions: cfg.DPIExclusions,
-		nflogGroup:    cfg.NFLogGroup,
-		nfqueueGroup:  cfg.NFQueueGroup,
-		flows:         make(map[string]*flow.State),
-		verdictCache:  NewVerdictCache(30*time.Second, 65536),
+		managementReservation: cfg.Enforce.ManagementReservation,
+		capture:               capManager,
+		onError:               cfg.OnError,
+		inspectAll:            cfg.InspectAll,
+		dpiEnabled:            cfg.DPIEnabled,
+		dpiMode:               cfg.DPIMode,
+		dpiExclusions:         cfg.DPIExclusions,
+		nflogGroup:            cfg.NFLogGroup,
+		nfqueueGroup:          cfg.NFQueueGroup,
+		flows:                 make(map[string]*flow.State),
+		verdictCache:          NewVerdictCache(30*time.Second, 65536),
+		hooks:                 hooks,
 	}
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
@@ -157,10 +179,17 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
-	e.eventStore = events.NewStore(4096)
+	e.eventStore = cfg.Events
+	if e.eventStore == nil {
+		e.eventStore = events.NewStore(4096)
+	}
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.initIEC(cfg, capManager)
+	e.gate = &envelopeGate{}
+	e.bindGate()
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompiler()
+		comp.ManagementReservation = e.managementReservation
 		if cfg.Enforce.TableName != "" {
 			comp.TableName = cfg.Enforce.TableName
 		}
@@ -191,6 +220,8 @@ func New(cfg Config) (*Engine, error) {
 
 // Reconfigure replaces the engine's internal state from a freshly created
 // engine without copying atomic or mutex fields (which are not safe to copy).
+// fresh must be constructed with Config.Events set to e.Events(): IEC104
+// callbacks bind to that store at construction, and the store is never swapped.
 //
 // Reconfigure returns only after the previous data-plane run has stopped,
 // including its capture consumers and nflog socket, so the following Start
@@ -209,11 +240,19 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.nflogStop = nil
 	e.flowMu.Unlock()
 	prevRunDone := e.runDone
-	if prevCancel != nil {
-		prevCancel()
-	}
+	prevIEC := e.iec
 	if prevCapture != nil {
 		prevCapture.Stop()
+	}
+	// Closing an inline queue invokes OnSourceDown, which schedules IEC
+	// session resets on the old worker. Keep it alive until those callbacks
+	// and their reset jobs have completed; otherwise cancellation can discard
+	// the resets while Reconfigure replaces the session table.
+	if prevIEC != nil && prevIEC.jobs != nil && prevRunDone != nil {
+		prevIEC.jobs.flush(prevRunDone)
+	}
+	if prevCancel != nil {
+		prevCancel()
 	}
 	if prevNflogStop != nil {
 		prevNflogStop()
@@ -228,10 +267,12 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flowMu.Lock()
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
+	if e.compiler != nil {
+		e.compiler.ManagementReservation = e.managementReservation
+	}
 	e.applier = fresh.applier
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
-	e.eventStore = fresh.eventStore
 	e.inventory = fresh.inventory
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
@@ -247,27 +288,58 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.flows = fresh.flows
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
+	e.hooks = fresh.hooks
+	e.iec = fresh.iec
 	e.flowMu.Unlock()
+	e.epoch.Add(1)
 	e.started.Store(false)
+	// The old queue is closed and the new one is not bound yet: the
+	// envelope drops until the new run binds (contracts K8).
+	e.bindGate()
+	e.gate.own(0)
+	// The fresh table enforces the loaded rules at once; sessions of the
+	// old run are unknown to it and are reset once (spec §8.3).
+	if snap := e.ruleSnap.Load(); snap != nil {
+		e.iec.setPolicy(snap)
+	}
+	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
+		_ = prevIEC.injector.Close()
+	}
 }
 
 func (e *Engine) Start(ctx context.Context) error {
+	_, err := e.start(ctx)
+	return err
+}
+
+// start is Start; it also returns the NFQUEUE group of the configuration
+// it started, read under the lifecycle lock.
+func (e *Engine) start(ctx context.Context) (uint16, error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	group := e.nfqueueGroup
 
 	if e.started.Swap(true) {
-		return nil
+		return group, nil
 	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
 	e.runCapture = runCapture
-	if err := runCapture.Start(runCtx, e.handlePacket); err != nil {
+	if err := runCapture.Start(runCtx, e.HandlePacket); err != nil {
+		if e.nfqueueGroup != 0 {
+			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
+			e.gate.own(0)
+		}
 		runCancel()
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
-		return err
+		return group, err
+	}
+	if group != 0 {
+		// Start returned nil: the queue is bound and registered.
+		e.gate.own(group)
 	}
 	// Start the nflog consumer if configured. This produces
 	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
@@ -303,11 +375,21 @@ func (e *Engine) Start(ctx context.Context) error {
 			e.flowMu.Unlock()
 		}
 	}
-	// Periodically update the active goroutine gauge.
 	runDone := make(chan struct{})
 	e.runDone = runDone
+	var run sync.WaitGroup
+	run.Add(3)
 	go func() {
-		defer close(runDone)
+		defer run.Done()
+		e.hooks.blocks.run(runCtx)
+	}()
+	go func() {
+		defer run.Done()
+		e.iec.run(runCtx.Done())
+	}()
+	// Periodically update the active goroutine gauge.
+	go func() {
+		defer run.Done()
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -319,32 +401,33 @@ func (e *Engine) Start(ctx context.Context) error {
 			}
 		}
 	}()
-	return nil
+	go func() {
+		run.Wait()
+		close(runDone)
+	}()
+	return group, nil
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 }
 
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
+		return err
+	}
 	var compiled string
 	var applyErr error
 
 	if e.compiler != nil {
 		start := time.Now()
-		compiled, applyErr = e.compiler.CompileFirewall(&snap)
+		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
 		if applyErr != nil {
-			e.setRulesetStatus(compiled, applyErr)
-			return applyErr
-		}
-		if e.applier == nil {
-			applyErr = errors.New("no applier configured")
-			e.setRulesetStatus(compiled, applyErr)
-			return applyErr
-		}
-		if applyErr = e.applier.Apply(ctx, compiled); applyErr != nil {
 			e.setRulesetStatus(compiled, applyErr)
 			return applyErr
 		}
@@ -352,6 +435,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	}
 
 	e.ruleSnap.Store(&snap)
+	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
 	e.setRulesetStatus(compiled, nil)
 	return nil
@@ -447,67 +531,36 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 		return port == 47808
 	case "opcua":
 		return port == 4840
+	case "iec104":
+		return port == iec104Port
 	default:
 		return false
 	}
 }
 
-func (e *Engine) handlePacket(pkt capture.Packet) {
+// handlePacket runs flow tracking, DPI and enforcement for one captured
+// packet and decides it.
+func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	if e == nil {
-		return
+		return acceptDecision
 	}
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	if pkt.Invalid != "" {
+		return invalidPacketDecision(pkt)
+	}
 	now := pkt.Timestamp
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 	state := e.trackFlow(pkt, now)
 	if state == nil {
-		return
+		return acceptDecision
 	}
-
-	parsed := dpi.ParsedPacket{
-		Payload:   pkt.Payload,
-		Proto:     pkt.Transport,
-		SrcPort:   pkt.SrcPort,
-		DstPort:   pkt.DstPort,
-		TCPSeq:    pkt.TCPSeq,
-		HasTCPSeq: pkt.HasTCPSeq,
-		TCPSyn:    pkt.TCPFlags&capture.TCPFlagSYN != 0,
+	if d, ok := e.handleIECPacket(pkt, state); ok {
+		return d
 	}
-
-	flowHash := state.Key.Hash()
-	shouldInspect := e.ShouldInspect(state, &parsed)
-	if cached, ok := e.verdictCache.Get(flowHash); ok {
-		// Permanent or temporary enforcement verdicts can short-circuit the flow.
-		if cached.Action != verdict.AllowContinue {
-			return
-		}
-		// For non-inspected flows we cache ALLOW to avoid re-checking every packet.
-		// Inspectable flows must continue through DPI so later payload-bearing
-		// packets are decoded; otherwise a SYN/ACK can suppress the whole flow.
-		if !shouldInspect {
-			return
-		}
-	}
-
-	if !shouldInspect {
-		// Cache an ALLOW verdict for non-inspected flows so we don't
-		// re-evaluate ShouldInspect on every packet.
-		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
-		return
-	}
-	events, err := e.dpiMgr.OnPacket(state, &parsed)
-	if err != nil {
-		return
-	}
-	e.RecordDPIEvents(state, &parsed, events)
-
-	if v, enforced := e.enforceDPIEvents(state, &parsed, events); enforced {
-		e.verdictCache.Put(flowHash, v)
-		return
-	}
+	return e.handleFlowPacket(pkt, state)
 }
 
 // trackFlow returns the state of the packet's connection direction. Each
@@ -534,8 +587,8 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 
 // connectionStateLocked finds or creates the direction state for pkt. A
 // SYN marks its sender as the opener and a SYN-ACK as the server; without
-// a handshake, a direction whose opposite was already seen is oriented
-// against it, and otherwise the first-seen direction is the opener. Must
+// a handshake, the opposite direction or a known ICS service port orients
+// it. Ambiguous or unknown ports retain first-seen orientation. Must
 // be called with e.flowMu held.
 func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.State {
 	key := flow.Key{
@@ -569,8 +622,14 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 		opposite := key.Reversed()
 		opposite.Dir = flow.DirForward
 		if _, ok := e.flows[opposite.Hash()]; ok {
-			// The other side was seen first and opened the connection.
 			key.Dir = flow.DirReverse
+		} else {
+			opposite.Dir = flow.DirReverse
+			if _, ok := e.flows[opposite.Hash()]; !ok {
+				if dir, known := icsServiceDirection(pkt); known {
+					key.Dir = dir
+				}
+			}
 		}
 	}
 	state := flow.NewState(key, now)
@@ -583,10 +642,10 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 // handshakeDirection reports the direction a TCP handshake segment
 // proves: a SYN comes from the opener, a SYN-ACK from the server.
 func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
-	if pkt.Proto != 6 || pkt.TCPFlags&capture.TCPFlagSYN == 0 {
+	if pkt.Proto != 6 || pkt.TCP.Flags&capture.TCPFlagSYN == 0 {
 		return flow.DirForward, false
 	}
-	if pkt.TCPFlags&capture.TCPFlagACK != 0 {
+	if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
 		return flow.DirReverse, true
 	}
 	return flow.DirForward, true
@@ -601,12 +660,22 @@ func (e *Engine) dropFlowLocked(key flow.Key) {
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
+	var expired []*flow.State
 	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
 			metrics.FlowsActive.Dec()
+			if st != nil {
+				expired = append(expired, st)
+			}
 		}
 	}
+	e.flowMu.Unlock()
+	for _, st := range expired {
+		e.endFlowStream(st, nil)
+	}
 }
+
+// ManagementReservation is trusted startup authority, never accepted in payloads.
+func (e *Engine) ManagementReservation() *mgmtpath.Reservation { return e.managementReservation }

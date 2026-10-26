@@ -4,6 +4,7 @@
 package stats
 
 import (
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -33,43 +34,44 @@ type FlowStats struct {
 	Bytes    int64  `json:"bytes"`
 }
 
-// Tracker records per-protocol and per-flow statistics from DPI events.
+// Tracker keeps packet/byte accounting separate from DPI event counters.
 type Tracker struct {
 	mu    sync.RWMutex
 	proto map[string]*ProtoStats
-	flows map[string]*FlowStats
+	flows map[hostPair]*FlowStats
+}
+
+// hostPair deliberately excludes transport ports: top talkers aggregate all
+// captured traffic by directional host pair and protocol, not by connection.
+// Binary addresses avoid formatting/allocating map keys on every packet.
+type hostPair struct {
+	src, dst netip.Addr
+	protocol string
 }
 
 // New creates a new statistics tracker.
 func New() *Tracker {
 	return &Tracker{
 		proto: make(map[string]*ProtoStats),
-		flows: make(map[string]*FlowStats),
+		flows: make(map[hostPair]*FlowStats),
 	}
 }
 
-// Record updates stats for the event's protocol and flow.
-func (t *Tracker) Record(ev dpi.Event, bytes int) {
+// RecordEvent updates only semantic counters. One decoder event may represent
+// one information object, not one transport packet. Event attributes never
+// supply transport counters or flow identities.
+func (t *Tracker) RecordEvent(ev dpi.Event) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	proto := ev.Proto
-	if proto == "" {
-		proto = "unknown"
-	}
-
-	ps, ok := t.proto[proto]
-	if !ok {
-		ps = &ProtoStats{Protocol: proto}
-		t.proto[proto] = ps
-	}
-	ps.PacketCount++
-	ps.ByteCount += int64(bytes)
+	ps := t.protocolLocked(ev.Proto)
 	ps.EventCount++
-	ps.LastSeen = ev.Timestamp
+	if ev.Timestamp.After(ps.LastSeen) {
+		ps.LastSeen = ev.Timestamp
+	}
 
 	kind := strings.ToLower(ev.Kind)
 	switch {
@@ -82,42 +84,49 @@ func (t *Tracker) Record(ev dpi.Event, bytes int) {
 	default:
 		ps.ReadCount++
 	}
-
-	// Update flow stats using src/dst from event attributes.
-	srcIP := attrStr(ev.Attributes, "src")
-	dstIP := attrStr(ev.Attributes, "dst")
-	if srcIP != "" && dstIP != "" {
-		flowKey := srcIP + "|" + dstIP + "|" + proto
-		fs, ok := t.flows[flowKey]
-		if !ok {
-			fs = &FlowStats{SrcIP: srcIP, DstIP: dstIP, Protocol: proto}
-			t.flows[flowKey] = fs
-		}
-		fs.Packets++
-		fs.Bytes += int64(bytes)
-	}
 }
 
-// RecordFlow updates flow-level stats without requiring a DPI event.
-// Useful for recording packet/byte counters from flow state.
-func (t *Tracker) RecordFlow(srcIP, dstIP, protocol string, packets, bytes int64) {
+// RecordPacket charges one captured packet and its transport payload bytes to
+// exactly one protocol and directional flow, including retransmissions and
+// packets that emit no events. Header bytes are not included.
+func (t *Tracker) RecordPacket(srcIP, dstIP netip.Addr, protocol string, bytes int, timestamp time.Time) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	ps := t.protocolLocked(protocol)
+	ps.PacketCount++
+	ps.ByteCount += int64(bytes)
+	if timestamp.After(ps.LastSeen) {
+		ps.LastSeen = timestamp
+	}
+	if !srcIP.IsValid() || !dstIP.IsValid() {
+		return
+	}
+	srcIP, dstIP = srcIP.Unmap(), dstIP.Unmap()
+	flowKey := hostPair{src: srcIP, dst: dstIP, protocol: ps.Protocol}
+	fs, ok := t.flows[flowKey]
+	if !ok {
+		fs = &FlowStats{SrcIP: srcIP.String(), DstIP: dstIP.String(), Protocol: ps.Protocol}
+		t.flows[flowKey] = fs
+	}
+	fs.Packets++
+	fs.Bytes += int64(bytes)
+}
+
+// protocolLocked requires t.mu to be held.
+func (t *Tracker) protocolLocked(protocol string) *ProtoStats {
 	if protocol == "" {
 		protocol = "unknown"
 	}
-	flowKey := srcIP + "|" + dstIP + "|" + protocol
-	fs, ok := t.flows[flowKey]
+	ps, ok := t.proto[protocol]
 	if !ok {
-		fs = &FlowStats{SrcIP: srcIP, DstIP: dstIP, Protocol: protocol}
-		t.flows[flowKey] = fs
+		ps = &ProtoStats{Protocol: protocol}
+		t.proto[protocol] = ps
 	}
-	fs.Packets += packets
-	fs.Bytes += bytes
+	return ps
 }
 
 // Stats returns all protocol statistics sorted by packet count descending.
@@ -157,21 +166,6 @@ func (t *Tracker) TopTalkers(n int) []FlowStats {
 		out = out[:n]
 	}
 	return out
-}
-
-func attrStr(attrs map[string]any, key string) string {
-	if attrs == nil {
-		return ""
-	}
-	v, ok := attrs[key]
-	if !ok {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
-	}
-	return s
 }
 
 func attrBool(attrs map[string]any, key string) bool {

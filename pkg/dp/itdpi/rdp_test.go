@@ -52,7 +52,7 @@ func buildX224CC(data []byte) []byte {
 	li := byte(6 + len(data))
 	buf := []byte{
 		li,
-		0xC0,       // Connection Confirm
+		0xD0,       // Connection Confirm
 		0x00, 0x00, // dst-ref
 		0x00, 0x00, // src-ref
 		0x00, // class options
@@ -198,6 +198,45 @@ func TestRDPConnectionConfirm(t *testing.T) {
 	}
 	if ev.Attributes["stage"] != "connection_confirm" {
 		t.Errorf("stage=%v, want connection_confirm", ev.Attributes["stage"])
+	}
+}
+
+func TestRDPStandardConnectionConfirmWire(t *testing.T) {
+	// Independent standard-layout fixtures: ITU-T X.224 §13.4 CC-TPDU
+	// (LI, D0, destination/source references, class), RFC 1006 §6 TPKT.
+	// The second adds [MS-RDPBCGR] §2.2.1.2.1 RDP_NEG_RSP:
+	// type=02, flags=00, LE length=8, LE selectedProtocol=1 (TLS).
+	tests := []struct {
+		name     string
+		wire     []byte
+		wantKind string
+	}{
+		{"bare_cc", []byte{3, 0, 0, 11, 6, 0xd0, 0, 0, 0x12, 0x34, 0}, "connection_confirm"},
+		{"tls_cc", []byte{3, 0, 0, 19, 14, 0xd0, 0, 0, 0x12, 0x34, 0, 2, 0, 8, 0, 1, 0, 0, 0}, "negotiation"},
+		{"old_wrong_code", []byte{3, 0, 0, 11, 6, 0xc0, 0, 0, 0x12, 0x34, 0}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events, err := NewRDPDecoder().OnPacket(rdpFlowState(3389, 50000), &dpi.ParsedPacket{
+				Payload: tt.wire, Proto: "tcp", SrcPort: 3389, DstPort: 50000,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantKind == "" {
+				if len(events) != 0 {
+					t.Fatalf("non-CC TPDU emitted events: %+v", events)
+				}
+				return
+			}
+			if len(events) != 1 || events[0].Proto != "rdp" || events[0].Kind != tt.wantKind {
+				t.Fatalf("unexpected CC decoding: %+v", events)
+			}
+			if tt.wantKind == "negotiation" &&
+				(events[0].Attributes["selected_protocol"] != "tls" || events[0].Attributes["security_level"] != "tls") {
+				t.Fatalf("unexpected TLS negotiation: %+v", events[0])
+			}
+		})
 	}
 }
 

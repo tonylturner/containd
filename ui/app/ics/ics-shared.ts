@@ -1,5 +1,22 @@
 import type { ICSPredicate } from "../../lib/api";
 
+export type ICSMode = "enforce" | "learn";
+export type ICSModeSelection = ICSMode | "";
+
+export function formatICSMode(
+  ruleMode: ICSMode | undefined,
+  globalMode: ICSMode | undefined,
+): { label: string; effectiveMode: ICSMode; inherited: boolean } {
+  const effectiveMode = ruleMode ?? globalMode ?? "learn";
+  const inherited = ruleMode === undefined;
+  const effectiveLabel = effectiveMode === "learn" ? "learning" : "enforce";
+  return {
+    label: inherited ? `inherit (${effectiveLabel})` : effectiveLabel,
+    effectiveMode,
+    inherited,
+  };
+}
+
 export type ProtocolMeta = {
   label: string;
   port: string;
@@ -91,6 +108,18 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     addrPlaceholder: "",
     addrHelp: "Optional OPC UA node ID filter.",
   },
+  iec104: {
+    label: "IEC 60870-5-104",
+    port: "2404",
+    fcLabel: "Type IDs / classes",
+    fcPlaceholder: "",
+    fcHelp:
+      "ASDU Type IDs (1=single point, 3=double point, 13=float measurement, 30=single point with time, 31=double point with time, 45-51/58-64=commands and setpoints, 100=general interrogation, 102=read) and classes (monitor, control, system, unknown).",
+    addrLabel: "CA / IOA",
+    addrPlaceholder: "",
+    addrHelp:
+      "Common address (station, 0-65534) and information object address ranges (0-16777215).",
+  },
 };
 
 export const PROTOCOL_KEYS = Object.keys(PROTOCOLS);
@@ -118,7 +147,7 @@ export function buildICSRulePreview(
   addresses: string,
   readOnly: boolean,
   writeOnly: boolean,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
 ): Record<string, unknown> {
   return {
     id: rule.id,
@@ -135,7 +164,7 @@ export function buildICSRulePreview(
             .filter(Boolean),
           readOnly,
           writeOnly,
-          mode,
+          ...(mode ? { mode } : {}),
         }
       : undefined,
   };
@@ -149,7 +178,7 @@ export function buildICSRuleUpdate(
   objectClasses: string,
   readOnly: boolean,
   writeOnly: boolean,
-  mode: "enforce" | "learn",
+  mode: ICSModeSelection,
 ): ICSPredicate {
   const ics: ICSPredicate = {
     protocol,
@@ -164,7 +193,7 @@ export function buildICSRuleUpdate(
       .filter(Boolean),
     readOnly,
     writeOnly,
-    mode,
+    ...(mode ? { mode } : {}),
   };
 
   if (protocol === "modbus" && unitId.trim()) {

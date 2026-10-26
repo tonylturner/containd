@@ -1,0 +1,100 @@
+services:
+  firewall:
+    image: ${IMAGE_NAME:?set IMAGE_NAME}
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: test/iec104/preflight/Dockerfile
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    init: true
+    networks:
+      a:
+        ipv4_address: 10.250.0.2
+      b:
+        ipv4_address: 10.251.0.2
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        nft add table inet iec104_preflight
+        nft add chain inet iec104_preflight forward '{ type filter hook forward priority 0; policy accept; }'
+        nft add rule inet iec104_preflight forward tcp dport 2404 counter queue num 101
+        nft add rule inet iec104_preflight forward tcp sport 2404 counter queue num 101
+        exec /usr/local/bin/preflight firewall
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/preflight", "ctl", "http://127.0.0.1:8081", "GET", "/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ${RESULTS_DIR:?set RESULTS_DIR}:/results
+
+  client:
+    image: ${IMAGE_NAME:?set IMAGE_NAME}
+    pull_policy: build
+    depends_on:
+      firewall:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    init: true
+    networks:
+      a:
+        ipv4_address: 10.250.0.10
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        ip route replace default via 10.250.0.2
+        exec /usr/local/bin/preflight client
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/preflight", "ctl", "http://127.0.0.1:8080", "GET", "/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ${RESULTS_DIR:?set RESULTS_DIR}:/results
+
+  server:
+    image: ${IMAGE_NAME:?set IMAGE_NAME}
+    pull_policy: build
+    depends_on:
+      firewall:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    init: true
+    networks:
+      b:
+        ipv4_address: 10.251.0.10
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        ip route replace default via 10.251.0.2
+        exec /usr/local/bin/preflight server
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/preflight", "ctl", "http://127.0.0.1:8080", "GET", "/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ${RESULTS_DIR:?set RESULTS_DIR}:/results
+
+networks:
+  a:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.250.0.0/24
+  b:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.251.0.0/24

@@ -25,8 +25,9 @@ import (
 func TestNFQueueSuperviseRestartsAfterPanic(t *testing.T) {
 	var attempts atomic.Int32
 	src := &nfqueueSource{queueID: 100}
-	src.runFn = func(ctx context.Context) error {
+	src.runFn = func(ctx context.Context, ready func()) error {
 		n := attempts.Add(1)
+		ready()
 		if n == 1 {
 			panic("simulated netlink slice-bounds panic")
 		}
@@ -45,12 +46,18 @@ func TestNFQueueSuperviseRestartsAfterPanic(t *testing.T) {
 		errs = append(errs, e)
 	}
 
+	src.cfg.OnError = onErr
+
 	ctx, cancel := context.WithCancel(context.Background())
+	bound := make(chan error, 1)
 	done := make(chan struct{})
 	go func() {
-		src.supervise(ctx, onErr)
+		src.supervise(ctx, bound)
 		close(done)
 	}()
+	if err := <-bound; err != nil {
+		t.Fatalf("bound = %v, want nil after the first run bound", err)
+	}
 	// Give it long enough to: panic on attempt 1, sleep the initial
 	// backoff (250ms), restart on attempt 2.
 	deadline := time.After(3 * time.Second)
@@ -103,8 +110,10 @@ func TestNFQueueSuperviseGivesUpAfterMaxRetries(t *testing.T) {
 
 	var attempts atomic.Int32
 	src := &nfqueueSource{queueID: 100}
-	src.runFn = func(ctx context.Context) error {
-		attempts.Add(1)
+	src.runFn = func(ctx context.Context, ready func()) error {
+		if attempts.Add(1) == 1 {
+			ready() // bound once, then every rebind fails
+		}
 		return fmt.Errorf("simulated permanent failure")
 	}
 
@@ -115,11 +124,13 @@ func TestNFQueueSuperviseGivesUpAfterMaxRetries(t *testing.T) {
 		}
 	}
 
+	src.cfg.OnError = onErr
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		src.supervise(ctx, onErr)
+		src.supervise(ctx, make(chan error, 1))
 		close(done)
 	}()
 
@@ -157,7 +168,7 @@ func TestNFQueueSuperviseCleansUpBetweenRetries(t *testing.T) {
 	var calls atomic.Int32
 
 	src := &nfqueueSource{queueID: 100}
-	src.runFn = func(ctx context.Context) error {
+	src.runFn = func(ctx context.Context, ready func()) error {
 		// If supervise re-entered before the previous attempt's
 		// defer chain finished, inFlight is still true.
 		if inFlight.Load() {
@@ -172,6 +183,7 @@ func TestNFQueueSuperviseCleansUpBetweenRetries(t *testing.T) {
 		n := calls.Add(1)
 		switch n {
 		case 1:
+			ready()
 			panic("simulated panic mid-flight")
 		case 2:
 			return fmt.Errorf("simulated error")
@@ -185,7 +197,7 @@ func TestNFQueueSuperviseCleansUpBetweenRetries(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		src.supervise(ctx, func(error) {})
+		src.supervise(ctx, make(chan error, 1))
 		close(done)
 	}()
 	deadline := time.After(3 * time.Second)
@@ -212,18 +224,19 @@ func TestNFQueueSuperviseExitsOnContextCancel(t *testing.T) {
 	defer withFastBackoff(1 * time.Millisecond)()
 
 	src := &nfqueueSource{queueID: 100}
-	src.runFn = func(ctx context.Context) error {
+	src.runFn = func(ctx context.Context, ready func()) error {
+		ready()
 		<-ctx.Done()
 		return nil
 	}
 
 	var errCount atomic.Int32
-	onErr := func(e error) { errCount.Add(1) }
+	src.cfg.OnError = func(e error) { errCount.Add(1) }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		src.supervise(ctx, onErr)
+		src.supervise(ctx, make(chan error, 1))
 		close(done)
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -236,4 +249,73 @@ func TestNFQueueSuperviseExitsOnContextCancel(t *testing.T) {
 	if errCount.Load() > 0 {
 		t.Errorf("expected zero error notifications on clean cancel, got %d", errCount.Load())
 	}
+}
+
+// TestNFQueueSuperviseFirstBindFailureIsReturned pins that Start reports a
+// failed first bind instead of retrying it in the background.
+func TestNFQueueSuperviseFirstBindFailureIsReturned(t *testing.T) {
+	defer withFastBackoff(1 * time.Millisecond)()
+	var attempts atomic.Int32
+	bindErr := errors.New("simulated EPERM")
+	src := &nfqueueSource{queueID: 100}
+	src.runFn = func(context.Context, func()) error {
+		attempts.Add(1)
+		return bindErr
+	}
+	bound := make(chan error, 1)
+	src.supervise(context.Background(), bound)
+	if err := <-bound; !errors.Is(err, bindErr) {
+		t.Fatalf("bound = %v, want the first bind error", err)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1 (no background retry of a failed first bind)", got)
+	}
+}
+
+// TestNFQueueSuperviseCancelBeforeBind reports the cancellation to Start.
+func TestNFQueueSuperviseCancelBeforeBind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	src := &nfqueueSource{queueID: 100}
+	src.runFn = func(context.Context, func()) error {
+		t.Error("runFn must not run after cancellation")
+		return nil
+	}
+	bound := make(chan error, 1)
+	src.supervise(ctx, bound)
+	if err := <-bound; !errors.Is(err, context.Canceled) {
+		t.Fatalf("bound = %v, want context.Canceled", err)
+	}
+}
+
+// TestNFQueueSuperviseBoundRunResetsFailures keeps rebinding a queue that
+// binds and later fails: only consecutive failures to bind count.
+func TestNFQueueSuperviseBoundRunResetsFailures(t *testing.T) {
+	defer withFastBackoff(1 * time.Millisecond)()
+	var attempts atomic.Int32
+	src := &nfqueueSource{queueID: 100}
+	src.runFn = func(ctx context.Context, ready func()) error {
+		attempts.Add(1)
+		ready()
+		return errors.New("generation failed after binding")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		src.supervise(ctx, make(chan error, 1))
+		close(done)
+	}()
+	want := int32(3 * nfqueueMaxRetries)
+	deadline := time.After(3 * time.Second)
+	for attempts.Load() < want {
+		select {
+		case <-done:
+			t.Fatalf("supervise gave up after %d bound runs", attempts.Load())
+		case <-deadline:
+			t.Fatalf("only %d attempts", attempts.Load())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }

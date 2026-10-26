@@ -15,14 +15,23 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
 // SimulationStatus holds the state of the synthetic traffic generator.
 type SimulationStatus struct {
 	Running bool `json:"running"`
+}
+
+// RuntimeHealth is the engine health needed by the management API.
+type RuntimeHealth struct {
+	BootID            string
+	IEC104Enforcement dpengine.IEC104Enforcement
+	IPv4Forwarding    netcfg.IPv4ForwardingStatus
 }
 
 // ListEvents fetches recent normalized events from the engine.
@@ -48,6 +57,25 @@ func (c *HTTPClient) ListEvents(ctx context.Context, limit int) ([]dpevents.Even
 		return nil, err
 	}
 	return out, nil
+}
+
+// QueryEvents fetches a filtered chronological evidence page from the engine.
+func (c *HTTPClient) QueryEvents(ctx context.Context, q dpevents.Query) (dpevents.Page, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/events?"+q.Values().Encode(), nil)
+	if err != nil {
+		return dpevents.Page{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return dpevents.Page{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return dpevents.Page{}, fmt.Errorf("engine events status %d", resp.StatusCode)
+	}
+	var page dpevents.Page
+	err = json.NewDecoder(resp.Body).Decode(&page)
+	return page, err
 }
 
 // ListProtoStats fetches protocol counters derived from live DPI events.
@@ -317,4 +345,42 @@ func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (Simu
 		return SimulationStatus{}, err
 	}
 	return st, nil
+}
+
+// RuntimeHealth reads the engine's network-namespace health from its /health
+// endpoint.
+func (c *HTTPClient) RuntimeHealth(ctx context.Context) (RuntimeHealth, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
+	if err != nil {
+		return RuntimeHealth{}, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return RuntimeHealth{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return RuntimeHealth{}, engineStatusError(resp, "engine health status")
+	}
+	var out struct {
+		BootID            string                      `json:"bootId"`
+		IEC104Enforcement *dpengine.IEC104Enforcement `json:"iec104Enforcement"`
+		IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return RuntimeHealth{}, err
+	}
+	if out.IEC104Enforcement == nil {
+		return RuntimeHealth{}, fmt.Errorf("engine health has no iec104Enforcement")
+	}
+	switch out.IPv4Forwarding {
+	case netcfg.IPv4ForwardingEnabled, netcfg.IPv4ForwardingDisabled:
+	default:
+		out.IPv4Forwarding = netcfg.IPv4ForwardingUnknown
+	}
+	return RuntimeHealth{
+		BootID:            out.BootID,
+		IEC104Enforcement: *out.IEC104Enforcement,
+		IPv4Forwarding:    out.IPv4Forwarding,
+	}, nil
 }

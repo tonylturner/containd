@@ -12,61 +12,66 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func buildDetectionConditions(det map[string]any) (config.IDSCondition, error) {
+func buildDetectionConditions(det map[string]any) (config.IDSCondition, []string, error) {
 	if len(det) == 0 {
-		return config.IDSCondition{}, nil
+		return config.IDSCondition{}, []string{`keyword "detection" not fully mapped`}, nil
 	}
 	selections := map[string]config.IDSCondition{}
+	var notes []string
 	var conditionExpr string
 	for k, v := range det {
 		if strings.EqualFold(k, "condition") {
 			if s, ok := v.(string); ok {
 				conditionExpr = s
 			}
+			if conditionExpr == "" {
+				notes = append(notes, `keyword "condition" not fully mapped: expected a non-empty expression`)
+			}
 			continue
 		}
-		c, err := buildSelectionCondition(v)
+		c, lost, err := buildSelectionCondition(v)
 		if err != nil {
-			return config.IDSCondition{}, fmt.Errorf("selection %s: %w", k, err)
+			return config.IDSCondition{}, nil, fmt.Errorf("selection %s: %w", k, err)
 		}
+		notes = append(notes, lost...)
 		selections[k] = c
 	}
 
 	if conditionExpr == "" {
 		if len(selections) == 1 {
 			for _, c := range selections {
-				return c, nil
+				return c, notes, nil
 			}
 		}
-		return config.IDSCondition{}, fmt.Errorf("sigma detection missing condition")
+		return config.IDSCondition{}, nil, fmt.Errorf("sigma detection missing condition")
 	}
 
 	parser := newConditionParser(conditionExpr, selections)
-	return parser.parse()
+	c, err := parser.parse()
+	return c, append(notes, parser.notes...), err
 }
 
-func buildSelectionCondition(sel any) (config.IDSCondition, error) {
+func buildSelectionCondition(sel any) (config.IDSCondition, []string, error) {
 	switch s := sel.(type) {
 	case map[string]any:
-		leaves, err := buildLeafConditionsFromMap(s)
-		if err != nil {
-			return config.IDSCondition{}, err
-		}
+		leaves, notes := buildLeafConditionsFromMap(s)
 		if len(leaves) == 1 {
-			return leaves[0], nil
+			return leaves[0], notes, nil
 		}
-		return config.IDSCondition{All: leaves}, nil
+		return config.IDSCondition{All: leaves}, notes, nil
 	case []any:
 		var anyConds []config.IDSCondition
+		var notes []string
+		if len(s) == 0 {
+			notes = append(notes, `keyword "selection" not fully mapped: empty list`)
+		}
 		for _, el := range s {
 			m, ok := el.(map[string]any)
 			if !ok {
-				return config.IDSCondition{}, fmt.Errorf("selection list elements must be maps")
+				return config.IDSCondition{}, nil, fmt.Errorf("selection list elements must be maps")
 			}
-			leaves, err := buildLeafConditionsFromMap(m)
-			if err != nil {
-				return config.IDSCondition{}, err
-			}
+			leaves, lost := buildLeafConditionsFromMap(m)
+			notes = append(notes, lost...)
 			if len(leaves) == 1 {
 				anyConds = append(anyConds, leaves[0])
 			} else {
@@ -74,72 +79,66 @@ func buildSelectionCondition(sel any) (config.IDSCondition, error) {
 			}
 		}
 		if len(anyConds) == 1 {
-			return anyConds[0], nil
+			return anyConds[0], notes, nil
 		}
-		return config.IDSCondition{Any: anyConds}, nil
+		return config.IDSCondition{Any: anyConds}, notes, nil
 	default:
-		return config.IDSCondition{}, fmt.Errorf("unsupported selection type %T", sel)
+		return config.IDSCondition{}, nil, fmt.Errorf("unsupported selection type %T", sel)
 	}
 }
 
-func buildLeafConditionsFromMap(m map[string]any) ([]config.IDSCondition, error) {
+func buildLeafConditionsFromMap(m map[string]any) ([]config.IDSCondition, []string) {
 	var out []config.IDSCondition
+	var notes []string
+	if len(m) == 0 {
+		notes = append(notes, `keyword "selection" not fully mapped: empty map`)
+	}
 	for rawField, v := range m {
-		field, op := splitFieldModifier(rawField)
+		field, op, dropped := splitFieldModifier(rawField)
+		for _, mod := range dropped {
+			notes = append(notes, fmt.Sprintf("keyword %q not fully mapped in field %q", mod, rawField))
+		}
 		cond := config.IDSCondition{
 			Field: normalizeField(field),
 			Op:    op,
 			Value: v,
 		}
-		// Normalize list values to "in" if op is equals.
+		if cond.Field == "" {
+			notes = append(notes, fmt.Sprintf("field %q not fully mapped: no supported decoder attribute", field))
+		}
+		// List equality is executable as membership; other list operators
+		// need Sigma's OR/all semantics, which this converter does not map.
 		switch v.(type) {
 		case []any, []string, []int, []uint8, []uint16, []uint32, []uint64:
 			if cond.Op == "equals" {
 				cond.Op = "in"
+			} else if cond.Op != "in" {
+				modifier := strings.Split(rawField, "|")[1]
+				notes = append(notes, fmt.Sprintf("keyword %q not fully mapped for list field %q", modifier, rawField))
 			}
 		}
 		out = append(out, cond)
 	}
-	return out, nil
+	return out, notes
 }
 
-func splitFieldModifier(field string) (string, string) {
+func splitFieldModifier(field string) (string, string, []string) {
 	parts := strings.Split(field, "|")
 	base := parts[0]
 	if len(parts) == 1 {
-		return base, "equals"
+		return base, "equals", nil
 	}
 	mod := strings.ToLower(parts[1])
+	dropped := append([]string(nil), parts[2:]...)
 	switch mod {
-	case "contains":
-		return base, "contains"
+	case "contains", "gt", "lt", "in":
+		return base, mod, dropped
 	case "re", "regex":
-		return base, "regex"
-	case "startswith":
-		return base, "regex"
-	case "endswith":
-		return base, "regex"
-	case "gt":
-		return base, "gt"
-	case "lt":
-		return base, "lt"
+		return base, "regex", dropped
 	default:
-		return base, "equals"
+		// Includes startswith/endswith: unanchored regex is not equivalent.
+		return base, "equals", append(dropped, parts[1])
 	}
-}
-
-func normalizeField(f string) string {
-	f = strings.TrimSpace(f)
-	if f == "" {
-		return f
-	}
-	lf := strings.ToLower(f)
-	if strings.HasPrefix(lf, "attr.") ||
-		lf == "proto" || lf == "kind" || lf == "flowid" ||
-		lf == "srcip" || lf == "dstip" || lf == "srcport" || lf == "dstport" {
-		return lf
-	}
-	return "attr." + lf
 }
 
 // newConditionParser and helpers implement a tiny Sigma condition expression parser.
@@ -147,12 +146,17 @@ type conditionParser struct {
 	tokens     []string
 	pos        int
 	selections map[string]config.IDSCondition
+	notes      []string
 }
 
 func newConditionParser(expr string, selections map[string]config.IDSCondition) *conditionParser {
 	re := regexp.MustCompile(`\(|\)|\band\b|\bor\b|\bnot\b|[A-Za-z0-9_\-*]+`)
 	toks := re.FindAllString(strings.ToLower(expr), -1)
-	return &conditionParser{tokens: toks, selections: selections}
+	p := &conditionParser{tokens: toks, selections: selections}
+	if strings.TrimSpace(re.ReplaceAllString(expr, "")) != "" {
+		p.notes = append(p.notes, `keyword "condition" not fully mapped: unsupported expression syntax`)
+	}
+	return p
 }
 
 func (p *conditionParser) parse() (config.IDSCondition, error) {
@@ -233,13 +237,8 @@ func (p *conditionParser) parsePrimary() (config.IDSCondition, error) {
 	}
 	tok := p.tokens[p.pos]
 	p.pos++
-	if tok == "1" || tok == "all" {
-		return config.IDSCondition{}, nil
-	}
-	if strings.HasPrefix(tok, "selection") || p.selections[tok].Field != "" || p.selections[tok].All != nil || p.selections[tok].Any != nil || p.selections[tok].Not != nil {
-		if c, ok := p.selections[tok]; ok {
-			return c, nil
-		}
+	if c, ok := p.selections[tok]; ok {
+		return c, nil
 	}
 	// Allow "selection*" wildcard as OR of matching selections.
 	if strings.Contains(tok, "*") {
@@ -258,8 +257,10 @@ func (p *conditionParser) parsePrimary() (config.IDSCondition, error) {
 		}
 		return config.IDSCondition{Any: anyConds}, nil
 	}
-	// If numeric literal, treat as empty (Sigma sometimes uses "1 of them").
-	if _, err := strconv.Atoi(tok); err == nil {
+	// These legacy accepted literals have no executable translation. Preserve
+	// the stored rule, but never let this empty leaf turn it into match-all.
+	if _, err := strconv.Atoi(tok); err == nil || tok == "all" {
+		p.notes = append(p.notes, fmt.Sprintf("keyword %q not fully mapped: literal %q", "condition", tok))
 		return config.IDSCondition{}, nil
 	}
 	return config.IDSCondition{}, fmt.Errorf("unknown selection %q", tok)

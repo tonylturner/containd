@@ -1,0 +1,441 @@
+{
+  "schema_version": "0.1.0",
+  "system": {
+    "hostname": "containd",
+    "mgmt": {
+      "listenAddr": ":8080",
+      "enableHTTP": true,
+      "enableHTTPS": true,
+      "httpListenAddr": ":8080",
+      "httpsListenAddr": ":8443",
+      "tlsCertFile": "/data/tls/server.crt",
+      "tlsKeyFile": "/data/tls/server.key"
+    },
+    "ssh": {}
+  },
+  "interfaces": [
+    {
+      "name": "wan",
+      "zone": "wan",
+      "access": {
+        "mgmt": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "dmz",
+      "zone": "dmz",
+      "access": {
+        "mgmt": true,
+        "ssh": true
+      }
+    },
+    {
+      "name": "lan1",
+      "zone": "lan1",
+      "access": {
+        "mgmt": true,
+        "ssh": true
+      }
+    },
+    {
+      "name": "lan2",
+      "zone": "lan2",
+      "access": {
+        "mgmt": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "lan3",
+      "zone": "lan3",
+      "access": {
+        "mgmt": true,
+        "ssh": true
+      }
+    }
+  ],
+  "zones": [
+    {
+      "name": "wan",
+      "description": "Enterprise Zone - Corporate IT environment"
+    },
+    {
+      "name": "dmz",
+      "description": "Vendor / Engineering Zone - Remote support and maintenance"
+    },
+    {
+      "name": "lan1",
+      "description": "OT Operations Zone - HMI, RTAC, supervisory control"
+    },
+    {
+      "name": "lan2",
+      "description": "Field Device Zone - Relay, recloser, regulator, capbank"
+    },
+    {
+      "name": "lan3",
+      "description": "RangerDanger control plane - backend API access (not student-visible)"
+    }
+  ],
+  "routing": {},
+  "dataplane": {
+    "dpiMode": "enforce",
+    "nflogGroup": 100,
+    "nfqueueGroup": 101,
+    "dpiEnabled": true,
+    "dpiIcsProtocols": {
+      "modbus": true,
+      "dnp3": true
+    }
+  },
+  "pcap": {
+    "filter": {}
+  },
+  "firewall": {
+    "defaultAction": "DENY",
+    "rules": [
+      {
+        "id": "enterprise-to-vendor-only",
+        "description": "Enterprise to Vendor: SSH, HTTP/S only (no direct OT access)",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "dmz"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "22"
+          },
+          {
+            "name": "tcp",
+            "port": "80"
+          },
+          {
+            "name": "tcp",
+            "port": "443"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "deny-enterprise-to-ot",
+        "description": "BLOCK: Enterprise cannot reach OT Operations (Modbus, DNP3, HTTP, HMI)",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "1881"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "deny-enterprise-to-field",
+        "description": "BLOCK: Enterprise cannot reach Field Devices (Modbus, DNP3, or HTTP)",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "vendor-to-ot-restricted",
+        "description": "Vendor to OT: HTTPS and SSH only for monitoring (no Modbus, no HMI control)",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "443"
+          },
+          {
+            "name": "tcp",
+            "port": "22"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW",
+        "log": true
+      },
+      {
+        "id": "deny-vendor-to-field",
+        "description": "BLOCK: Vendor cannot reach Field Devices directly (no Modbus, no DNP3, no HTTP)",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "rtac-to-field-modbus",
+        "description": "RTAC to Field Devices: Modbus TCP read/write (supervisory control only)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "ics": {
+          "protocol": "modbus",
+          "functionCode": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        },
+        "action": "ALLOW",
+        "log": true
+      },
+      {
+        "id": "rtac-to-field-dnp3",
+        "description": "RTAC to Field Devices: DNP3 TCP - Read/integrity poll only (FC1). Direct Operate (FC5) and No-Ack (FC6) are blocked at the DPI layer even from the RTAC source.",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {
+          "protocol": "dnp3",
+          "functionCode": [
+            1
+          ]
+        },
+        "action": "ALLOW",
+        "log": true
+      },
+      {
+        "id": "rtac-to-field-http",
+        "description": "RTAC to Field Devices: HTTP API (supervisory management)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW",
+        "log": true
+      },
+      {
+        "id": "deny-ot-to-field-direct",
+        "description": "BLOCK: Other OT nodes cannot Modbus/DNP3/HTTP to Field Devices (prevents lateral movement)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          }
+        ],
+        "ics": {},
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "ot-intrazone-ops",
+        "description": "OT Operations internal: HMI\u2194RTAC Modbus, DNP3, HTTP, FUXA, NTP",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          },
+          {
+            "name": "tcp",
+            "port": "1881"
+          },
+          {
+            "name": "tcp",
+            "port": "502"
+          },
+          {
+            "name": "tcp",
+            "port": "20000"
+          },
+          {
+            "name": "udp",
+            "port": "123"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW"
+      },
+      {
+        "id": "gps-to-field-ntp",
+        "description": "GPS Time Server to Field Devices: NTP only (time sync for SOE)",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.50/32"
+        ],
+        "protocols": [
+          {
+            "name": "udp",
+            "port": "123"
+          }
+        ],
+        "ics": {},
+        "action": "ALLOW",
+        "log": true
+      }
+    ],
+    "nat": {
+      "enabled": false
+    }
+  },
+  "ids": {
+    "enabled": false
+  },
+  "services": {
+    "syslog": {
+      "forwarders": [],
+      "format": "rfc5424",
+      "batchSize": 500,
+      "flushEvery": 2
+    },
+    "dns": {
+      "enabled": false
+    },
+    "ntp": {
+      "enabled": false
+    },
+    "proxy": {
+      "forward": {
+        "enabled": false
+      },
+      "reverse": {
+        "enabled": false
+      }
+    },
+    "dhcp": {
+      "enabled": false
+    },
+    "vpn": {
+      "wireguard": {
+        "enabled": false
+      },
+      "openvpn": {
+        "enabled": false
+      }
+    },
+    "av": {
+      "enabled": false,
+      "icap": {},
+      "clamav": {}
+    }
+  }
+}

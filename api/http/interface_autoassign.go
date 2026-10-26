@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type autoAssignOptions struct {
+	Reservation       *mgmtpath.Reservation
 	AllowFallback     bool
 	DefaultRouteIface string
 }
@@ -41,6 +43,12 @@ func defaultAutoAssignSubnets() map[string]string {
 	}
 }
 
+// DefaultInterfaceSubnetOverride is the deployment's explicit subnet authority,
+// shared with boot repair so a renumbered device name cannot pin a stale row.
+func DefaultInterfaceSubnetOverride(logical string) string {
+	return envAnyOrDefault("", "CONTAIND_AUTO_"+strings.ToUpper(logical)+"_SUBNET", "CONTAIND_"+strings.ToUpper(logical)+"_SUBNET")
+}
+
 func interfaceDeviceSet(state []config.InterfaceState) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, st := range state {
@@ -61,7 +69,7 @@ func buildAutoAssignCandidates(state []config.InterfaceState) ([]autoAssignCandi
 			continue
 		}
 		stateByName[name] = st
-		if name == "lo" || !isAutoAssignableDevice(name, st.MAC) {
+		if !st.Up || name == "lo" || !isAutoAssignableDevice(name, st.MAC) {
 			continue
 		}
 		mac := strings.TrimSpace(strings.ToLower(st.MAC))
@@ -88,18 +96,33 @@ func computeDefaultInterfaceAssignments(ifaces []config.Interface, state []confi
 	}
 
 	candidates, stateByName := buildAutoAssignCandidates(state)
-	if len(candidates) < needed {
-		return nil, fmt.Errorf("not enough eligible kernel interfaces (%d) for defaults (%d)", len(candidates), needed)
-	}
 
 	assignments := map[string]string{}
 	usedDev := map[string]bool{}
-	assignByNamePrefix(order, ifaceByName, candidates, assignments, usedDev)
-	assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultAutoAssignSubnets())
-	assignDefaultRouteWAN(ifaceByName, opts, stateByName, assignments, usedDev)
-	if err := assignFallbackDefaults(order, ifaceByName, candidates, assignments, usedDev, opts.AllowFallback); err != nil {
-		return nil, err
+	if opts.Reservation != nil {
+		for _, iface := range ifaces {
+			if iface.Device == opts.Reservation.Device || iface.Device == "" && iface.Name == opts.Reservation.Device {
+				assignments[iface.Name] = opts.Reservation.Device
+				usedDev[opts.Reservation.Device] = true
+			}
+		}
 	}
+	assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultAutoAssignSubnets())
+	// Explicit subnet authority must never fall through to naming, routing or
+	// index heuristics, including when discovery is missing or ambiguous.
+	heuristicOrder := make([]string, 0, len(order))
+	for _, logical := range order {
+		if DefaultInterfaceSubnetOverride(logical) == "" {
+			heuristicOrder = append(heuristicOrder, logical)
+		}
+	}
+	assignByNamePrefix(heuristicOrder, ifaceByName, candidates, assignments, usedDev)
+	for _, logical := range heuristicOrder {
+		if logical == "wan" {
+			assignDefaultRouteWAN(ifaceByName, opts, stateByName, assignments, usedDev)
+		}
+	}
+	assignFallbackDefaults(heuristicOrder, ifaceByName, candidates, assignments, usedDev, opts.AllowFallback)
 	return assignments, nil
 }
 
@@ -120,6 +143,9 @@ func defaultLogicalInterfaces(ifaces []config.Interface, order []string) (map[st
 func assignByNamePrefix(order []string, ifaceByName map[string]config.Interface, candidates []autoAssignCandidate, assignments map[string]string, usedDev map[string]bool) {
 	for _, logical := range order {
 		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		if _, pinned := assignments[logical]; pinned {
 			continue
 		}
 		for _, cand := range candidates {
@@ -147,19 +173,15 @@ func assignBySubnet(order []string, ifaceByName map[string]config.Interface, can
 		if cidr == "" {
 			continue
 		}
+		matches := []string{}
 		for _, cand := range candidates {
-			if usedDev[cand.name] {
-				continue
+			if ifaceHasIPv4InCIDR(stateByName[cand.name].Addrs, cidr) {
+				matches = append(matches, cand.name)
 			}
-			st, ok := stateByName[cand.name]
-			if !ok {
-				continue
-			}
-			if ifaceHasIPv4InCIDR(st.Addrs, cidr) {
-				assignments[logical] = cand.name
-				usedDev[cand.name] = true
-				break
-			}
+		}
+		if len(matches) == 1 && !usedDev[matches[0]] {
+			assignments[logical] = matches[0]
+			usedDev[matches[0]] = true
 		}
 	}
 }
@@ -175,13 +197,13 @@ func assignDefaultRouteWAN(ifaceByName map[string]config.Interface, opts autoAss
 	if defDev == "" || usedDev[defDev] {
 		return
 	}
-	if st, ok := stateByName[defDev]; ok && isAutoAssignableDevice(defDev, st.MAC) {
+	if st, ok := stateByName[defDev]; ok && st.Up && isAutoAssignableDevice(defDev, st.MAC) {
 		assignments["wan"] = defDev
 		usedDev[defDev] = true
 	}
 }
 
-func assignFallbackDefaults(order []string, ifaceByName map[string]config.Interface, candidates []autoAssignCandidate, assignments map[string]string, usedDev map[string]bool, allowFallback bool) error {
+func assignFallbackDefaults(order []string, ifaceByName map[string]config.Interface, candidates []autoAssignCandidate, assignments map[string]string, usedDev map[string]bool, allowFallback bool) {
 	for _, logical := range order {
 		if _, ok := ifaceByName[logical]; !ok {
 			continue
@@ -190,7 +212,7 @@ func assignFallbackDefaults(order []string, ifaceByName map[string]config.Interf
 			continue
 		}
 		if !allowFallback {
-			return fmt.Errorf("unable to safely auto-bind default interfaces")
+			continue
 		}
 		for _, cand := range candidates {
 			if usedDev[cand.name] {
@@ -200,11 +222,7 @@ func assignFallbackDefaults(order []string, ifaceByName map[string]config.Interf
 			usedDev[cand.name] = true
 			break
 		}
-		if _, ok := assignments[logical]; !ok {
-			return fmt.Errorf("not enough eligible kernel interfaces to complete auto-assign")
-		}
 	}
-	return nil
 }
 
 func isAutoAssignableDevice(name string, mac string) bool {
@@ -282,13 +300,18 @@ func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
 // AutoBindDefaultInterfaceDevices is the exported wrapper around the
 // in-package autoBindDefaultInterfaceDevices so other startup paths can
 // trigger the same logical-name → kernel-device autobind that the
-// commit/getConfig handlers already run. Callers should Save the config
-// back to the store if true is returned.
+// commit/getConfig handlers already run. Boot callers persist the result with
+// config.Repair so running and any staged candidate get the same repair.
 func AutoBindDefaultInterfaceDevices(cfg *config.Config) bool {
-	return autoBindDefaultInterfaceDevices(cfg)
+	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
 }
 
 func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
+	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
+}
+
+// AutoBindDefaultInterfaceDevicesReserved never moves an existing reserved binding.
+func AutoBindDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Reservation) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
@@ -296,14 +319,19 @@ func autoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	if err != nil {
 		return false
 	}
-	return autoBindDefaultInterfaceDevicesFromState(cfg, state, detectKernelDefaultRouteIface())
+	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, detectKernelDefaultRouteIface(), r)
 }
 
 func autoBindDefaultInterfaceDevicesFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string) bool {
+	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, defaultRouteIface, nil)
+}
+
+func autoBindDefaultInterfaceDevicesReservedFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string, r *mgmtpath.Reservation) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
 	assignments, err := computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+		Reservation:       r,
 		AllowFallback:     false,
 		DefaultRouteIface: defaultRouteIface,
 	})

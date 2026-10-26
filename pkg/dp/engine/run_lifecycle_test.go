@@ -16,19 +16,25 @@ import (
 
 var errCapturePreflight = errors.New("capture preflight failed")
 
+// retryCapture and blockingCapture stop like capture.Manager: Stop cancels
+// the capture's own context and waits for its run to exit. Reconfigure stops
+// the old capture before it cancels the engine run (see engine.go).
 type retryCapture struct {
 	startCalls atomic.Int32
 	stopCalls  atomic.Int32
 	done       chan struct{}
+	cancel     context.CancelFunc
 }
 
 func (c *retryCapture) Start(ctx context.Context, _ capture.Handler) error {
 	if c.startCalls.Add(1) == 1 {
 		return errCapturePreflight
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
 	c.done = make(chan struct{})
 	go func(done chan struct{}) {
-		<-ctx.Done()
+		<-runCtx.Done()
 		close(done)
 	}(c.done)
 	return nil
@@ -36,12 +42,17 @@ func (c *retryCapture) Start(ctx context.Context, _ capture.Handler) error {
 
 func (c *retryCapture) Stop() {
 	c.stopCalls.Add(1)
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if c.done != nil {
 		<-c.done
 	}
 }
 
 func (c *retryCapture) Interfaces() []string { return nil }
+
+func (c *retryCapture) Settler() capture.Settler { return nil }
 
 func TestStartRetriesAfterCaptureFailure(t *testing.T) {
 	ctx := context.Background()
@@ -72,6 +83,7 @@ func TestStartRetriesAfterCaptureFailure(t *testing.T) {
 
 type blockingCapture struct {
 	done       chan struct{}
+	cancel     context.CancelFunc
 	stopCalls  atomic.Int32
 	stopWaited atomic.Bool
 }
@@ -81,10 +93,12 @@ func newBlockingCapture() *blockingCapture {
 }
 
 func (c *blockingCapture) Start(ctx context.Context, _ capture.Handler) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
 	started := make(chan struct{})
 	go func() {
 		close(started)
-		<-ctx.Done()
+		<-runCtx.Done()
 		close(c.done)
 	}()
 	<-started
@@ -93,6 +107,9 @@ func (c *blockingCapture) Start(ctx context.Context, _ capture.Handler) error {
 
 func (c *blockingCapture) Stop() {
 	c.stopCalls.Add(1)
+	if c.cancel != nil {
+		c.cancel()
+	}
 	select {
 	case <-c.done:
 		c.stopWaited.Store(true)
@@ -101,6 +118,8 @@ func (c *blockingCapture) Stop() {
 }
 
 func (c *blockingCapture) Interfaces() []string { return nil }
+
+func (c *blockingCapture) Settler() capture.Settler { return nil }
 
 func engineWithCapture(t *testing.T, runner captureRunner) *Engine {
 	t.Helper()

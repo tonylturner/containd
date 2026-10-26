@@ -28,7 +28,7 @@ func TestNFQueueModeRequiresLinux(t *testing.T) {
 		}
 	}
 
-	handler := func(pkt Packet) {}
+	handler := func(Packet) Decision { return Decision{Action: Accept} }
 	err = mgr.Start(context.Background(), handler)
 
 	// On non-Linux, this should return a "not supported" error.
@@ -59,7 +59,7 @@ func TestDecodeIPPacketIPv4(t *testing.T) {
 	pkt[23] = 0xF6
 	pkt[32] = 0x50 // data offset = 5 (20 bytes)
 
-	decoded, ok := decodeIPPacket(pkt)
+	decoded, ok := decodeIP(pkt)
 	if !ok {
 		t.Fatal("expected successful decode")
 	}
@@ -81,20 +81,20 @@ func TestDecodeIPPacketIPv4(t *testing.T) {
 }
 
 func TestDecodeIPPacketTooShort(t *testing.T) {
-	_, ok := decodeIPPacket([]byte{0x45})
+	_, ok := decodeIP([]byte{0x45})
 	if ok {
 		t.Fatal("expected decode failure for truncated packet")
 	}
 }
 
 func TestDecodeIPPacketEmpty(t *testing.T) {
-	_, ok := decodeIPPacket(nil)
+	_, ok := decodeIP(nil)
 	if ok {
 		t.Fatal("expected decode failure for nil packet")
 	}
 }
 
-func TestDecodeIPPacketIPv6UDP(t *testing.T) {
+func TestMainDecodeIPPacketIPv6UDP(t *testing.T) {
 	// Minimal IPv6 UDP packet: 40-byte IPv6 header + 8-byte UDP header + payload.
 	pkt := make([]byte, 52)
 	pkt[0] = 0x60 // version=6
@@ -123,7 +123,7 @@ func TestDecodeIPPacketIPv6UDP(t *testing.T) {
 	pkt[45] = 0x0C
 	copy(pkt[48:], []byte{0xde, 0xad, 0xbe, 0xef})
 
-	decoded, ok := decodeIPPacket(pkt)
+	decoded, ok := decodeIP(pkt)
 	if !ok {
 		t.Fatal("expected successful IPv6 UDP decode")
 	}
@@ -139,21 +139,21 @@ func TestDecodeIPPacketIPv6UDP(t *testing.T) {
 }
 
 func TestDecodeL4RejectsInvalidHeaders(t *testing.T) {
-	if _, ok := decodeL4("nfqueue", 6, nil, nil, make([]byte, 10)); ok {
+	if ok := decodeL4(&Packet{Proto: 6}, make([]byte, 10)); ok {
 		t.Fatal("expected short TCP decode failure")
 	}
 
 	shortOffsetTCP := make([]byte, 20)
 	shortOffsetTCP[12] = 0x10 // data offset = 4, invalid
-	if _, ok := decodeL4("nfqueue", 6, nil, nil, shortOffsetTCP); ok {
+	if ok := decodeL4(&Packet{Proto: 6}, shortOffsetTCP); ok {
 		t.Fatal("expected invalid TCP data offset failure")
 	}
 
-	if _, ok := decodeL4("nfqueue", 17, nil, nil, make([]byte, 4)); ok {
+	if ok := decodeL4(&Packet{Proto: 17}, make([]byte, 4)); ok {
 		t.Fatal("expected short UDP decode failure")
 	}
 
-	if _, ok := decodeL4("nfqueue", 1, nil, nil, []byte{0x00}); ok {
+	if ok := decodeL4(&Packet{Proto: 1}, []byte{0x00}); ok {
 		t.Fatal("expected unsupported proto decode failure")
 	}
 }
@@ -178,42 +178,42 @@ func tcpIPv4Packet(seq uint32, flags byte, payload []byte, pad int) []byte {
 }
 
 func TestDecodeIPPacketTCPSequence(t *testing.T) {
-	decoded, ok := decodeIPPacket(tcpIPv4Packet(0, 0x18, []byte{0xAA, 0xBB}, 0))
+	decoded, ok := decodeIP(tcpIPv4Packet(0, 0x18, []byte{0xAA, 0xBB}, 0))
 	if !ok {
 		t.Fatal("expected successful decode")
 	}
-	if !decoded.HasTCPSeq || decoded.TCPSeq != 0 || decoded.TCPFlags != 0x18 {
-		t.Fatalf("seq=%d has=%v flags=%#x, want seq 0 valid flags 0x18", decoded.TCPSeq, decoded.HasTCPSeq, decoded.TCPFlags)
+	if !decoded.TCP.Valid || decoded.TCP.Seq != 0 || decoded.TCP.Flags != 0x18 {
+		t.Fatalf("seq=%d has=%v flags=%#x, want seq 0 valid flags 0x18", decoded.TCP.Seq, decoded.TCP.Valid, decoded.TCP.Flags)
 	}
 
-	// Data on a SYN starts one past the SYN's sequence number.
-	decoded, _ = decodeIPPacket(tcpIPv4Packet(0xFFFFFFFF, TCPFlagSYN, []byte{0x01}, 0))
-	if decoded.TCPSeq != 0 {
-		t.Fatalf("SYN payload seq = %d, want 0 (wrapped ISN+1)", decoded.TCPSeq)
+	// Capture preserves the wire ISN; callers account for SYN sequence space.
+	decoded, _ = decodeIP(tcpIPv4Packet(0xFFFFFFFF, byte(TCPFlagSYN), []byte{0x01}, 0))
+	if decoded.TCP.Seq != 0xFFFFFFFF {
+		t.Fatalf("SYN wire seq = %d, want 0xFFFFFFFF", decoded.TCP.Seq)
 	}
 
-	udp, _ := decodeIPPacket(func() []byte {
+	udp, _ := decodeIP(func() []byte {
 		pkt := make([]byte, 28)
 		pkt[0] = 0x45
 		pkt[3] = 28
 		pkt[9] = 17
 		return pkt
 	}())
-	if udp.HasTCPSeq {
+	if udp.TCP.Valid {
 		t.Fatal("UDP packet must not carry a TCP sequence number")
 	}
 }
 
 func TestDecodeIPPacketIgnoresLinkPadding(t *testing.T) {
 	// A pure ACK padded to the Ethernet minimum must not yield payload.
-	decoded, ok := decodeIPPacket(tcpIPv4Packet(100, 0x10, nil, 6))
+	decoded, ok := decodeIP(tcpIPv4Packet(100, 0x10, nil, 6))
 	if !ok {
 		t.Fatal("expected successful decode")
 	}
 	if len(decoded.Payload) != 0 {
 		t.Fatalf("padding decoded as payload: %x", decoded.Payload)
 	}
-	decoded, _ = decodeIPPacket(tcpIPv4Packet(100, 0x18, []byte{0x01, 0x02}, 4))
+	decoded, _ = decodeIP(tcpIPv4Packet(100, 0x18, []byte{0x01, 0x02}, 4))
 	if !bytes.Equal(decoded.Payload, []byte{0x01, 0x02}) {
 		t.Fatalf("payload = %x, want 0102", decoded.Payload)
 	}

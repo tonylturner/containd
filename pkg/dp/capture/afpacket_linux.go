@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -65,35 +66,59 @@ func (w *worker) run(ctx context.Context) error {
 		if n == 0 || pollfds[0].Revents&unix.POLLIN == 0 {
 			continue
 		}
-		rn, _, err := unix.Recvfrom(fd, buf, 0)
+		rn, from, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
 			if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
 				continue
 			}
 			return err
 		}
-		if rn <= 0 {
+		if rn <= 0 || outgoingPacket(from) {
 			continue
 		}
 		pkt, ok := decodePacket(w.iface, buf[:rn])
 		if !ok {
 			continue
 		}
-		w.handler(pkt)
+		// AF_PACKET is observational: the decision is not applied.
+		_ = w.handler(pkt)
 	}
 }
 
+// outgoingPacket excludes local transmit copies, including forwarded packets
+// after masquerade. Ingress capture sees each wire direction before NAT once.
+func outgoingPacket(from unix.Sockaddr) bool {
+	ll, ok := from.(*unix.SockaddrLinklayer)
+	return ok && ll.Pkttype == unix.PACKET_OUTGOING
+}
+
+// decodePacket strips the Ethernet header and decodes the IP packet with
+// the shared raw-IP decoder. The IP version must match the EtherType.
 func decodePacket(iface string, data []byte) (Packet, bool) {
 	ethType, offset, ok := parseEthernet(data)
 	if !ok {
 		return Packet{}, false
 	}
+	ip := data[offset:]
+	var version byte
 	switch ethType {
-	case 0x0800, 0x86dd:
-		return decodeIP(iface, data[offset:])
+	case 0x0800:
+		version = 4
+	case 0x86dd:
+		version = 6
 	default:
 		return Packet{}, false
 	}
+	if len(ip) < 1 || ip[0]>>4 != version {
+		return Packet{}, false
+	}
+	pkt, ok := decodeIP(ip)
+	if !ok {
+		return Packet{}, false
+	}
+	pkt.Timestamp = time.Now().UTC()
+	pkt.Interface = iface
+	return pkt, true
 }
 
 func parseEthernet(data []byte) (uint16, int, bool) {

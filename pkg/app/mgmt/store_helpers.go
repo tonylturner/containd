@@ -4,11 +4,13 @@
 package mgmtapp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -37,18 +39,18 @@ func cfgGetInt(cfg *config.Config, f func(*config.Config) int, def int) int {
 	return f(cfg)
 }
 
-func mustInitStore() config.Store {
+func initStore(r *mgmtpath.Reservation) (config.Store, error) {
 	dbPath := common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		logging.NewService("mgmt").Fatalf("failed to create config dir: %v", err)
+		return nil, fmt.Errorf("create config dir: %w", err)
 	}
 	store, err := openStoreWithRetry("config", func() (config.Store, error) {
-		return config.NewSQLiteStore(dbPath)
+		return config.NewSQLiteStore(dbPath, config.WithManagementReservation(r))
 	})
 	if err != nil {
-		logging.NewService("mgmt").Fatalf("failed to open config store: %v", err)
+		return nil, fmt.Errorf("open config store: %w", err)
 	}
-	return store
+	return store, nil
 }
 
 func mustInitAuditStore() audit.Store {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // LearnedProfile accumulates observed ICS traffic for a single communication pair and protocol.
@@ -110,42 +111,32 @@ func recordProtocolAttributes(proto string, p *LearnedProfile, ev dpi.Event) {
 }
 
 func recordCIPAttributes(p *LearnedProfile, ev dpi.Event) {
-	if sc, ok := ev.Attributes["service_code"]; ok {
-		if v, ok := toUint8(sc); ok {
-			p.FunctionCodes[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "service_code"); ok {
+		p.FunctionCodes[v] = true
 	}
-	if oc, ok := ev.Attributes["object_class"]; ok {
-		if v, ok := toUint16(oc); ok {
-			p.ObjectClasses[v] = true
-		}
+	if v, ok := eventfields.Uint16(ev.Attributes, "object_class"); ok {
+		p.ObjectClasses[v] = true
 	}
 	recordStringAddress(p, ev.Attributes["cip_path"])
 }
 
 func recordDNP3Attributes(p *LearnedProfile, ev dpi.Event) {
-	if fc, ok := ev.Attributes["function_code"]; ok {
-		if v, ok := toUint8(fc); ok {
-			p.FunctionCodes[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
+		p.FunctionCodes[v] = true
 	}
 	recordStringAddress(p, ev.Attributes["object_groups"])
 }
 
 func recordFunctionAndAddress(p *LearnedProfile, ev dpi.Event) {
-	if fc, ok := ev.Attributes["function_code"]; ok {
-		if v, ok := toUint8(fc); ok {
-			p.FunctionCodes[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
+		p.FunctionCodes[v] = true
 	}
 	recordStringAddress(p, ev.Attributes["address"])
 }
 
 func recordBACnetAttributes(p *LearnedProfile, ev dpi.Event) {
-	if sc, ok := ev.Attributes["service_code"]; ok {
-		if v, ok := toUint8(sc); ok {
-			p.FunctionCodes[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "service_code"); ok {
+		p.FunctionCodes[v] = true
 	}
 	objType, hasType := ev.Attributes["object_type"]
 	objInst, hasInst := ev.Attributes["object_instance"]
@@ -166,15 +157,11 @@ func recordMMSAttributes(p *LearnedProfile, ev dpi.Event) {
 }
 
 func recordDefaultAttributes(p *LearnedProfile, ev dpi.Event) {
-	if fc, ok := ev.Attributes["function_code"]; ok {
-		if v, ok := toUint8(fc); ok {
-			p.FunctionCodes[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
+		p.FunctionCodes[v] = true
 	}
-	if uid, ok := ev.Attributes["unit_id"]; ok {
-		if v, ok := toUint8(uid); ok {
-			p.UnitIDs[v] = true
-		}
+	if v, ok := eventfields.Uint8(ev.Attributes, "unit_id"); ok {
+		p.UnitIDs[v] = true
 	}
 	if addr, ok := ev.Attributes["address"]; ok {
 		recordAddressValue(p, addr)
@@ -304,50 +291,6 @@ func (l *Learner) Clear() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.profiles = make(map[string]*LearnedProfile)
-}
-
-// toUint8 converts common numeric types to uint8.
-func toUint8(v any) (uint8, bool) {
-	switch n := v.(type) {
-	case uint8:
-		return n, true
-	case int:
-		if n >= 0 && n <= 255 {
-			return uint8(n), true
-		}
-	case int64:
-		if n >= 0 && n <= 255 {
-			return uint8(n), true
-		}
-	case float64:
-		if n >= 0 && n <= 255 {
-			return uint8(n), true
-		}
-	}
-	return 0, false
-}
-
-// toUint16 converts common numeric types to uint16.
-func toUint16(v any) (uint16, bool) {
-	switch n := v.(type) {
-	case uint16:
-		return n, true
-	case uint8:
-		return uint16(n), true
-	case int:
-		if n >= 0 && n <= 65535 {
-			return uint16(n), true
-		}
-	case int64:
-		if n >= 0 && n <= 65535 {
-			return uint16(n), true
-		}
-	case float64:
-		if n >= 0 && n <= 65535 {
-			return uint16(n), true
-		}
-	}
-	return 0, false
 }
 
 // parseHexUint8 parses a hex string like "0xA5" into a uint8.

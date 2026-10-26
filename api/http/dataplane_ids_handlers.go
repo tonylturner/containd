@@ -25,7 +25,7 @@ import (
 
 func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -36,7 +36,7 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 
 func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -153,48 +153,36 @@ func blockFlowHandler(engine EngineClient) gin.HandlerFunc {
 
 func getIDSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		rules, err := store.LoadIDSRules(c.Request.Context())
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
 		}
 		resp := cfg.IDS
-		resp.Rules = rules
 		c.JSON(http.StatusOK, resp)
 	}
 }
 
-func setIDSHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func setIDSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var idsCfg config.IDSConfig
 		if err := c.ShouldBindJSON(&idsCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := store.SaveIDSRules(c.Request.Context(), idsCfg.Rules); err != nil {
-			apiError(c, http.StatusInternalServerError, err.Error())
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.IDS.Enabled = idsCfg.Enabled
+			cfg.IDS.RuleGroups = idsCfg.RuleGroups
+			if idsCfg.Rules != nil {
+				cfg.IDS.Rules = idsCfg.Rules
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		cfg.IDS.Enabled = idsCfg.Enabled
-		cfg.IDS.RuleGroups = idsCfg.RuleGroups
-		cfg.IDS.Rules = nil
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
-		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "running"})
-		idsCfg.Rules = nil
+		auditLog(c, audit.Record{Action: "ids.rules.set", Target: "candidate", Detail: "candidate"})
+		idsCfg = cfg.IDS
 		c.JSON(http.StatusOK, idsCfg)
 	}
 }
@@ -218,7 +206,7 @@ func convertSigmaHandler() gin.HandlerFunc {
 	}
 }
 
-func idsImportHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func idsImportHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		file, header, err := c.Request.FormFile("file")
 		if err != nil {
@@ -248,37 +236,32 @@ func idsImportHandler(store config.Store, engine EngineClient, services Services
 			return
 		}
 
-		existingRules, err := store.LoadIDSRules(c.Request.Context())
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		existing := make(map[string]bool, len(existingRules))
-		for _, r := range existingRules {
-			existing[r.ID] = true
-		}
-		added := 0
-		skipped := 0
-		for _, r := range rules {
-			if existing[r.ID] {
-				skipped++
-				continue
+		added, skipped := 0, 0
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			existing := make(map[string]bool, len(cfg.IDS.Rules))
+			for _, r := range cfg.IDS.Rules {
+				existing[r.ID] = true
 			}
-			existingRules = append(existingRules, r)
-			existing[r.ID] = true
-			added++
-		}
-		if err := store.SaveIDSRules(c.Request.Context(), existingRules); err != nil {
-			apiError(c, http.StatusInternalServerError, err.Error())
+			for _, r := range rules {
+				if existing[r.ID] {
+					skipped++
+					continue
+				}
+				cfg.IDS.Rules = append(cfg.IDS.Rules, r)
+				existing[r.ID] = true
+				added++
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
-		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format})
+		auditLog(c, audit.Record{Action: "ids.rules.import", Target: format, Detail: "candidate"})
 
 		c.JSON(http.StatusOK, gin.H{
 			"imported": added,
 			"skipped":  skipped,
-			"total":    len(existingRules),
+			"total":    len(cfg.IDS.Rules),
 			"format":   format,
 		})
 	}
@@ -337,7 +320,7 @@ func idsBackupHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func idsRestoreHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func idsRestoreHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		const maxSize = 50 << 20
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxSize+1))
@@ -354,19 +337,21 @@ func idsRestoreHandler(store config.Store, engine EngineClient, services Service
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := store.SaveIDSRules(c.Request.Context(), rules); err != nil {
-			internalError(c, err)
+		if _, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.IDS.Rules = rules
+			return true
+		}); !ok {
 			return
 		}
-		_, _ = applyRunningConfig(c.Request.Context(), store, engine, services)
-		auditLog(c, audit.Record{Action: "ids.rules.restore", Target: "running"})
-		c.JSON(http.StatusOK, gin.H{"status": "restored", "count": len(rules)})
+		auditLog(c, audit.Record{Action: "ids.rules.restore", Target: "candidate", Detail: "candidate"})
+
+		c.JSON(http.StatusOK, gin.H{"status": "staged", "count": len(rules)})
 	}
 }
 
 func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -382,45 +367,33 @@ func setFirewallNATHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid NAT payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Firewall.NAT = nat
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Firewall.NAT = nat
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "firewall.nat.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "firewall.nat.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Firewall.NAT)
 	}
 }
 
-func setDataPlaneHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func setDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dp config.DataPlaneConfig
 		if err := c.ShouldBindJSON(&dp); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.DataPlane = dp
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.DataPlane = dp
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if engine != nil {
-			if err := engine.Configure(c.Request.Context(), cfg.DataPlane); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
-		auditLog(c, audit.Record{Action: "dataplane.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "dataplane.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.DataPlane)
 	}
 }

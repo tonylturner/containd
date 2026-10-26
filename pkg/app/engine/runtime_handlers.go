@@ -11,16 +11,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ids"
@@ -137,9 +136,12 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 
 func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
 	var current config.ServicesConfig
+	var currentMu sync.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			currentMu.Lock()
+			defer currentMu.Unlock()
 			writeJSON(w, current)
 			return
 		case http.MethodPost:
@@ -153,6 +155,18 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+			if ownership != nil {
+				ownership.applyMu.Lock()
+				defer ownership.applyMu.Unlock()
+			}
+			if dpEngine != nil {
+				if err := config.ValidateManagementServices(svc, dpEngine.ManagementReservation()); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			currentMu.Lock()
+			defer currentMu.Unlock()
 			if dpEngine != nil && dpEngine.AVSink() != nil {
 				if adapter, ok := dpEngine.AVSink().(*avSinkAdapter); ok && adapter != nil {
 					avCtx, cancelAV := context.WithTimeout(r.Context(), 3*time.Second)
@@ -283,13 +297,19 @@ func conntrackHandler() http.HandlerFunc {
 	}
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	resp := healthResponse{
-		Status:    "ok",
-		Component: "engine",
-		Build:     config.BuildVersion,
+// healthHandler is engine liveness plus IEC104 enforcement health (K6).
+func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, healthResponse{
+			ManagementReservation: guard.Status(),
+			Status:                "ok",
+			Component:             "engine",
+			Build:                 config.BuildVersion,
+			BootID:                engineBootID,
+			IEC104Enforcement:     dpEngine.IEC104Enforcement(),
+			IPv4Forwarding:        netcfg.ReadIPv4ForwardingStatus(),
+		})
 	}
-	writeJSON(w, resp)
 }
 
 func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
@@ -344,77 +364,25 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	}
 }
 
-func configHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, simMgr *simulationManager) http.HandlerFunc {
-	var current config.DataPlaneConfig
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, current)
-			return
-		case http.MethodPost:
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "failed to read body", http.StatusBadRequest)
-				return
-			}
-			var dp config.DataPlaneConfig
-			if err := json.Unmarshal(body, &dp); err != nil {
-				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-				return
-			}
-			current = dp
-			var excl []engine.DPIExclusion
-			for _, e := range dp.DPIExclusions {
-				excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
-			}
-			newEngine, err := engine.New(engine.Config{
-				Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
-				OnError: func(err error) {
-					logger.Errorf("data plane capture error: %v", err)
-				},
-				Enforce:         engine.EnforceConfig{Enabled: dp.Enforcement, TableName: firstNonEmpty(dp.EnforceTable, "containd"), Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(firstNonEmpty(dp.EnforceTable, "containd"))},
-				InspectAll:      dp.DPIMock,
-				DPIEnabled:      dp.DPIEnabled,
-				DPIMode:         dp.DPIMode,
-				DPIProtocols:    dp.DPIProtocols,
-				DPIICSProtocols: dp.DPIICSProtocols,
-				DPIExclusions:   excl,
-				NFLogGroup:      dp.NFLogGroup,
-				NFQueueGroup:    dp.NFQueueGroup,
-			})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			dpEngine.Reconfigure(newEngine)
-			go func() {
-				if err := dpEngine.Start(context.Background()); err != nil {
-					logger.Errorf("capture start failed: %v", err)
-				}
-			}()
-			if dp.DPIMock {
-				simMgr.stop()
-				simMgr.start(nil)
-			} else {
-				simMgr.stop()
-			}
-			writeJSON(w, map[string]any{"status": "configured"})
-			return
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-	}
-}
-
 type simulationManager struct {
 	dpEngine *engine.Engine
 	logger   *zap.SugaredLogger
-	cancel   context.CancelFunc
-	running  bool
+
+	mu      sync.Mutex // the config and simulation handlers call in concurrently
+	cancel  context.CancelFunc
+	running bool
+	runs    int // simulation starts, so a restart is observable
+}
+
+func (sm *simulationManager) isRunning() bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.running
 }
 
 func (sm *simulationManager) start(subnets []synth.Subnet) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	if sm.running {
 		return
 	}
@@ -426,11 +394,14 @@ func (sm *simulationManager) start(subnets []synth.Subnet) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sm.cancel = cancel
 	sm.running = true
+	sm.runs++
 	sm.logger.Infof("simulation started (%d subnets)", len(cfg.Subnets))
 	go synth.Run(ctx, sm.dpEngine.Events(), cfg)
 }
 
 func (sm *simulationManager) stop() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	if !sm.running || sm.cancel == nil {
 		return
 	}
@@ -444,7 +415,7 @@ func simulationHandler(sm *simulationManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, map[string]any{"running": sm.running})
+			writeJSON(w, map[string]any{"running": sm.isRunning()})
 		case http.MethodPost:
 			var req struct {
 				Action  string         `json:"action"`

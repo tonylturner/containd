@@ -5,6 +5,7 @@ package mgmtapp
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -31,8 +32,7 @@ type sshRuntimeConfig struct {
 	baseURL       string
 }
 
-func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex) (string, bool) {
-	cfg, _ := store.Load(context.Background())
+func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error)) (string, bool) {
 	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
 
 	opts := sshserver.Options{
@@ -63,6 +63,9 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 	srv, err := sshserver.New(opts)
 	if err != nil {
 		logger.Warnf("ssh disabled: %v", err)
+		if optionalFault != nil {
+			optionalFault(fmt.Errorf("ssh disabled: %w", err))
+		}
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
@@ -74,8 +77,11 @@ func startSSH(logger *zap.SugaredLogger, store config.Store, userStore users.Sto
 	}
 
 	go func() {
-		if err := srv.ListenAndServe(context.Background()); err != nil {
+		if err := srv.ListenAndServe(ctx); err != nil {
 			logger.Errorf("ssh server exited: %v", err)
+			if optionalFault != nil {
+				optionalFault(fmt.Errorf("ssh %s: %w", rt.sshAddr, err))
+			}
 		}
 	}()
 	logger.Infof("ssh enabled on %s (admin only)", rt.sshAddr)

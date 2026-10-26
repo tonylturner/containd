@@ -78,11 +78,14 @@ shellcheck_targets=(
     scripts/coverage-report.sh
     scripts/dev-verify.sh
     scripts/perf-baseline.sh
+    scripts/preflight-iec104.sh
     scripts/quickstart.sh
     scripts/semgrep-verify.sh
     scripts/smoke-dpi.sh
     scripts/smoke-forward.sh
+    scripts/smoke-iec104.sh
     scripts/smoketest
+    test/iec104/capture/capture.sh
 )
 
 cd "$repo_root"

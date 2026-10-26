@@ -1,6 +1,11 @@
 **/.git
 **/.DS_Store
 
+# build/ working files (specs, smoke results, local tools)
+build/*
+!build/Dockerfile.mgmt
+!build/Dockerfile.engine
+
 # Go build artifacts
 **/bin
 **/dist

@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -61,7 +62,7 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 	t.Run("health", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
-		healthHandler(rec, req)
+		healthHandler(dp, nil)(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d", rec.Code)
 		}
@@ -71,6 +72,13 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 		}
 		if out.Status != "ok" || out.Component != "engine" {
 			t.Fatalf("unexpected health response: %#v", out)
+		}
+		if out.IPv4Forwarding != netcfg.ReadIPv4ForwardingStatus() {
+			t.Fatalf("ipv4Forwarding = %q, want %q", out.IPv4Forwarding, netcfg.ReadIPv4ForwardingStatus())
+		}
+		// No IEC104 rule is loaded: inactive with no fault (K6).
+		if out.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: false, Healthy: true}) {
+			t.Fatalf("iec104Enforcement = %+v", out.IEC104Enforcement)
 		}
 	})
 

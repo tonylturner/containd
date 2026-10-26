@@ -18,6 +18,7 @@ import (
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/identity"
@@ -28,13 +29,15 @@ import (
 )
 
 type Options struct {
-	Combined bool
+	Reservation *mgmtpath.Reservation
+	Combined    bool
 }
 
 type mgmtStores struct {
 	store      config.Store
 	auditStore audit.Store
 	userStore  users.Store
+	bootEvent  *dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -50,6 +53,8 @@ type mgmtListenerConfig struct {
 	allowedOrigins      []string
 	tlsCert             string
 	tlsKey              string
+	optionalFault       func(error)
+	reservedHTTPAddr    string
 }
 
 func Run(ctx context.Context, opts Options) error {
@@ -59,7 +64,16 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	stores, cfg, err := initMgmtStores(logger)
+	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
+		return err
+	}
+	if err := validateReservedEnvironment(opts.Reservation); err != nil {
+		return err
+	}
+	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
+		return err
+	}
+	stores, cfg, err := initMgmtStores(logger, opts.Reservation)
 	if err != nil {
 		return err
 	}
@@ -67,9 +81,21 @@ func Run(ctx context.Context, opts Options) error {
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
 
-	listenerCfg, err := resolveMgmtListenerConfig(logger, cfg)
+	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
+	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
+		return err
+	}
+	listenerFaults := &bootListenerFaults{logger: logger}
+	var optionalFault func(error)
+	if opts.Reservation != nil {
+		optionalFault = listenerFaults.record
+	}
+	listenerCfg, err := resolveMgmtListenerConfig(logger, runtimeCfg, optionalFault)
 	if err != nil {
 		return err
+	}
+	if opts.Reservation != nil {
+		listenerCfg.reservedHTTPAddr = net.JoinHostPort(opts.Reservation.Local.Addr().String(), fmt.Sprint(opts.Reservation.Port))
 	}
 
 	var engineClient httpapi.EngineClient
@@ -77,39 +103,39 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := services.NewManager(services.ManagerOptions{})
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver)
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list))
 	// Best-effort initial service render on startup.
-	if cfg, err := stores.store.Load(context.Background()); err == nil {
+	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
 			logger.Warnf("failed to apply initial service config: %v", applyErr)
 		}
 	}
-	if serviceManager != nil {
-		serviceManager.SetEventLister(func(limit int) []dpevents.Event {
-			var out []dpevents.Event
-			type eventLister interface {
-				ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+	serviceManager.SetEventLister(func(limit int) []dpevents.Event {
+		var out []dpevents.Event
+		type eventLister interface {
+			ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+		}
+		if ec, ok := engineClient.(eventLister); ok && ec != nil {
+			if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
+				out = append(out, evs...)
 			}
-			if ec, ok := engineClient.(eventLister); ok && ec != nil {
-				if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
-					out = append(out, evs...)
-				}
-			}
-			out = append(out, serviceManager.ListTelemetryEvents(limit)...)
-			return out
-		})
-		serviceManager.StartAVWorker(context.Background())
-	}
+		}
+		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+		return out
+	})
+	serviceManager.StartAVWorker(context.Background())
 	serveStaticUI(router)
+	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
+	defer stopEngineSync()
 
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
-	handler := mgmtAccessHandler(stores.store, ipIndex, router)
+	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(logger, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
+	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault)
 	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 
@@ -138,19 +164,22 @@ func validateJWTSecret(logger *zap.SugaredLogger) error {
 	return nil
 }
 
-func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, error) {
-	stores := mgmtStores{
-		store:      mustInitStore(),
-		auditStore: mustInitAuditStore(),
-		userStore:  mustInitUsersStore(),
+func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtStores, *config.Config, error) {
+	store, err := initStore(r)
+	if err != nil {
+		return mgmtStores{}, nil, err
 	}
-	ensureDefaultConfig(logger, stores.store)
-	_ = stores.userStore.EnsureDefaultAdmin(context.Background())
+	stores := mgmtStores{store: store}
+	// Stored conflicts are recovery state, never a reason to remove management.
+	fail := func(err error) (mgmtStores, *config.Config, error) { store.Close(); return mgmtStores{}, nil, err }
+	if err := ensureDefaultConfig(logger, store); err != nil {
+		return fail(err)
+	}
+	cfg, err := store.Load(context.Background())
+	if err != nil {
+		return fail(err)
+	}
 
-	cfg, err := stores.store.Load(context.Background())
-	if err != nil && !errors.Is(err, config.ErrNotFound) {
-		logger.Warnf("failed to load config on startup: %v", err)
-	}
 	// Repair stale interface.device bindings before the HTTP server begins
 	// serving traffic. Without this, mgmtAccessHandler reads the stored
 	// config with device fields pointing at kernel devices the OS may have
@@ -166,13 +195,40 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 	// authoritative determinism source (see CONTAIND_AUTO_*_SUBNET env vars
 	// + assignBySubnet); we're not changing that, just making sure it runs.
 	if cfg != nil {
-		blankDefaultInterfaceDevices(cfg)
-		if httpapi.AutoBindDefaultInterfaceDevices(cfg) {
-			if saveErr := stores.store.Save(context.Background(), cfg); saveErr != nil {
-				logger.Warnf("failed to persist autobound interface devices on startup: %v", saveErr)
+		repaired, repairErr := config.Repair(context.Background(), stores.store, func(next *config.Config) error {
+			// Keep the old bindings if discovery cannot produce a replacement.
+			devices := make([]string, len(next.Interfaces))
+			for i := range next.Interfaces {
+				devices[i] = next.Interfaces[i].Device
 			}
+			blankDefaultInterfaceDevicesExcept(next, r)
+			if !httpapi.AutoBindDefaultInterfaceDevicesReserved(next, r) {
+				for i := range next.Interfaces {
+					next.Interfaces[i].Device = devices[i]
+				}
+			}
+			return nil
+		})
+		if repairErr != nil {
+			logger.Warnf("boot interface repair: %v", repairErr)
+		} else {
+			cfg = repaired
 		}
 	}
+	stores.auditStore = mustInitAuditStore()
+	stores.userStore = mustInitUsersStore()
+	if err := stores.userStore.EnsureDefaultAdmin(context.Background()); err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	event, err := recordReservationBootDecision(logger, stores, cfg, r)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	stores.bootEvent = event
 	return stores, cfg, nil
 }
 
@@ -180,7 +236,9 @@ func initMgmtStores(logger *zap.SugaredLogger) (mgmtStores, *config.Config, erro
 // logical interface (wan/dmz/lan1..lan6) so the subsequent
 // AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
 // Non-default interfaces (custom user-named) are left untouched.
-func blankDefaultInterfaceDevices(cfg *config.Config) {
+func blankDefaultInterfaceDevices(cfg *config.Config) { blankDefaultInterfaceDevicesExcept(cfg, nil) }
+
+func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservation) {
 	if cfg == nil {
 		return
 	}
@@ -188,19 +246,33 @@ func blankDefaultInterfaceDevices(cfg *config.Config) {
 	for _, name := range config.DefaultPhysicalInterfaces() {
 		defaults[name] = struct{}{}
 	}
+	// A matching device name alone is not ownership after NIC renumbering:
+	// an addressed default row may now point at the reserved NIC by accident.
+	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
 	for i := range cfg.Interfaces {
+		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
+			// Structural validity alone cannot establish ownership: on a
+			// partial appliance an unaddressed ordinary row may now carry the
+			// reserved NIC's old ethN name. Explicit subnet authority wins.
+			subnet := httpapi.DefaultInterfaceSubnetOverride(cfg.Interfaces[i].Name)
+			_, network, err := net.ParseCIDR(subnet)
+			if subnet == "" || err == nil && network.Contains(net.IP(r.Local.Addr().AsSlice())) {
+				continue
+			}
+		}
 		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
 			cfg.Interfaces[i].Device = ""
 		}
 	}
 }
 
-func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config) (mgmtListenerConfig, error) {
+func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {
 	listenerCfg := mgmtListenerConfig{
-		httpAddr:    resolveHTTPAddr(cfg),
-		httpsAddr:   resolveHTTPSAddr(cfg),
-		enableHTTP:  boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
-		enableHTTPS: boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		httpAddr:      resolveHTTPAddr(cfg),
+		httpsAddr:     resolveHTTPSAddr(cfg),
+		enableHTTP:    boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
+		enableHTTPS:   boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		optionalFault: optionalFault,
 	}
 	listenerCfg.httpLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpAddr)
 	listenerCfg.httpsLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpsAddr)
@@ -218,6 +290,9 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config) (m
 	tlsCert, tlsKey, err := ensureSelfSignedTLSFiles(listenerCfg.tlsCert, listenerCfg.tlsKey, detectIPs())
 	if err != nil {
 		logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
+		if listenerCfg.optionalFault != nil {
+			listenerCfg.optionalFault(fmt.Errorf("https TLS certificate: %w", err))
+		}
 		listenerCfg.enableHTTPS = false
 		return listenerCfg, nil
 	}
@@ -268,7 +343,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*
 		if listenerCfg.redirectHTTPToHTTPS {
 			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
 		}
-		srv, lns, err := buildHTTPServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr)
+		srv, lns, err := buildListenerServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
 		if err != nil {
 			return nil, nil, errChPrefix("http", err)
 		}
@@ -276,8 +351,11 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*
 		listeners = append(listeners, lns...)
 	}
 	if listenerCfg.enableHTTPS {
-		srv, lns, err := buildHTTPSServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey))
+		srv, lns, err := buildListenerServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
 		if err != nil {
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
 			return nil, nil, errChPrefix("https", err)
 		}
 		servers = append(servers, srv...)

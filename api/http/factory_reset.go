@@ -17,7 +17,7 @@ type factoryResetRequest struct {
 	Confirm string `json:"confirm"`
 }
 
-func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.HandlerFunc {
+func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req factoryResetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -29,28 +29,36 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 			return
 		}
 
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
+		def := ApplianceDefaults(config.ReservationForStore(cfgStore))
+		// Validate the exact replacement before revoking sessions or wiping any
+		// database. An incompatible factory default is an explicit refusal.
+		if err := config.ValidateForStore(cfgStore, def); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		ctx := c.Request.Context()
 
 		// Log intent before wiping anything (best-effort). Note: the audit DB itself is wiped
 		// during this operation, so only the final "completed" record is guaranteed to remain.
 		auditLog(c, audit.Record{Action: "system.factory_reset.requested", Target: "all", Result: "requested"})
 
-		// Wipe users and sessions, then re-seed default admin.
-		if userStore == nil {
-			apiError(c, http.StatusServiceUnavailable, "users store unavailable")
+		// Check all store capabilities before any destructive mutation.
+		if userStore == nil || cfgStore == nil {
+			apiError(c, http.StatusServiceUnavailable, "reset stores unavailable")
 			return
 		}
-
-		// Revoke the current session so clients are forced to re-authenticate immediately,
-		// even if they keep sending a cached token/cookie.
+		us, usersOK := userStore.(*users.SQLiteStore)
+		cs, configOK := cfgStore.(*config.SQLiteStore)
+		if !usersOK || !configOK {
+			apiError(c, http.StatusNotImplemented, "factory reset requires SQLite stores")
+			return
+		}
+		// Revoke the current session even if the caller keeps its token.
 		if sid := strings.TrimSpace(c.GetString(ctxSessionKey)); sid != "" {
 			_ = userStore.RevokeSession(ctx, sid)
-		}
-
-		us, ok := userStore.(*users.SQLiteStore)
-		if !ok {
-			apiError(c, http.StatusNotImplemented, "factory reset not supported for this users store")
-			return
 		}
 		if err := us.WipeAll(ctx); err != nil {
 			internalError(c, err)
@@ -62,36 +70,21 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store) gin.Handl
 		}
 
 		// Wipe config store and re-seed defaults.
-		if cfgStore == nil {
-			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
-			return
-		}
-		cs, ok := cfgStore.(*config.SQLiteStore)
-		if !ok {
-			apiError(c, http.StatusNotImplemented, "factory reset not supported for this config store")
-			return
-		}
 		if err := cs.WipeAll(ctx); err != nil {
 			internalError(c, err)
 			return
 		}
 
-		def := config.DefaultConfig()
-		def.System.Hostname = "containd"
-		def.System.Mgmt.ListenAddr = ":8080"
-		def.System.Mgmt.HTTPListenAddr = ":8080"
-		def.System.Mgmt.HTTPSListenAddr = ":8443"
-		t := true
-		def.System.Mgmt.EnableHTTP = &t
-		def.System.Mgmt.EnableHTTPS = &t
-		def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-		def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-		def.System.SSH.ListenAddr = ":2222"
-		def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 		if err := cfgStore.Save(ctx, def); err != nil {
 			internalError(c, err)
 			return
 		}
+		warnings, err := applyRunningConfigLocked(ctx, cfgStore, engine, services, nil)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		setWarningHeader(c, warnings)
 
 		// Wipe audit log (after the reset) and then write a completion record.
 		if storeVal, ok := c.Get("auditStore"); ok && storeVal != nil {

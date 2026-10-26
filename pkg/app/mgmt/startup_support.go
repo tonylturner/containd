@@ -9,23 +9,25 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
-
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"go.uber.org/zap"
 )
 
 func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
 	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
-	if engineURL == "" && opts.Combined {
+	if engineURL == "" && (opts.Combined || opts.Reservation != nil) {
 		engineAddr := common.EnvTrimmed("CONTAIND_ENGINE_ADDR", "")
 		if engineAddr == "" {
 			engineAddr = ":8081"
@@ -257,71 +259,53 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) {
+func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 	if store == nil {
-		return
+		return nil
 	}
 	cfg, err := store.Load(context.Background())
 	if err == nil && cfg != nil {
-		changed := false
-		if strings.TrimSpace(cfg.System.Hostname) == "" {
-			cfg.System.Hostname = "containd"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.ListenAddr) == "" {
-			cfg.System.Mgmt.ListenAddr = ":8080"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.HTTPListenAddr) == "" {
-			cfg.System.Mgmt.HTTPListenAddr = ":8080"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) == "" {
-			cfg.System.Mgmt.HTTPSListenAddr = ":8443"
-			changed = true
-		}
-		if cfg.System.Mgmt.EnableHTTP == nil {
-			cfg.System.Mgmt.EnableHTTP = boolPtr(true)
-			changed = true
-		}
-		if cfg.System.Mgmt.EnableHTTPS == nil {
-			cfg.System.Mgmt.EnableHTTPS = boolPtr(true)
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.TLSCertFile) == "" {
-			cfg.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-			changed = true
-		}
-		if strings.TrimSpace(cfg.System.Mgmt.TLSKeyFile) == "" {
-			cfg.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-			changed = true
-		}
-		if changed {
-			if err := store.Save(context.Background(), cfg); err != nil {
-				logger.Errorf("failed to backfill default config values: %v", err)
+		_, repairErr := config.Repair(context.Background(), store, func(next *config.Config) error {
+			if strings.TrimSpace(next.System.Hostname) == "" {
+				next.System.Hostname = "containd"
 			}
+			if strings.TrimSpace(next.System.Mgmt.ListenAddr) == "" {
+				next.System.Mgmt.ListenAddr = ":8080"
+			}
+			if strings.TrimSpace(next.System.Mgmt.HTTPListenAddr) == "" {
+				next.System.Mgmt.HTTPListenAddr = ":8080"
+			}
+			if strings.TrimSpace(next.System.Mgmt.HTTPSListenAddr) == "" {
+				next.System.Mgmt.HTTPSListenAddr = ":8443"
+			}
+			if next.System.Mgmt.EnableHTTP == nil {
+				next.System.Mgmt.EnableHTTP = boolPtr(true)
+			}
+			if next.System.Mgmt.EnableHTTPS == nil {
+				next.System.Mgmt.EnableHTTPS = boolPtr(true)
+			}
+			if strings.TrimSpace(next.System.Mgmt.TLSCertFile) == "" {
+				next.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+			}
+			if strings.TrimSpace(next.System.Mgmt.TLSKeyFile) == "" {
+				next.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+			}
+			return nil
+		})
+		if repairErr != nil {
+			logger.Warnf("backfill default config: %v", repairErr)
 		}
-		return
+		return nil
 	}
 	if !errors.Is(err, config.ErrNotFound) {
-		logger.Warnf("failed to load config (continuing): %v", err)
-		return
+		return fmt.Errorf("load default config: %w", err)
 	}
-	def := config.DefaultConfig()
-	config.ApplyBootstrapEnvDefaults(def)
-	def.System.Hostname = "containd"
-	def.System.Mgmt.ListenAddr = ":8080"
-	def.System.Mgmt.HTTPListenAddr = ":8080"
-	def.System.Mgmt.HTTPSListenAddr = ":8443"
-	def.System.Mgmt.EnableHTTP = boolPtr(true)
-	def.System.Mgmt.EnableHTTPS = boolPtr(true)
-	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+	def := httpapi.ApplianceDefaults(config.ReservationForStore(store))
 	if err := store.Save(context.Background(), def); err != nil {
-		logger.Errorf("failed to initialize default config: %v", err)
-		return
+		return fmt.Errorf("initialize default config: %w", err)
 	}
 	logger.Info("initialized default config")
+	return nil
 }
 
 func ensureLoopbackHTTPAddr(addr string) string {
@@ -336,5 +320,73 @@ func ensureLoopbackHTTPAddr(addr string) string {
 		return addr
 	default:
 		return net.JoinHostPort("127.0.0.1", port)
+	}
+}
+
+// validateReservedStartup checks effective environment-resolved listeners as well
+// as the pure configured aliases checked by ValidateManagementReservation.
+func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error {
+	if r == nil {
+		return nil
+	}
+	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
+		return err
+	}
+	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerConflictsHTTP(resolveHTTPSAddr(cfg), resolveHTTPAddr(cfg), true, r) {
+		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
+	}
+	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
+	if ssh == "" && cfg != nil {
+		ssh = cfg.System.SSH.ListenAddr
+	}
+	if ssh == "" {
+		ssh = ":2222"
+	}
+	if config.ManagementListenerConflictsHTTP(ssh, resolveHTTPAddr(cfg), false, r) {
+		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
+	}
+	return nil
+}
+
+// No management-owned service may start until the engine has subscribed and
+// completed its initial guard scan. This also orders split-process startup.
+func waitForReservedEngine(ctx context.Context, base string, r *mgmtpath.Reservation) error {
+	if r == nil {
+		return nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "http" || r.ValidateEngineBind(u.Host) != nil {
+		return fmt.Errorf("reserved management path requires a loopback HTTP engine URL")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	health := managementGuardHealth(base)
+	var last error
+	for {
+		h, err := health(ctx)
+		if err == nil {
+			same := len(h.Sources) == len(r.Sources)
+			for _, source := range r.Sources {
+				found := false
+				for _, s := range h.Sources {
+					if s == source.String() {
+						found = true
+					}
+				}
+				same = same && found
+			}
+			if h.Active && h.Error == "" && h.Device == r.Device && h.Local == r.Local.String() && h.Port == r.Port && same {
+				return nil
+			}
+			last = fmt.Errorf("engine reservation guard is not ready or does not match startup authority")
+		} else {
+			last = err
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("reserved management path engine guard: %w: %v", ctx.Err(), last)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }

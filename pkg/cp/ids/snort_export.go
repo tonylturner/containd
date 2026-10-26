@@ -5,6 +5,7 @@ package ids
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,14 +19,21 @@ func ExportSnortRule(rule config.IDSRule) (string, error) {
 	if rule.SourceFormat == "snort" && rule.RawSource != "" {
 		return rule.RawSource, nil
 	}
+	if err := checkExportableProto(rule); err != nil {
+		return "", err
+	}
 	return buildSnortRule(rule), nil
 }
 
-// ExportSnortRules converts multiple IDSRules to Snort .rules format.
+// ExportSnortRules converts multiple IDSRules to Snort .rules format. Rules
+// whose protocol it cannot express are skipped.
 func ExportSnortRules(rules []config.IDSRule) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, rule := range rules {
 		s, err := ExportSnortRule(rule)
+		if errors.Is(err, ErrUnexportableProto) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

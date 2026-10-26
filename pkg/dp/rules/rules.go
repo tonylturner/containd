@@ -27,6 +27,11 @@ type LocalServiceRule struct {
 	Zone   string
 	Proto  string // tcp|udp
 	Port   int
+	// RecoverUnbound is set only for a management listener with logical grants.
+	// Resolve in the engine namespace; an empty resolved set MUST omit the rule,
+	// never turn it into an unconstrained allow.
+	RecoverUnbound bool
+	DeniedIfaces   []string
 }
 
 type NATConfig struct {
@@ -85,7 +90,7 @@ type Protocol struct {
 
 // ICSPredicate captures ICS-specific fields for all supported protocols.
 type ICSPredicate struct {
-	Protocol      string   // modbus, dnp3, cip, s7comm, mms, bacnet, opcua
+	Protocol      string   // modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104
 	FunctionCode  []uint8  // function/service codes (all protocols)
 	UnitID        *uint8   // optional Modbus unit id
 	Addresses     []string // address/register ranges as strings
@@ -94,4 +99,18 @@ type ICSPredicate struct {
 	WriteOnly     bool     // write-only class
 	Direction     string   // "request", "response", or "" (both)
 	Mode          string   // "learn" or "enforce"
+
+	// IEC 60870-5-104 predicates. The Snapshot is JSON-marshalled to the
+	// engine, so TypeIDs is []int: []uint8 would encode as base64.
+	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255
+	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
+	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
+	IOA     []IOARange `json:"ioa,omitempty"`
+}
+
+// IOARange is a closed IEC104 information object address range,
+// endpoints 0..16777215.
+type IOARange struct {
+	Start uint32 `json:"start"`
+	End   uint32 `json:"end"`
 }

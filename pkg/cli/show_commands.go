@@ -205,39 +205,6 @@ func showFlows(api *API) Command {
 	}
 }
 
-func showEvents(api *API) Command {
-	return func(ctx context.Context, out io.Writer, args []string) error {
-		var events []dpevents.Event
-		if err := api.getJSON(ctx, "/api/v1/events", &events); err != nil {
-			return err
-		}
-		if out == nil {
-			return nil
-		}
-		if len(events) == 0 {
-			fmt.Fprintln(out, "No events.")
-			return nil
-		}
-		t := newTable("ID", "TIME", "FLOW", "PROTO", "KIND", "SRC", "DST", "ATTRS")
-		for _, ev := range events {
-			src := fmt.Sprintf("%s:%d", ev.SrcIP, ev.SrcPort)
-			dst := fmt.Sprintf("%s:%d", ev.DstIP, ev.DstPort)
-			t.addRow(
-				fmt.Sprintf("%d", ev.ID),
-				fmtTime(ev.Timestamp),
-				truncate(ev.FlowID, 12),
-				ev.Proto,
-				ev.Kind,
-				truncate(src, 22),
-				truncate(dst, 22),
-				attrsSummary(ev.Attributes, 60),
-			)
-		}
-		t.render(out)
-		return nil
-	}
-}
-
 func showZones(store config.Store) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		cfg, err := store.Load(ctx)
@@ -257,6 +224,16 @@ func showZones(store config.Store) Command {
 	}
 }
 
+func interfaceMode(iface config.Interface) string {
+	if iface.AddressMode != "" {
+		return iface.AddressMode
+	}
+	if len(iface.Addresses) > 0 {
+		return "static"
+	}
+	return "external"
+}
+
 func showInterfaces(store config.Store) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		cfg, err := store.Load(ctx)
@@ -271,7 +248,7 @@ func showInterfaces(store config.Store) Command {
 		for _, iface := range cfg.Interfaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
-			mode := firstNonEmpty(iface.AddressMode, "static")
+			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
 				if a, err := osInterfaceAddrs(effectiveDev); err == nil && len(a) > 0 {
@@ -342,7 +319,7 @@ func showInterfacesAPI(api *API) Command {
 		for _, iface := range ifaces {
 			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
 			dev := firstNonEmpty(iface.Device, "—")
-			mode := firstNonEmpty(iface.AddressMode, "static")
+			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
 				if st, ok := stateByName[effectiveDev]; ok && len(st.Addrs) > 0 {

@@ -44,13 +44,13 @@ CISA's examples also make several expectations clear:
 
 | Commitment | Status | containd today |
 | ---------- | ------ | -------------- |
-| Multi-factor authentication | Done | Optional app-based TOTP MFA is built in for local accounts, including admin-enforced MFA with a 7-day grace period. |
+| Multi-factor authentication | Partial | Optional app-based TOTP MFA is built in for web sign-in to local accounts, including admin-enforced MFA with a 7-day grace period. SSH does not yet enforce MFA or forced password change ([roadmap](roadmap.md) item 1.2). |
 | Reducing default passwords | Partial | Fresh installs still use a universal bootstrap password, but password change is mandatory on first login and the caveat is documented openly. |
 | Reducing an entire class of vulnerability | Partial | containd already emphasizes safer defaults, signed releases, SBOMs, scanning, and defensive validation, but this remains an ongoing engineering program rather than a finished milestone. |
 | Increasing customer installation of security patches | Partial | Releases, signed images, SBOMs, and update policy guidance are in place, but patch adoption still depends on operator action and is not measured centrally. |
 | Publishing a vulnerability disclosure policy | Done | Public `SECURITY.md` and machine-readable `security.txt` are implemented and shipped. |
 | Improving CVE transparency and completeness | Partial | containd now documents a GitHub advisory/CVE/CSAF process, but long-term completeness depends on continued execution as real advisories are published. |
-| Increasing the ability for customers to gather evidence of intrusions | Done | Audit logs, events, DPI telemetry, syslog/export, and logging guidance are part of the base product. |
+| Increasing the ability for customers to gather evidence of intrusions | Partial | Audit logs, events, DPI telemetry, syslog forwarding, and logging guidance are part of the base product. Audit coverage of account changes, syslog delivery of mixed event sources, and the configured SIEM export still have gaps ([roadmap](roadmap.md) items 1.9 and 3.3). |
 
 ## containd's Position
 
@@ -70,7 +70,7 @@ Why that exists today:
 
 - containd is often used in offline lab, classroom, demo, and containerized training environments.
 - instructors and students need a predictable first-login path that works even when there is no external identity provider, mail service, or secret-distribution system.
-- containd already enforces password change on first login and supports replacing password-based access with stronger controls such as SSH keys and, in the roadmap below, app-based MFA.
+- containd already enforces password change on first login and supports replacing password-based access with stronger controls such as SSH keys and app-based TOTP MFA for web sign-in.
 
 Why this is still called out:
 
@@ -95,6 +95,8 @@ Current alignment:
 Current caveat:
 
 - the current MFA implementation is local-account TOTP only;
+- MFA and forced password change apply to web sign-in; SSH sign-in does not enforce them yet;
+- a password or MFA change does not yet revoke sessions that already exist;
 - SMS is intentionally not supported;
 - broader external identity integration and richer auth policy are still future work.
 
@@ -290,23 +292,13 @@ The goal is not only to teach traffic segmentation. It is also to train students
 
 ## Roadmap
 
-### Near Term
+The security roadmap is part of the single [Product Roadmap](roadmap.md). The
+items that close the caveats on this page are:
 
-- gather operational feedback on the local-account TOTP MFA flow and keep it lightweight
-- keep the disclosure, CSAF, logging, and update-policy documents current as releases and advisories evolve
-- make sure the first real public advisories use the documented GitHub advisory, release-note, and CSAF process consistently
-
-### Medium Term
-
-- support modern external authentication, especially OIDC
-- expand beyond the current `admin` and `view` roles into more robust role management
-- improve identity and auth policy controls so classroom and enterprise-style deployments can both model stronger security postures
-
-### Longer Term
-
-- evaluate a stronger per-instance bootstrap path that preserves first-access reliability for labs while reducing dependence on a universal bootstrap password
-- continue improving the public evidence trail around advisories, patching, and measurable security progress
-- revisit whether patch-adoption guidance can be made more prescriptive as the supported deployment modes stabilize
+- one account-assurance contract for web, SSH, and CLI (item 1.2);
+- a strict deployment profile with a per-instance bootstrap instead of the universal bootstrap password (item 1.3);
+- complete audit evidence with visible delivery failures (item 1.9);
+- external identity (OIDC) and richer, resource-scoped roles (Stage 2 and Stage 4).
 
 ## Bottom Line
 

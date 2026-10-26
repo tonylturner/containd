@@ -8,16 +8,19 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type ctxKey int
 
 const localIPKey ctxKey = 1
+const localAddrKey ctxKey = 2
 
 func connContextWithLocalIP(ctx context.Context, c net.Conn) context.Context {
 	if c == nil {
@@ -30,6 +33,10 @@ func connContextWithLocalIP(ctx context.Context, c net.Conn) context.Context {
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return ctx
+	}
+	local, err := netip.ParseAddrPort(c.LocalAddr().String())
+	if err == nil {
+		ctx = context.WithValue(ctx, localAddrKey, local)
 	}
 	return context.WithValue(ctx, localIPKey, ip)
 }
@@ -46,35 +53,31 @@ func localIPFromRequest(r *http.Request) net.IP {
 	return nil
 }
 
-func buildHTTPServers(handler http.Handler, addr string, loopbackAddr string) ([]*http.Server, []net.Listener, error) {
+// In reserved mode the primary HTTP bind serves the reserved endpoint and is
+// mandatory. A wildcard may fail because a different address is occupied: bind
+// the reserved endpoint independently in that case. TLS and convenience
+// loopback sockets are independent best effort.
+func buildListenerServers(handler http.Handler, addr, loopbackAddr string, tlsCfg *tls.Config, reservedAddr string, optionalFault func(error)) ([]*http.Server, []net.Listener, error) {
 	var servers []*http.Server
 	var listeners []net.Listener
 	addrs := []string{addr}
 	if loopbackAddr != "" && loopbackAddr != addr {
 		addrs = append(addrs, loopbackAddr)
 	}
-	for _, a := range addrs {
+	for i, a := range addrs {
 		ln, err := net.Listen("tcp", a)
-		if err != nil {
-			return nil, nil, err
+		if err != nil && i == 0 && tlsCfg == nil && reservedAddr != "" && a != reservedAddr && optionalFault != nil {
+			optionalFault(err)
+			ln, err = net.Listen("tcp", reservedAddr)
 		}
-		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP}
-		servers = append(servers, srv)
-		listeners = append(listeners, ln)
-	}
-	return servers, listeners, nil
-}
-
-func buildHTTPSServers(handler http.Handler, addr string, loopbackAddr string, tlsCfg *tls.Config) ([]*http.Server, []net.Listener, error) {
-	var servers []*http.Server
-	var listeners []net.Listener
-	addrs := []string{addr}
-	if loopbackAddr != "" && loopbackAddr != addr {
-		addrs = append(addrs, loopbackAddr)
-	}
-	for _, a := range addrs {
-		ln, err := net.Listen("tcp", a)
 		if err != nil {
+			if optionalFault != nil && (tlsCfg != nil || i > 0) {
+				optionalFault(err)
+				continue
+			}
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
 			return nil, nil, err
 		}
 		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP, TLSConfig: tlsCfg}
@@ -152,8 +155,14 @@ func (idx *ipInterfaceIndex) refresh() {
 	idx.lastLoaded = time.Now()
 }
 
-func mgmtAccessHandler(store config.Store, idx *ipInterfaceIndex, next http.Handler) http.Handler {
+func mgmtAccessHandler(store config.Store, idx *ipInterfaceIndex, reservation *mgmtpath.Reservation, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		local, _ := r.Context().Value(localAddrKey).(netip.AddrPort)
+		remote, err := netip.ParseAddrPort(r.RemoteAddr)
+		if r.TLS == nil && err == nil && reservation.Admits(remote, local) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := localIPFromRequest(r)
 		if ip == nil || ip.IsLoopback() {
 			next.ServeHTTP(w, r)

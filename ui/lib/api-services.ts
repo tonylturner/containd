@@ -1,4 +1,6 @@
+import { notifyConfigMutation } from "./config-events";
 import {
+  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -54,6 +56,7 @@ export const servicesAPI = {
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      notifyConfigMutation(res);
       return {
         ok: true,
         data: (await res.json()) as { status: string; file: string },
@@ -80,6 +83,7 @@ export const servicesAPI = {
       if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
       clearAuthExpired();
       if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+      notifyConfigMutation(res);
       return {
         ok: true,
         data: (await res.json()) as { status: string; file: string },
@@ -124,7 +128,7 @@ export const servicesAPI = {
       name,
     }),
   downloadOpenVPNClientURL: (name: string) =>
-    `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`,
+    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`),
   getWireGuardStatus: (iface?: string) =>
     getJSON<WireGuardStatus>(
       `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,

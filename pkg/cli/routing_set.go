@@ -26,6 +26,7 @@ func setRouteAddAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showRoutingAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -45,6 +46,7 @@ func setRouteDelAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showRoutingAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -64,6 +66,7 @@ func setIPRuleAddAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showRoutingAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -199,6 +202,7 @@ func setIPRuleDelAPI(api *API) Command {
 			return err
 		}
 		if out != nil {
+			fmt.Fprintln(out, stagedMessage)
 			_ = showRoutingAPI(api)(ctx, out, nil)
 		}
 		return nil
@@ -405,6 +409,7 @@ func deleteAllIPRulesForTable(ctx context.Context, out io.Writer, api *API, tabl
 		return err
 	}
 	if out != nil {
+		fmt.Fprintln(out, stagedMessage)
 		_ = showRoutingAPI(api)(ctx, out, nil)
 	}
 	return nil

@@ -87,7 +87,7 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
 	}
 	return nil
 }
@@ -165,7 +165,7 @@ func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Wr
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
 	}
 	return nil
 }
@@ -192,7 +192,21 @@ func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if out != nil {
-		_, _ = out.Write([]byte("ok\n"))
+		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
 	}
 	return nil
+}
+
+// Only persistent config edits are staged; operational and commit output stays unchanged.
+const stagedMessage = `staged; run "commit" to apply`
+
+func writeMutationResult(out io.Writer, state string) {
+	if out == nil {
+		return
+	}
+	if state == "staged" {
+		fmt.Fprintln(out, stagedMessage)
+	} else {
+		fmt.Fprintln(out, "ok")
+	}
 }

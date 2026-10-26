@@ -8,6 +8,7 @@ export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   bacnet: { label: "BACnet/IP", port: 47808 },
   opcua: { label: "OPC UA", port: 4840 },
   mms: { label: "IEC 61850 MMS", port: 102 },
+  iec104: { label: "IEC 60870-5-104", port: 2404 },
 };
 
 export function zoneLabel(zone: Zone): string {

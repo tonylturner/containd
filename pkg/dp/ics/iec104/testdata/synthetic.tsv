@@ -1,0 +1,79 @@
+# Synthetic IEC 60870-5-104 APDUs for the iec104 decoder tests.
+#
+# Every vector is hand-built from the standard layouts, not captured:
+# IEC 60870-5-104 Ed.2.0 clause 5 (APCI) and the IEC 104 parameters (COT 2,
+# CA 2, IOA 3 octets), and IEC 60870-5-101 Ed.2.0 7.2 (data unit identifier,
+# information elements) and 7.3 (ASDUs). "104 time-tagged" marks the command
+# ASDUs with CP56Time2a that IEC 104 adds (58-64, 107); monitor types 30-37
+# also carry CP56Time2a. Clause numbers are to be verified against the
+# licensed text (spec §7.2). Captures from the RangerDanger lib60870 spike,
+# when they exist, go in a separate file and are labelled as captures.
+#
+# Format: one APDU stream per line, tab-separated:
+#   name  direction(c=client to server, s=server to client)  kinds  hex  reference
+# kinds lists the event kinds in order, or frame_error for bytes that cannot
+# be framed.
+startdt_act	c	apci	680407000000	104 cl.5 U-format STARTDT act
+startdt_con	s	apci	68040b000000	104 cl.5 U-format STARTDT con
+stopdt_act	c	apci	680413000000	104 cl.5 U-format STOPDT act
+testfr_act_server	s	apci	680443000000	104 cl.5 U-format TESTFR act (either side may test)
+testfr_con	c	apci	680483000000	104 cl.5 U-format TESTFR con
+s_frame	c	apci	680401000a00	104 cl.5 S-format N(R)=5
+gi_act	c	request	680e0000000064010600010000000014	101 7.3.4 C_IC_NA_1 QOI 20, COT 6
+gi_actcon	s	response	680e0000020064010700010000000014	101 7.3.4 C_IC_NA_1 COT 7
+gi_data_m_sp_na_1	s	response	680e00000000010114000100ea030001	101 7.3.1 M_SP_NA_1 SIQ, GI COT 20, trip IOA 1002
+gi_data_m_sp_na_1_sq	s	response,response	680f00000000018214000100ea03000190	101 7.3.1 M_SP_NA_1 SQ=1 SIQ objects, IOAs 1002 and 1003
+gi_data_m_dp_na_1_sq	s	response,response,response	681002000200038314000100e90300010282	101 7.3.1 M_DP_NA_1 SQ=1, DIQ, COT 20
+spont_m_st_na_1	s	response	680f00000000050103000100150500c290	101 7.3.1 M_ST_NA_1 VTI+QDS, negative value and transient
+m_bo_na_1	s	response	681200000000070103000100010000efbeadde90	101 7.3.1 M_BO_NA_1 BSI+QDS
+m_me_na_1	s	response	681000000000090103000100e90300feff10	101 7.3.1 M_ME_NA_1 normalized int16+QDS
+m_me_nb_1	s	response	6810000000000b0103000100ea0300d20440	101 7.3.1 M_ME_NB_1 scaled int16+QDS
+m_it_na_1	s	response	6812000000000f0103000100d10700feffffffe5	101 7.3.1 M_IT_NA_1 signed BCR and flags
+m_me_nd_1	s	response	680f00000000150103000100d20700ff7f	101 7.3.1 M_ME_ND_1 normalized int16 without quality
+gi_data_m_me_nc_1	s	response,response	681a040002000d0214000100d107000080664300d20700000080bf10	101 7.3.1 M_ME_NC_1 SQ=0, R32+QDS
+m_me_nc_1_nan	s	response	6812000000000d0103000100e903000000c07f00	101 7.3.1 M_ME_NC_1 R32 quiet NaN: value_invalid, not malformed (K8)
+gi_actterm	s	response	680e0600020064010a00010000000014	101 7.3.4 C_IC_NA_1 COT 10
+spont_m_sp_tb_1	s	response	6815000000001e0103000100ea03000129090f09070b1a	101 7.3.1 M_SP_TB_1 SIQ+CP56Time2a, trip IOA 1002
+spont_m_dp_tb_1	s	response	6815080002001f0103000100b90b000229090f09070b1a	101 7.3.1 M_DP_TB_1 DIQ+CP56Time2a 2026-11-07T09:15:02.345
+spont_m_st_tb_1	s	response	681600000000200103000100150500c29029090f09070b1a	101 7.3.1 M_ST_TB_1 VTI+QDS+CP56Time2a
+m_bo_tb_1	s	response	681900000000210103000100b90b00efbeadde9029090f09070b1a	101 7.3.1 M_BO_TB_1 BSI+QDS+CP56Time2a
+m_me_td_1	s	response	681700000000220103000100ba0b00fdff9029090f09070b1a	101 7.3.1 M_ME_TD_1 normalized int16+QDS+CP56Time2a
+m_me_te_1	s	response	681700000000230103000100bb0b00ea000029090f09070b1a	101 7.3.1 M_ME_TE_1 scaled int16+QDS+CP56Time2a
+m_me_tf_1	s	response	681900000000240103000100bc0b000000c03f1029090f09070b1a	101 7.3.1 M_ME_TF_1 R32+QDS+CP56Time2a
+m_it_tb_1	s	response	681900000000250103000100bd0b007b0000000529090f09070b1a	101 7.3.1 M_IT_TB_1 BCR+CP56Time2a
+spont_m_st_na_1_sq	s	response,response	681100000000058203000100150500c2900200	101 7.3.1 M_ST_NA_1 SQ=1, consecutive step-position objects
+c_dc_na_1_select	c	request	680e02000a002e0106000100d1070082	101 7.3.2 C_DC_NA_1 DCO S/E=1 ON
+c_dc_na_1_select_con	s	response	680e0a0004002e0107000100d1070082	101 7.3.2 C_DC_NA_1 COT 7
+c_dc_na_1_execute	c	request	680e04000c002e0106000100d1070002	101 7.3.2 C_DC_NA_1 DCO S/E=0 ON
+c_dc_na_1_negative_con	s	response	680e0c0006002e016e000100d1070002	101 7.3.2 C_DC_NA_1 COT 46 P/N=1
+c_sc_na_1	c	request	680e000000002d010600010089130081	101 7.3.2 C_SC_NA_1 SCO select ON
+c_rc_na_1	c	request	680e000000002f010600010071170002	101 7.3.2 C_RC_NA_1 RCO higher
+c_se_na_1	c	request	681000000000300106000100591b00004000	101 7.3.2 C_SE_NA_1 NVA+QOS
+c_se_nb_1	c	request	6810000000003101060001005a1b00d20480	101 7.3.2 C_SE_NB_1 SVA+QOS select
+c_se_nc_1	c	request	6812000000003201060001005b1b000000464200	101 7.3.2 C_SE_NC_1 R32+QOS
+c_se_nc_1_minus_inf	c	request	6812000000003201060001005b1b00000080ff80	101 7.3.2 C_SE_NC_1 R32 -Inf select: value_invalid, not malformed (K8)
+c_bo_na_1	c	request	681100000000330106000100411f0001000000	101 7.3.2 C_BO_NA_1 BSI, no select
+c_sc_ta_1	c	request	6815000000003a01060001008913000129090f09070b1a	104 time-tagged C_SC_TA_1 SCO+CP56Time2a
+c_dc_ta_1	c	request	6815000000003b0106000100d107008129090f09070b1a	104 time-tagged C_DC_TA_1 DCO+CP56Time2a
+c_rc_ta_1	c	request	6815000000003c01060001007117000129090f09070b1a	104 time-tagged C_RC_TA_1 RCO+CP56Time2a
+c_se_ta_1	c	request	6817000000003d0106000100591b0000400029090f09070b1a	104 time-tagged C_SE_TA_1 NVA+QOS+CP56Time2a
+c_se_tb_1	c	request	6817000000003e01060001005a1b0001000029090f09070b1a	104 time-tagged C_SE_TB_1 SVA+QOS+CP56Time2a
+c_se_tc_1	c	request	6819000000003f01060001005b1b000000803f0029090f09070b1a	104 time-tagged C_SE_TC_1 R32+QOS+CP56Time2a
+c_bo_ta_1	c	request	681800000000400106000100411f000100000029090f09070b1a	104 time-tagged C_BO_TA_1 BSI+CP56Time2a
+m_ei_na_1	s	response	680e0000000046010400010000000000	101 7.3.3 M_EI_NA_1 COI, COT 4
+c_ci_na_1	c	request	680e0000000065010600010000000005	101 7.3.4 C_CI_NA_1 QCC
+c_rd_na_1	c	request	680d00000000660105000100a10f00	101 7.3.4 C_RD_NA_1 IOA only, COT 5
+c_cs_na_1	c	request	68140000000067010600010000000029090f09070b1a	101 7.3.4 C_CS_NA_1 CP56Time2a
+c_rp_na_1	c	request	680e0000000069010600010000000001	101 7.3.4 C_RP_NA_1 QRP 1
+c_ts_ta_1	c	request	6816000000006b0106000100000000341229090f09070b1a	104 time-tagged C_TS_TA_1 TSC+CP56Time2a
+edge_ioa	s	response,response,response,response	681a0000000003040300020000000001ffff000100000102ffffff02	101 7.2.5 IOA 0, 65535, 65536, 16777215; CA 2
+malformed_dco_state_0	c	malformed	680e000000002e0106000100d1070080	101 7.2.6 DCO state 0 is not permitted
+profile_server_activates	s	malformed	680e000000002e0106000100d1070001	B profile (spec 7.3): server-originated command
+profile_client_monitor	c	malformed	680e0000000003010300010001000001	B profile (spec 7.3): monitor type from client
+profile_sq_command	c	malformed	680e000000002e810600010001000001	B profile (spec 7.2): command with SQ=1
+unsupported_type_2	s	unsupported	680e0000000002010300010001000001	101 7.3.1 Type 2 has no B descriptor
+unsupported_c_cd_na_1	c	unsupported	680f000000006a01060001000000000000	101 7.3.4 C_CD_NA_1 is not used in 104
+frame_bad_start	c	frame_error	670407000000	104 cl.5 start octet must be 0x68
+frame_bad_length	c	frame_error	68020700	104 cl.5 length octet 4..253
+frame_i_reserved_bit	s	frame_error	680400000100	104 cl.5 I-format control octet 3 bit 0
+frame_u_two_functions	c	frame_error	68040f000000	104 cl.5 U-format exactly one function

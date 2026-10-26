@@ -9,14 +9,23 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
 func eventsHandler(dpEngine *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := parseLimit(r, 500)
-		list := dpEngine.Events().List(limit)
+		q, filtered, err := events.ParseQuery(r.URL.Query())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if filtered {
+			writeJSON(w, dpEngine.Events().QueryTelemetry(q))
+			return
+		}
+		list := dpEngine.Events().ListTelemetry(q.Limit)
 		writeJSON(w, list)
 	}
 }

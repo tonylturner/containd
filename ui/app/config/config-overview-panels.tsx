@@ -64,7 +64,7 @@ export function ConfigBackupRecoveryCard({
           className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
         />
         <div className="text-xs text-[var(--text-muted)]">
-          Restore replaces the live config. Use redacted backups for sharing.
+          Restore replaces the candidate config. Use redacted backups for sharing.
         </div>
         {canEdit && (
           <button
@@ -232,7 +232,7 @@ export function IDSRulesCard({
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">IDS Rules</div>
           <div className="text-sm text-[var(--text)]">
-            IDS rules are stored separately from the config ({idsRuleCount} rules loaded).
+            Running IDS bank: {idsRuleCount} committed rules. Restores stage the candidate bank; commit promotes both.
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -240,11 +240,11 @@ export function IDSRulesCard({
             onClick={onDownloadRules}
             className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
           >
-            Download rules
+            Download rule backup
           </button>
           {canEdit && (
             <label className="cursor-pointer rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui">
-              Restore rules
+              Stage rule restore
               <input
                 type="file"
                 accept=".json"

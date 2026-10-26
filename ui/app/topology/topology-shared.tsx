@@ -8,7 +8,6 @@ import {
   type FirewallRule,
   type FlowSummary,
   type Interface,
-  type InterfaceState,
   type OSRoutingSnapshot,
   type RoutingConfig,
   type SystemStats,
@@ -17,10 +16,14 @@ import {
   fetchHealth,
 } from "../../lib/api";
 import s from "./topology.module.css";
+import { normalizeFirewallRules } from "../../lib/api-normalize";
+import { interfaceAddresses, runtimeFor, type InterfaceAddresses } from "../../lib/interface-addresses";
+import { TopologyAddress } from "./topology-address";
 
 export interface BuiltIface {
   name: string;
-  ip: string;
+  address: InterfaceAddresses;
+  fullAddrs: string[];
   state: "up" | "down";
   zone: string;
   rx: string;
@@ -61,6 +64,8 @@ export interface TopoNodeData {
   loss?: string;
   iface?: string;
   subnet?: string;
+  address?: InterfaceAddresses;
+  fullAddrs?: string[];
   hosts?: number;
   flows?: number;
   rx?: string;
@@ -194,7 +199,7 @@ function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
         />
       </div>
       <div className={s.nodeBody}>
-        <NRow k="subnet" v={data.subnet || "\u2014"} />
+        <NRow k="subnet" v={<TopologyAddress address={data.address} fullAddrs={data.fullAddrs} />} />
         <NRow k="hosts" v={String(data.hosts ?? 0)} />
         <NRow k="flows" v={String(data.flows ?? 0)} />
         <Spark nodeId={id} color={sparkColor} />
@@ -203,7 +208,7 @@ function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function NRow({ k, v }: { k: string; v: string }) {
+function NRow({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className={s.nodeRow}>
       <span className={s.nodeRowKey}>{k}</span>
@@ -383,34 +388,32 @@ export function nodeOperatorHint(data: TopoNodeData): string {
 }
 
 export async function buildTopology(): Promise<TopoResult | null> {
-  const [
-    health,
-    zones,
-    ifaces,
-    ifaceState,
-    routing,
-    osRouting,
-    fwRules,
-    flows,
-    events,
-    sysStats,
-  ] = await Promise.all([
+  const [health, running, ifaceState, osRouting, flows, events, sysStats] = await Promise.all([
     fetchHealth(),
-    api.listZones(),
-    api.listInterfaces(),
+    api.getRunningConfig(),
     api.listInterfaceState(),
-    api.getRouting(),
     api.getOSRouting(),
-    api.listFirewallRules(),
     api.listFlows(),
     api.listEvents(),
     api.getSystemStats().catch(() => null),
   ]);
+  if (!running) return null;
+  const zones = running.zones;
+  const ifaces = running.interfaces;
+  const routing = running.routing;
+  const fwRules = normalizeFirewallRules(running.firewall?.rules);
 
   const zoneSubnet: Record<string, string> = {};
+  const zoneAddresses: Record<string, { address: InterfaceAddresses; fullAddrs: string[] }> = {};
   for (const ifc of ifaces || []) {
-    if (ifc.zone && ifc.addresses?.length && !zoneSubnet[ifc.zone]) {
-      zoneSubnet[ifc.zone] = ifc.addresses[0];
+    const address = interfaceAddresses(ifc, ifaceState || []);
+    if (ifc.zone && address.addrs.length &&
+        (!zoneSubnet[ifc.zone] || (address.source === "config" && zoneAddresses[ifc.zone]?.address.source !== "config"))) {
+      zoneSubnet[ifc.zone] = address.addrs[0];
+      zoneAddresses[ifc.zone] = {
+        address,
+        fullAddrs: (address.source === "config" ? ifc.addresses : runtimeFor(ifc, ifaceState || [])?.addrs) || [],
+      };
     }
   }
 
@@ -448,13 +451,6 @@ export async function buildTopology(): Promise<TopoResult | null> {
     }
   }
 
-  const stateMap: Record<string, InterfaceState> = {};
-  for (const st of (ifaceState as InterfaceState[]) || []) {
-    stateMap[st.name] = st;
-  }
-  const ifState = (ifc: Interface) =>
-    stateMap[ifc.name] || (ifc.device ? stateMap[ifc.device] : undefined);
-
   const zoneFlowCount: Record<string, { rx: number; tx: number }> = {};
   for (const fl of (flows as FlowSummary[]) || []) {
     for (const [zn, sub] of Object.entries(zoneSubnet)) {
@@ -468,18 +464,15 @@ export async function buildTopology(): Promise<TopoResult | null> {
   }
 
   const builtIfaces: BuiltIface[] = ((ifaces as Interface[]) || []).map((ifc) => {
-    const st = ifState(ifc);
-    const addr = ifc.addresses?.length
-      ? ifc.addresses[0]
-      : st?.addrs?.find(
-          (a: string) => !a.startsWith("::") && !a.startsWith("fe80"),
-        ) || "\u2014";
+    const st = runtimeFor(ifc, ifaceState || []);
+    const address = interfaceAddresses(ifc, ifaceState || []);
     const zfc = ifc.zone ? zoneFlowCount[ifc.zone] : undefined;
     const rxStr = zfc ? `${zfc.rx} pkts` : "0 pkts";
     const txStr = zfc ? `${zfc.tx} pkts` : "0 pkts";
     return {
       name: ifc.device || ifc.name,
-      ip: addr,
+      address,
+      fullAddrs: (address.source === "config" ? ifc.addresses : st?.addrs) || [],
       state: st?.up !== false ? "up" : "down",
       zone: ifc.zone || "\u2014",
       rx: rxStr,
@@ -634,11 +627,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
   zoneList.forEach((z, i) => {
     const name = z.name;
     const ifc = ((ifaces as Interface[]) || []).find((ii) => ii.zone === name);
-    const st = ifc ? ifState(ifc) : undefined;
-    const subnet =
-      zoneSubnet[name] ||
-      st?.addrs?.find((a: string) => !a.startsWith("::") && !a.startsWith("fe80")) ||
-      "\u2014";
+    const subnet = zoneSubnet[name] || "\u2014";
     const hosts = zoneHosts[name]?.size || 0;
     const flCount = zoneFlowIds[name]?.size || 0;
     const alerts = zoneAlerts[name] || 0;
@@ -656,6 +645,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
       status,
       iface: ifc?.device || ifc?.name || "\u2014",
       subnet,
+      ...zoneAddresses[name],
       hosts,
       flows: flCount,
       rx: "\u2014",

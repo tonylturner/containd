@@ -6,22 +6,20 @@ package httpapi
 import (
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -33,29 +31,31 @@ func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil || r.ID == "" {
+		if err := c.ShouldBindJSON(&r); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
+			return
+		}
+		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		for _, existing := range cfg.Firewall.Rules {
-			if existing.ID == r.ID {
-				apiError(c, http.StatusBadRequest, "rule already exists")
-				return
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Firewall.Rules {
+				if existing.ID == r.ID {
+					apiError(c, http.StatusBadRequest, "rule already exists")
+					return false
+				}
 			}
-		}
-		if cfg.Firewall.DefaultAction == "" {
-			cfg.Firewall.DefaultAction = config.ActionDeny
-		}
-		cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			if cfg.Firewall.DefaultAction == "" {
+				cfg.Firewall.DefaultAction = config.ActionDeny
+			}
+			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+			return true
+		})
+		if !ok {
 			return
 		}
+		auditLog(c, audit.Record{Action: "firewall.rules.create", Target: r.ID, Detail: "candidate"})
 		c.JSON(http.StatusOK, r)
 	}
 }
@@ -63,27 +63,25 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 func deleteFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		original := len(cfg.Firewall.Rules)
-		filtered := make([]config.Rule, 0, len(cfg.Firewall.Rules))
-		for _, r := range cfg.Firewall.Rules {
-			if r.ID != id {
-				filtered = append(filtered, r)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			original := len(cfg.Firewall.Rules)
+			filtered := make([]config.Rule, 0, len(cfg.Firewall.Rules))
+			for _, r := range cfg.Firewall.Rules {
+				if r.ID != id {
+					filtered = append(filtered, r)
+				}
 			}
-		}
-		if len(filtered) == original {
-			apiError(c, http.StatusNotFound, "rule not found")
+			if len(filtered) == original {
+				apiError(c, http.StatusNotFound, "rule not found")
+				return false
+			}
+			cfg.Firewall.Rules = filtered
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Firewall.Rules = filtered
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			internalError(c, err)
-			return
-		}
+		auditLog(c, audit.Record{Action: "firewall.rules.delete", Target: id, Detail: "candidate"})
 		c.Status(http.StatusNoContent)
 	}
 }
@@ -104,6 +102,9 @@ func mergeJSONObject(dst, patch map[string]interface{}) map[string]interface{} {
 	return dst
 }
 
+// updateFirewallRuleHandler merges a JSON patch into a rule. The "ics"
+// object is not deep-merged as generic JSON: config.PatchICSPredicate
+// strict-decodes it, and a protocol change replaces the predicate.
 func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -112,77 +113,77 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "failed to read request body")
 			return
 		}
-		var patch map[string]interface{}
+		var patch map[string]json.RawMessage
 		if err := json.Unmarshal(body, &patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		updated := false
-		for i, existing := range cfg.Firewall.Rules {
-			if existing.ID == id {
-				currentJSON, err := json.Marshal(existing)
-				if err != nil {
-					internalError(c, err)
-					return
+		var rule config.Rule
+		icsPatch, patchesICS := patch["ics"]
+		delete(patch, "ics")
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			idx := -1
+			for i, existing := range cfg.Firewall.Rules {
+				if existing.ID == id {
+					idx = i
+					break
 				}
-				var merged map[string]interface{}
-				if err := json.Unmarshal(currentJSON, &merged); err != nil {
-					internalError(c, err)
-					return
-				}
-				merged = mergeJSONObject(merged, patch)
-				mergedJSON, err := json.Marshal(merged)
-				if err != nil {
-					internalError(c, err)
-					return
-				}
-				var rule config.Rule
-				if err := json.Unmarshal(mergedJSON, &rule); err != nil {
-					apiError(c, http.StatusBadRequest, "invalid rule payload")
-					return
-				}
-				if rule.ID == "" {
-					rule.ID = existing.ID
-				}
-				cfg.Firewall.Rules[i] = rule
-				updated = true
-				c.Set("updated_rule", rule)
-				break
 			}
-		}
-		if !updated {
-			apiError(c, http.StatusNotFound, "rule not found")
-			return
-		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if v, ok := c.Get("updated_rule"); ok {
-			if rule, ok := v.(config.Rule); ok {
-				c.JSON(http.StatusOK, rule)
-				return
+			if idx < 0 {
+				apiError(c, http.StatusNotFound, "rule not found")
+				return false
 			}
+			existing := cfg.Firewall.Rules[idx]
+			rule, err = mergeRulePatch(existing, patch)
+			if err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+				return false
+			}
+			if patchesICS {
+				if rule.ICS, err = config.PatchICSPredicate(existing.ICS, icsPatch); err != nil {
+					apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+					return false
+				}
+			}
+			if rule.ID == "" {
+				rule.ID = existing.ID
+			}
+			cfg.Firewall.Rules[idx] = rule
+			return true
+		})
+		if !ok {
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+		auditLog(c, audit.Record{Action: "firewall.rules.update", Target: id, Detail: "candidate"})
+		c.JSON(http.StatusOK, rule)
 	}
 }
 
-type previewRuleResponse struct {
-	MatchCount    int               `json:"match_count"`
-	SampleMatches []dpevents.Event  `json:"sample_matches"`
-	TimeRange     *previewTimeRange `json:"time_range"`
-	TotalEvents   int               `json:"total_events"`
-}
-
-type previewTimeRange struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
+// mergeRulePatch deep-merges the non-ICS keys of a patch into a rule.
+func mergeRulePatch(existing config.Rule, patch map[string]json.RawMessage) (config.Rule, error) {
+	currentJSON, err := json.Marshal(existing)
+	if err != nil {
+		return config.Rule{}, err
+	}
+	var merged map[string]interface{}
+	if err := json.Unmarshal(currentJSON, &merged); err != nil {
+		return config.Rule{}, err
+	}
+	generic := make(map[string]interface{}, len(patch))
+	for key, raw := range patch {
+		var value interface{}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return config.Rule{}, err
+		}
+		generic[key] = value
+	}
+	mergedJSON, err := json.Marshal(mergeJSONObject(merged, generic))
+	if err != nil {
+		return config.Rule{}, err
+	}
+	var rule config.Rule
+	err = json.Unmarshal(mergedJSON, &rule)
+	return rule, err
 }
 
 func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
@@ -201,15 +202,7 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			Destinations: req.Destinations,
 			Action:       rules.Action(req.Action),
 			Identities:   req.Identities,
-			ICS: rules.ICSPredicate{
-				Protocol:     req.ICS.Protocol,
-				FunctionCode: req.ICS.FunctionCode,
-				UnitID:       req.ICS.UnitID,
-				Addresses:    req.ICS.Addresses,
-				ReadOnly:     req.ICS.ReadOnly,
-				WriteOnly:    req.ICS.WriteOnly,
-				Mode:         req.ICS.Mode,
-			},
+			ICS:          compile.ICSPredicate(req.ICS),
 		}
 		if req.Schedule != nil {
 			entry.Schedule = rules.SchedulePredicate{
@@ -223,65 +216,17 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			entry.Protocols = append(entry.Protocols, rules.Protocol{Name: p.Name, Port: p.Port})
 		}
 
-		tc, ok := engine.(TelemetryClient)
-		if !ok || tc == nil {
-			c.JSON(http.StatusOK, previewRuleResponse{
-				SampleMatches: []dpevents.Event{},
-			})
+		client, ok := engine.(RulePreviewClient)
+		if !ok || client == nil {
+			apiError(c, http.StatusServiceUnavailable, "engine rule preview unavailable")
 			return
 		}
-
-		evs, err := tc.ListEvents(c.Request.Context(), 5000)
+		result, err := client.PreviewRule(c.Request.Context(), entry)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, "failed to fetch events: "+err.Error())
+			apiError(c, http.StatusBadGateway, "failed to preview rule: "+err.Error())
 			return
 		}
-
-		totalEvents := len(evs)
-		var tr *previewTimeRange
-		if totalEvents > 0 {
-			oldest := evs[0].Timestamp
-			newest := evs[0].Timestamp
-			for _, ev := range evs[1:] {
-				if ev.Timestamp.Before(oldest) {
-					oldest = ev.Timestamp
-				}
-				if ev.Timestamp.After(newest) {
-					newest = ev.Timestamp
-				}
-			}
-			tr = &previewTimeRange{Start: oldest, End: newest}
-		}
-
-		const maxSamples = 50
-		var matchCount int
-		var samples []dpevents.Event
-		for _, ev := range evs {
-			ctx := rules.EvalContext{
-				SrcIP: net.ParseIP(ev.SrcIP),
-				DstIP: net.ParseIP(ev.DstIP),
-				Proto: ev.Transport,
-				Port:  strconv.Itoa(int(ev.DstPort)),
-				Now:   ev.Timestamp,
-			}
-			if rules.PreviewMatch(entry, ctx) {
-				matchCount++
-				if len(samples) < maxSamples {
-					samples = append(samples, ev)
-				}
-			}
-		}
-
-		if samples == nil {
-			samples = []dpevents.Event{}
-		}
-
-		c.JSON(http.StatusOK, previewRuleResponse{
-			MatchCount:    matchCount,
-			SampleMatches: samples,
-			TimeRange:     tr,
-			TotalEvents:   totalEvents,
-		})
+		c.JSON(http.StatusOK, result)
 	}
 }
 
@@ -296,7 +241,7 @@ func hasICSPredicate(r config.Rule) bool {
 
 func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -317,7 +262,11 @@ func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil || r.ID == "" {
+		if err := c.ShouldBindJSON(&r); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
+			return
+		}
+		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
@@ -325,25 +274,23 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "rule must include an ICS predicate")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		for _, existing := range cfg.Firewall.Rules {
-			if existing.ID == r.ID {
-				apiError(c, http.StatusBadRequest, "rule already exists")
-				return
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Firewall.Rules {
+				if existing.ID == r.ID {
+					apiError(c, http.StatusBadRequest, "rule already exists")
+					return false
+				}
 			}
-		}
-		if cfg.Firewall.DefaultAction == "" {
-			cfg.Firewall.DefaultAction = config.ActionDeny
-		}
-		cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			if cfg.Firewall.DefaultAction == "" {
+				cfg.Firewall.DefaultAction = config.ActionDeny
+			}
+			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+			return true
+		})
+		if !ok {
 			return
 		}
+		auditLog(c, audit.Record{Action: "firewall.ics_rules.create", Target: r.ID, Detail: "candidate"})
 		c.JSON(http.StatusOK, r)
 	}
 }
@@ -353,37 +300,35 @@ func updateICSRuleHandler(store config.Store) gin.HandlerFunc {
 		id := c.Param("id")
 		var rule config.Rule
 		if err := c.ShouldBindJSON(&rule); err != nil {
-			apiError(c, http.StatusBadRequest, "invalid rule payload")
+			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		updated := false
-		for i, existing := range cfg.Firewall.Rules {
-			if existing.ID == id {
-				if !hasICSPredicate(existing) {
-					apiError(c, http.StatusBadRequest, "rule is not an ICS rule")
-					return
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			updated := false
+			for i, existing := range cfg.Firewall.Rules {
+				if existing.ID == id {
+					if !hasICSPredicate(existing) {
+						apiError(c, http.StatusBadRequest, "rule is not an ICS rule")
+						return false
+					}
+					if rule.ID == "" {
+						rule.ID = existing.ID
+					}
+					cfg.Firewall.Rules[i] = rule
+					updated = true
+					break
 				}
-				if rule.ID == "" {
-					rule.ID = existing.ID
-				}
-				cfg.Firewall.Rules[i] = rule
-				updated = true
-				break
 			}
-		}
-		if !updated {
-			apiError(c, http.StatusNotFound, "rule not found")
+			if !updated {
+				apiError(c, http.StatusNotFound, "rule not found")
+				return false
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		auditLog(c, audit.Record{Action: "firewall.ics_rules.update", Target: id, Detail: "candidate"})
 		c.JSON(http.StatusOK, rule)
 	}
 }

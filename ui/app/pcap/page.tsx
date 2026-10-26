@@ -1,5 +1,10 @@
 "use client";
 
+import { notifyConfigMutation } from "../../lib/config-events";
+
+import { postJSONResult } from "../../lib/api-request";
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 
 import {
@@ -84,6 +89,7 @@ async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
       body: form,
     });
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;
@@ -92,29 +98,29 @@ async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
 
 async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
   try {
-    const res = await fetch(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`, {
-      method: "POST",
-      credentials: "include",
-    });
+    const res = await fetch(
+      apiURL(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`),
+      {
+        method: "POST",
+        credentials: "include",
+      },
+    );
     if (!res.ok) return null;
+    notifyConfigMutation(res);
     return (await res.json()) as PolicyAnalysis;
   } catch {
     return null;
   }
 }
 
-async function applyGeneratedRules(rules: PolicyRule[]): Promise<boolean> {
-  try {
-    const res = await fetch(apiURL("/api/v1/firewall/rules"), {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rules }),
-    });
-    return res.ok;
-  } catch {
-    return false;
+async function applyGeneratedRules(rules: PolicyRule[]): Promise<{ count: number; error?: string }> {
+  let count = 0;
+  for (const rule of rules) {
+    const result = await postJSONResult("/api/v1/firewall/rules", rule);
+    if (!result.ok) return { count, error: result.error };
+    count++;
   }
+  return { count };
 }
 
 /* -- Format helpers -- */
@@ -159,6 +165,8 @@ export default function PcapAnalysisPage() {
     const list = await listPcaps();
     setPcaps(list);
   }
+
+  useConfigRefresh(refreshPcaps);
 
   useEffect(() => {
     refreshPcaps();
@@ -207,12 +215,12 @@ export default function PcapAnalysisPage() {
       setError("No rules selected.");
       return;
     }
-    const ok = await applyGeneratedRules(toApply);
-    if (!ok) {
-      setError("Failed to apply rules.");
+    const result = await applyGeneratedRules(toApply);
+    if (result.error) {
+      setError(`${result.count} rule(s) staged — commit to apply. Remaining rules failed: ${result.error}`);
       return;
     }
-    setSuccess(`${toApply.length} rule(s) applied successfully.`);
+    setSuccess(`${result.count} rule(s) staged — commit to apply.`);
   }
 
   return (
@@ -284,9 +292,9 @@ export default function PcapAnalysisPage() {
             }
             onApply={() => {
               confirm.open({
-                title: "Apply Rules",
-                message: `Apply ${selectedRules.size} generated rule(s) to the firewall?`,
-                confirmLabel: "Apply",
+                title: "Stage Rules",
+                message: `Stage ${selectedRules.size} generated rule(s)? Commit is required to apply them.`,
+                confirmLabel: "Stage",
                 onConfirm: () => handleApplyRules(result.rules, selectedRules),
               });
             }}
@@ -391,9 +399,9 @@ export default function PcapAnalysisPage() {
               }
               onApply={() => {
                 confirm.open({
-                  title: "Apply Rules",
-                  message: `Apply ${existingSelectedRules.size} generated rule(s) to the firewall?`,
-                  confirmLabel: "Apply",
+                  title: "Stage Rules",
+                  message: `Stage ${existingSelectedRules.size} generated rule(s)? Commit is required to apply them.`,
+                  confirmLabel: "Stage",
                   onConfirm: () =>
                     handleApplyRules(
                       existingResult.result.rules,
@@ -562,7 +570,7 @@ function AnalysisResults({
                   disabled={selectedRules.size === 0}
                   className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
                 >
-                  Apply {selectedRules.size} Rule(s)
+                  Stage {selectedRules.size} Rule(s)
                 </button>
               )}
             </div>

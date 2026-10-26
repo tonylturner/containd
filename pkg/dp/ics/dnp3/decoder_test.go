@@ -159,6 +159,12 @@ func TestFunctionCodeName(t *testing.T) {
 	if name != "unknown_0xff" {
 		t.Errorf("expected 'unknown_0xff', got %q", name)
 	}
+	// IEEE 1815-2012 function codes 20, 21 and 22.
+	for fc, want := range map[uint8]string{20: "enable_unsolicited", 21: "disable_unsolicited", 22: "assign_class"} {
+		if got := FunctionCodeName(fc); got != want {
+			t.Errorf("FunctionCodeName(%d) = %q, want %q", fc, got, want)
+		}
+	}
 }
 
 func TestDecoderSupportsPort20000(t *testing.T) {
@@ -485,36 +491,6 @@ func TestFormatIINFlags(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("FormatIINFlags(0x%02X, 0x%02X) = %q, want %q", tc.iin1, tc.iin2, got, tc.want)
 		}
-	}
-}
-
-func TestParseObjectHeaders(t *testing.T) {
-	// Two headers: Qualifier 0x06 (no range) + Qualifier 0x00 (1-byte range 0-4)
-	data := []byte{
-		0x01, 0x02, 0x06, // Group 1, Var 2, Qualifier 0x06
-		0x1E, 0x02, 0x00, 0x00, 0x04, // Group 30, Var 2, Qualifier 0x00, range 0-4
-	}
-	headers := ParseObjectHeaders(data, 0)
-	if len(headers) != 2 {
-		t.Fatalf("expected 2 headers, got %d", len(headers))
-	}
-	if headers[0].Group != 1 || headers[0].Qualifier != 0x06 {
-		t.Errorf("header[0] = group %d qualifier 0x%02X", headers[0].Group, headers[0].Qualifier)
-	}
-	if headers[1].Group != 30 || headers[1].Count != 5 {
-		t.Errorf("header[1] = group %d count %d, want group 30 count 5", headers[1].Group, headers[1].Count)
-	}
-}
-
-func TestParseObjectHeadersWithCount(t *testing.T) {
-	// Qualifier 0x07: 1-byte count
-	data := []byte{0x0C, 0x01, 0x07, 0x03}
-	headers := ParseObjectHeaders(data, 0)
-	if len(headers) != 1 {
-		t.Fatalf("expected 1 header, got %d", len(headers))
-	}
-	if headers[0].Group != 12 || headers[0].Count != 3 {
-		t.Errorf("header = group %d count %d, want group 12 count 3", headers[0].Group, headers[0].Count)
 	}
 }
 

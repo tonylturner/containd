@@ -8,17 +8,27 @@ import { RulePreviewButton } from "../../components/RulePreview";
 import {
   buildICSRulePreview,
   buildICSRuleUpdate,
+  type ICSMode,
+  type ICSModeSelection,
   PROTOCOL_KEYS,
   PROTOCOLS,
   protoMeta,
 } from "./ics-shared";
+import {
+  buildIEC104RulePreview,
+  buildIEC104RuleICS,
+  iec104DraftFrom,
+} from "./iec104";
+import { IEC104Fields } from "./iec104-fields";
 
 export function EditICSModal({
   rule,
+  globalMode,
   onClose,
   onSave,
 }: {
   rule: FirewallRule;
+  globalMode?: ICSMode;
   onClose: () => void;
   onSave: (ics: ICSPredicate | undefined) => void;
 }) {
@@ -36,15 +46,28 @@ export function EditICSModal({
   );
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
-  const [mode, setMode] = useState<"enforce" | "learn">(
-    rule.ics?.mode ?? "learn",
-  );
+  const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
+  const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
+  const [error, setError] = useState<string | null>(null);
 
   const meta = protoMeta(protocol);
+  const isIEC104 = protocol === "iec104";
+  const iecBuild = isIEC104
+    ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
+    : null;
 
   function save() {
+    setError(null);
     if (!enabled) {
       onSave(undefined);
+      return;
+    }
+    if (iecBuild) {
+      if (!iecBuild.ok) {
+        setError(iecBuild.error);
+        return;
+      }
+      onSave(iecBuild.ics);
       return;
     }
     onSave(
@@ -114,106 +137,117 @@ export function EditICSModal({
               </label>
               <select
                 value={mode}
-                onChange={(e) => setMode(e.target.value as "enforce" | "learn")}
+                onChange={(e) => setMode(e.target.value as ICSModeSelection)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
               >
+                {!rule.ics?.mode && (
+                  <option value="">
+                    Inherit ({globalMode === "enforce" ? "enforce" : "learning"})
+                  </option>
+                )}
                 <option value="learn">Safe learning (alert-only)</option>
                 <option value="enforce">Enforce (block)</option>
               </select>
             </div>
           </div>
 
-          <div>
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
-              {meta.fcLabel}
-              <InfoTip label={meta.fcHelp} />
-            </label>
-            <input
-              value={functionCodes}
-              onChange={(e) => setFunctionCodes(e.target.value)}
-              disabled={!enabled}
-              className="mt-1 w-full input-industrial disabled:opacity-60"
-              placeholder={meta.fcPlaceholder || "Leave empty for all"}
-            />
-          </div>
-
-          <div>
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
-              {meta.addrLabel}
-              <InfoTip label={meta.addrHelp} />
-            </label>
-            <input
-              value={addresses}
-              onChange={(e) => setAddresses(e.target.value)}
-              disabled={!enabled}
-              className="mt-1 w-full input-industrial disabled:opacity-60"
-              placeholder={meta.addrPlaceholder || "Leave empty for all"}
-            />
-          </div>
-
-          {protocol === "modbus" && (
+          {isIEC104 ? (
+            <IEC104Fields draft={iec} onChange={setIec} disabled={!enabled} />
+          ) : (
+            <>
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
-                Unit ID
-                <InfoTip label="Modbus unit identifier (slave address). 0-255. Leave empty for all." />
+                {meta.fcLabel}
+                <InfoTip label={meta.fcHelp} />
               </label>
               <input
-                value={unitId}
-                onChange={(e) => setUnitId(e.target.value)}
+                value={functionCodes}
+                onChange={(e) => setFunctionCodes(e.target.value)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
-                placeholder="0-255 (leave empty for all)"
+                placeholder={meta.fcPlaceholder || "Leave empty for all"}
               />
             </div>
-          )}
 
-          {protocol === "cip" && (
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
-                Object Classes
-                <InfoTip label="CIP object class IDs (comma-separated, hex with 0x prefix or decimal). Leave empty for all." />
+                {meta.addrLabel}
+                <InfoTip label={meta.addrHelp} />
               </label>
               <input
-                value={objectClasses}
-                onChange={(e) => setObjectClasses(e.target.value)}
+                value={addresses}
+                onChange={(e) => setAddresses(e.target.value)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
-                placeholder="0x02, 0x04 (leave empty for all)"
+                placeholder={meta.addrPlaceholder || "Leave empty for all"}
               />
             </div>
-          )}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={readOnly}
-                onChange={(e) => {
-                  setReadOnly(e.target.checked);
-                  if (e.target.checked) setWriteOnly(false);
-                }}
-                disabled={!enabled}
-                className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
-              />
-              Read-only
-              <InfoTip label="Only match read operations. Mutually exclusive with write-only." />
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={writeOnly}
-                onChange={(e) => {
-                  setWriteOnly(e.target.checked);
-                  if (e.target.checked) setReadOnly(false);
-                }}
-                disabled={!enabled}
-                className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
-              />
-              Write-only
-              <InfoTip label="Only match write/control operations. Mutually exclusive with read-only." />
-            </label>
-          </div>
+            {protocol === "modbus" && (
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                  Unit ID
+                  <InfoTip label="Modbus unit identifier (slave address). 0-255. Leave empty for all." />
+                </label>
+                <input
+                  value={unitId}
+                  onChange={(e) => setUnitId(e.target.value)}
+                  disabled={!enabled}
+                  className="mt-1 w-full input-industrial disabled:opacity-60"
+                  placeholder="0-255 (leave empty for all)"
+                />
+              </div>
+            )}
+
+            {protocol === "cip" && (
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                  Object Classes
+                  <InfoTip label="CIP object class IDs (comma-separated, hex with 0x prefix or decimal). Leave empty for all." />
+                </label>
+                <input
+                  value={objectClasses}
+                  onChange={(e) => setObjectClasses(e.target.value)}
+                  disabled={!enabled}
+                  className="mt-1 w-full input-industrial disabled:opacity-60"
+                  placeholder="0x02, 0x04 (leave empty for all)"
+                />
+              </div>
+            )}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={readOnly}
+                  onChange={(e) => {
+                    setReadOnly(e.target.checked);
+                    if (e.target.checked) setWriteOnly(false);
+                  }}
+                  disabled={!enabled}
+                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                />
+                Read-only
+                <InfoTip label="Only match read operations. Mutually exclusive with write-only." />
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={writeOnly}
+                  onChange={(e) => {
+                    setWriteOnly(e.target.checked);
+                    if (e.target.checked) setReadOnly(false);
+                  }}
+                  disabled={!enabled}
+                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                />
+                Write-only
+                <InfoTip label="Only match write/control operations. Mutually exclusive with read-only." />
+              </label>
+            </div>
+            </>
+          )}
 
           <div className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
             <strong className="text-[var(--text)]">{meta.label}</strong> &mdash;
@@ -232,21 +266,28 @@ export function EditICSModal({
               "Common: 12=ReadProperty, 14=ReadPropertyMultiple, 15=WriteProperty, 8=WhoIs, 0=IAm."}
             {protocol === "opcua" &&
               "OPC Unified Architecture binary protocol."}
+            {isIEC104 &&
+              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
           </div>
+          {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
           <RulePreviewButton
-            rule={buildICSRulePreview(
-              rule,
-              enabled,
-              protocol,
-              functionCodes,
-              addresses,
-              readOnly,
-              writeOnly,
-              mode,
-            )}
+            rule={
+              isIEC104
+                ? buildIEC104RulePreview(rule, enabled, iec, mode, globalMode)
+                : buildICSRulePreview(
+                    rule,
+                    enabled,
+                    protocol,
+                    functionCodes,
+                    addresses,
+                    readOnly,
+                    writeOnly,
+                    mode,
+                  )
+            }
           />
           <button
             onClick={onClose}

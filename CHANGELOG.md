@@ -7,6 +7,192 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-25
+
+### Added
+
+- Product roadmap page (Docs → Roadmap) built from the 2026-10-25 maturity
+  audit, with the audit reports kept in `docs/audits/2026-10-25/`. Secure by
+  Design now marks MFA and intrusion evidence as Partial and states the SSH
+  and session-revocation caveats.
+
+- Query retained events server-side by IEC session/APDU, flow, kind, protocol,
+  decision/verdict and time/cursor bounds; Events deep links and CLI flags search
+  before limiting. Filtered pages include cursor and gap/engine-error metadata;
+  only-limit callers keep the bare-array API response.
+
+- Protect bounded IEC 104 incident bundles (denied decisions, enforcement and
+  abort/reset outcomes, and implicated decoded attempts) from routine telemetry.
+
+- IEC 104 decodes single-point information: TypeID 1 (M_SP_NA_1) and
+  TypeID 30 (M_SP_TB_1, with CP56Time2a). Both are monitor-class and match
+  read-only IEC 104 rules.
+- IEC 104 decodes step-position Types 5 and 32, including the signed VTI,
+  transient flag, quality and CP56Time2a. It also decodes common monitor
+  Types 7, 9, 11, 15, 21 and 33-37. Sequenced addressing is supported for
+  untimed monitor Types 1, 3, 5, 7, 9, 11, 13, 15 and 21; timed monitor
+  Types 30-37 require SQ=0.
+- `set firewall ics-rule ... iec104` accepts `--type-ids`, `--classes`,
+  `--ca`, `--ioa`, `--direction` and `--mode`. `show firewall ics-rules`
+  shows the IEC fields.
+- PCAP capture selects targets by zone (`zones`) and by logical or kernel
+  interface name (`interfaces`). The engine resolves both, also when a
+  config commit restarts capture. A logical interface uses its `Device`,
+  or its `Name` when unset, only if that kernel device exists. Zones skip
+  unbound members and reject a zone with no existing devices, naming the
+  zone and unbound members. Explicit interfaces with missing devices are
+  rejected. Start responses and status list kernel devices only.
+  `filter.port` takes a TCP/UDP port or range.
+- `/api/v1/health` reports `ipv4Forwarding` (`enabled`, `disabled` or
+  `unknown`). A commit with forwarding disabled returns a warning, and the
+  engine logs a warning when a blocked sysctl write leaves it at 0.
+
+- Optional immutable management reservation with exact-peer HTTP/INPUT
+  access, priority-1 reply pinning and visible recovery from VPN
+  source-address takeovers.
+- Keep RangerDanger's reserved management available across NIC renumbering
+  and stored-config conflicts; expose recoverable boot faults, block unsafe
+  replay, and share reservation-aware bootstrap/factory-reset defaults.
+- Install fail-closed default-deny recovery enforcement for
+  reserved-management boot faults, with verified recovery status in the API
+  and Interfaces page.
+- Expose management reservation and guard health.
+- Add capture-backed IEC 104 decoder and fuzz regressions for segmented,
+  coalesced, malformed and incomplete traffic, plus isolated
+  management-access smoke coverage.
+- Gate `:latest` promotion on signed, SBOM-attached stable tags whose
+  commits are on `main`, with rebuild-free manual promotion after a later
+  merge.
+
+### Changed (visible in API, events and logs)
+
+- **Unknown firewall rule keys are rejected with HTTP 400.** The error names
+  the key. Before, unknown keys were silently dropped.
+- **Malformed rule selectors fail at save.** An unknown protocol, a port on a
+  protocol without ports, or a malformed port is rejected by validation, not
+  at nftables compile. Protocol names are stored in lower case.
+- **Logged DENY events are retained apart from telemetry.** A separate bank
+  keeps the newest 1024 `firewall.rule.hit` DENY events, so high-volume
+  IEC 104 telemetry does not push them out. Event lists return retained
+  DENYs first within `limit`, so they can displace newer telemetry rows.
+- **PCAP start no longer saves its body.** A non-empty start body is the
+  capture request for that start only; an empty body starts the committed
+  PCAP settings. Saved PCAP settings (`POST /pcap/config`) stage until
+  commit. With no engine connected, the start is queued. A body with no
+  interface and no zone is rejected.
+- Normal Modbus replies carry kind `response`; exceptions stay `exception`.
+- Merged 0.1.32 (persistent Modbus/DNP3 inspection, reply orientation,
+  port-less rules, Go 1.26.9). IEC 104 keeps failing closed: an unmatched
+  IEC 104 reply inside an enforce envelope is still denied.
+
+- **Configuration edits stage until commit.** Every persisted edit from the
+  UI, API and CLI writes the candidate; only Commit or Commit-confirmed
+  applies it. Commit and rollback cover the configuration and the IDS rule
+  bank in one transaction. Paths, methods, bodies and status codes are
+  unchanged; a success means "staged", not "active". Editable-object lists
+  read the candidate; `GET /config`, export, health and status read running.
+  Live operations (blocks, conntrack, capture start/stop, users, reset)
+  stay immediate. RangerDanger's candidate→commit import is unaffected.
+- **Mutation responses carry `X-Containd-Config: staged` or `committed`.**
+  The UI and CLI use this header as their only classifier. The global
+  commit bar refreshes on every staged edit; editors say "staged", and the
+  CLI prints `staged; run "commit" to apply`.
+- **IDS export is `GET`.** The `POST` route is removed.
+- **DPI transport counters count each captured packet once.** Protocol and
+  top-talker packet/byte counts are lower than before, where decoded objects
+  and flow-end events multiplied them.
+- **Re-import IDS rule files imported before 0.1.33.** Suricata/Snort and
+  Sigma rules with unmapped constraints, and imported rules without
+  executable content (including YARA), are kept as non-evaluable with notes
+  and no longer alert. Re-importing applies the corrected field mapping.
+- **Upgrade notes for RangerDanger and rollback.** RangerDanger 0.1.25 and
+  earlier send `ics.functionCodes` and `ics.note` when applying a Modbus DPI
+  plan; 0.1.32 ignored them (the rule allowed every function code) and 0.1.33
+  rejects them with HTTP 400. Use RangerDanger 0.1.26 or later. The stored
+  config schema moves to 0.1.7, which 0.1.32 cannot read: back up `/data`
+  before upgrading and restore that backup to roll back. `POST /config/import`
+  now stages; RangerDanger uses it only as a fallback when candidate→commit
+  fails, and in neither version does that fallback change the live firewall.
+  RangerDanger still reports that fallback as a success: 0.1.32 replaced the
+  running config, while 0.1.33 keeps it and stages the import. Check the
+  `X-Containd-Config: staged` response header and commit the candidate.
+- **Malformed management listener addresses are rejected** at validation.
+  A listener value must be `host:port` or `:port`.
+
+### Fixed
+
+- Interface autobind binds each logical interface independently. A subnet
+  setting (`CONTAIND_<NAME>_SUBNET`) binds only when exactly one up NIC
+  matches and never falls back to name, route or index guesses. Five- and
+  seven-NIC appliances with `CONTAIND_MGMT_RESERVATION` now boot, including
+  after NIC renumbering.
+- Management access granted only on unbound logical interfaces no longer
+  locks out the appliance. The management listeners stay reachable on every
+  existing NIC whose access is not explicitly disabled, and `GET
+  /api/v1/health` reports `managementBinding.state: unbound-appliance`.
+- Static icon URLs now include the runtime `/containd/` base path when the UI
+  is mounted under that prefix.
+- Firewall and ICS rule previews run in the engine with its live zone mappings
+  and runtime context builders. IEC 104 uses the decoder's shared `SafeRead`
+  classification, so read-only rules match eligible forward and reverse traffic;
+  envelope-level denials are not counted as candidate-rule matches.
+- ICS policy views show the effective inherited mode, and saving an inherited
+  filter no longer writes a rule-level `learn` override.
+- Commit-confirmed expiry replays the rolled-back running configuration to the
+  engine without requiring an engine restart. Service and VPN updates serialize
+  persistence and runtime changes with replay.
+- IDS updates, imports and restores return runtime apply errors and warnings
+  instead of reporting silent success. Config commits, interface/routing updates
+  and dataplane/PCAP changes serialize persistence with engine replay to prevent
+  lost updates.
+- Management replays the stored running config at boot and after an engine
+  restart, detected by a random per-process engine `/health` `bootId`.
+  Replays and commit applies are serialized to avoid stale rule pushes.
+- AF_PACKET capture inspects ingress packets only. With NAT, the
+  post-masquerade copy was decoded a second time and added inert block
+  entries for the engine address.
+- Flows first seen mid-stream are oriented by the known ICS service port, so
+  replies get the correct policy context. Handshake evidence still wins.
+- A policy apply that restarts the NFQUEUE capture resets the open IEC 104
+  sessions again. The engine stopped its reset worker before queue shutdown
+  had queued the resets, so a session could stall until the client's t1
+  timeout.
+- The UI no longer hides a page behind "Checking session..." while it
+  re-checks a session it has already verified.
+- Data-plane rebuilds preserve the process event ring and increasing event
+  IDs, including logged denies and events from rebuilt IEC104 sessions.
+- Restore S7 service decoding for standard COTP DT traffic and recognize
+  CR/CC credit bits.
+- Correct RDP X.224 Connection Confirm decoding and security negotiation
+  visibility.
+- Fix Suricata/Snort imports to match real HTTP, DNS and TLS decoder
+  attributes; reject unexposed header-buffer predicates.
+- Correct Sigma field and port aliases.
+- Eliminate steady-state DPI accounting allocations and repeated decoder
+  scans; keep protocol last-seen timestamps monotonic.
+- Native PCAP captures keep running after their start request returns, stop
+  cleanly on engine shutdown, and report worker exits in status. Before,
+  a capture ended with its request and wrote only the file header.
+- Preserve operational packet captures across unrelated configuration
+  commits and rollbacks.
+- Config review shows secret-only, IDS-bank and newly introduced section
+  changes from the authoritative diff; IDS bank bodies appear as summaries.
+- Config explorer shows correct IDS counts for running and staged banks.
+- Live topology views read the running configuration; stale commit notices
+  clear and staging writes one audit record.
+- Preserve reserved HTTP management when optional listeners cannot bind;
+  expose listener boot faults.
+- Refuse unsafe resets and rollback targets without discarding staged work.
+- Avoid SQLite-specific management boot-fault handling; a historical
+  reservation fault no longer blocks replay after the reservation is removed.
+- Correct ownership netlink subscriptions, watcher cancellation and
+  concurrent interface/routing state updates.
+- Preserve static, DHCP and WireGuard host addresses during CIDR conversion.
+- Reuse the management guard receive buffer.
+- Bind `:latest` signature verification to the exact release commit checked
+  for `main` ancestry; reject malformed and reserved release versions before
+  publishing images.
+
 ## [0.1.32] - 2026-10-09
 
 ### Fixed

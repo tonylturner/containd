@@ -4,8 +4,6 @@
 package httpapi
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,83 +25,63 @@ type syslogPatch struct {
 }
 
 // patchSyslogHandler supports incremental updates (format set, forwarder add/del, batch/flush tweaks).
-func patchSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func patchSyslogHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var patch syslogPatch
 		if err := c.ShouldBindJSON(&patch); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		cur := cfg.Services.Syslog
-		if patch.Format != "" {
-			cur.Format = patch.Format
-		}
-		if patch.BatchSize > 0 {
-			cur.BatchSize = patch.BatchSize
-		}
-		if patch.FlushEvery > 0 {
-			cur.FlushEvery = patch.FlushEvery
-		}
 		if patch.Forwarder != nil {
-			f := *patch.Forwarder
-			if err := cpservices.ValidateSyslogForwarder(f); err != nil {
+			if err := cpservices.ValidateSyslogForwarder(*patch.Forwarder); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
 			}
-			switch strings.ToLower(strings.TrimSpace(patch.Action)) {
-			case "add":
-				cur.Forwarders = append(cur.Forwarders, f)
-			case "del":
-				var next []config.SyslogForwarder
-				for _, existing := range cur.Forwarders {
-					if existing.Address == f.Address && existing.Port == f.Port {
-						continue
-					}
-					next = append(next, existing)
-				}
-				cur.Forwarders = next
-			default:
-				// no-op if action unknown
-			}
 		}
-		cfg.Services.Syslog = cur
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cur := cfg.Services.Syslog
+			if patch.Format != "" {
+				cur.Format = patch.Format
+			}
+			if patch.BatchSize > 0 {
+				cur.BatchSize = patch.BatchSize
+			}
+			if patch.FlushEvery > 0 {
+				cur.FlushEvery = patch.FlushEvery
+			}
+			if patch.Forwarder != nil {
+				f := *patch.Forwarder
+				switch strings.ToLower(strings.TrimSpace(patch.Action)) {
+				case "add":
+					cur.Forwarders = append(cur.Forwarders, f)
+				case "del":
+					var next []config.SyslogForwarder
+					for _, existing := range cur.Forwarders {
+						if existing.Address == f.Address && existing.Port == f.Port {
+							continue
+						}
+						next = append(next, existing)
+					}
+					cur.Forwarders = next
+				default:
+					// no-op if action unknown
+				}
+			}
+			cfg.Services.Syslog = cur
+			return true
+		})
+		if !ok {
 			return
 		}
-		if services != nil {
-			if err := services.Apply(c.Request.Context(), cfg.Services); err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-		}
+
+		auditLog(c, audit.Record{Action: "services.syslog.patch", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
-}
-
-func applyServiceRuntime(ctx context.Context, servicesCfg config.ServicesConfig, services ServicesApplier, engine EngineClient) []string {
-	var warnings []string
-	if services != nil {
-		if err := services.Apply(ctx, servicesCfg); err != nil {
-			warnings = append(warnings, fmt.Sprintf("services: %v", err))
-		}
-	}
-	if engine != nil {
-		if err := engine.ConfigureServices(ctx, servicesCfg); err != nil {
-			warnings = append(warnings, fmt.Sprintf("engine services: %v", err))
-		}
-	}
-	return warnings
 }
 
 func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -112,31 +90,29 @@ func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setSyslogHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func setSyslogHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var syslogCfg config.SyslogConfig
 		if err := c.ShouldBindJSON(&syslogCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.Syslog = syslogCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Services.Syslog = syslogCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
+
+		auditLog(c, audit.Record{Action: "services.syslog.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Syslog)
 	}
 }
 
 func getDNSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -152,33 +128,34 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			next := cfg.Services
+			current, err := store.LoadCandidate(c.Request.Context())
+			if err != nil {
+				internalError(c, err)
+				return
+			}
+			next := current.Services
 			next.DNS = dnsCfg
 			if err := v.Validate(c.Request.Context(), next); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
-		cfg.Services.DNS = dnsCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.DNS = dnsCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
-		auditLog(c, audit.Record{Action: "services.dns.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.dns.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.DNS)
 	}
 }
 
 func getNTPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -187,32 +164,28 @@ func getNTPHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setNTPHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func setNTPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ntpCfg config.NTPConfig
 		if err := c.ShouldBindJSON(&ntpCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.NTP = ntpCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Services.NTP = ntpCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
-		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.ntp.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.NTP)
 	}
 }
 
 func getAVHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -228,26 +201,27 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			next := cfg.Services
+			current, err := store.LoadCandidate(c.Request.Context())
+			if err != nil {
+				internalError(c, err)
+				return
+			}
+			next := current.Services
 			next.AV = avCfg
 			if err := v.Validate(c.Request.Context(), next); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
-		cfg.Services.AV = avCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.AV = avCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
-		auditLog(c, audit.Record{Action: "services.av.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.av.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.AV)
 	}
 }
@@ -369,7 +343,7 @@ func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.Handle
 
 func getDHCPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -378,32 +352,28 @@ func getDHCPHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setDHCPHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+func setDHCPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dhcpCfg config.DHCPConfig
 		if err := c.ShouldBindJSON(&dhcpCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.DHCP = dhcpCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Services.DHCP = dhcpCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
-		auditLog(c, audit.Record{Action: "services.dhcp.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.dhcp.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.DHCP)
 	}
 }
 
 func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -412,32 +382,28 @@ func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setForwardProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var forwardCfg config.ForwardProxyConfig
 		if err := c.ShouldBindJSON(&forwardCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.Proxy.Forward = forwardCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Services.Proxy.Forward = forwardCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
-		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.proxy.forward.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Forward)
 	}
 }
 
 func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -446,25 +412,21 @@ func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setReverseProxyHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var reverseCfg config.ReverseProxyConfig
 		if err := c.ShouldBindJSON(&reverseCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.Proxy.Reverse = reverseCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Services.Proxy.Reverse = reverseCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, nil))
-		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.proxy.reverse.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.Proxy.Reverse)
 	}
 }

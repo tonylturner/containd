@@ -74,7 +74,7 @@ func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 	if sr.ID == "" && sr.Title == "" {
 		return config.IDSRule{}, fmt.Errorf("sigma rule must have id or title")
 	}
-	conds, err := buildDetectionConditions(sr.Detection)
+	conds, notes, err := buildDetectionConditions(sr.Detection)
 	if err != nil {
 		return config.IDSRule{}, err
 	}
@@ -94,6 +94,11 @@ func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 		References:   sr.References,
 	}
 
+	if len(notes) > 0 {
+		sort.Strings(notes)
+		rule.Labels["evaluable"] = "false"
+		rule.ConversionNotes = notes
+	}
 	if len(sr.Tags) > 0 {
 		rule.Labels["sigma.tags"] = strings.Join(sr.Tags, ",")
 	}

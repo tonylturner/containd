@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -69,6 +71,8 @@ export default function NATPage() {
     setNat(n ?? { enabled: false });
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, []);
@@ -116,8 +120,8 @@ export default function NATPage() {
           setNat(saved.data);
           setNotice(
             saved.warning
-              ? `NAT configuration saved with warning: ${saved.warning}`
-              : "NAT configuration saved.",
+              ? `NAT configuration staged — commit to apply. Warning: ${saved.warning}`
+              : "NAT configuration staged — commit to apply.",
           );
           refresh();
         }}
@@ -137,8 +141,8 @@ export default function NATPage() {
           setNat(saved.data);
           setNotice(
             saved.warning
-              ? `Port forwarding configuration saved with warning: ${saved.warning}`
-              : "Port forwarding configuration saved.",
+              ? `Port forwarding configuration staged — commit to apply. Warning: ${saved.warning}`
+              : "Port forwarding configuration staged — commit to apply.",
           );
           refresh();
         }}

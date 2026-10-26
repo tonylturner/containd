@@ -10,13 +10,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func enableForwarding() error {
@@ -27,6 +29,9 @@ func enableForwarding() error {
 		// effectively enabled in the underlying VM; do not fail interface application
 		// just because we can't write the sysctl from inside the container.
 		if isSysctlWriteBlocked(err) {
+			if ReadIPv4ForwardingStatus() == IPv4ForwardingDisabled {
+				slog.Warn("ipv4 forwarding is disabled (net.ipv4.ip_forward=0); routed traffic will not pass")
+			}
 			return nil
 		}
 		return fmt.Errorf("enable ipv4 forwarding: %w", err)

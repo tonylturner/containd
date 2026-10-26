@@ -9,7 +9,7 @@ import (
 )
 
 func BenchmarkReassemblerFeedInOrder(b *testing.B) {
-	r := NewReassembler(64*1024, time.Minute)
+	r := newReassembler(64*1024, time.Minute)
 	now := time.Unix(1, 0).UTC()
 	payload := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 
@@ -17,7 +17,8 @@ func BenchmarkReassemblerFeedInOrder(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		seq := uint32(100 + (i * len(payload)))
-		r.Feed("bench-in-order", payload, now, seq, true)
+		res := r.feed("bench-in-order", position{kind: posSeq, seq: seq}, payload, now, true, false)
+		r.trim("bench-in-order", res.base, len(res.buf))
 	}
 }
 
@@ -29,9 +30,9 @@ func BenchmarkReassemblerFeedGapFill(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		r := NewReassembler(64*1024, time.Minute)
-		r.Feed("bench-gap", first, now, 100, true)
-		r.Feed("bench-gap", last, now, 105, true)
-		r.Feed("bench-gap", missing, now, 102, true)
+		r := newReassembler(64*1024, time.Minute)
+		r.feed("bench-gap", position{kind: posSeq, seq: 100}, first, now, true, false)
+		r.feed("bench-gap", position{kind: posSeq, seq: 105}, last, now, true, false)
+		r.feed("bench-gap", position{kind: posSeq, seq: 102}, missing, now, true, false)
 	}
 }

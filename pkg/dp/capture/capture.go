@@ -13,8 +13,28 @@ import (
 	"time"
 )
 
-// Handler receives decoded capture packets.
-type Handler func(pkt Packet)
+// TCPFlags are the eight TCP header flag bits.
+type TCPFlags uint8
+
+const (
+	TCPFlagFIN TCPFlags = 0x01
+	TCPFlagSYN TCPFlags = 0x02
+	TCPFlagRST TCPFlags = 0x04
+	TCPFlagPSH TCPFlags = 0x08
+	TCPFlagACK TCPFlags = 0x10
+	TCPFlagURG TCPFlags = 0x20
+	TCPFlagECE TCPFlags = 0x40
+	TCPFlagCWR TCPFlags = 0x80
+)
+
+// TCPMeta carries the decoded TCP header fields.
+type TCPMeta struct {
+	Valid  bool // header decoded; Seq 0 is a real value
+	Seq    uint32
+	Ack    uint32
+	Flags  TCPFlags
+	Window uint16
+}
 
 // Packet is a minimal decoded packet for DPI/telemetry.
 type Packet struct {
@@ -26,24 +46,23 @@ type Packet struct {
 	DstPort   uint16
 	Proto     uint8  // IP protocol number (6 TCP, 17 UDP)
 	Transport string // "tcp" or "udp"
-	Payload   []byte // L4 payload
-	// TCPSeq is the sequence number of the first payload byte. It is
-	// meaningful only when HasTCPSeq is set; zero is a valid sequence.
-	TCPSeq    uint32
-	HasTCPSeq bool
-	TCPFlags  uint8 // TCP header flags byte (FIN 0x01, SYN 0x02, RST 0x04, ACK 0x10)
+	Payload   []byte // L4 payload; always an owned copy
+	TCP       TCPMeta
+	Token     Token  // zero unless delivered inline
+	Mark      uint32 // NFQUEUE skb mark when HasMark; opaque to capture
+	HasMark   bool
+	// Invalid is "" when the packet decoded. Otherwise it names the reason
+	// (see the Invalid* constants); tuple fields are then best effort.
+	Invalid string
 }
-
-// TCP header flag bits carried in Packet.TCPFlags.
-const (
-	TCPFlagSYN uint8 = 0x02
-	TCPFlagACK uint8 = 0x10
-)
 
 // Manager manages interface capture workers.
 type Manager struct {
 	interfaces []string
 	cfg        Config
+
+	settler *settler
+	comp    *completer // inline completions; NFQUEUE only, from Start to Stop
 
 	mu      sync.Mutex
 	started bool
@@ -61,23 +80,30 @@ type Config struct {
 	BufferMB   int
 	Promisc    bool
 	OnError    func(error)
+	// OnVerdict and OnSource report inline verdict completions and source
+	// state. They run on one capture-owned completion goroutine, in
+	// submission order; Stop returns after the last one.
+	OnVerdict VerdictFunc
+	OnSource  func(SourceEvent)
 }
 
 func NewManager(cfg Config) (*Manager, error) {
 	cfg = normalizeConfig(cfg)
+	settler := &settler{inline: strings.EqualFold(cfg.Mode, "nfqueue")}
 	// Allow empty capture config for early phases and mgmt-only runs.
 	// Capture start will be a no-op in this case. NFQUEUE mode does not
 	// need interface names (packets arrive via the kernel queue, not an
 	// eth listener) — only the QueueID matters.
 	if len(cfg.Interfaces) == 0 && !strings.EqualFold(cfg.Mode, "nfqueue") {
-		return &Manager{interfaces: nil, cfg: cfg}, nil
+		return &Manager{interfaces: nil, cfg: cfg, settler: settler}, nil
 	}
-	return &Manager{interfaces: cfg.Interfaces, cfg: cfg}, nil
+	return &Manager{interfaces: cfg.Interfaces, cfg: cfg, settler: settler}, nil
 }
 
 // Start begins capture on configured interfaces after validating they exist.
-// A failed Start leaves the manager retryable; no consumer goroutines remain
-// when Start returns an error.
+// In NFQUEUE mode it returns nil only after the queue is bound; a failed
+// first bind is returned, not retried. A failed Start leaves the manager
+// retryable; no consumer goroutines remain when Start returns an error.
 func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	m.mu.Lock()
 	if m.stopped {
@@ -120,33 +146,45 @@ func (m *Manager) Start(ctx context.Context, handler Handler) error {
 	case "", "afpacket":
 		err = m.startAFPacket(runCtx, handler)
 	case "nfqueue":
+		m.comp = newCompleter(m.cfg.OnVerdict, m.cfg.OnSource)
 		err = m.startNFQueue(runCtx, handler)
 	}
 	if err != nil {
 		m.started = false
 		m.cancel = nil
+		comp := m.comp
+		m.comp = nil
 		m.mu.Unlock()
 		cancel()
 		m.wg.Wait()
+		if comp != nil {
+			comp.close()
+		}
 		return err
 	}
 	m.mu.Unlock()
 	return nil
 }
 
-// Stop permanently stops the manager, cancels capture, and waits for all
-// consumer goroutines to exit. It is safe to call repeatedly, including
-// before Start or after a failed Start.
+// Stop permanently stops the manager, cancels capture, waits for all
+// consumer goroutines to exit, and then delivers every pending OnVerdict and
+// OnSource completion. It is safe to call repeatedly, including before Start
+// or after a failed Start.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.stopped = true
 	cancel := m.cancel
 	m.cancel = nil
+	comp := m.comp
+	m.comp = nil
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	m.wg.Wait()
+	if comp != nil {
+		comp.close()
+	}
 }
 
 func normalizeConfig(cfg Config) Config {

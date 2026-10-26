@@ -147,7 +147,7 @@ func buildRuleHitEvent(a nflog.Attribute) (events.Event, bool) {
 	// fields. nflog can be configured to copy meta-only (no payload) by
 	// the operator; skip silently in that case.
 	if a.Payload != nil && len(*a.Payload) > 0 {
-		if pkt, ok := decodeIPPacket(*a.Payload); ok {
+		if pkt, ok := decodeIP(*a.Payload); ok {
 			ev.SrcIP = pkt.SrcIP.String()
 			ev.DstIP = pkt.DstIP.String()
 			ev.SrcPort = pkt.SrcPort

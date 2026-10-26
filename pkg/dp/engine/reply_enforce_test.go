@@ -40,6 +40,7 @@ func newEnforceEngine(t *testing.T, def rules.Action, entries ...rules.Entry) (*
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	startBlockWorker(t, e)
 	e.LoadRules(rules.Snapshot{Default: def, Firewall: entries, IDS: rules.IDSConfig{Enabled: true}})
 	return e, up
 }
@@ -108,7 +109,7 @@ func TestDNP3ReplyNotEnforcedUnderDefaultDeny(t *testing.T) {
 	handshake(e, 41000, dnp3Port)
 	e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Read))
 	e.handlePacket(connSegment(true, 41000, dnp3Port, 500, ackPsh, dnp3Response))
-	if got := up.blocked(); len(got) != 0 {
+	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks after the read and its reply = %v, want none", got)
 	}
 	if replyVerdict(e, 41000, dnp3Port) {
@@ -121,7 +122,7 @@ func TestDNP3ReplyNotEnforcedUnderDefaultDeny(t *testing.T) {
 	handshake(e, 41001, dnp3Port)
 	e.handlePacket(connSegment(false, 41001, dnp3Port, 100, ackPsh, dnp3Read))
 	e.handlePacket(connSegment(true, 41001, dnp3Port, 500, ackPsh, dnp3Response))
-	if got := up.blocked(); len(got) != 0 {
+	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks after the re-polls = %v, want none", got)
 	}
 	if got := protoEvents(e, "dnp3"); got != 6 {
@@ -143,7 +144,7 @@ func TestDNP3UnsolicitedNotEnforced(t *testing.T) {
 	if got := protoEvents(e, "dnp3"); got != 1 {
 		t.Fatalf("dnp3 events = %d, want 1", got)
 	}
-	if got := up.blocked(); len(got) != 0 {
+	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks = %v, want none", got)
 	}
 	if replyVerdict(e, 41000, dnp3Port) {
@@ -177,13 +178,13 @@ func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
 			handshake(e, 41000, tc.port)
 			if tc.request != nil {
 				e.handlePacket(connSegment(false, 41000, tc.port, 100, ackPsh, tc.request))
-				if got := up.blocked(); len(got) != 0 {
+				if got := up.blockedAfter(e); len(got) != 0 {
 					t.Fatalf("the request was blocked by a response rule: %v", got)
 				}
 			}
 			e.handlePacket(connSegment(true, 41000, tc.port, 500, ackPsh, tc.reply))
 			want := testClient + ">" + testServer + "/tcp:" + port
-			if got := up.blocked(); len(got) != 1 || got[0] != want {
+			if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
 				t.Fatalf("blocks = %v, want [%s]", got, want)
 			}
 			if got := ruleHits(e, "deny-reply"); got != 1 {
@@ -210,7 +211,7 @@ func TestModbusExceptionReplyNotEnforced(t *testing.T) {
 	if got := protoEvents(e, "modbus"); got != 2 {
 		t.Fatalf("modbus events = %d, want 2", got)
 	}
-	if got := up.blocked(); len(got) != 0 {
+	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks = %v, want none", got)
 	}
 	if replyVerdict(e, 41000, 502) {
@@ -232,7 +233,7 @@ func TestRequestStillGetsDefault(t *testing.T) {
 	// The master sends an outstation's frame: FC130 from the opener.
 	e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Unsolicited))
 	want := testClient + ">" + testServer + "/tcp:20000"
-	if got := up.blocked(); len(got) != 1 || got[0] != want {
+	if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
 		t.Fatalf("blocks = %v, want [%s]", got, want)
 	}
 }

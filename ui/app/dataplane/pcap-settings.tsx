@@ -22,33 +22,31 @@ export function CaptureStatusCard({
   captureSummary,
   runningSince,
   status,
-  settings,
 }: {
   isRunning: boolean;
   captureSummary: string;
   runningSince: string;
   status: PcapStatus | null;
-  settings: PcapConfig;
 }) {
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
-            Capture Status
+            Live Capture Status
           </div>
           <div className="mt-1 text-sm text-[var(--text)]">
-            {isRunning ? "Running" : "Stopped"}
+            {!status ? "Unknown — live status unavailable" : isRunning ? "Running" : "Stopped"}
           </div>
         </div>
         <span
           className={`rounded-full px-2 py-0.5 text-xs ${isRunning ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/[0.1] text-[var(--text)]"}`}
         >
-          {isRunning ? "active" : "idle"}
+          {!status ? "unknown" : isRunning ? "active" : "idle"}
         </span>
       </div>
       <div className="mt-2 text-xs text-[var(--text-muted)]">
-        {captureSummary}
+        Form settings (not live): {captureSummary}
       </div>
       <div className="mt-2 text-xs text-[var(--text-muted)]">
         Started: <span className="text-[var(--text)]">{runningSince}</span>
@@ -56,9 +54,9 @@ export function CaptureStatusCard({
       <div className="mt-1 text-xs text-[var(--text-muted)]">
         Active interfaces:{" "}
         <span className="text-[var(--text)]">
-          {(status?.interfaces ?? settings.interfaces ?? []).length
-            ? (status?.interfaces ?? settings.interfaces ?? []).join(", ")
-            : "none"}
+          {(status?.interfaces ?? []).length
+            ? (status?.interfaces ?? []).join(", ")
+            : status ? "none" : "unknown"}
         </span>
       </div>
       {status?.lastError ? (
@@ -75,8 +73,10 @@ export function CaptureSetupCard({
   settings,
   setSettings,
   configIssues,
-  ifaceOptions,
+  captureIfaceOptions,
+  zoneOptions,
   toggleIface,
+  toggleZone,
   setAllInterfaces,
   bpfPreview,
   updateForwardTarget,
@@ -86,8 +86,10 @@ export function CaptureSetupCard({
   settings: PcapConfig;
   setSettings: React.Dispatch<React.SetStateAction<PcapConfig>>;
   configIssues: string[];
-  ifaceOptions: { value: string; label: string }[];
+  captureIfaceOptions: { value: string; label: string }[];
+  zoneOptions: { value: string; label: string }[];
   toggleIface: (name: string) => void;
+  toggleZone: (name: string) => void;
   setAllInterfaces: (on: boolean) => void;
   bpfPreview: string;
   updateForwardTarget: (iface: string, patch: Partial<PcapForwardRow>) => void;
@@ -99,8 +101,7 @@ export function CaptureSetupCard({
         Capture setup
       </h2>
       <p className="mt-1 text-sm text-[var(--text)]">
-        Start/stop packet captures on selected interfaces and store PCAPs for
-        replay.
+        Save PCAP defaults to stage them for commit. Start and stop act immediately; starting uses the form below without saving it.
       </p>
       {configIssues.length > 0 && (
         <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
@@ -135,7 +136,7 @@ export function CaptureSetupCard({
             </div>
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-4">
-            {ifaceOptions.map((opt) => (
+            {captureIfaceOptions.map((opt) => (
               <label
                 key={opt.value}
                 className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui"
@@ -151,6 +152,37 @@ export function CaptureSetupCard({
               </label>
             ))}
           </div>
+        </div>
+
+        <div>
+          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            Zones
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-4">
+            {zoneOptions.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui"
+              >
+                <input
+                  type="checkbox"
+                  checked={(settings.zones ?? []).includes(opt.value)}
+                  disabled={!canEdit}
+                  onChange={() => toggleZone(opt.value)}
+                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
+                />
+                {opt.label}
+              </label>
+            ))}
+            {zoneOptions.length === 0 && (
+              <p className="text-xs text-[var(--text-muted)]">
+                No zones are configured.
+              </p>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Zone capture includes every configured interface assigned to that zone.
+          </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
@@ -235,7 +267,7 @@ export function CaptureSetupCard({
             <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
               Filters (tcpdump style)
             </div>
-            <div className="mt-2 grid gap-2 md:grid-cols-3">
+            <div className="mt-2 grid gap-2 md:grid-cols-4">
               <input
                 value={settings.filter?.src ?? ""}
                 disabled={!canEdit}
@@ -279,6 +311,19 @@ export function CaptureSetupCard({
                 <option value="udp">udp</option>
                 <option value="icmp">icmp</option>
               </select>
+              <input
+                aria-label="Port or port range"
+                value={settings.filter?.port ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    filter: { ...(prev.filter ?? {}), port: e.target.value },
+                  }))
+                }
+                placeholder="Port or range (e.g. 2404)"
+                className="input-industrial transition-ui outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
+              />
             </div>
             <div className="mt-2 text-xs text-[var(--text-muted)]">
               Filter preview:{" "}

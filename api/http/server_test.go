@@ -73,12 +73,38 @@ func (m *mockStore) Load(ctx context.Context) (*config.Config, error) {
 	return m.cfg, nil
 }
 
+func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+	cfg, err := m.LoadCandidate(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return err
+	}
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	var next config.Config
+	if err := json.Unmarshal(blob, &next); err != nil {
+		return err
+	}
+	if err := edit(&next); err != nil {
+		return err
+	}
+	return m.SaveCandidate(ctx, &next)
+}
+
 func (m *mockStore) SaveCandidate(ctx context.Context, cfg *config.Config) error {
 	return m.Save(ctx, cfg)
 }
 
 func (m *mockStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
-	return m.Load(ctx)
+	cfg, err := m.Load(ctx)
+	if err == config.ErrNotFound {
+		return config.DefaultConfig(), nil
+	}
+	return cfg, err
 }
 
 func (m *mockStore) Commit(ctx context.Context) error { return nil }
@@ -221,8 +247,8 @@ func TestGetConfigNotFound(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)
 	}
-	if cfg.System.Hostname != "containd" {
-		t.Fatalf("expected default hostname containd, got %q", cfg.System.Hostname)
+	if cfg.System.Hostname != config.DefaultConfig().System.Hostname {
+		t.Fatalf("expected default hostname, got %q", cfg.System.Hostname)
 	}
 }
 

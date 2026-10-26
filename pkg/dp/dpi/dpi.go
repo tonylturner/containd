@@ -11,24 +11,25 @@ import (
 )
 
 const (
-	defaultReassemblyMax     = 64 * 1024        // 64 KB per stream
+	defaultReassemblyMax     = 64 * 1024        // 64 KB buffered per stream direction
 	defaultReassemblyTimeout = 30 * time.Second // idle stream timeout
 )
 
 // ParsedPacket is a minimal packet representation for DPI decoders.
+// Capture will populate this in later phases.
 type ParsedPacket struct {
 	Payload []byte
 	Proto   string // "tcp", "udp"
 	SrcPort uint16
 	DstPort uint16
-	// TCPSeq is the sequence number of the first payload byte. It is
-	// meaningful only when HasTCPSeq is set; zero is a valid sequence.
-	TCPSeq    uint32
-	HasTCPSeq bool
-	// TCPSyn marks a SYN segment: the sender starts a new sequence space
-	// at TCPSeq, replacing any stream state an earlier connection on the
-	// same tuple left behind.
-	TCPSyn bool
+	TCPSeq  uint32 // TCP sequence number (0 for UDP)
+	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
+
+	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
+	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)
+	HasOffset   bool      // the caller tracked the handshake and computed Offset
+	Session     string    // required when HasOffset
+	Dir         StreamDir // required when HasOffset
 }
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
@@ -60,25 +61,19 @@ type PortHinter interface {
 
 // Manager dispatches packets to registered decoders.
 type Manager struct {
+	streamMu    sync.Mutex // one feed/parse/trim transaction across capture workers
 	decoders    []Decoder
 	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
-	reassembler *Reassembler
-
-	// streamMu makes Feed -> DecodeStream -> Trim atomic per packet. The
-	// engine calls OnPacket from one goroutine per capture interface, and
-	// a forwarded segment is captured on both its ingress and egress
-	// interface; without the lock two goroutines could decode the same
-	// bytes twice or trim bytes the other has not parsed yet.
-	streamMu sync.Mutex
+	reassembler *reassembler
 }
 
 func NewManager(decoders ...Decoder) *Manager {
 	m := &Manager{
 		tcpByPort:   make(map[uint16][]Decoder),
 		udpByPort:   make(map[uint16][]Decoder),
-		reassembler: NewReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
+		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -149,65 +144,11 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 	return append(indexed, m.anyDecoders...)
 }
 
-// OnPacket passes the packet to decoders that support the flow. TCP
-// payload for StreamDecoders goes through the reassembler, so they see
-// the in-order byte stream of the flow direction and each message is
-// decoded exactly once; all other decoders see the packet as captured.
+// OnPacket passes the packet to decoders that support the flow and returns
+// only the events. It is Inspect without the framing metadata.
 func (m *Manager) OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error) {
-	if m == nil || len(m.decoders) == 0 {
-		return nil, nil
-	}
-	var streamDecoders []StreamDecoder
-	var packetDecoders []Decoder
-	for _, d := range m.candidates(state) {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
-		if sd, ok := d.(StreamDecoder); ok && pkt.Proto == "tcp" && m.reassembler != nil {
-			streamDecoders = append(streamDecoders, sd)
-			continue
-		}
-		packetDecoders = append(packetDecoders, d)
-	}
-
-	out := m.decodeStream(state, pkt, streamDecoders)
-	for _, d := range packetDecoders {
-		events, err := d.OnPacket(state, pkt)
-		if err != nil {
-			return out, err
-		}
-		out = append(out, events...)
-	}
-	return out, nil
-}
-
-// decodeStream feeds the segment into the flow direction's stream, lets
-// every stream decoder frame the buffered bytes, and drops the bytes they
-// consumed. Decoders parse the same buffer, so the largest consumption
-// wins.
-func (m *Manager) decodeStream(state *flow.State, pkt *ParsedPacket, decoders []StreamDecoder) []Event {
-	if len(decoders) == 0 {
-		return nil
-	}
-	flowKey := state.Key.Hash()
-	m.streamMu.Lock()
-	defer m.streamMu.Unlock()
-	if pkt.TCPSyn && pkt.HasTCPSeq {
-		m.reassembler.Open(flowKey, pkt.TCPSeq, time.Now())
-	}
-	if len(pkt.Payload) == 0 {
-		return nil
-	}
-	stream := m.reassembler.Feed(flowKey, pkt.Payload, time.Now(), pkt.TCPSeq, pkt.HasTCPSeq)
-	var out []Event
-	consumed := 0
-	for _, d := range decoders {
-		events, n := d.DecodeStream(state, stream)
-		out = append(out, events...)
-		consumed = max(consumed, n)
-	}
-	m.reassembler.Trim(flowKey, consumed)
-	return out
+	res := m.Inspect(state, pkt)
+	return res.Events, res.Err
 }
 
 // OnFlowEnd notifies decoders of flow termination and cleans up reassembly
@@ -216,10 +157,12 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	if m == nil || len(m.decoders) == 0 {
 		return nil, nil
 	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {
-		m.reassembler.Complete(state.Key.Hash())
+		m.reassembler.complete(state.Key.Hash())
 	}
 
 	var out []Event

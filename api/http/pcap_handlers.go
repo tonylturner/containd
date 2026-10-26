@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 
 func getPCAPConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			httpError(c, err)
 			return
@@ -28,53 +29,72 @@ func getPCAPConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setPCAPConfigHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func setPCAPConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req config.PCAPConfig
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			httpError(c, err)
+		if err := config.ValidatePCAPConfig(req); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		cfg.PCAP = req
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			httpError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.PCAP = req
+			return true
+		})
+		if !ok {
 			return
 		}
-		if engine != nil {
-			if _, err := engine.SetPcapConfig(c.Request.Context(), cfg.PCAP); err != nil {
-				apiError(c, http.StatusBadRequest, err.Error())
-				return
-			}
-		}
-		auditLog(c, audit.Record{Action: "pcap.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "pcap.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.PCAP)
 	}
 }
 
 func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			httpError(c, err)
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
+		var err error
+		var body []byte
+		if c.Request.Body != nil {
+			body, err = io.ReadAll(c.Request.Body)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, "failed to read pcap start body")
+				return
+			}
+		}
+		var capture config.PCAPConfig
+		if strings.TrimSpace(string(body)) != "" {
+			if err := json.Unmarshal(body, &capture); err != nil {
+				apiError(c, http.StatusBadRequest, "invalid pcap start JSON: "+err.Error())
+				return
+			}
+		} else {
+			cfg, err := loadOrInitConfig(c.Request.Context(), store)
+			if err != nil {
+				httpError(c, err)
+				return
+			}
+			capture = cfg.PCAP
+		}
+		capture.Enabled = true
+		if err := config.ValidatePCAPConfig(capture); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		cfg.PCAP.Enabled = true
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			httpError(c, err)
-			return
+		var status pcap.Status
+		if engine != nil {
+			status, err = engine.StartPcap(c.Request.Context(), capture)
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
+
 		if engine == nil {
 			c.JSON(http.StatusOK, gin.H{"status": "pcap start queued"})
-			return
-		}
-		status, err := engine.StartPcap(c.Request.Context(), cfg.PCAP)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		auditLog(c, audit.Record{Action: "pcap.start", Target: "running"})
@@ -82,18 +102,10 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	}
 }
 
-func stopPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func stopPCAPHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			httpError(c, err)
-			return
-		}
-		cfg.PCAP.Enabled = false
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			httpError(c, err)
-			return
-		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		if engine == nil {
 			c.JSON(http.StatusOK, gin.H{"status": "pcap stop queued"})
 			return

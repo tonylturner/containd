@@ -22,6 +22,81 @@ Authentication and user-management coverage includes:
 
 See [Config Format — API Endpoints](config-format.md#api-endpoints) for a concise listing of all REST endpoints.
 
+## Staged Configuration
+
+All persisted configuration edits stage into one shared candidate, including
+object CRUD, service settings, IDS rules, saved PCAP settings, `POST /config`
+and `POST /config/import`. Import replaces the candidate, never running.
+Editable lists and settings read candidate desired state. Staging does not apply
+anything to the engine or services; read-only discovery/validation is permitted.
+Use `GET /config/diff` to review, then `POST /config/commit` or
+`POST /config/commit_confirmed` to promote and apply. Running configuration and
+its IDS bank are promoted and rolled back together. Plain commit cancels an
+outstanding confirmed-commit timer and replaces its rollback baseline.
+
+`GET /config`, `GET /config/export`, config backups, `GET /ids/export` and
+`GET /ids/backup` read running. IDS import and restore stage desired rules.
+Operational commands (blocks, reconcile, credentials, definition updates and
+capture start/stop) remain immediate. `/pcap/start` uses its request body, or
+running PCAP settings when absent; neither start nor stop persists settings.
+CLI configuration commands report `staged; run "commit" to apply`.
+
+Successful staged edits return `X-Containd-Config: staged`. Successful commit,
+commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
+Operational, read, preview-only and failed responses carry neither header value.
+
+## Event Retention and Page Limits
+
+`GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum
+5000), but **not necessarily the globally newest N**. Each runtime store
+keeps a separate count-bounded bank of its latest 1024 real
+`firewall.rule.hit` events whose `attributes.action` is exactly `DENY`.
+Later DENYs evict older bank entries; ordinary telemetry does not. There is
+no age expiry. The bank survives configuration rebuilds, not process restarts,
+and is not a guarantee of a fixed number of hours under DENY floods.
+
+Both the engine's `/internal/events` listing and the management API select
+DENYs first, newest-first if they exceed the limit. Management merges engine
+and service candidates before applying the same rule. Remaining slots contain
+the newest other events. Results are deduplicated by event ID and then sorted
+newest-first by timestamp, with descending ID breaking ties. Original IDs,
+timestamps and network tuples do not change.
+
+An unreachable-engine telemetry-error row always reserves a slot, even at
+`limit=1`. Small pages can therefore consist entirely of DENYs or the error;
+old evidence can displace newer ordinary telemetry. This selection applies
+to all protocols, including Modbus and DNP3, not only IEC104.
+
+`GET /api/v1/events/{id}` can find retained DENYs after the general ring has
+wrapped. `/api/v1/flows` still rolls up only the general event ring; prolonged
+DENY retention does not resurrect old flow groups.
+
+## Forwarding Health and Commit Warnings
+
+Unauthenticated `GET /api/v1/health` includes `ipv4Forwarding`, which is
+`enabled`, `disabled`, or `unknown`. The value is read from
+`/proc/sys/net/ipv4/ip_forward` by the engine in its network namespace;
+`unknown` means the sysctl could not be read or the management API could not
+reach the engine.
+
+`managementBinding.state` is `configured`, `unbound-appliance`, or `unknown`.
+`unbound-appliance` means management access is granted only on logical
+interfaces that have no existing device. The management listeners in
+`recoveryPorts` then accept connections on every existing NIC except those
+whose access is explicitly disabled, so an unbound appliance never locks out
+management. Bind the interfaces to clear this state.
+
+When a commit applies a configuration spanning multiple zone-assigned
+interface devices and forwarding is disabled, the response includes the
+`X-Containd-Warnings` header:
+
+```text
+ipv4 forwarding is disabled (net.ipv4.ip_forward=0); routed traffic will not pass
+```
+
+Warnings are returned as repeated `X-Containd-Warnings` header values when
+there is more than one.
+
 ## Environment Variables
 
 The following environment variables control runtime behavior. They are read at startup and (where noted) on `SIGHUP` reload.
@@ -73,9 +148,9 @@ The following environment variables control runtime behavior. They are read at s
 | `CONTAIND_ENFORCE_ENABLED` | `0` | Enable nftables enforcement (`1` to enable). The published starter and dev compose files override this to `1` by default. |
 | `CONTAIND_DPI_MOCK` | `0` | Enable synthetic DPI event generation for testing (`1` to enable) |
 
-### DPI Configuration (Runtime)
+### DPI Configuration (Staged)
 
-DPI mode and per-protocol settings are configured at runtime via the API or UI, not environment variables. Use `POST /api/v1/engine/config` with:
+DPI mode and per-protocol settings are staged via the API or UI, not environment variables. Use `POST /api/v1/dataplane`, then commit, with:
 
 - `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy enforcement)
 - `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)

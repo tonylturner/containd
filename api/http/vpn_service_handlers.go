@@ -23,7 +23,7 @@ import (
 
 func getVPNHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -33,31 +33,27 @@ func getVPNHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setVPNHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+func setVPNHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var vpnCfg config.VPNConfig
 		if err := c.ShouldBindJSON(&vpnCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			vpnCfg.RestoreRedactedSecrets(cfg.Services.VPN)
+			cfg.Services.VPN = vpnCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		vpnCfg.RestoreRedactedSecrets(cfg.Services.VPN)
-		cfg.Services.VPN = vpnCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
-		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "running"})
+		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "candidate", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Services.VPN)
 	}
 }
 
-func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, engine EngineClient) gin.HandlerFunc {
+func uploadOpenVPNProfileHandler(store config.Store) gin.HandlerFunc {
 	type req struct {
 		Name string `json:"name"`
 		OVPN string `json:"ovpn"`
@@ -99,31 +95,32 @@ func uploadOpenVPNProfileHandler(store config.Store, services ServicesApplier, e
 			internalError(c, err)
 			return
 		}
-		path := filepath.Join(base, name+".ovpn")
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, []byte(ovpn+"\n"), 0o600); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			_ = os.Remove(tmp)
-			internalError(c, err)
-			return
-		}
-
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		// CreateTemp uses O_EXCL and never replaces an active profile artifact.
+		file, err := os.CreateTemp(base, name+"-*.ovpn")
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		cfg.Services.VPN.OpenVPN.ConfigPath = path
-		cfg.Services.VPN.OpenVPN.Managed = nil
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		path := file.Name()
+		if _, err := file.WriteString(ovpn + "\n"); err != nil {
+			file.Close()
+			internalError(c, err)
 			return
 		}
-		setWarningHeader(c, applyServiceRuntime(c.Request.Context(), cfg.Services, services, engine))
-		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name})
+		if err := file.Close(); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Services.VPN.OpenVPN.ConfigPath = path
+			cfg.Services.VPN.OpenVPN.Managed = nil
+			return true
+		})
+		if !ok {
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name, Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
 	}
 }

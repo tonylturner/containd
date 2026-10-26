@@ -43,13 +43,34 @@ func (b *blockRecorder) blocked() []string {
 	return append([]string(nil), b.flows...)
 }
 
-func segment(fromServer bool, seq uint32, flags uint8, payload []byte) capture.Packet {
+// Run the B asynchronous block worker without starting live capture.
+func startBlockWorker(t *testing.T, e *Engine) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); e.hooks.blocks.run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+func (b *blockRecorder) blockedAfter(e *Engine) []string {
+	done := make(chan struct{})
+	if !e.hooks.blocks.submit(func() { close(done) }) {
+		panic("block worker full")
+	}
+	<-done
+	return b.blocked()
+}
+
+func segment(fromServer bool, seq uint32, flags capture.TCPFlags, payload []byte) capture.Packet {
 	return connSegment(fromServer, 41000, 502, seq, flags, payload)
 }
 
 // connSegment builds a segment of the testClient:clientPort ->
 // testServer:serverPort connection, sent by the server when fromServer.
-func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, flags uint8, payload []byte) capture.Packet {
+func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, flags capture.TCPFlags, payload []byte) capture.Packet {
+	if flags&capture.TCPFlagSYN != 0 {
+		seq--
+	}
 	pkt := capture.Packet{
 		Timestamp: time.Now().UTC(),
 		Interface: "eth1",
@@ -60,9 +81,7 @@ func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, fla
 		Proto:     6,
 		Transport: "tcp",
 		Payload:   payload,
-		TCPSeq:    seq,
-		HasTCPSeq: true,
-		TCPFlags:  flags,
+		TCP:       capture.TCPMeta{Valid: true, Seq: seq, Flags: capture.TCPFlags(flags)},
 	}
 	if fromServer {
 		pkt.Interface = "eth0"
@@ -128,16 +147,19 @@ func TestTrackFlowOrientsReplies(t *testing.T) {
 
 func TestTrackFlowHandshakeReorients(t *testing.T) {
 	e := newOrientationEngine(t)
-	// Mid-stream capture saw the server first and took it as the opener.
-	if st := e.trackFlow(segment(true, 500, ackPsh, nil), time.Now()); st.Key.Dir != flow.DirForward {
+	// Unknown ports still use first-seen orientation until a handshake.
+	packet := func(server bool, seq uint32, flags capture.TCPFlags) capture.Packet {
+		return connSegment(server, 41000, 9999, seq, flags, nil)
+	}
+	if st := e.trackFlow(packet(true, 500, ackPsh), time.Now()); st.Key.Dir != flow.DirForward {
 		t.Fatalf("first-seen dir = %d, want forward", st.Key.Dir)
 	}
-	e.trackFlow(segment(false, 100, capture.TCPFlagACK, nil), time.Now())
+	e.trackFlow(packet(false, 100, capture.TCPFlagACK), time.Now())
 	// A new connection on the tuple corrects the orientation.
-	if st := e.trackFlow(segment(false, 1000, capture.TCPFlagSYN, nil), time.Now()); st.Key.Dir != flow.DirForward {
+	if st := e.trackFlow(packet(false, 1000, capture.TCPFlagSYN), time.Now()); st.Key.Dir != flow.DirForward {
 		t.Fatalf("SYN sender dir = %d, want forward", st.Key.Dir)
 	}
-	if st := e.trackFlow(segment(true, 5000, ackPsh, nil), time.Now()); st.Key.Dir != flow.DirReverse {
+	if st := e.trackFlow(packet(true, 5000, ackPsh), time.Now()); st.Key.Dir != flow.DirReverse {
 		t.Fatalf("server dir after SYN = %d, want reverse", st.Key.Dir)
 	}
 	if len(e.flows) != 2 {
@@ -198,6 +220,7 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	write.ICS = rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}, WriteOnly: true}
 	// IDS on (the shipped default config) inspects every flow, replies
 	// included.
+	startBlockWorker(t, e)
 	e.LoadRules(rules.Snapshot{
 		Default:  rules.ActionDeny,
 		Firewall: []rules.Entry{read, write},
@@ -209,18 +232,18 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	e.handlePacket(segment(true, 500, capture.TCPFlagSYN|capture.TCPFlagACK, nil))
 	e.handlePacket(segment(false, 100, ackPsh, readReq))
 	e.handlePacket(segment(true, 500, ackPsh, readResp))
-	if got := up.blocked(); len(got) != 0 {
+	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("allowed read or its reply was blocked: %v", got)
 	}
 
 	write6 := modbusADU(11, 6, 1, 0x1234)
 	e.handlePacket(segment(false, 112, ackPsh, write6))
 	want := testClient + ">" + testServer + "/tcp:502"
-	if got := up.blocked(); len(got) != 1 || got[0] != want {
+	if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
 		t.Fatalf("blocks after write = %v, want [%s]", got, want)
 	}
 	e.handlePacket(segment(true, 513, ackPsh, write6))
-	if got := up.blocked(); len(got) != 2 || got[0] != want || got[1] != want {
+	if got := up.blockedAfter(e); len(got) != 2 || got[0] != want || got[1] != want {
 		t.Fatalf("blocks after the echoed reply = %v, want [%s %s]", got, want, want)
 	}
 	if got := ruleHits(e, "write-deny"); got != 2 {
@@ -253,5 +276,62 @@ func TestReplyInspectedByServicePort(t *testing.T) {
 	e.handlePacket(segment(true, 500, ackPsh, []byte{0, 10, 0, 0, 0, 7, 1, 3, 4, 0, 0, 0, 1}))
 	if got := modbusEventsOldestFirst(e); len(got) != 1 || got[0].SrcIP != testServer {
 		t.Fatalf("reply events = %+v, want one from %s", got, testServer)
+	}
+}
+
+func TestModbusResponseDirectionRule(t *testing.T) {
+	e := newModbusInspectEngine(t)
+	e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, IDS: rules.IDSConfig{Enabled: true}, Firewall: []rules.Entry{{
+		ID: "response-only", Action: rules.ActionAllow, Log: true,
+		Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
+		ICS:       rules.ICSPredicate{Protocol: "modbus", Direction: "response", FunctionCode: []uint8{3}},
+	}}})
+	e.handlePacket(segment(false, 100, capture.TCPFlagSYN, nil))
+	e.handlePacket(segment(false, 100, ackPsh, modbusADU(1, 3, 0, 1)))
+	if got := ruleHits(e, "response-only"); got != 0 {
+		t.Fatalf("request matched response rule: %d", got)
+	}
+	e.handlePacket(segment(true, 500, ackPsh, []byte{0, 1, 0, 0, 0, 5, 1, 3, 2, 0, 42}))
+	if got := ruleHits(e, "response-only"); got != 1 {
+		t.Fatalf("response rule hits=%d", got)
+	}
+	replies := modbusEventsOldestFirst(e)
+	if len(replies) != 2 || replies[1].Kind != "response" {
+		t.Fatalf("events=%+v", replies)
+	}
+}
+
+func TestTrackFlowICSServiceReplyFirst(t *testing.T) {
+	for _, tc := range []struct {
+		proto uint8
+		port  uint16
+	}{{6, 502}, {6, 20000}, {6, 44818}, {6, 102}, {6, 4840}, {6, 2404}, {17, 2222}, {17, 47808}} {
+		e := newOrientationEngine(t)
+		reply := connSegment(true, 41000, tc.port, 500, ackPsh, nil)
+		reply.Proto = tc.proto
+		st := e.trackFlow(reply, time.Now())
+		if st.Key.Dir != flow.DirReverse {
+			t.Fatalf("%d/%d first reply dir=%d", tc.proto, tc.port, st.Key.Dir)
+		}
+		request := connSegment(false, 41000, tc.port, 100, ackPsh, nil)
+		request.Proto = tc.proto
+		if st := e.trackFlow(request, time.Now()); st.Key.Dir != flow.DirForward {
+			t.Fatalf("%d/%d request dir=%d", tc.proto, tc.port, st.Key.Dir)
+		}
+	}
+}
+
+func TestTrackFlowHandshakeOverridesServicePort(t *testing.T) {
+	e := newOrientationEngine(t)
+	// An opener bound to a service port is still the client.
+	p := connSegment(true, 41000, 502, 100, capture.TCPFlagSYN, nil)
+	if st := e.trackFlow(p, time.Now()); st.Key.Dir != flow.DirForward {
+		t.Fatal("port overrode SYN")
+	}
+	p.SrcIP, p.DstIP = p.DstIP, p.SrcIP
+	p.SrcPort, p.DstPort = p.DstPort, p.SrcPort
+	p.TCP.Flags = ackPsh
+	if st := e.trackFlow(p, time.Now()); st.Key.Dir != flow.DirReverse {
+		t.Fatal("port overrode existing handshake")
 	}
 }

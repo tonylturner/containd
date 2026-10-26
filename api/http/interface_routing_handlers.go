@@ -10,13 +10,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -25,12 +26,8 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func interfaceStateHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, err := loadOrInitConfig(c.Request.Context(), store); err != nil {
-			internalError(c, err)
-			return
-		}
 		if engine == nil {
 			c.JSON(http.StatusOK, []config.InterfaceState{})
 			return
@@ -44,7 +41,7 @@ func interfaceStateHandler(store config.Store, engine EngineClient) gin.HandlerF
 	}
 }
 
-func interfacesAssignHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func interfacesAssignHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if engine == nil {
 			apiError(c, http.StatusBadRequest, "engine unavailable")
@@ -55,47 +52,41 @@ func interfacesAssignHandler(store config.Store, engine EngineClient, services S
 			apiError(c, http.StatusBadRequest, "invalid request")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
 		state, err := engine.ListInterfaceState(c.Request.Context())
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
 		deviceSet := interfaceDeviceSet(state)
+		defaultRouteIface := ""
+		if req.Mode == "auto" {
+			defaultRouteIface = detectKernelDefaultRouteIface()
+		}
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			ifaceByName := map[string]*config.Interface{}
+			for i := range cfg.Interfaces {
+				ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
+			}
 
-		ifaceByName := map[string]*config.Interface{}
-		for i := range cfg.Interfaces {
-			ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
-		}
+			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req, defaultRouteIface, config.ReservationForStore(store))
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return false
+			}
+			if err := validateInterfaceAssignments(assignments, ifaceByName, deviceSet); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return false
+			}
 
-		assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			for logical, dev := range assignments {
+				ifaceByName[logical].Device = dev
+			}
+			return true
+		})
+		if !ok {
 			return
 		}
-		if err := validateInterfaceAssignments(assignments, ifaceByName, deviceSet); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		for logical, dev := range assignments {
-			ifaceByName[logical].Device = dev
-		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
-		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config"})
+		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config", Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
 	}
 }
@@ -122,12 +113,13 @@ func normalizedInterfaceAssignMode(req interfaceAssignRequest) string {
 	return mode
 }
 
-func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest) (map[string]string, error) {
+func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest, defaultRouteIface string, r *mgmtpath.Reservation) (map[string]string, error) {
 	switch req.Mode {
 	case "auto":
 		return computeDefaultInterfaceAssignments(ifaces, state, autoAssignOptions{
+			Reservation:       r,
 			AllowFallback:     true,
-			DefaultRouteIface: detectKernelDefaultRouteIface(),
+			DefaultRouteIface: defaultRouteIface,
 		})
 	case "explicit":
 		return normalizedInterfaceMappings(req.Mappings)
@@ -188,9 +180,15 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)
+			return
+		}
+		if err := config.ValidateForStore(store, cfg); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {
@@ -202,80 +200,58 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 	}
 }
 
-func createInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func createInterfaceHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var iface config.Interface
 		if err := c.ShouldBindJSON(&iface); err != nil || iface.Name == "" {
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			for _, existing := range cfg.Interfaces {
+				if existing.Name == iface.Name {
+					apiError(c, http.StatusBadRequest, "interface already exists")
+					return false
+				}
+			}
+			cfg.Interfaces = append(cfg.Interfaces, iface)
+			return true
+		})
+		if !ok {
 			return
 		}
-		for _, existing := range cfg.Interfaces {
-			if existing.Name == iface.Name {
-				apiError(c, http.StatusBadRequest, "interface already exists")
-				return
-			}
-		}
-		cfg.Interfaces = append(cfg.Interfaces, iface)
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
-			if err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
-			}
-			setWarningHeader(c, warnings)
-		}
-		auditLog(c, audit.Record{Action: "interfaces.create", Target: iface.Name})
+		auditLog(c, audit.Record{Action: "interfaces.create", Target: iface.Name, Detail: "candidate"})
 		c.JSON(http.StatusOK, iface)
 	}
 }
 
-func deleteInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		original := len(cfg.Interfaces)
-		filtered := make([]config.Interface, 0, len(cfg.Interfaces))
-		for _, i := range cfg.Interfaces {
-			if i.Name != name {
-				filtered = append(filtered, i)
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			original := len(cfg.Interfaces)
+			filtered := make([]config.Interface, 0, len(cfg.Interfaces))
+			for _, i := range cfg.Interfaces {
+				if i.Name != name {
+					filtered = append(filtered, i)
+				}
 			}
-		}
-		if len(filtered) == original {
-			apiError(c, http.StatusNotFound, "interface not found")
-			return
-		}
-		cfg.Interfaces = filtered
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			internalError(c, err)
-			return
-		}
-		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
-			if err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
+			if len(filtered) == original {
+				apiError(c, http.StatusNotFound, "interface not found")
+				return false
 			}
-			setWarningHeader(c, warnings)
+			cfg.Interfaces = filtered
+			return true
+		})
+		if !ok {
+			return
 		}
-		auditLog(c, audit.Record{Action: "interfaces.delete", Target: name})
+		auditLog(c, audit.Record{Action: "interfaces.delete", Target: name, Detail: "candidate"})
 		c.Status(http.StatusNoContent)
 	}
 }
 
-func updateInterfaceHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
 		var iface config.Interface
@@ -283,61 +259,50 @@ func updateInterfaceHandler(store config.Store, engine EngineClient, services Se
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		isAccessUnset := func(a config.InterfaceAccess) bool {
-			return a.Mgmt == nil && a.HTTP == nil && a.HTTPS == nil && a.SSH == nil
-		}
-		updated := false
-		for i, existing := range cfg.Interfaces {
-			if existing.Name == name {
-				if iface.Name == "" {
-					iface.Name = existing.Name
-				}
-				if strings.TrimSpace(iface.Device) == "" {
-					iface.Device = existing.Device
-				}
-				if strings.TrimSpace(iface.Zone) == "" {
-					iface.Zone = existing.Zone
-				}
-				if iface.Addresses == nil {
-					iface.Addresses = existing.Addresses
-				}
-				if isAccessUnset(iface.Access) {
-					iface.Access = existing.Access
-				}
-				cfg.Interfaces[i] = iface
-				updated = true
-				break
+		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			isAccessUnset := func(a config.InterfaceAccess) bool {
+				return a.Mgmt == nil && a.HTTP == nil && a.HTTPS == nil && a.SSH == nil
 			}
-		}
-		if !updated {
-			apiError(c, http.StatusNotFound, "interface not found")
-			return
-		}
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if engine != nil {
-			warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
-			if err != nil {
-				apiError(c, http.StatusBadGateway, err.Error())
-				return
+			updated := false
+			for i, existing := range cfg.Interfaces {
+				if existing.Name == name {
+					if iface.Name == "" {
+						iface.Name = existing.Name
+					}
+					if strings.TrimSpace(iface.Device) == "" {
+						iface.Device = existing.Device
+					}
+					if strings.TrimSpace(iface.Zone) == "" {
+						iface.Zone = existing.Zone
+					}
+					if iface.Addresses == nil {
+						iface.Addresses = existing.Addresses
+					}
+					if isAccessUnset(iface.Access) {
+						iface.Access = existing.Access
+					}
+					cfg.Interfaces[i] = iface
+					updated = true
+					break
+				}
 			}
-			setWarningHeader(c, warnings)
+			if !updated {
+				apiError(c, http.StatusNotFound, "interface not found")
+				return false
+			}
+			return true
+		})
+		if !ok {
+			return
 		}
-		auditLog(c, audit.Record{Action: "interfaces.update", Target: name})
+		auditLog(c, audit.Record{Action: "interfaces.update", Target: name, Detail: "candidate"})
 		c.JSON(http.StatusOK, iface)
 	}
 }
 
 func getRoutingHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := store.LoadCandidate(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -346,30 +311,21 @@ func getRoutingHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func setRoutingHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func setRoutingHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var routingCfg config.RoutingConfig
 		if err := c.ShouldBindJSON(&routingCfg); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			cfg.Routing = routingCfg
+			return true
+		})
+		if !ok {
 			return
 		}
-		cfg.Routing = routingCfg
-		if err := store.Save(c.Request.Context(), cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfig(c.Request.Context(), store, engine, services)
-		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "routing.set", Target: "config"})
+		auditLog(c, audit.Record{Action: "routing.set", Target: "config", Detail: "candidate"})
 		c.JSON(http.StatusOK, cfg.Routing)
 	}
 }
@@ -387,6 +343,8 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := loadOrInitConfig(c.Request.Context(), store)
 		if err != nil {
 			internalError(c, err)

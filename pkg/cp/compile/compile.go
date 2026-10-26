@@ -83,15 +83,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Action:       dprules.Action(r.Action),
 			Log:          r.Log,
 			Identities:   append([]string(nil), r.Identities...),
-			ICS: dprules.ICSPredicate{
-				Protocol:     r.ICS.Protocol,
-				FunctionCode: append([]uint8(nil), r.ICS.FunctionCode...),
-				UnitID:       r.ICS.UnitID,
-				Addresses:    append([]string(nil), r.ICS.Addresses...),
-				ReadOnly:     r.ICS.ReadOnly,
-				WriteOnly:    r.ICS.WriteOnly,
-				Mode:         r.ICS.Mode,
-			},
+			ICS:          ICSPredicate(r.ICS),
 		}
 		if r.Schedule != nil {
 			entry.Schedule = dprules.SchedulePredicate{
@@ -283,82 +275,6 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 	out = append(out, compileProxyLocalInput(cfg)...)
 	out = append(out, compileVPNLocalInput(cfg)...)
 	return out
-}
-
-func compileMgmtLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
-	var out []dprules.LocalServiceRule
-	httpPort := listenPortOrDefault(cfg.System.Mgmt.HTTPListenAddr, 8080)
-	httpsPort := listenPortOrDefault(cfg.System.Mgmt.HTTPSListenAddr, 8443)
-	if strings.TrimSpace(cfg.System.Mgmt.HTTPListenAddr) == "" && strings.TrimSpace(cfg.System.Mgmt.ListenAddr) != "" {
-		httpPort = listenPortOrDefault(cfg.System.Mgmt.ListenAddr, 8080)
-	}
-	sshPort := listenPortOrDefault(cfg.System.SSH.ListenAddr, 2222)
-
-	enableHTTP := cfg.System.Mgmt.EnableHTTP == nil || *cfg.System.Mgmt.EnableHTTP
-	enableHTTPS := cfg.System.Mgmt.EnableHTTPS != nil && *cfg.System.Mgmt.EnableHTTPS
-	if cfg.System.Mgmt.EnableHTTPS == nil {
-		enableHTTPS = strings.TrimSpace(cfg.System.Mgmt.HTTPSListenAddr) != ""
-	}
-
-	mgmtHTTPIfaces, mgmtHTTPSIfaces, sshIfaces := localAccessIfaces(cfg.Interfaces, enableHTTP, enableHTTPS)
-	sort.Strings(mgmtHTTPIfaces)
-	sort.Strings(mgmtHTTPSIfaces)
-	sort.Strings(sshIfaces)
-
-	if enableHTTP && httpPort != 0 && len(mgmtHTTPIfaces) > 0 {
-		out = append(out, dprules.LocalServiceRule{
-			ID:     "auto-allow-mgmt-http",
-			Ifaces: mgmtHTTPIfaces,
-			Proto:  "tcp",
-			Port:   httpPort,
-		})
-	}
-	if enableHTTPS && httpsPort != 0 && len(mgmtHTTPSIfaces) > 0 {
-		out = append(out, dprules.LocalServiceRule{
-			ID:     "auto-allow-mgmt-https",
-			Ifaces: mgmtHTTPSIfaces,
-			Proto:  "tcp",
-			Port:   httpsPort,
-		})
-	}
-	if sshPort != 0 && len(sshIfaces) > 0 {
-		out = append(out, dprules.LocalServiceRule{
-			ID:     "auto-allow-ssh",
-			Ifaces: sshIfaces,
-			Proto:  "tcp",
-			Port:   sshPort,
-		})
-	}
-	return out
-}
-
-func localAccessIfaces(ifaces []config.Interface, enableHTTP, enableHTTPS bool) ([]string, []string, []string) {
-	mgmtHTTPIfaces := make([]string, 0, len(ifaces))
-	mgmtHTTPSIfaces := make([]string, 0, len(ifaces))
-	sshIfaces := make([]string, 0, len(ifaces))
-	for _, iface := range ifaces {
-		dev := iface.Name
-		if strings.TrimSpace(iface.Device) != "" {
-			dev = iface.Device
-		}
-		if dev == "" {
-			continue
-		}
-		allowMgmt := iface.Access.Mgmt == nil || *iface.Access.Mgmt
-		allowHTTP := iface.Access.HTTP == nil || *iface.Access.HTTP
-		allowHTTPS := iface.Access.HTTPS == nil || *iface.Access.HTTPS
-		allowSSH := iface.Access.SSH == nil || *iface.Access.SSH
-		if allowMgmt && enableHTTP && allowHTTP {
-			mgmtHTTPIfaces = append(mgmtHTTPIfaces, dev)
-		}
-		if allowMgmt && enableHTTPS && allowHTTPS {
-			mgmtHTTPSIfaces = append(mgmtHTTPSIfaces, dev)
-		}
-		if allowSSH {
-			sshIfaces = append(sshIfaces, dev)
-		}
-	}
-	return mgmtHTTPIfaces, mgmtHTTPSIfaces, sshIfaces
 }
 
 func compileInfraServiceLocalInput(cfg *config.Config) []dprules.LocalServiceRule {

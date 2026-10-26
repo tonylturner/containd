@@ -5,9 +5,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func TestCLIFormatHelpers(t *testing.T) {
@@ -118,5 +123,107 @@ func TestFirewallICSParsingHelpers(t *testing.T) {
 	}
 	if _, err := parseFirewallICSRuleArgs([]string{"id", "ALLOW", "modbus", "--unknown"}); err == nil {
 		t.Fatal("expected unknown option error")
+	}
+}
+
+func TestFirewallIEC104RuleFlags(t *testing.T) {
+	t.Parallel()
+
+	rule, err := parseFirewallICSRuleArgs([]string{
+		"allow-commands",
+		"ALLOW",
+		"iec104",
+		"--type-ids", "45,46",
+		"--classes", "monitor,control",
+		"--ca", "1,65534",
+		"--ioa", "0,65536-65567,16777215",
+		"--read-only",
+		"--direction", "request",
+		"--mode", "enforce",
+	})
+	if err != nil {
+		t.Fatalf("parse IEC104 flags: %v", err)
+	}
+	if got := rule.ICS.TypeIDs; len(got) != 2 || got[0] != 45 || got[1] != 46 {
+		t.Fatalf("type IDs = %v, want [45 46]", got)
+	}
+	if got := rule.ICS.Classes; len(got) != 2 || got[0] != "monitor" || got[1] != "control" {
+		t.Fatalf("classes = %v, want [monitor control]", got)
+	}
+	if got := rule.ICS.CA; len(got) != 2 || got[0] != 1 || got[1] != 65534 {
+		t.Fatalf("CA = %v, want [1 65534]", got)
+	}
+	wantIOA := []config.IOARange{{Start: 0, End: 0}, {Start: 65536, End: 65567}, {Start: 16777215, End: 16777215}}
+	if !reflect.DeepEqual(rule.ICS.IOA, wantIOA) {
+		t.Fatalf("IOA ranges = %v, want %v", rule.ICS.IOA, wantIOA)
+	}
+	if !rule.ICS.ReadOnly || rule.ICS.Direction != "request" || rule.ICS.Mode != "enforce" {
+		t.Fatalf("readOnly/direction/mode = %t/%q/%q", rule.ICS.ReadOnly, rule.ICS.Direction, rule.ICS.Mode)
+	}
+
+	tests := []struct {
+		name  string
+		flags []string
+	}{
+		{"type ID zero", []string{"--type-ids", "0"}},
+		{"type ID too large", []string{"--type-ids", "256"}},
+		{"invalid class", []string{"--classes", "commands"}},
+		{"broadcast CA", []string{"--ca", "65535"}},
+		{"IOA above 24 bits", []string{"--ioa", "16777216"}},
+		{"reversed IOA", []string{"--ioa", "10-1"}},
+		{"invalid direction", []string{"--direction", "both"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"id", "ALLOW", "iec104"}, tc.flags...)
+			if _, err := parseFirewallICSRuleArgs(args); err == nil {
+				t.Fatalf("parse flags %v succeeded, want error", tc.flags)
+			}
+		})
+	}
+}
+
+func TestShowFirewallICSRulesIncludesIEC104Fields(t *testing.T) {
+	t.Parallel()
+
+	rule := config.Rule{
+		ID:     "iec-read",
+		Action: config.ActionAllow,
+		ICS: config.ICSPredicate{
+			Protocol:  "iec104",
+			TypeIDs:   []int{45, 46},
+			Classes:   []string{"monitor"},
+			CA:        []uint16{1},
+			IOA:       []config.IOARange{{Start: 65536, End: 65567}},
+			ReadOnly:  true,
+			Direction: "response",
+			Mode:      "enforce",
+		},
+	}
+	inherited := config.Rule{
+		ID:     "iec-inherited",
+		Action: config.ActionAllow,
+		ICS:    config.ICSPredicate{Protocol: "iec104", ReadOnly: true},
+	}
+	client := &dispatchHTTPClient{
+		t: t,
+		handlers: map[string]func(*http.Request) (*http.Response, error){
+			"GET /api/v1/firewall/ics-rules": func(*http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(http.StatusOK, []config.Rule{rule, inherited}, nil), nil
+			},
+			"GET /api/v1/dataplane": func(*http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(http.StatusOK, config.DataPlaneConfig{DPIMode: "enforce"}, nil), nil
+			},
+		},
+	}
+	api := &API{BaseURL: "http://localhost", Client: client}
+	var out bytes.Buffer
+	if err := showFirewallICSRulesAPI(api)(context.Background(), &out, nil); err != nil {
+		t.Fatalf("show IEC104 rules: %v", err)
+	}
+	for _, want := range []string{"TYPE_IDS", "CLASSES", "CA", "IOA", "DIRECTION", "45,46", "monitor", "65536-65567", "response", "enforce (effective: enforce)", "inherit (enforce)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output = %q, want %q", out.String(), want)
+		}
 	}
 }

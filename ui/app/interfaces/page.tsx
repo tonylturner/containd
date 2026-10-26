@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -10,9 +12,12 @@ import { validateCIDRList, validateIP } from "../../lib/validate";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { chipClass, InterfaceRow, runtimeFor } from "./interface-row";
+import { chipClass, InterfaceRow } from "./interface-row";
+import type { ManagementReservation } from "../../lib/api-console";
+import { runtimeFor } from "../../lib/interface-addresses";
 
 export default function InterfacesPage() {
+  const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -63,11 +68,13 @@ export default function InterfacesPage() {
   ];
 
   async function refresh() {
-    const [i, z, s] = await Promise.all([
+    const [i, z, s, r] = await Promise.all([
       api.listInterfaces(),
       api.listZones(),
       api.listInterfaceState(),
+      api.getManagementReservation(),
     ]);
+    setReservation(r);
     setIfaces(i ?? []);
     setZones(z ?? []);
     setState(s ?? []);
@@ -96,6 +103,8 @@ export default function InterfacesPage() {
     };
   }, [ifaces, state]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, []);
@@ -110,7 +119,7 @@ export default function InterfacesPage() {
       return;
     }
     await refresh();
-    setNotice(res.warning ? `Auto-assign completed with warning: ${res.warning}` : "Interfaces auto-assigned.");
+    setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
   }
 
   async function onReconcileReplace() {
@@ -118,7 +127,7 @@ export default function InterfacesPage() {
     confirm.open({
       title: "Reconcile interfaces",
       message:
-        "Reconcile will REPLACE OS interface addresses for interfaces with configured static addresses. Continue?",
+        "Live reconcile reapplies running config and will REPLACE OS interface addresses for interfaces with configured static addresses. Continue?",
       confirmLabel: "Reconcile",
       variant: "warning",
       onConfirm: async () => {
@@ -195,7 +204,7 @@ export default function InterfacesPage() {
     setVlanId("10");
     setAddresses("");
     await refresh();
-    setNotice(created.warning ? `Interface created with warning: ${created.warning}` : "Interface created.");
+    setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
   }
 
   async function onDelete(ifaceName: string) {
@@ -207,7 +216,7 @@ export default function InterfacesPage() {
       return;
     }
     await refresh();
-    setNotice(result.warning ? `Interface deleted with warning: ${result.warning}` : "Interface deleted.");
+    setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
@@ -226,10 +235,10 @@ export default function InterfacesPage() {
       setError(updated.error || "Failed to update interface.");
       return;
     }
-    // Optimistic config update so the row reflects immediately even if runtime state is slightly delayed.
+    // Reflect candidate state; the separate OS state remains live until commit.
     setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated.data } : i)));
     await refresh();
-    setNotice(updated.warning ? `Saved with warning: ${updated.warning}` : "Saved.");
+    setNotice(updated.warning ? `Interface staged — commit to apply. Warning: ${updated.warning}` : "Interface staged — commit to apply.");
   }
 
   return (
@@ -253,7 +262,7 @@ export default function InterfacesPage() {
                 className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
                 title="Reconcile interface addresses (replace semantics for configured static addresses)"
               >
-                {reconciling ? "Reconciling..." : "Reconcile"}
+                {reconciling ? "Reconciling..." : "Reconcile live"}
               </button>
             </>
           )}
@@ -267,6 +276,39 @@ export default function InterfacesPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {reservation?.active && (
+        <aside aria-label="Reserved management path" className="mb-4 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <p className="font-semibold">RangerDanger management access is reserved</p>
+          <p className="mt-1 break-words">
+            {reservation.sources?.join(", ")} can reach HTTP management on {reservation.device} ({reservation.local}, port {reservation.port}),
+            even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
+          </p>
+          {(!reservation.guard?.active || reservation.guard?.error) && (
+            <p className="mt-1 text-amber-400">Guard fault: {reservation.guard?.error || "engine guard unavailable"}</p>
+          )}
+          {!!reservation.guard?.faults && (
+            <p className="mt-1 text-amber-400">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
+          )}
+          {reservation.bootFault && (
+            <div role="status" className="mt-2 text-amber-400">
+              <p className="font-semibold">Configuration apply paused</p>
+              <p>{reservation.recovery || "recovery pending: ruleset not verified"}</p>
+              <p>{reservation.bootFault}</p>
+              <p>Reserved management remains available. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.</p>
+            </div>
+          )}
+          {!!reservation.listenerFaults?.length && (
+            <div role="status" className="mt-2 text-amber-400">
+              <p className="font-semibold">Optional listener boot faults</p>
+              <p>Reserved HTTP management remains available. Correct the listener settings and restart to restore these listeners.</p>
+              <ul className="list-disc pl-5">
+                {reservation.listenerFaults.map((fault, index) => <li key={index}>{fault}</li>)}
+              </ul>
+            </div>
+          )}
+          {reservation.rollbackFault && <p className="mt-1 text-amber-400">{reservation.rollbackFault}</p>}
+        </aside>
+      )}
       {!isAdmin() && (
         <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
           View-only mode: configuration changes are disabled.
@@ -426,6 +468,7 @@ export default function InterfacesPage() {
               <th className="px-4 py-3">Device</th>
               <th className="px-4 py-3">Link</th>
               <th className="px-4 py-3">Zone</th>
+              <th className="px-4 py-3">Mode</th>
               <th className="px-4 py-3">Addresses</th>
               <th className="px-4 py-3">Network</th>
               <th className="px-4 py-3">Access</th>
@@ -435,7 +478,7 @@ export default function InterfacesPage() {
           <tbody>
             {ifaces.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6">
+                <td colSpan={11} className="px-4 py-6">
                   <EmptyState
                     title="No interfaces configured"
                     description="Create an interface above to bind a network port to a zone."

@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Validate performs basic consistency checks on the config.
@@ -51,6 +54,9 @@ func (c *Config) Validate() error {
 	if err := validateDataPlane(c.DataPlane); err != nil {
 		return err
 	}
+	if err := validateIEC104Policy(c); err != nil {
+		return err
+	}
 	if err := validatePCAP(c.PCAP); err != nil {
 		return err
 	}
@@ -74,14 +80,12 @@ func validateHostname(h string) error {
 }
 
 func validateMgmt(m MgmtConfig) error {
-	if m.ListenAddr != "" && len(m.ListenAddr) > 128 {
-		return fmt.Errorf("mgmt.listenAddr too long")
-	}
-	if m.HTTPListenAddr != "" && len(m.HTTPListenAddr) > 128 {
-		return fmt.Errorf("mgmt.httpListenAddr too long")
-	}
-	if m.HTTPSListenAddr != "" && len(m.HTTPSListenAddr) > 128 {
-		return fmt.Errorf("mgmt.httpsListenAddr too long")
+	for _, listener := range []struct{ field, addr string }{
+		{"mgmt.listenAddr", m.ListenAddr}, {"mgmt.httpListenAddr", m.HTTPListenAddr}, {"mgmt.httpsListenAddr", m.HTTPSListenAddr},
+	} {
+		if err := validateManagementListenerAddress(listener.field, listener.addr); err != nil {
+			return err
+		}
 	}
 	if m.TLSCertFile != "" && len(m.TLSCertFile) > 256 {
 		return fmt.Errorf("mgmt.tlsCertFile too long")
@@ -99,11 +103,35 @@ func validateMgmt(m MgmtConfig) error {
 }
 
 func validateSSH(s SSHConfig) error {
-	if s.ListenAddr != "" && len(s.ListenAddr) > 128 {
-		return fmt.Errorf("ssh.listenAddr too long")
+	if err := validateManagementListenerAddress("ssh.listenAddr", s.ListenAddr); err != nil {
+		return err
 	}
 	if s.AuthorizedKeysDir != "" && len(s.AuthorizedKeysDir) > 256 {
 		return fmt.Errorf("ssh.authorizedKeysDir too long")
+	}
+	return nil
+}
+
+func validateManagementListenerAddress(field, addr string) error {
+	if addr == "" {
+		return nil // unset uses the appliance default
+	}
+	if len(addr) > 128 {
+		return fmt.Errorf("%s too long", field)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	n, portErr := strconv.Atoi(port)
+	var validHost bool
+	if strings.Contains(host, ":") {
+		_, parseErr := netip.ParseAddr(host)
+		validHost = parseErr == nil
+	} else {
+		validHost = strings.IndexFunc(host, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.')
+		}) == -1 && !strings.ContainsAny(addr, "[]")
+	}
+	if err != nil || portErr != nil || strings.ContainsAny(port, "+- ") || n < 1 || n > 65535 || !validHost {
+		return fmt.Errorf("%s must be host:port or :port with a numeric port in 1..65535", field)
 	}
 	return nil
 }
@@ -374,9 +402,11 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				return fmt.Errorf("rule %s has invalid CIDR %q: %w", r.ID, cidr, err)
 			}
 		}
-		for _, p := range r.Protocols {
-			if p.Name == "" {
-				return fmt.Errorf("rule %s has protocol with empty name", r.ID)
+		for i := range r.Protocols {
+			p := &r.Protocols[i]
+			p.Name = strings.ToLower(strings.TrimSpace(p.Name))
+			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
+				return fmt.Errorf("rule %s: %w", r.ID, err)
 			}
 		}
 		for _, id := range r.Identities {
@@ -675,28 +705,6 @@ func defaultNATSourceZones(zoneSet map[string]struct{}, egress string) []string 
 	return out
 }
 
-func validateICSPredicate(p ICSPredicate, ruleID string) error {
-	if p.Protocol == "" {
-		return nil
-	}
-	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
-		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
-	}
-	if p.ReadOnly && p.WriteOnly {
-		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)
-	}
-	if p.Direction != "" && p.Direction != "request" && p.Direction != "response" {
-		return fmt.Errorf("rule %s ics direction invalid %q", ruleID, p.Direction)
-	}
-	if len(p.FunctionCode) > 0 && p.Protocol != "modbus" && p.Protocol != "dnp3" && p.Protocol != "cip" && p.Protocol != "s7comm" && p.Protocol != "bacnet" && p.Protocol != "opcua" && p.Protocol != "mms" {
-		return fmt.Errorf("rule %s ics functionCode only supported for modbus, dnp3, cip, s7comm, bacnet, opcua, and mms currently", ruleID)
-	}
-	if len(p.ObjectClasses) > 0 && p.Protocol != "cip" {
-		return fmt.Errorf("rule %s ics objectClasses only supported for cip protocol", ruleID)
-	}
-	return nil
-}
-
 func validateRouting(r RoutingConfig, ifaces []Interface, zones []Zone) error {
 	if len(r.Gateways) == 0 && len(r.Routes) == 0 && len(r.Rules) == 0 {
 		return nil
@@ -879,14 +887,25 @@ func validatePCAP(p PCAPConfig) error {
 	return validatePCAPForwardTargets(p.ForwardTargets)
 }
 
+// ValidatePCAPConfig validates PCAP capture settings independently of the
+// remainder of the appliance configuration.
+func ValidatePCAPConfig(p PCAPConfig) error {
+	return validatePCAP(p)
+}
+
 func validatePCAPInterfaces(p PCAPConfig) error {
 	for _, name := range p.Interfaces {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("pcap.interfaces cannot include empty name")
 		}
 	}
-	if p.Enabled && len(p.Interfaces) == 0 {
-		return errors.New("pcap.enabled requires at least one interface")
+	for _, name := range p.Zones {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("pcap.zones cannot include empty name")
+		}
+	}
+	if p.Enabled && len(p.Interfaces) == 0 && len(p.Zones) == 0 {
+		return errors.New("pcap.enabled requires at least one interface or zone")
 	}
 	return nil
 }
@@ -921,6 +940,14 @@ func validatePCAPFilter(filter PCAPFilter) error {
 	proto := strings.ToLower(strings.TrimSpace(filter.Proto))
 	if proto != "" && proto != "any" && proto != "tcp" && proto != "udp" && proto != "icmp" {
 		return fmt.Errorf("pcap.filter.proto invalid %q", filter.Proto)
+	}
+	if strings.TrimSpace(filter.Port) != "" {
+		if proto == "icmp" {
+			return errors.New("pcap.filter.port cannot be used with proto icmp")
+		}
+		if _, _, err := ParsePCAPPortRange(filter.Port); err != nil {
+			return err
+		}
 	}
 	return nil
 }

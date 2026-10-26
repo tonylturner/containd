@@ -15,17 +15,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Compiler turns a dp rules.Snapshot into an nftables ruleset.
 // This is a minimal Phase 1 skeleton.
 type Compiler struct {
-	TableName string
+	ManagementReservation *mgmtpath.Reservation
+	TableName             string
 	// QueueID, when non-zero, causes DPI-eligible rules (those with an
 	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
 	// steering matched traffic through NFQUEUE for selective DPI.
 	QueueID int
+	// IEC104EnvelopeOpen is the state CompileFirewall writes into
+	// IEC104EnvelopeChain: true queues envelope traffic to QueueID, false
+	// (the zero value) drops it. Only the engine that owns the queue sets
+	// it, and only while that queue is bound (contracts K8).
+	IEC104EnvelopeOpen bool
 	// NFLogGroup, when non-zero, causes rules with Log:true to emit a
 	// "log prefix ... group <NFLogGroup>" statement before their verdict.
 	// The userspace nflog consumer subscribes to this group, parses the
@@ -58,6 +65,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
 	c.writeDynamicSets(&buf)
+	// Declared before the forward chain that jumps to it.
+	if c.SteersIEC104(snap) {
+		c.writeIEC104EnvelopeChain(&buf)
+	}
 	if err := c.writeInputChain(&buf, snap); err != nil {
 		return "", err
 	}
@@ -119,11 +130,22 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
+	c.writeManagementInput(buf)
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
 	for _, lr := range locals {
+		if lr.RecoverUnbound {
+			live, err := mgmtpath.Devices()
+			if err != nil {
+				return fmt.Errorf("discover management bindings: %w", err)
+			}
+			lr.Ifaces, _ = mgmtpath.ResolveBindings(lr.Ifaces, lr.DeniedIfaces, live)
+			if len(lr.Ifaces) == 0 {
+				continue
+			}
+		}
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {
 			return err
@@ -169,9 +191,12 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// entirely, so the userspace DPI decoder never sees a payload to
 	// parse. With QueueID=0 this is a no-op (compileEntry emits plain
 	// accept/drop for everything, ct established below stays optimal).
+	// IEC104 rules come first and steer both directions of their session
+	// scope, marked; they replace the rule's own line.
 	if c.QueueID > 0 {
+		c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap)
 		for _, e := range entries {
-			if !isDPIEligible(e) {
+			if !isDPIEligible(e) || isIEC104Rule(e) {
 				continue
 			}
 			lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
@@ -379,23 +404,11 @@ func defaultPolicy(a rules.Action) string {
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	base := []string{}
-
-	if len(e.SourceZones) > 0 {
-		ifs := collectZoneIfaces(e.SourceZones, zoneIfaces)
-		if len(ifs) > 0 {
-			base = append(base, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
-		} else {
-			// No interfaces for these zones -> rule never matches.
-			base = append(base, "iifname { }")
-		}
+	if c := zoneClause("iifname", e.SourceZones, zoneIfaces); c != "" {
+		base = append(base, c)
 	}
-	if len(e.DestZones) > 0 {
-		ifs := collectZoneIfaces(e.DestZones, zoneIfaces)
-		if len(ifs) > 0 {
-			base = append(base, fmt.Sprintf("oifname { %s }", strings.Join(ifs, ", ")))
-		} else {
-			base = append(base, "oifname { }")
-		}
+	if c := zoneClause("oifname", e.DestZones, zoneIfaces); c != "" {
+		base = append(base, c)
 	}
 
 	// Pick the verdict once — same for every emitted protocol-variant line.
@@ -473,7 +486,14 @@ func protocolMatch(p rules.Protocol) (string, error) {
 		if p.Port == "" {
 			return "meta l4proto " + name, nil
 		}
-		return fmt.Sprintf("%s dport %s", name, p.Port), nil
+		lo, hi, err := rules.ParsePortRange(p.Port)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s port: %w", name, err)
+		}
+		if lo == hi {
+			return fmt.Sprintf("%s dport %d", name, lo), nil
+		}
+		return fmt.Sprintf("%s dport %d-%d", name, lo, hi), nil
 	case "icmp":
 		if p.Port != "" {
 			return "", fmt.Errorf("icmp does not take a port (got %q)", p.Port)
@@ -565,6 +585,20 @@ func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]str
 	}
 	parts = append(parts, proto, fmt.Sprintf("dport %d", r.Port), "accept")
 	return strings.Join(parts, " "), nil
+}
+
+// zoneClause matches keyword (iifname or oifname) against the interfaces of
+// zones; "" when zones is empty. Zones without interfaces give an empty set,
+// so the rule never matches.
+func zoneClause(keyword string, zones []string, zoneIfaces map[string][]string) string {
+	if len(zones) == 0 {
+		return ""
+	}
+	ifs := collectZoneIfaces(zones, zoneIfaces)
+	if len(ifs) == 0 {
+		return keyword + " { }"
+	}
+	return fmt.Sprintf("%s { %s }", keyword, strings.Join(ifs, ", "))
 }
 
 func collectZoneIfaces(zones []string, zoneIfaces map[string][]string) []string {

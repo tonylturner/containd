@@ -7,6 +7,7 @@ package capture
 
 import (
 	"bytes"
+	"golang.org/x/sys/unix"
 	"testing"
 )
 
@@ -22,7 +23,18 @@ func TestDecodePacketEthernetTCP(t *testing.T) {
 	if pkt.Interface != "eth0" || pkt.SrcPort != 40000 || pkt.DstPort != 502 {
 		t.Fatalf("unexpected packet: %+v", pkt)
 	}
-	if !pkt.HasTCPSeq || pkt.TCPSeq != 7 || !bytes.Equal(pkt.Payload, []byte{0x01, 0x02}) {
-		t.Fatalf("seq=%d has=%v payload=%x, want seq 7 payload 0102", pkt.TCPSeq, pkt.HasTCPSeq, pkt.Payload)
+	if !pkt.TCP.Valid || pkt.TCP.Seq != 7 || !bytes.Equal(pkt.Payload, []byte{0x01, 0x02}) {
+		t.Fatalf("seq=%d has=%v payload=%x, want seq 7 payload 0102", pkt.TCP.Seq, pkt.TCP.Valid, pkt.Payload)
+	}
+}
+
+func TestOutgoingPacket(t *testing.T) {
+	for _, kind := range []uint8{unix.PACKET_HOST, unix.PACKET_BROADCAST, unix.PACKET_MULTICAST, unix.PACKET_OTHERHOST, unix.PACKET_OUTGOING} {
+		if got := outgoingPacket(&unix.SockaddrLinklayer{Pkttype: kind}); got != (kind == unix.PACKET_OUTGOING) {
+			t.Fatalf("packet type %d: outgoing=%v", kind, got)
+		}
+	}
+	if outgoingPacket(nil) {
+		t.Fatal("missing address treated as outgoing")
 	}
 }

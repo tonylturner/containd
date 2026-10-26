@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
+import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { Sparkline } from "../../components/Sparkline";
 import { Card } from "../../components/Card";
@@ -160,28 +161,28 @@ export default function MonitoringOverviewPage() {
         {
           key: "dns",
           label: "DNS",
-          icon: "/icons/envoyproxy.svg",
+          icon: staticAssetURL("/icons/envoyproxy.svg"),
           status: (services as any)?.dns?.running ? "running" : "stopped",
           hint: "Unbound resolver",
         },
         {
           key: "ntp",
           label: "NTP",
-          icon: "/icons/envoyproxy.svg",
+          icon: staticAssetURL("/icons/envoyproxy.svg"),
           status: (services as any)?.ntp?.running ? "running" : "stopped",
           hint: "OpenNTPD client",
         },
         {
           key: "dhcp",
           label: "DHCP",
-          icon: "/icons/envoyproxy.svg",
+          icon: staticAssetURL("/icons/envoyproxy.svg"),
           status: (services as any)?.dhcp?.enabled ? "enabled" : "off",
           hint: "LAN leases",
         },
         {
           key: "vpn",
           label: "VPN",
-          icon: "/icons/wireguard.svg",
+          icon: staticAssetURL("/icons/wireguard.svg"),
           status:
             (services as any)?.vpn?.wireguard_enabled || (services as any)?.vpn?.openvpn_running
               ? "active"
@@ -191,14 +192,14 @@ export default function MonitoringOverviewPage() {
         {
           key: "proxy",
           label: "Proxies",
-          icon: "/icons/nginx.svg",
+          icon: staticAssetURL("/icons/nginx.svg"),
           status: (services as any)?.proxy?.envoy_running || (services as any)?.proxy?.nginx_running ? "running" : "stopped",
           hint: "Envoy + Nginx",
         },
         {
           key: "av",
           label: "AV",
-          icon: "/icons/envoyproxy.svg",
+          icon: staticAssetURL("/icons/envoyproxy.svg"),
           status: (services as any)?.av?.enabled ? "enabled" : "off",
           hint: "ICAP/ClamAV",
         },
@@ -242,7 +243,7 @@ export default function MonitoringOverviewPage() {
           <div className="space-y-3 text-xs text-[var(--text)]">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-[var(--text-muted)]">
-                <Image src="/icons/nginx.svg" alt="" width={16} height={16} className="h-4 w-4" />
+                <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={16} height={16} className="h-4 w-4" />
                 Proxies
               </span>
               <span>

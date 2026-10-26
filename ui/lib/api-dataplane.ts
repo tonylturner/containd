@@ -1,4 +1,6 @@
+import { notifyConfigMutation } from "./config-events";
 import {
+  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -87,6 +89,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
     if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
     clearAuthExpired();
     if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    notifyConfigMutation(res);
     return {
       ok: true,
       data: (await res.json()) as PcapItem,
@@ -101,7 +104,7 @@ export async function uploadPcap(file: File): Promise<ApiResult<PcapItem>> {
 }
 
 export function downloadPcapURL(name: string): string {
-  return `/api/v1/pcap/download/${encodeURIComponent(name)}`;
+  return apiURL(`/api/v1/pcap/download/${encodeURIComponent(name)}`);
 }
 
 export async function deletePcap(name: string): Promise<ApiResult<void>> {

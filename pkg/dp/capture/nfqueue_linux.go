@@ -7,31 +7,41 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	nfqueue "github.com/florianl/go-nfqueue/v2"
+	"golang.org/x/sys/unix"
 )
 
-// nfqueueSource captures packets via NFQUEUE and delivers them to a Handler.
+// inlineMaxPacketLen copies whole packets to userspace: an inline verdict
+// must judge every payload byte (milestone B §8.1).
+const inlineMaxPacketLen = 65535
+
+// nfqueueSource captures packets via NFQUEUE and delivers them inline: the
+// handler's Decision is the packet's verdict.
 type nfqueueSource struct {
 	queueID int
 	cfg     Config
 	handler Handler
+	settler *settler
+	comp    *completer
 
 	// runFn lets tests inject a fake inner-loop implementation. Production
-	// uses s.run (the real go-nfqueue consumer). Tests override this to
-	// exercise the supervise retry/backoff/give-up logic without needing
-	// the netfilter kernel surface.
-	runFn func(context.Context) error
+	// uses s.run (the real go-nfqueue consumer). A run calls ready once its
+	// queue is bound and the generation's Ready event is delivered. Tests
+	// override this to exercise the supervise retry/backoff/give-up logic
+	// without needing the netfilter kernel surface.
+	runFn func(ctx context.Context, ready func()) error
 }
 
 // Bounded retry envelope for the NFQUEUE consumer goroutine. If the
 // inner run loop panics or returns an error, restart with exponential
-// backoff up to maxRetries; after that, give up and leave the queue
-// dark (logged via OnError) so we don't pathologically spin on a
-// permanent kernel-side failure. Each successful run that exits via
-// ctx-cancel resets the retry counter.
+// backoff; after nfqueueMaxRetries consecutive failures, give up and leave
+// the queue dark (logged via OnError) so we don't pathologically spin on a
+// permanent kernel-side failure. A run that bound its queue resets the
+// failure count and the backoff.
 //
 // These are vars rather than consts so the tests can compress the
 // backoff to sub-millisecond and finish in well under a second
@@ -55,19 +65,24 @@ func withFastBackoff(d time.Duration) func() {
 	}
 }
 
+// startNFQueue starts the supervised consumer and returns once its first
+// queue generation is bound, or with the first bind error.
 func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
 	src := &nfqueueSource{
 		queueID: m.cfg.QueueID,
 		cfg:     m.cfg,
 		handler: handler,
+		settler: m.settler,
+		comp:    m.comp,
 	}
 	src.runFn = src.run
+	bound := make(chan error, 1)
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		src.supervise(ctx, m.cfg.OnError)
+		src.supervise(ctx, bound)
 	}()
-	return nil
+	return <-bound
 }
 
 // supervise runs the NFQUEUE consumer in a retry loop. Without this,
@@ -76,25 +91,53 @@ func (m *Manager) startNFQueue(ctx context.Context, handler Handler) error {
 // leave the kernel queue undrained — ICS traffic queues to a sink
 // nobody reads, and the queue eventually fills (MaxQueueLen=1024)
 // and either drops new packets or stalls them until full engine
-// restart. The recover here logs the panic via onError, then attempts
+// restart. The recover here logs the panic via OnError, then attempts
 // to re-establish the consumer via fresh nfqueue.Open + RegisterWithErrorFunc.
 // Bounded retries (nfqueueMaxRetries with exponential backoff) prevent
 // a permanent kernel-side failure from busy-looping. Cancellation via
 // ctx.Done() exits cleanly without consuming a retry.
-func (s *nfqueueSource) supervise(ctx context.Context, onError func(error)) {
+//
+// bound receives exactly one value: nil once the first run is bound, or
+// the error that ended the first run before it bound. A first run that
+// fails is not retried; Start reports its error.
+func (s *nfqueueSource) supervise(ctx context.Context, bound chan<- error) {
+	onError := s.cfg.OnError
+	reported := false
+	report := func(err error) {
+		if !reported {
+			reported = true
+			bound <- err
+		}
+	}
+	defer func() { report(context.Cause(ctx)) }()
 	backoff := nfqueueRetryInitial
-	for attempt := 0; ; attempt++ {
+	for failures := 0; ; {
 		if ctx.Err() != nil {
 			return
 		}
-		err := s.runWithRecover(ctx, onError)
+		ranBound := false
+		err := s.runWithRecover(ctx, func() {
+			ranBound = true
+			report(nil)
+		})
+		if !reported {
+			if err == nil {
+				err = fmt.Errorf("nfqueue queue %d: consumer exited before binding", s.queueID)
+			}
+			report(err)
+			return
+		}
 		if ctx.Err() != nil {
 			return
 		}
+		if ranBound {
+			failures, backoff = 0, nfqueueRetryInitial
+		}
+		failures++
 		if err != nil && onError != nil {
-			onError(fmt.Errorf("nfqueue consumer exited (attempt %d/%d): %w", attempt+1, nfqueueMaxRetries, err))
+			onError(fmt.Errorf("nfqueue consumer exited (attempt %d/%d): %w", failures, nfqueueMaxRetries, err))
 		}
-		if attempt+1 >= nfqueueMaxRetries {
+		if failures >= nfqueueMaxRetries {
 			if onError != nil {
 				onError(fmt.Errorf("nfqueue consumer giving up after %d failed attempts; queue %d will be undrained until engine restart",
 					nfqueueMaxRetries, s.queueID))
@@ -117,22 +160,26 @@ func (s *nfqueueSource) supervise(ctx context.Context, onError func(error)) {
 
 // runWithRecover converts a panic in runFn() into a returned error so
 // supervise() can retry it the same way it retries normal errors.
-func (s *nfqueueSource) runWithRecover(ctx context.Context, onError func(error)) (err error) {
+func (s *nfqueueSource) runWithRecover(ctx context.Context, ready func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if onError != nil {
-				onError(fmt.Errorf("nfqueue consumer panicked, recovered: %v", r))
+			if s.cfg.OnError != nil {
+				s.cfg.OnError(fmt.Errorf("nfqueue consumer panicked, recovered: %v", r))
 			}
 			err = fmt.Errorf("nfqueue consumer panic: %v", r)
 		}
 	}()
-	return s.runFn(ctx)
+	return s.runFn(ctx, ready)
 }
 
-func (s *nfqueueSource) run(ctx context.Context) error {
+// run binds one queue generation and serves it until ctx ends or the
+// generation fails. The queue socket is closed before the generation's
+// close completions and down event are queued, and run returns only after
+// they are delivered, so they precede the next generation's first packet.
+func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 	cfg := nfqueue.Config{
 		NfQueue:      uint16(s.queueID),
-		MaxPacketLen: uint32(s.cfg.Snaplen),
+		MaxPacketLen: inlineMaxPacketLen,
 		MaxQueueLen:  1024,
 		Copymode:     nfqueue.NfQnlCopyPacket,
 	}
@@ -144,60 +191,83 @@ func (s *nfqueueSource) run(ctx context.Context) error {
 	// Unconditional release so that ANY return path — normal ctx
 	// cancel, register error, or a panic propagating up through
 	// runWithRecover — closes the netfilter group binding before
-	// supervise's retry calls nfqueue.Open again. Without this,
-	// the old binding sat with the kernel while supervise burned
-	// retries on EBUSY/EPERM Opens, turning panic-recovery into a
-	// recover-and-loop-fail loop until the retry envelope gave up.
-	// nf.Close is idempotent; safe to defer here even though
-	// RegisterWithErrorFunc's internal goroutine also closes on
-	// ctx cancel.
+	// supervise's retry calls nfqueue.Open again. nf.Close is idempotent.
 	defer func() { _ = nf.Close() }()
 
+	gen := newGeneration(func(id uint32, v Verdict) error {
+		if v == VerdictDrop {
+			return nf.SetVerdict(id, nfqueue.NfDrop)
+		}
+		return nf.SetVerdict(id, nfqueue.NfAccept)
+	}, s.comp, s.cfg.OnError)
+	open := make(chan struct{}) // closed once the Ready event is delivered
+
 	hookFn := func(a nfqueue.Attribute) int {
-		if a.Payload == nil || len(*a.Payload) == 0 {
-			if a.PacketID != nil {
-				_ = nf.SetVerdict(*a.PacketID, nfqueue.NfAccept)
-			}
-			return 0
+		<-open
+		if a.PacketID == nil {
+			return 0 // no ID, no verdict possible; nothing to own
 		}
-		pkt, ok := decodeIPPacket(*a.Payload)
-		if !ok {
-			// Not a parseable IP packet -- accept and move on.
-			if a.PacketID != nil {
-				_ = nf.SetVerdict(*a.PacketID, nfqueue.NfAccept)
-			}
-			return 0
+		var raw []byte
+		if a.Payload != nil {
+			raw = *a.Payload
 		}
-
-		// Deliver to capture handler (DPI/telemetry).
-		s.handler(pkt)
-
-		// Default verdict is ACCEPT. The verdict cache in the engine will
-		// override this via nftables set updates for blocked flows.
-		if a.PacketID != nil {
-			_ = nf.SetVerdict(*a.PacketID, nfqueue.NfAccept)
+		pkt := DecodeIPPacket(raw)
+		pkt.Timestamp = time.Now().UTC()
+		pkt.Interface = "nfqueue"
+		if a.Mark != nil {
+			pkt.Mark = *a.Mark
+			pkt.HasMark = true
 		}
+		gen.deliver(*a.PacketID, pkt, s.handler)
 		return 0
 	}
 
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
 	errFn := func(e error) int {
+		if runCtx.Err() != nil {
+			return 1
+		}
 		if s.cfg.OnError != nil {
 			s.cfg.OnError(e)
 		}
-		if ctx.Err() != nil {
-			return 1
+		if receiveRecoverable(e) {
+			return 0
 		}
-		return 0
+		gen.fail(fmt.Errorf("nfqueue receive: %w", e))
+		return 1
 	}
 
-	if err := nf.RegisterWithErrorFunc(ctx, hookFn, errFn); err != nil {
+	if err := nf.RegisterWithErrorFunc(runCtx, hookFn, errFn); err != nil {
 		// nf.Close runs via defer above; no explicit close needed.
 		return fmt.Errorf("nfqueue register: %w", err)
 	}
 
-	// Block until context is cancelled. nf.Close fires via defer
-	// on the way out, which signals RegisterWithErrorFunc's internal
-	// goroutine to exit cleanly.
-	<-ctx.Done()
-	return nil
+	s.settler.publish(gen)
+	gen.push(completion{source: true, event: SourceEvent{Generation: gen.id, Ready: true}})
+	s.comp.flush()
+	close(open)
+	ready()
+
+	select {
+	case <-ctx.Done():
+	case <-gen.failed:
+	}
+	stop()
+	_ = nf.Close() // waits for the receive goroutine; the kernel drops queued packets
+	cause := gen.failure()
+	gen.close(cause)
+	s.comp.flush()
+	return cause
+}
+
+// receiveRecoverable reports receive errors that leave the queue usable:
+// ENOBUFS means the kernel dropped packets it could not queue to us (no
+// token was issued for them); timeouts and interrupts are transient.
+func receiveRecoverable(err error) bool {
+	if errors.Is(err, unix.ENOBUFS) || errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }

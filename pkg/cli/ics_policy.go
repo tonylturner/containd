@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // setFirewallICSRuleAPI creates or updates an ICS-specific firewall rule.
@@ -28,6 +29,11 @@ import (
 //	--addresses <ranges>      (comma-separated, e.g. "0x0100-0x01FF,0x0200")
 //	--read-only
 //	--write-only
+//	--type-ids <ids>          (IEC104, comma-separated, e.g. "45,46")
+//	--classes <classes>       (IEC104, monitor|control|system|unknown)
+//	--ca <addresses>          (IEC104, comma-separated, 0..65534)
+//	--ioa <ranges>            (IEC104, comma-separated decimal addresses/ranges)
+//	--direction <request|response>
 //	--mode <learn|enforce>
 func setFirewallICSRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
@@ -41,7 +47,7 @@ func setFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--mode <learn|enforce>]")
+		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>]")
 	}
 
 	rule := config.Rule{
@@ -123,9 +129,162 @@ func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, 
 		}
 		rule.ICS.Mode = value
 		return next, nil
+	case "--type-ids":
+		value, next, err := firewallICSRuleValue(args, index, "--type-ids")
+		if err != nil {
+			return index, err
+		}
+		typeIDs, err := parseIEC104TypeIDs(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.TypeIDs = typeIDs
+		return next, nil
+	case "--classes":
+		value, next, err := firewallICSRuleValue(args, index, "--classes")
+		if err != nil {
+			return index, err
+		}
+		classes, err := parseIEC104Classes(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.Classes = classes
+		return next, nil
+	case "--ca":
+		value, next, err := firewallICSRuleValue(args, index, "--ca")
+		if err != nil {
+			return index, err
+		}
+		cas, err := parseIEC104CAs(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.CA = cas
+		return next, nil
+	case "--ioa":
+		value, next, err := firewallICSRuleValue(args, index, "--ioa")
+		if err != nil {
+			return index, err
+		}
+		ioa, err := parseIEC104IOARanges(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.IOA = ioa
+		return next, nil
+	case "--direction":
+		value, next, err := firewallICSRuleValue(args, index, "--direction")
+		if err != nil {
+			return index, err
+		}
+		if value != "request" && value != "response" {
+			return index, fmt.Errorf("--direction must be 'request' or 'response'")
+		}
+		rule.ICS.Direction = value
+		return next, nil
 	default:
 		return index, fmt.Errorf("unknown option: %s", args[index])
 	}
+}
+
+func parseIEC104TypeIDs(value string) ([]int, error) {
+	items, err := parseIEC104UintCSV(value, "--type-ids", 255)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		if item == 0 {
+			return nil, fmt.Errorf("--type-ids values must be in 1..255")
+		}
+		ids = append(ids, int(item))
+	}
+	return ids, nil
+}
+
+func parseIEC104Classes(value string) ([]string, error) {
+	items := strings.Split(value, ",")
+	classes := make([]string, 0, len(items))
+	for _, item := range items {
+		class := strings.TrimSpace(item)
+		switch class {
+		case "monitor", "control", "system", "unknown":
+			classes = append(classes, class)
+		default:
+			return nil, fmt.Errorf("--classes value %q is invalid (want monitor, control, system, unknown)", class)
+		}
+	}
+	if len(classes) == 0 {
+		return nil, fmt.Errorf("--classes requires at least one class")
+	}
+	return classes, nil
+}
+
+func parseIEC104CAs(value string) ([]uint16, error) {
+	items, err := parseIEC104UintCSV(value, "--ca", 65535)
+	if err != nil {
+		return nil, err
+	}
+	cas := make([]uint16, 0, len(items))
+	for _, item := range items {
+		if item == 65535 {
+			return nil, fmt.Errorf("--ca cannot include broadcast address 65535")
+		}
+		cas = append(cas, uint16(item))
+	}
+	return cas, nil
+}
+
+func parseIEC104IOARanges(value string) ([]config.IOARange, error) {
+	items := strings.Split(value, ",")
+	ranges := make([]config.IOARange, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, fmt.Errorf("--ioa requires decimal addresses or ranges")
+		}
+		startText, endText, hasEnd := strings.Cut(item, "-")
+		start, err := strconv.ParseUint(strings.TrimSpace(startText), 10, 24)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --ioa address %q: %w", startText, err)
+		}
+		end := start
+		if hasEnd {
+			end, err = strconv.ParseUint(strings.TrimSpace(endText), 10, 24)
+			if err != nil {
+				return nil, fmt.Errorf("invalid --ioa range end %q: %w", endText, err)
+			}
+		}
+		if start > end {
+			return nil, fmt.Errorf("invalid --ioa range %d-%d: start is after end", start, end)
+		}
+		ranges = append(ranges, config.IOARange{Start: uint32(start), End: uint32(end)})
+	}
+	if len(ranges) == 0 {
+		return nil, fmt.Errorf("--ioa requires at least one address or range")
+	}
+	return ranges, nil
+}
+
+func parseIEC104UintCSV(value, flag string, max uint64) ([]uint64, error) {
+	items := strings.Split(value, ",")
+	values := make([]uint64, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, fmt.Errorf("%s requires comma-separated decimal values", flag)
+		}
+		number, err := strconv.ParseUint(item, 10, 16)
+		if err != nil || number > max {
+			return nil, fmt.Errorf("invalid %s value %q (want 0..%d)", flag, item, max)
+		}
+		values = append(values, number)
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("%s requires at least one value", flag)
+	}
+	return values, nil
 }
 
 func firewallICSRuleValue(args []string, index int, flag string) (string, int, error) {
@@ -159,11 +318,31 @@ func showFirewallICSRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/firewall/ics-rules", &rules); err != nil {
 			return err
 		}
-		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "R/W", "MODE")
+		var dataPlane config.DataPlaneConfig
+		if err := api.getJSON(ctx, "/api/v1/dataplane", &dataPlane); err != nil {
+			return err
+		}
+		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE")
 		for _, r := range rules {
 			fcs := make([]string, 0, len(r.ICS.FunctionCode))
 			for _, fc := range r.ICS.FunctionCode {
 				fcs = append(fcs, strconv.Itoa(int(fc)))
+			}
+			typeIDs := make([]string, 0, len(r.ICS.TypeIDs))
+			for _, typeID := range r.ICS.TypeIDs {
+				typeIDs = append(typeIDs, strconv.Itoa(typeID))
+			}
+			cas := make([]string, 0, len(r.ICS.CA))
+			for _, ca := range r.ICS.CA {
+				cas = append(cas, strconv.Itoa(int(ca)))
+			}
+			ioa := make([]string, 0, len(r.ICS.IOA))
+			for _, addressRange := range r.ICS.IOA {
+				if addressRange.Start == addressRange.End {
+					ioa = append(ioa, strconv.FormatUint(uint64(addressRange.Start), 10))
+				} else {
+					ioa = append(ioa, fmt.Sprintf("%d-%d", addressRange.Start, addressRange.End))
+				}
 			}
 			unitID := "—"
 			if r.ICS.UnitID != nil {
@@ -175,9 +354,10 @@ func showFirewallICSRulesAPI(api *API) Command {
 			} else if r.ICS.WriteOnly {
 				rw = "write-only"
 			}
-			mode := "—"
-			if r.ICS.Mode != "" {
-				mode = r.ICS.Mode
+			effectiveMode := dprules.EffectiveMode(r.ICS.Mode, dataPlane.DPIMode)
+			mode := fmt.Sprintf("%s (effective: %s)", strings.TrimSpace(r.ICS.Mode), effectiveMode)
+			if strings.TrimSpace(r.ICS.Mode) == "" {
+				mode = "inherit (" + effectiveMode + ")"
 			}
 			t.addRow(
 				r.ID,
@@ -188,7 +368,12 @@ func showFirewallICSRulesAPI(api *API) Command {
 				joinCSV(fcs),
 				unitID,
 				joinCSV(r.ICS.Addresses),
+				joinCSV(typeIDs),
+				joinCSV(r.ICS.Classes),
+				joinCSV(cas),
+				joinCSV(ioa),
 				rw,
+				firstNonEmpty(r.ICS.Direction, "—"),
 				mode,
 			)
 		}

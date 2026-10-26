@@ -1,0 +1,7 @@
+**
+!go.mod
+!go.sum
+!test/
+!test/iec104/
+!test/iec104/preflight/
+!test/iec104/preflight/*.go

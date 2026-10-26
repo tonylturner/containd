@@ -152,7 +152,7 @@ CONTAIND_UI_DIR=ui/out ./containd all
 - Cosign-signed container images with CycloneDX SBOM attestation
 - Trivy vulnerability scanning in CI (zero HIGH/CRITICAL)
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for the CISA alignment roadmap, and [Advisories and CSAF](docs/mkdocs/advisories.md) for the public advisory process.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for CISA alignment, the [Product Roadmap](docs/mkdocs/roadmap.md) for planned work, and [Advisories and CSAF](docs/mkdocs/advisories.md) for the public advisory process.
 
 ## Documentation
 

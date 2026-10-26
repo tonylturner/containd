@@ -23,6 +23,8 @@ import {
 
 const REDIRECT_TRACE_KEY = "containd.auth.redirect_trace";
 
+let verifiedSession: User | null = null;
+
 function appendRedirectTrace(entry: {
   ts: string;
   from: string;
@@ -53,9 +55,9 @@ export function Shell({
 }) {
   const pathname = usePathname() || "/";
   const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
-  const [authChecked, setAuthChecked] = React.useState(false);
+  const [authChecked, setAuthChecked] = React.useState(() => !!verifiedSession);
   const [authError, setAuthError] = React.useState<string | null>(null);
-  const [me, setMe] = React.useState<User | null>(null);
+  const [me, setMe] = React.useState<User | null>(() => verifiedSession);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<
@@ -181,25 +183,29 @@ export function Shell({
   }, []);
 
   React.useEffect(() => {
+    if (me) verifiedSession = me;
+  }, [me]);
+
+  React.useEffect(() => {
     if (pathname.startsWith("/login")) {
       setAuthChecked(true);
       setAuthError(null);
       return;
     }
     let canceled = false;
-    setAuthChecked(false);
     setAuthError(null);
     api.meStatus().then(({ status, data }) => {
       if (canceled) return;
       if (status === 401) {
+        verifiedSession = null;
         redirectToLogin("expired");
         return;
       }
       if (!data) {
         setAuthError("Unable to verify session (API unavailable).");
-        setAuthChecked(false);
         return;
       }
+      verifiedSession = data;
       setMe(data);
       if (data?.mustChangePassword) {
         setProfileTab("password");

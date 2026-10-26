@@ -25,9 +25,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
-// RecordDPIEvents appends events to the telemetry store.
+// RecordDPIEvents records semantic counters and appends events to telemetry.
+// It does not charge packets or bytes; flow-end events use this path too.
 func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if e == nil || e.eventStore == nil {
+	if e == nil {
+		return
+	}
+	e.recordProtoStats(evs)
+	if e.eventStore == nil {
 		return
 	}
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
@@ -38,7 +43,6 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
 	e.enqueueAVTasks(state, evs)
-	e.recordProtoStats(srcIP, dstIP, pkt, evs)
 	e.eventStore.Record(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
@@ -62,7 +66,7 @@ func (e *Engine) recordInventoryEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		if isICSEvent(ev.Proto, ev.Kind) {
+		if learnableICSEvent(ev) {
 			e.inventory.RecordEvent(srcIP, dstIP, ev)
 		}
 	}
@@ -73,7 +77,7 @@ func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		if isICSEvent(ev.Proto, ev.Kind) {
+		if learnableICSEvent(ev) {
 			e.learner.RecordEvent(srcIP, dstIP, ev)
 		}
 	}
@@ -98,14 +102,14 @@ func anomalyAlertFromEvent(ev dpi.Event, a anomaly.Anomaly) dpi.Event {
 		FlowID: ev.FlowID,
 		Proto:  "ids",
 		Kind:   "anomaly",
-		Attributes: map[string]any{
+		Attributes: withDerivedIdentity(ev, map[string]any{
 			"anomaly_type": a.Type,
 			"protocol":     a.Protocol,
 			"severity":     a.Severity,
 			"message":      a.Message,
 			"source_ip":    a.SourceIP,
 			"dest_ip":      a.DestIP,
-		},
+		}),
 		Timestamp: a.Timestamp,
 	}
 }
@@ -126,12 +130,12 @@ func signatureAlertFromMatch(ev dpi.Event, m signatures.Match) dpi.Event {
 		FlowID: ev.FlowID,
 		Proto:  "ids",
 		Kind:   "signature_match",
-		Attributes: map[string]any{
+		Attributes: withDerivedIdentity(ev, map[string]any{
 			"signature_id": m.Signature.ID,
 			"name":         m.Signature.Name,
 			"severity":     m.Signature.Severity,
 			"description":  m.Signature.Description,
-		},
+		}),
 		Timestamp: m.Timestamp,
 	}
 }
@@ -171,14 +175,12 @@ func isAVScanCandidate(ev dpi.Event) bool {
 	return ev.Kind == "request" || ev.Kind == "response"
 }
 
-func (e *Engine) recordProtoStats(srcIP, dstIP string, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if e == nil || e.stats == nil || pkt == nil || srcIP == "" || dstIP == "" {
+func (e *Engine) recordProtoStats(evs []dpi.Event) {
+	if e == nil || e.stats == nil {
 		return
 	}
-	payloadLen := len(pkt.Payload)
 	for _, ev := range evs {
-		e.stats.Record(ev, payloadLen)
-		e.stats.RecordFlow(srcIP, dstIP, ev.Proto, 1, int64(payloadLen))
+		e.stats.RecordEvent(ev)
 	}
 }
 
@@ -220,7 +222,7 @@ func (e *Engine) Inventory() *inventory.Inventory {
 	return e.inventory
 }
 
-// ProtoStats returns current per-protocol statistics derived from DPI events.
+// ProtoStats returns independent transport and DPI event counters per protocol.
 func (e *Engine) ProtoStats() []stats.ProtoStats {
 	if e == nil || e.stats == nil {
 		return nil
@@ -301,8 +303,7 @@ func isICSEvent(proto, kind string) bool {
 
 // Evaluate applies the current rule snapshot to a simple context.
 func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
+	ev := e.ruleSnap.Evaluator()
 	return ev.Evaluate(ctx)
 }
 
@@ -327,8 +328,7 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 // gets AllowContinue instead of the snapshot's default.
 func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
-	snap := e.ruleSnap.Load()
-	ev := rules.NewEvaluator(snap)
+	ev := e.ruleSnap.Evaluator()
 	action, matched := ev.EvaluateMatch(ctx)
 	if matched == nil && !applyDefault {
 		action = rules.ActionAllow
@@ -387,18 +387,23 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 // should never silently start blocking traffic just because containd is
 // installed.
 func (e *Engine) effectiveMode(matched *rules.Entry) string {
-	if matched != nil && strings.TrimSpace(matched.ICS.Mode) != "" {
-		return strings.ToLower(strings.TrimSpace(matched.ICS.Mode))
+	ruleMode, globalMode := "", ""
+	if matched != nil {
+		ruleMode = matched.ICS.Mode
 	}
-	if e != nil && strings.TrimSpace(e.dpiMode) != "" {
-		return strings.ToLower(strings.TrimSpace(e.dpiMode))
+	if e != nil {
+		globalMode = e.dpiMode
 	}
-	return "learn"
+	return rules.EffectiveMode(ruleMode, globalMode)
 }
 
 // ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
 func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	if e.updater == nil {
+	return applyVerdict(ctx, e.updater, v, flow)
+}
+
+func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdict, flow rules.EvalContext) error {
+	if updater == nil {
 		return nil
 	}
 	switch v.Action {
@@ -407,9 +412,9 @@ func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules
 		if ip == nil {
 			ip = flow.DstIP
 		}
-		return e.updater.BlockHostTemp(ctx, ip, v.TTL)
+		return updater.BlockHostTemp(ctx, ip, v.TTL)
 	case verdict.BlockFlowTemp:
-		return e.updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
+		return updater.BlockFlowTemp(ctx, flow.SrcIP, flow.DstIP, flow.Proto, flow.Port, v.TTL)
 	default:
 		return nil
 	}

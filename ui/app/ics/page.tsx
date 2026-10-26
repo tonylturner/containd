@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -11,16 +13,44 @@ import {
   type FirewallRule,
   type ICSPredicate,
 } from "../../lib/api";
+import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
-import { PROTOCOL_KEYS, PROTOCOLS, protoMeta } from "./ics-shared";
+import {
+  formatICSMode,
+  type ICSMode,
+  PROTOCOL_KEYS,
+  PROTOCOLS,
+  protoMeta,
+} from "./ics-shared";
+import { summarizeIEC104 } from "./iec104";
+import { IEC104HealthStatus } from "./iec104-health";
 
 /* -- Page ----------------------------------------------------------------- */
 
+function ICSModeBadge({
+  ruleMode,
+  globalMode,
+}: {
+  ruleMode?: ICSMode;
+  globalMode?: ICSMode;
+}) {
+  const mode = formatICSMode(ruleMode, globalMode);
+  return (
+    <StatusBadge
+      variant={mode.effectiveMode === "learn" ? "warning" : "success"}
+      dot
+    >
+      {mode.label}
+    </StatusBadge>
+  );
+}
+
 export default function ICSPolicyPage() {
+  const toast = useToast();
   const canEdit = isAdmin();
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +63,8 @@ export default function ICSPolicyPage() {
 
   async function refresh() {
     setError(null);
-    const list = await api.listFirewallRules();
+    const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    if (dp) setDpiConfig(dp);
     if (!list) {
       setError("Failed to load firewall rules.");
       return;
@@ -41,13 +72,10 @@ export default function ICSPolicyPage() {
     setRules(list);
   }
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
-  }, []);
-  useEffect(() => {
-    fetchDataPlane().then((dp) => {
-      if (dp) setDpiConfig(dp);
-    });
   }, []);
 
   const icsRules = useMemo(
@@ -75,6 +103,7 @@ export default function ICSPolicyPage() {
       setError(result.error);
       return;
     }
+    toast("ICS filter staged — commit to apply.", "success");
     setEditing(null);
     refresh();
   }
@@ -98,7 +127,7 @@ export default function ICSPolicyPage() {
       )}
 
       {/* -- DPI status --------------------------------------------------- */}
-      <Card title="DPI Status" className="mb-4">
+      <Card title="Candidate DPI Settings" className="mb-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-[var(--text)]">
             ICS protocol filters require DPI to be enabled with at least one capture interface configured.
@@ -112,6 +141,9 @@ export default function ICSPolicyPage() {
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
         )}
+        <div className="mt-3">
+          <IEC104HealthStatus />
+        </div>
         <div className="mt-2">
           <Link href="/firewall/" className="text-xs font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
             Configure DPI in Firewall Rules &rarr;
@@ -143,7 +175,7 @@ export default function ICSPolicyPage() {
             Go to Firewall Rules &rarr;
           </Link>
         </Card>
-        <Card title="Active Filters">
+        <Card title="Candidate Filters">
           {Object.keys(protoCounts).length === 0 ? (
             <div className="text-xs text-[var(--text-muted)]">
               No ICS filters configured yet.
@@ -241,10 +273,14 @@ export default function ICSPolicyPage() {
                   </StatusBadge>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
-                  {(r.ics?.functionCode ?? []).join(", ") || "*"}
+                  {r.ics?.protocol === "iec104"
+                    ? summarizeIEC104(r.ics).types
+                    : (r.ics?.functionCode ?? []).join(", ") || "*"}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
-                  {(r.ics?.addresses ?? []).join(", ") || "*"}
+                  {r.ics?.protocol === "iec104"
+                    ? summarizeIEC104(r.ics).addresses
+                    : (r.ics?.addresses ?? []).join(", ") || "*"}
                 </td>
                 <td className="px-4 py-3 text-xs text-[var(--text)]">
                   {r.ics?.readOnly
@@ -254,12 +290,10 @@ export default function ICSPolicyPage() {
                       : "R/W"}
                 </td>
                 <td className="px-4 py-3 text-[var(--text)]">
-                  <StatusBadge
-                    variant={r.ics?.mode === "learn" ? "warning" : "success"}
-                    dot
-                  >
-                    {r.ics?.mode === "learn" ? "learning" : "enforce"}
-                  </StatusBadge>
+                  <ICSModeBadge
+                    ruleMode={r.ics?.mode}
+                    globalMode={dpiConfig.dpiMode}
+                  />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
@@ -278,6 +312,7 @@ export default function ICSPolicyPage() {
       {editing && (
         <EditICSModal
           rule={editing}
+          globalMode={dpiConfig.dpiMode}
           onClose={() => setEditing(null)}
           onSave={(ics) => onSave(editing.id, ics)}
         />

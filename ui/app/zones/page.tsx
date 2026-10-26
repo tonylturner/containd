@@ -1,10 +1,13 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Zone, type ConduitMap } from "../../lib/api";
 import { mapZone, scoreZone, slColor } from "../../lib/security-scoring";
+import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { useTableControls } from "../../hooks/useTableControls";
@@ -14,6 +17,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 
 export default function ZonesPage() {
+  const toast = useToast();
   const [zones, setZones] = useState<Zone[]>([]);
   const [conduits, setConduits] = useState<ConduitMap>({});
   const [name, setName] = useState("");
@@ -35,6 +39,8 @@ export default function ZonesPage() {
     setZones(list ?? []);
     setConduits((conds as ConduitMap) ?? {});
   }
+
+  useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -63,6 +69,7 @@ export default function ZonesPage() {
       setError(result.error);
       return;
     }
+    toast("Zone staged — commit to apply.", "success");
     setName("");
     setAlias("");
     setDescription("");
@@ -83,6 +90,7 @@ export default function ZonesPage() {
           setError(result.error);
           return;
         }
+        toast("Zone staged — commit to apply.", "success");
         refresh();
       },
     });
@@ -95,6 +103,7 @@ export default function ZonesPage() {
       setError(result.error);
       return;
     }
+    toast("Zone staged — commit to apply.", "success");
     refresh();
   }
 

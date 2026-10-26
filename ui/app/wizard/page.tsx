@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 
@@ -65,6 +67,8 @@ export default function WizardPage() {
     setNatConfig(n ?? { enabled: false });
     setLoading(false);
   }, []);
+
+  useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
@@ -134,7 +138,7 @@ export default function WizardPage() {
         return;
       }
       setNatConfig(natRes.data);
-      setSuccess("LAN internet access configured. Firewall allow rule and SNAT masquerade created.");
+      setSuccess("LAN internet rule and SNAT staged — commit to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
     }
@@ -190,7 +194,7 @@ export default function WizardPage() {
         setApplying(false);
         return;
       }
-      setSuccess("Internal service published. Port forward (DNAT) and firewall allow rule created.");
+      setSuccess("Port forward and firewall rule staged — commit to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
     }
@@ -231,7 +235,7 @@ export default function WizardPage() {
         setApplying(false);
         return;
       }
-      setSuccess(`ICS communication rule created for ${protoMeta?.label ?? icsProto} (${icsAccess}).`);
+      setSuccess(`ICS communication rule for ${protoMeta?.label ?? icsProto} (${icsAccess}) staged — commit to apply.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
     }
@@ -264,7 +268,7 @@ export default function WizardPage() {
         setApplying(false);
         return;
       }
-      setSuccess("Inter-zone communication rule created.");
+      setSuccess("Inter-zone communication rule staged — commit to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
     }
@@ -321,7 +325,7 @@ export default function WizardPage() {
   return (
     <Shell title="Policy Wizard">
       <p className="mb-6 text-sm text-[var(--text-muted)]">
-        Select a common connectivity scenario below. The wizard will walk you through each step and create the necessary firewall rules and NAT configuration automatically.
+        Select a common connectivity scenario below. The wizard will walk you through each step and stage the necessary firewall rules and NAT configuration automatically.
       </p>
 
       {loading && (
@@ -443,7 +447,7 @@ export default function WizardPage() {
                 disabled={applying}
                 className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
               >
-                {applying ? "Applying..." : "Apply"}
+                {applying ? "Staging..." : "Stage"}
               </button>
             )}
           </div>

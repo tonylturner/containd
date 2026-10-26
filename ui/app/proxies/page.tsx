@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRefresh } from "../../lib/use-config-refresh";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
@@ -10,6 +12,7 @@ import {
   type ReverseProxyConfig,
   type ReverseProxySite,
 } from "../../lib/api";
+import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
@@ -86,6 +89,8 @@ export default function ProxiesPage() {
     }
   }, [toast]);
 
+  useConfigRefresh(refresh);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -137,7 +142,7 @@ export default function ProxiesPage() {
       toast(msg, "error");
     } else {
       setForward(saved.data);
-      toast(saved.warning ? `Forward proxy saved with warning: ${saved.warning}` : "Forward proxy saved", "success");
+      toast(saved.warning ? `Forward proxy staged — commit to apply. Warning: ${saved.warning}` : "Forward proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -154,7 +159,7 @@ export default function ProxiesPage() {
       toast(msg, "error");
     } else {
       setReverse(saved.data);
-      toast(saved.warning ? `Reverse proxy saved with warning: ${saved.warning}` : "Reverse proxy saved", "success");
+      toast(saved.warning ? `Reverse proxy staged — commit to apply. Warning: ${saved.warning}` : "Reverse proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
   }
@@ -235,7 +240,7 @@ export default function ProxiesPage() {
       <div className="mb-4 grid gap-4 md:grid-cols-2">
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
-            <Image src="/icons/envoyproxy.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-[var(--text)]">Forward proxy (Envoy)</h2>
             <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
           </div>
@@ -247,7 +252,7 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Running: {status?.envoy_running ? "yes" : "no"}{" "}
+                Live running: {status?.envoy_running ? "yes" : "no"}{" "}
                 {status?.envoy_pid ? `(pid ${status.envoy_pid})` : ""}
               </p>
               <p className="text-xs text-[var(--text-muted)]">
@@ -280,7 +285,7 @@ export default function ProxiesPage() {
         </Card>
         <Card padding="lg" className="backdrop-blur">
           <div className="flex items-center gap-3">
-            <Image src="/icons/nginx.svg" alt="" width={20} height={20} className="h-5 w-5" />
+            <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-[var(--text)]">Reverse proxy (Nginx)</h2>
             <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
           </div>
@@ -292,7 +297,7 @@ export default function ProxiesPage() {
           ) : (
             <>
               <p className="mt-2 text-xs text-[var(--text-muted)]">
-                Running: {status?.nginx_running ? "yes" : "no"}{" "}
+                Live running: {status?.nginx_running ? "yes" : "no"}{" "}
                 {status?.nginx_pid ? `(pid ${status.nginx_pid})` : ""}
               </p>
               <p className="text-xs text-[var(--text-muted)]">
@@ -464,7 +469,7 @@ export default function ProxiesPage() {
                 <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-emerald-400">Saved</span>
+                <span className="text-sm text-emerald-400">Staged — commit to apply.</span>
               )}
               {canEdit && (
                 <button
@@ -606,7 +611,7 @@ export default function ProxiesPage() {
                 <span className="text-sm text-red-400">Save failed</span>
               )}
               {saveState === "saved" && (
-                <span className="text-sm text-emerald-400">Saved</span>
+                <span className="text-sm text-emerald-400">Staged — commit to apply.</span>
               )}
               {canEdit && (
                 <button

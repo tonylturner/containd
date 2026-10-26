@@ -44,7 +44,10 @@ func newModbusInspectEngine(t *testing.T) *Engine {
 	return e
 }
 
-func clientSegment(iface string, seq uint32, flags uint8, payload []byte) capture.Packet {
+func clientSegment(iface string, seq uint32, flags capture.TCPFlags, payload []byte) capture.Packet {
+	if flags&capture.TCPFlagSYN != 0 {
+		seq--
+	}
 	return capture.Packet{
 		Timestamp: time.Now().UTC(),
 		Interface: iface,
@@ -55,9 +58,7 @@ func clientSegment(iface string, seq uint32, flags uint8, payload []byte) captur
 		Proto:     6,
 		Transport: "tcp",
 		Payload:   payload,
-		TCPSeq:    seq,
-		HasTCPSeq: true,
-		TCPFlags:  flags,
+		TCP:       capture.TCPMeta{Valid: true, Seq: seq, Flags: capture.TCPFlags(flags)},
 	}
 }
 

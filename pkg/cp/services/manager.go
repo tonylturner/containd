@@ -207,7 +207,7 @@ func (m *Manager) ListTelemetryEvents(limit int) []dpevents.Event {
 	if m == nil || m.telemetry == nil {
 		return nil
 	}
-	return m.telemetry.List(limit)
+	return m.telemetry.ListTelemetry(limit)
 }
 
 // Validate performs best-effort validation for service configs without changing runtime state.

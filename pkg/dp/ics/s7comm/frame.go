@@ -19,7 +19,7 @@ type TPKTHeader struct {
 // COTPHeader represents a minimal COTP (ISO 8073) header.
 type COTPHeader struct {
 	Length  uint8 // header length minus 1
-	PDUType uint8 // 0xE0=CR, 0xD0=CC, 0x0F=DT
+	PDUType uint8 // 0xE0=CR, 0xD0=CC (low nibble is credit), 0xF0=DT
 }
 
 // S7Header represents the S7comm protocol header.
@@ -38,7 +38,7 @@ type S7Header struct {
 const (
 	COTPConnectionRequest = 0xE0
 	COTPConnectionConfirm = 0xD0
-	COTPData              = 0x0F
+	COTPData              = 0xF0
 )
 
 // S7comm message types.

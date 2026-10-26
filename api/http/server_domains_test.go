@@ -268,11 +268,11 @@ func TestAssignInterfacesAuto(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if len(eng.lastIf) == 0 {
-		t.Fatalf("expected interfaces applied to engine")
+	if len(eng.lastIf) != 0 {
+		t.Fatalf("staging applied interfaces to engine")
 	}
 	foundWAN := false
-	for _, iface := range eng.lastIf {
+	for _, iface := range m.cfg.Interfaces {
 		if iface.Name == "wan" {
 			foundWAN = true
 			if iface.Device != "eth0" {
@@ -281,7 +281,7 @@ func TestAssignInterfacesAuto(t *testing.T) {
 		}
 	}
 	if !foundWAN {
-		t.Fatalf("expected wan interface in engine config")
+		t.Fatalf("expected wan interface in candidate config")
 	}
 }
 
@@ -310,7 +310,7 @@ func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
 	}
 
 	got := map[string]string{}
-	for _, iface := range eng.lastIf {
+	for _, iface := range m.cfg.Interfaces {
 		if iface.Name == "" || iface.Device == "" {
 			continue
 		}
@@ -483,7 +483,7 @@ func TestUpdateFirewallRulePartialPatchPreservesExistingFields(t *testing.T) {
 	}
 }
 
-func TestSetDHCPReturnsWarningWhenRuntimeApplyFails(t *testing.T) {
+func TestSetDHCPDefersRuntimeApply(t *testing.T) {
 	m := &mockStore{
 		cfg: &config.Config{
 			Zones: []config.Zone{{Name: "lan1"}},
@@ -503,11 +503,11 @@ func TestSetDHCPReturnsWarningWhenRuntimeApplyFails(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("X-Containd-Warnings"); !strings.Contains(got, "engine services: dhcp: nft apply failed") {
-		t.Fatalf("expected warning header, got %q", got)
+	if got := rec.Header().Get("X-Containd-Warnings"); got != "" {
+		t.Fatalf("staging returned a runtime warning, got %q", got)
 	}
 	if !m.cfg.Services.DHCP.Enabled {
-		t.Fatal("expected DHCP config persisted despite runtime warning")
+		t.Fatal("expected staged DHCP config")
 	}
 }
 
@@ -614,20 +614,21 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 	}
 
 	gotRules, err := store.LoadIDSRules(context.Background())
-	if err != nil {
-		t.Fatalf("load ids rules after import: %v", err)
+	if err != nil || len(gotRules) != len(oldRules) || gotRules[0].ID != oldRules[0].ID {
+		t.Fatalf("import changed running bank: %v %v", gotRules, err)
 	}
-	if len(gotRules) != len(wantRules) || gotRules[0].ID != wantRules[0].ID {
-		t.Fatalf("ids rules not replaced on import: got=%v want=%v", gotRules, wantRules)
+	loaded, err := store.LoadCandidate(context.Background())
+	if err != nil || len(loaded.IDS.Rules) != len(wantRules) || loaded.IDS.Rules[0].ID != wantRules[0].ID {
+		t.Fatalf("candidate bank=%+v err=%v", loaded, err)
+	}
+	if err := store.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	gotRules, err = store.LoadIDSRules(context.Background())
+	if err != nil || len(gotRules) != len(wantRules) || gotRules[0].ID != wantRules[0].ID {
+		t.Fatalf("commit bank=%v err=%v", gotRules, err)
 	}
 
-	loaded, err := store.Load(context.Background())
-	if err != nil {
-		t.Fatalf("load config after import: %v", err)
-	}
-	if loaded.IDS.Rules != nil {
-		t.Fatalf("expected imported config blob to strip embedded ids rules, got %d", len(loaded.IDS.Rules))
-	}
 }
 
 func TestCommitConfirmedTTLParsing(t *testing.T) {

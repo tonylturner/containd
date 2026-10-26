@@ -6,14 +6,16 @@ package modbus
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"net"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Decoder implements dpi.Decoder for Modbus/TCP visibility.
+// Decoder implements dpi.StreamDecoder for Modbus/TCP visibility.
 type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
@@ -34,81 +36,89 @@ func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
 	return []uint16{502}, nil
 }
 
-// maxADULen is the largest Modbus/TCP ADU: a 7-byte MBAP header plus a
-// 253-byte PDU.
-const maxADULen = 260
+// Protocol implements dpi.StreamDecoder.
+func (d *Decoder) Protocol() string { return eventfields.ProtoModbus }
 
-// OnPacket decodes every complete Modbus/TCP frame in the payload.
+// ParseStream frames the Modbus/TCP stream into ADUs (MBAP header plus PDU)
+// and emits one event per complete ADU. An incomplete tail is NeedMore. Bytes
+// that cannot start an ADU (an MBAP length outside 2..254) end the parse with
+// a *dpi.FrameError carrying its malformed event.
+func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
+	var res dpi.StreamResult
+	pos := 0
+	for pos < len(v.Bytes) {
+		n, err := frameADU(v.Bytes[pos:])
+		if err != nil {
+			res.Consumed = pos
+			return res, &dpi.FrameError{
+				Offset: v.Base + int64(pos),
+				Reason: err.Error(),
+				Event:  malformedEvent(state, v.Bytes[pos:], err),
+			}
+		}
+		if n == 0 {
+			res.NeedMore = true
+			break
+		}
+		adu := v.Bytes[pos : pos+n]
+		res.Frames = append(res.Frames, dpi.DecodedFrame{
+			Start:  v.Base + int64(pos),
+			End:    v.Base + int64(pos+n),
+			Events: []dpi.Event{aduEvent(state, decodeADU(adu), adu)},
+		})
+		pos += n
+	}
+	res.Consumed = pos
+	return res, nil
+}
+
+// OnPacket parses pkt.Payload as a stream that starts at an ADU boundary,
+// with the same framing as ParseStream. It returns every complete ADU's event
+// and, when framing fails, the malformed event and the *dpi.FrameError.
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil {
+	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil
 	}
-	events, _ := d.DecodeStream(state, pkt.Payload)
+	res, err := d.ParseStream(state, dpi.StreamView{Session: flowID(state), Base: pkt.Offset, Bytes: pkt.Payload})
+	var events []dpi.Event
+	for _, f := range res.Frames {
+		events = append(events, f.Events...)
+	}
+	var fe *dpi.FrameError
+	if errors.As(err, &fe) {
+		return append(events, fe.Event), fe
+	}
 	return events, nil
 }
 
-// DecodeStream implements dpi.StreamDecoder: it emits one event per
-// complete MBAP-framed ADU at the start of stream and reports the bytes
-// they occupy. A trailing partial ADU is left for the next segment. A
-// header that cannot start a valid ADU discards the rest of the stream.
-func (d *Decoder) DecodeStream(state *flow.State, stream []byte) ([]dpi.Event, int) {
-	var events []dpi.Event
-	off := 0
-	for off < len(stream) {
-		rest := stream[off:]
-		if len(rest) < 8 {
-			// MBAP header plus function code not yet complete.
-			break
-		}
-		length := int(binary.BigEndian.Uint16(rest[4:6]))
-		frameLen := 6 + length
-		if length < 2 {
-			return events, len(stream)
-		}
-		if len(rest) < frameLen {
-			if frameLen > maxADULen {
-				// No conforming ADU is this long; waiting for it would
-				// stall the stream.
-				return events, len(stream)
-			}
-			break
-		}
-		frame, err := ParseTCPFrame(rest[:frameLen])
-		if err != nil {
-			return events, len(stream)
-		}
-		events = append(events, frameEvent(state, frame, rest[:frameLen]))
-		off += frameLen
-	}
-	return events, off
-}
-
-// frameEvent builds the DPI event for one parsed ADU; raw is its wire
-// bytes.
-func frameEvent(state *flow.State, frame *TCPFrame, raw []byte) dpi.Event {
+func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 	fc := frame.FunctionCode
 	isException := fc >= 128
 
 	attrs := map[string]any{
-		"transaction_id": frame.TransactionID,
-		"unit_id":        frame.UnitID,
-		"function_code":  fc,
+		"transaction_id":            frame.TransactionID,
+		eventfields.KeyUnitID:       frame.UnitID,
+		eventfields.KeyFunctionCode: fc,
 	}
-
 	kind := "request"
+	// The service port also identifies replies in offline captures that have
+	// no handshake-derived flow direction.
+	if state != nil && (state.Key.Dir == flow.DirReverse || state.Key.SrcPort == 502) {
+		kind = "response"
+	}
 
 	if isException {
 		kind = "exception"
 		baseFc := fc - 128
-		attrs["function_code"] = baseFc
-		attrs["is_write"] = IsWriteFunctionCode(baseFc)
+		attrs[eventfields.KeyFunctionCode] = baseFc
+		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(baseFc)
 		if len(frame.PDU) >= 1 {
 			ec := frame.PDU[0]
 			attrs["exception_code"] = ec
 			attrs["exception_description"] = exceptionName(ec)
 		}
 	} else {
-		attrs["is_write"] = IsWriteFunctionCode(fc)
+		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(fc)
 
 		switch fc {
 		case 8: // Diagnostics — sub-function is first 2 bytes of PDU.
@@ -118,7 +128,7 @@ func frameEvent(state *flow.State, frame *TCPFrame, raw []byte) dpi.Event {
 				attrs["sub_function_name"] = diagSubFunctionName(sub)
 				// Sub-functions 1 (restart comm) and 4 (force listen only) are writes.
 				if sub == 1 || sub == 4 {
-					attrs["is_write"] = true
+					attrs[eventfields.KeyIsWrite] = true
 				}
 			}
 		case 43: // MEI (Encapsulated Interface Transport).
@@ -140,19 +150,48 @@ func frameEvent(state *flow.State, frame *TCPFrame, raw []byte) dpi.Event {
 		}
 	}
 
-	// Include raw hex for operator visibility (cap to avoid huge payloads).
-	if len(raw) > 512 {
-		raw = raw[:512]
-	}
-	attrs["raw_hex"] = hex.EncodeToString(raw)
+	attrs["raw_hex"] = rawHex(adu)
 
 	return dpi.Event{
-		FlowID:     state.Key.Hash(),
-		Proto:      "modbus",
+		FlowID:     flowID(state),
+		Proto:      eventfields.ProtoModbus,
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
+}
+
+// malformedEvent describes bytes at an offset that cannot start an ADU.
+// Nothing in an unframeable header is trustworthy, so it carries only the
+// error and the bytes.
+func malformedEvent(state *flow.State, b []byte, err error) dpi.Event {
+	return dpi.Event{
+		FlowID: flowID(state),
+		Proto:  eventfields.ProtoModbus,
+		Kind:   eventfields.KindMalformed,
+		Attributes: map[string]any{
+			eventfields.KeyError: err.Error(),
+			"raw_hex":            rawHex(b),
+		},
+		Timestamp: time.Now().UTC(),
+	}
+}
+
+// rawHex encodes at most maxRawHex bytes for operator visibility.
+func rawHex(b []byte) string {
+	if len(b) > maxRawHex {
+		b = b[:maxRawHex]
+	}
+	return hex.EncodeToString(b)
+}
+
+const maxRawHex = 512
+
+func flowID(state *flow.State) string {
+	if state == nil {
+		return ""
+	}
+	return state.Key.Hash()
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

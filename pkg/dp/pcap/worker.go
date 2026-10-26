@@ -32,7 +32,10 @@ func newWorker(dir, iface string, cfg config.PCAPConfig) *worker {
 	return &worker{dir: dir, iface: iface, cfg: cfg}
 }
 
-func (w *worker) run(ctx context.Context, mgr *Manager) error {
+func (w *worker) run(ctx context.Context, mgr *Manager, run *captureRun, task *captureTask) error {
+	if ctx.Err() != nil {
+		return nil
+	}
 	fd, fwds, err := w.openCaptureSocket()
 	if err != nil {
 		return err
@@ -46,7 +49,10 @@ func (w *worker) run(ctx context.Context, mgr *Manager) error {
 	}
 	defer pc.close()
 
-	return w.runCaptureLoop(ctx, mgr, fd, fwds, pc)
+	if !mgr.workerStarted(run, task) {
+		return nil
+	}
+	return w.runCaptureLoop(ctx, mgr, run, fd, fwds, pc)
 }
 
 func (w *worker) openCaptureSocket() (int, []*forwardSink, error) {
@@ -88,7 +94,7 @@ func closeForwarders(fwds []*forwardSink) {
 	}
 }
 
-func (w *worker) runCaptureLoop(ctx context.Context, mgr *Manager, fd int, fwds []*forwardSink, pc *pcapFile) error {
+func (w *worker) runCaptureLoop(ctx context.Context, mgr *Manager, run *captureRun, fd int, fwds []*forwardSink, pc *pcapFile) error {
 	buf := make([]byte, w.cfg.Snaplen)
 	rotateAt := w.nextRotate()
 
@@ -97,13 +103,19 @@ func (w *worker) runCaptureLoop(ctx context.Context, mgr *Manager, fd int, fwds 
 			return nil
 		}
 		var err error
-		pc, rotateAt, err = w.maybeRotateCapture(mgr, pc, rotateAt)
+		pc, rotateAt, err = w.maybeRotateCapture(mgr, run, pc, rotateAt)
 		if err != nil {
 			return err
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		ready, err := pollCapturePacket(fd)
 		if err != nil {
 			return err
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		if !ready {
 			continue
@@ -124,13 +136,13 @@ func (w *worker) runCaptureLoop(ctx context.Context, mgr *Manager, fd int, fwds 
 	}
 }
 
-func (w *worker) maybeRotateCapture(mgr *Manager, pc *pcapFile, rotateAt time.Time) (*pcapFile, time.Time, error) {
+func (w *worker) maybeRotateCapture(mgr *Manager, run *captureRun, pc *pcapFile, rotateAt time.Time) (*pcapFile, time.Time, error) {
 	if !w.shouldRotate(pc, rotateAt) {
 		return pc, rotateAt, nil
 	}
 	if w.cfg.Mode == "once" {
 		if mgr != nil {
-			mgr.requestStop()
+			mgr.requestStop(run)
 		}
 		return pc, rotateAt, nil
 	}

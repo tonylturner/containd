@@ -30,6 +30,13 @@ components:
         or via the token cookie set automatically on login.
 
   schemas:
+    IDSBankSummary:
+      type: object
+      required: [count, sha256]
+      properties:
+        count: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+
     LoginRequest:
       type: object
       required: [username, password]
@@ -123,6 +130,105 @@ components:
         commit: { type: string }
         hostname: { type: string }
         time: { type: string, format: date-time }
+        iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
+        ipv4Forwarding:
+          type: string
+        managementBinding:
+          type: object
+          description: >
+            `configured` when a management grant names an existing device;
+            `unbound-appliance` when no granted interface is bound, so the
+            listed ports accept management on every existing NIC that is not
+            explicitly denied; `unknown` when state cannot be read.
+          properties:
+            state: { type: string, enum: [configured, unbound-appliance, unknown] }
+            recoveryPorts: { type: array, items: { type: integer } }
+          enum: [enabled, disabled, unknown]
+          description: >
+            IPv4 forwarding state read by the engine from
+            /proc/sys/net/ipv4/ip_forward in its network namespace.
+            `unknown` means the sysctl could not be read or the management
+            API could not reach the engine.
+
+    IEC104Enforcement:
+      type: object
+      required: [active, healthy, reason]
+      description: >
+        IEC 60870-5-104 enforcement state of the running engine. The
+        endpoint keeps HTTP 200 liveness whatever this object says.
+        Inactive with no fault is {active: false, healthy: true, reason: ""}.
+        If the management plane cannot reach the engine it reports
+        {active: false, healthy: false, reason: "engine unreachable"}; it
+        never reports healthy without the engine.
+      properties:
+        active:
+          type: boolean
+          description: >
+            At least one IEC104 enforce envelope is loaded in the runtime.
+            This describes the applied policy, not the saved config.
+        healthy:
+          type: boolean
+          description: >
+            False after a queue bind, verdict submission, reset send,
+            reset injector or bounded-worker failure. IEC104 envelope
+            traffic then fails closed until readiness returns.
+        reason: { type: string, description: Machine-readable cause when unhealthy, else empty }
+      example: { active: true, healthy: true, reason: "" }
+
+    PcapFilter:
+      type: object
+      description: >
+        Packet filter. Port matches either the TCP/UDP source or destination
+        port; it is not valid with proto icmp.
+      properties:
+        src: { type: string, description: Source IPv4 address or CIDR }
+        dst: { type: string, description: Destination IPv4 address or CIDR }
+        proto: { type: string, enum: [any, tcp, udp, icmp], default: any }
+        port:
+          type: string
+          pattern: '^[0-9]+(-[0-9]+)?$'
+          example: "2404"
+          description: Single port 1–65535 or inclusive range, e.g. 1000-2000
+
+    PcapConfig:
+      type: object
+      description: >
+        Capture selections are resolved when capture starts against the
+        running interface and zone configuration. Interface and zone
+        selections are unioned and deduplicated.
+      properties:
+        enabled: { type: boolean }
+        interfaces:
+          type: array
+          items: { type: string }
+          description: Logical interface name or existing kernel device name
+        zones:
+          type: array
+          items: { type: string }
+          description: Capture every configured interface assigned to these zones
+        snaplen: { type: integer, minimum: 0 }
+        maxSizeMB: { type: integer, minimum: 0 }
+        maxFiles: { type: integer, minimum: 0 }
+        mode: { type: string, enum: [rolling, once] }
+        promisc: { type: boolean }
+        bufferMB: { type: integer, minimum: 0 }
+        rotateSeconds: { type: integer, minimum: 0 }
+        filePrefix: { type: string }
+        filter: { $ref: "#/components/schemas/PcapFilter" }
+        forwardTargets:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    PcapStatus:
+      type: object
+      properties:
+        running: { type: boolean }
+        interfaces:
+          type: array
+          items: { type: string }
+          description: Resolved kernel device names
+        startedAt: { type: string, format: date-time }
+        lastError: { type: string }
 
     DashboardResponse:
       type: object
@@ -163,10 +269,32 @@ components:
         transport: { type: string, enum: [tcp, udp] }
         hash: { type: string }
 
+    EventPage:
+      type: object
+      required: [events, historyTruncated]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+        nextCursor:
+          type: string
+          description: Opaque exclusive upper bound for the next older page; absent at the end of retained matches.
+        historyTruncated:
+          type: boolean
+          description: Conservative warning that history may be incomplete, not a per-session loss count. True after any store overflow or when merged service history cannot be certified.
+        engineError:
+          type: string
+          description: Engine query failed; events may still contain matching service evidence. Never interpret this as an empty successful engine search.
+
     FlowSummary:
       type: object
       properties:
         flowId: { type: string }
+        session_id:
+          type: string
+          description: >
+            IEC104 session incarnation that groups this rollup (both wire
+            directions of one connection). Absent for non-IEC flows.
         firstSeen: { type: string, format: date-time }
         lastSeen: { type: string, format: date-time }
         srcIp: { type: string }
@@ -178,6 +306,129 @@ components:
         eventCount: { type: integer, format: uint64 }
         avDetected: { type: boolean }
         avBlocked: { type: boolean }
+
+    FirewallRule:
+      type: object
+      required: [id, action]
+      properties:
+        id: { type: string }
+        description: { type: string }
+        sourceZones: { type: array, items: { type: string } }
+        destZones: { type: array, items: { type: string } }
+        sources: { type: array, items: { type: string }, description: CIDRs }
+        destinations: { type: array, items: { type: string }, description: CIDRs }
+        protocols:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, example: tcp }
+              port: { type: string, example: "2404", description: Single port or range "1000-2000" }
+        identities: { type: array, items: { type: string } }
+        ics:
+          allOf:
+            - $ref: "#/components/schemas/ICSPredicate"
+          description: Always present in serialized rules; `{}` denotes no ICS predicate.
+        action: { type: string, enum: [ALLOW, DENY] }
+        log: { type: boolean }
+
+    ICSPredicate:
+      type: object
+      additionalProperties: false
+      description: |
+        ICS predicate of a firewall rule. Decoding is strict: unknown keys
+        (exact spelling) and duplicate keys are rejected. `{}` is a pure
+        L3/L4 rule. Semantic values need `protocol`. OR within a list, AND
+        across fields; an absent field matches any value.
+
+        IEC 60870-5-104 (`protocol: iec104`):
+        - `typeIds`, `classes`, `ca` and `ioa` are iec104-only. `null`, `[]`
+          and null items are rejected; omit the field to match any value.
+          Numbers must be JSON integers.
+        - `functionCode`, `unitId`, `addresses`, `objectClasses` and
+          `writeOnly` are rejected on iec104 when present at all, so
+          `"writeOnly": false` is an error.
+        - IEC104 rules match the session tuple (client = TCP opener,
+          server port 2404) whatever the wire direction; `direction` selects
+          the half. Inside the IEC104 envelope only iec104 rules are
+          evaluated, in order, and no match is DENY regardless of
+          `firewall.defaultAction`.
+        - An enforce ALLOW rule may name only Type IDs with a decoder
+          descriptor (1, 3, 13, 30, 31, 45-51, 58-64, 70, 100-103, 105, 107) and
+          not the `unknown` class. Broadcast (CA 65535) and malformed
+          objects never match an ALLOW.
+        - IEC104 enforce (effective mode: rule `mode`, else
+          `dataplane.dpiMode`, else learn) is rejected on save, candidate,
+          commit and import unless `dataplane.dpiEnabled` is true,
+          `dataplane.dpiIcsProtocols.iec104` is not false,
+          `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
+          IP/CIDR `dataplane.dpiExclusions` entry overlaps an enforce rule's
+          sources or destinations.
+      properties:
+        protocol:
+          type: string
+          enum: [modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104]
+        functionCode:
+          description: >
+            Function/service codes (not iec104). Accepted forms: integer
+            array, a single integer, numeric strings, an index-keyed
+            object, legacy base64 string, or null.
+          oneOf:
+            - { type: array, items: { type: integer, minimum: 0, maximum: 255 } }
+            - { type: integer, minimum: 0, maximum: 255 }
+            - { type: string }
+            - { type: object, additionalProperties: true }
+          nullable: true
+        unitId: { type: integer, minimum: 0, maximum: 255, description: Modbus unit id }
+        addresses: { type: array, items: { type: string }, description: Register/address values or ranges (not iec104) }
+        objectClasses: { type: array, items: { type: integer }, description: CIP object classes (cip only) }
+        readOnly:
+          type: boolean
+          description: >
+            Match read-only traffic only. On iec104: monitor-class responses,
+            GI (100) and read (102) requests, end of initialization (70),
+            S-frames and U-frames. false is no constraint, never "writes
+            only".
+        writeOnly: { type: boolean, description: Match writes only (not iec104) }
+        direction: { type: string, enum: [request, response] }
+        mode: { type: string, enum: [learn, enforce], description: Overrides dataplane.dpiMode for this rule }
+        typeIds:
+          type: array
+          minItems: 1
+          items: { type: integer, minimum: 1, maximum: 255 }
+          description: IEC104 Type IDs, a numeric array (never base64)
+        classes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [monitor, control, system, unknown] }
+        ca:
+          type: array
+          minItems: 1
+          items: { type: integer, minimum: 0, maximum: 65534 }
+          description: IEC104 common addresses; 65535 (broadcast) is rejected
+        ioa:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/IOARange" }
+          description: IEC104 information object address ranges; duplicates and overlaps are rejected
+      example:
+        protocol: iec104
+        typeIds: [46]
+        classes: [control]
+        direction: request
+        ca: [1]
+        ioa: [{ start: 65536, end: 65567 }]
+        mode: enforce
+
+    IOARange:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      description: Closed range, start <= end; both keys are required, so 0 is never "missing"
+      properties:
+        start: { type: integer, minimum: 0, maximum: 16777215 }
+        end: { type: integer, minimum: 0, maximum: 16777215 }
 
     AuditRecord:
       type: object
@@ -287,12 +538,14 @@ components:
         dpiProtocols:
           type: object
           additionalProperties: { type: boolean }
-          description: IT protocol enable/disable map (e.g., {"dns": true, "tls": true})
+          description: 'IT protocol enable/disable map (e.g., {"dns": true, "tls": true})'
         dpiIcsProtocols:
           type: object
           additionalProperties: { type: boolean }
           description: >
-            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua.
+            ICS protocol enable/disable map. Keys: modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104.
+            An absent key is enabled; only an explicit false disables a decoder.
+            A config with IEC104 enforce rules is rejected if iec104 is false.
           example:
             modbus: true
             dnp3: true
@@ -301,6 +554,7 @@ components:
             mms: true
             bacnet: false
             opcua: false
+            iec104: true
 
   parameters:
     pathId:
@@ -314,6 +568,10 @@ paths:
   /health:
     get:
       summary: Health check
+      description: >
+        Always returns HTTP 200 for liveness. `ipv4Forwarding` reports the
+        forwarding sysctl state observed in the engine's network namespace,
+        or `unknown` if that state cannot be read.
       security: []
       tags: [System]
       responses:
@@ -463,34 +721,250 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DashboardResponse" }
 
-  # ── Config ────────────────────────────────────────────────────────
-  /config:
+  /system/management-reservation:
     get:
-      summary: Get running configuration
-      tags: [Config]
+      summary: Read immutable management access and runtime guard health
+      description: >
+        Boot authority, not candidate or running config. Exact source peers keep
+        HTTP access despite interface access toggles; normal authentication still
+        applies. An unreachable engine is reported as a guard error, never healthy.
+      tags: [System]
       responses:
         "200":
-          description: Full device configuration
+          description: Reservation view; exactly {"active":false} when unset
           content:
-            application/json: { schema: { type: object } }
+            application/json:
+              schema:
+                type: object
+                required: [active]
+                properties:
+                  active: { type: boolean }
+                  device: { type: string }
+                  local: { type: string, description: Host address with prefix length }
+                  sources: { type: array, items: { type: string, format: ipv4 } }
+                  port: { type: integer, minimum: 1, maximum: 65535 }
+                  bootFault:
+                    type: string
+                    description: >
+                      Residual stored-config conflict after boot normalization; empty
+                      when clear. Blocks stored service/config replay and installs a
+                      minimal enforcement-on default-deny recovery ruleset instead.
+                      A safe commit, rollback or factory reset clears it.
+                  recovery:
+                    type: string
+                    description: >
+                      Empty without a bootFault. Reports "recovery: new transit
+                      dropped" only when the engine confirms the exact recovery
+                      ruleset applied successfully. Otherwise reports recovery
+                      pending or failed; established/related traffic is not denied.
+                  listenerFaults:
+                    type: array
+                    nullable: true
+                    items: { type: string }
+                    description: >
+                      Boot-only optional HTTP/HTTPS/SSH/loopback listener failures.
+                      Reserved HTTP remains mandatory; these diagnostics do not
+                      block safe policy apply. Correct settings and restart.
+                  rollbackFault:
+                    type: string
+                    description: Last refused rollback, retained across restarts
+                  guard:
+                    type: object
+                    required: [active, faults]
+                    properties:
+                      active: { type: boolean }
+                      device: { type: string }
+                      local: { type: string }
+                      sources: { type: array, items: { type: string, format: ipv4 } }
+                      port: { type: integer }
+                      error: { type: string }
+                      faults: { type: integer, minimum: 0 }
+                      lastFault:
+                        type: object
+                        properties:
+                          time: { type: string, format: date-time }
+                          interface: { type: string }
+                          address: { type: string }
+                          service: { type: string }
+                          reason: { type: string }
+
+  /system/factory-reset:
     post:
-      summary: Replace running configuration (admin)
+      summary: Reset appliance databases (admin)
+      description: >
+        Preflights the autobound appliance defaults (shared with first boot) against
+        the immutable management reservation before wiping users, sessions, config,
+        or audit. Genuine incompatible defaults are refused without changing these
+        stores. A successful reset clears the boot fault and applies the defaults.
+      tags: [System]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string, enum: [NUCLEAR] }
+      responses:
+        "200": { description: Reset complete; reauthenticate with default credentials }
+        "400": { description: Invalid confirmation or defaults conflict with reserved management path }
+        "403": { description: Admin role required }
+
+  # ── Config ────────────────────────────────────────────────────────
+  /config/validate:
+    post:
+      summary: Validate configuration without staging (admin)
+      description: >
+        Uses the same structural and immutable management-reservation checks as
+        persistence. Reservation errors name the field and "reserved management path".
+        Disabling all ordinary interface access flags is permitted.
       tags: [Config]
       requestBody:
         required: true
         content:
           application/json: { schema: { type: object } }
       responses:
-        "200": { description: Configuration saved }
+        "200": { description: Configuration valid }
+        "400": { description: Invalid configuration or reserved management path conflict }
         "403": { description: Admin role required }
+
+  /config:
+    get:
+      summary: Get running configuration
+      tags: [Config]
+      responses:
+        "200":
+          description: Running configuration with secrets redacted and ids.rules omitted (use IDS endpoints for the bank).
+          content:
+            application/json: { schema: { type: object } }
+    post:
+      summary: Replace candidate configuration (admin)
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200": { description: Configuration staged, not activated }
+        "403": { description: Admin role required }
+
+  /config/candidate:
+    get:
+      summary: Get the candidate configuration
+      tags: [Config]
+      responses:
+        "200":
+          description: Candidate configuration with secrets redacted and ids.rules omitted.
+          content:
+            application/json: { schema: { type: object } }
+        "404": { description: No candidate configuration }
+    post:
+      summary: Save a candidate configuration (admin)
+      description: >
+        Validates and stages the whole config without activating it. ICS
+        predicates decode strictly, and IEC104 enforce that cannot activate
+        is rejected (see ICSPredicate). An omitted or null ids.rules means keep
+        the existing bank; an explicit empty array clears it. GET /config and
+        GET /config/candidate omit ids.rules; exports and backups include it.
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200": { description: Candidate saved }
+        "400":
+          description: Invalid JSON or configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403": { description: Admin role required }
+
+  /config/diff:
+    get:
+      summary: Review pending configuration changes
+      description: >
+        Server-authoritative comparison of unredacted state. Secret-only edits
+        appear in changedSections without exposing their values or digests.
+        running and candidate retain redacted config shapes but omit ids.rules;
+        idsBank contains counts and SHA-256 digests of the ordered JSON rule arrays.
+        Exports and backups, unlike config reads and diff, include the full bank.
+      tags: [Config]
+      responses:
+        "200":
+          description: Pending changes (an absent candidate is seeded from running)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changed, changedSections, running, candidate, idsBank]
+                properties:
+                  changed: { type: boolean }
+                  changedSections: { type: array, items: { type: string } }
+                  running: { type: object, nullable: true }
+                  candidate: { type: object, nullable: true }
+                  idsBank:
+                    type: object
+                    required: [running, candidate]
+                    properties:
+                      running: { $ref: "#/components/schemas/IDSBankSummary" }
+                      candidate: { $ref: "#/components/schemas/IDSBankSummary" }
 
   /config/commit:
     post:
       summary: Commit candidate config and apply to data plane
+      description: >
+        Promotes the candidate to running and applies it. Check
+        GET /health iec104Enforcement afterwards: a runtime queue or reset
+        injector failure keeps the config and reports unhealthy.
       tags: [Config]
       responses:
-        "200": { description: Commit applied }
+        "200":
+          description: Commit applied
+          headers:
+            X-Containd-Warnings:
+              description: >
+                One header value per warning. When the config spans multiple
+                zone-assigned interface devices and IPv4 forwarding is
+                disabled, includes "ipv4 forwarding is disabled
+                (net.ipv4.ip_forward=0); routed traffic will not pass".
+              schema: { type: string }
+        "400": { description: Candidate configuration is invalid }
         "403": { description: Admin role required }
+
+  /config/import:
+    post:
+      summary: Import a configuration as the candidate (admin)
+      description: >
+        Validates the whole config and replaces the candidate with it. It
+        never changes running or activates anything: the data plane keeps its
+        current policy until POST /config/commit. After importing, commit and
+        then check GET /health iec104Enforcement. Validation is the same as
+        for a candidate, including the immutable reserved management path.
+        Reservation conflicts are 400 errors naming the field; running and
+        candidate are unchanged. Success sets `X-Containd-Config: staged`.
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object } }
+      responses:
+        "200":
+          description: Candidate replaced, not activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [staged] }
+        "400":
+          description: Invalid JSON or configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403": { description: Admin role required }
+        "413": { description: Body larger than 10 MiB }
 
   /config/rollback:
     post:
@@ -679,23 +1153,43 @@ paths:
           description: Array of firewall rules
           content:
             application/json:
-              schema: { type: array, items: { type: object } }
+              schema: { type: array, items: { $ref: "#/components/schemas/FirewallRule" } }
     post:
       summary: Create a firewall rule (admin)
       tags: [Firewall]
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FirewallRule" } } } }
       responses:
         "200": { description: Rule created }
+        "400": { description: Invalid rule or resulting configuration }
 
   /firewall/rules/{id}:
     patch:
       summary: Update a firewall rule (admin)
+      description: |
+        Merges the body into the rule. Top-level keys deep-merge as JSON.
+        The `ics` object is handled on its own: it is decoded strictly
+        (unknown or duplicate keys, and null or [] on typeIds, classes, ca
+        and ioa, are errors). If it sets a `protocol` different from the
+        rule's, it replaces the predicate; otherwise its keys overlay the
+        current predicate and the result is decoded strictly again, so keys
+        the protocol does not support are rejected. `"ics": null` clears
+        the predicate.
       tags: [Firewall]
       parameters:
         - $ref: "#/components/parameters/pathId"
       requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
       responses:
-        "200": { description: Rule updated }
+        "200":
+          description: Rule updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallRule" }
+        "400":
+          description: Invalid patch or resulting configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { description: Rule not found }
     delete:
       summary: Delete a firewall rule (admin)
       tags: [Firewall]
@@ -708,17 +1202,114 @@ paths:
   /events:
     get:
       summary: List recent ICS/network events
+      description: |
+        Returns an evidence-aware page, not the globally newest events.
+        Each runtime store independently retains its latest 1024 logged
+        firewall.rule.hit events with attributes.action equal to DENY,
+        in addition to its general event ring. Only later DENYs evict this
+        bank; there is no age expiry. It survives configuration rebuilds,
+        but not process restarts.
+
+        A separate IEC104 bank retains 128 incident sessions with up to 32
+        evidence rows each: deny/would_drop decisions, verdicts, abort/reset
+        and unhealthy outcomes, plus implicated decoded APDU context. Routine
+        allowed objects are not pinned. The oldest-created bundle is evicted
+        on session overflow; oldest rows are evicted on per-session overflow.
+        Retained bank slots are general capacity + 5120 (9216 by default),
+        plus the unchanged optional 1024-row spill queue. This is a row bound,
+        not a fixed byte allocation; event payload sizes follow their producers.
+
+        With no filters (only limit), returns the legacy bare array: DENYs
+        and IEC incident outcomes take slots before ordinary telemetry, then
+        the selected page is sorted newest-first by timestamp and ID. An engine
+        telemetry error always reserves a slot. IDs and flow rollups are unchanged.
+
+        Passing any filter, since/cursor, or query=1 returns EventPage instead.
+        Filters apply before limit, across retained general/incident/DENY rows
+        and merged service events. Query pages are strictly newest-first by
+        timestamp then ID, without evidence priority. AND combines filters;
+        kind accepts comma-separated prefixes (OR). Empty filters match all.
+        since is inclusive RFC3339; cursor is an opaque exclusive upper bound
+        on (timestamp, ID). Send nextCursor with the same filters for older rows.
+        Pagination searches retained memory only, not spill files or durable
+        history. New inserts and eviction can change later pages; this is not
+        a snapshot. An absent nextCursor means no more retained matches, not
+        proof of complete history. historyTruncated is conservative and cannot
+        detect losses from an earlier process lifetime. Service history has no
+        overflow metadata, so merged service queries warn conservatively.
+        Malformed bounds or limits return 400. An unavailable engine is reported
+        in engineError even when filters match no rows.
       tags: [Telemetry]
       parameters:
         - name: limit
           in: query
-          schema: { type: integer, default: 500, maximum: 5000 }
+          description: Hard maximum page size; filter before limit in query mode, evidence priority in legacy mode.
+          schema: { type: integer, default: 500, minimum: 1, maximum: 5000 }
+        - name: query
+          in: query
+          description: Request EventPage even without filters.
+          schema: { type: string, enum: ["1"] }
+        - name: id
+          in: query
+          description: Exact event ID; event-detail lookup uses this before limiting.
+          schema: { type: integer, format: uint64, minimum: 1 }
+        - name: session
+          in: query
+          description: Exact attributes.session_id (IEC incarnation).
+          schema: { type: string }
+        - name: flow
+          in: query
+          description: Exact flowId or session_id, including session-oriented flow deep links.
+          schema: { type: string }
+        - name: apdu
+          in: query
+          description: Exact apdu_id, trigger_apdu_id, or member of apdu_ids.
+          schema: { type: string }
+        - name: kind
+          in: query
+          description: Case-sensitive kind prefixes, comma-separated OR (for example ics.decision,ics.verdict).
+          schema: { type: string }
+        - name: protocol
+          in: query
+          description: Case-insensitive proto equality.
+          schema: { type: string }
+        - name: decision
+          in: query
+          description: Case-insensitive attributes.decision equality (allow, deny, would_drop).
+          schema: { type: string }
+        - name: verdict
+          in: query
+          description: Case-insensitive attributes.outcome or attributes.action equality (for example drop_failed or DENY).
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Inclusive timestamp lower bound, RFC3339 with optional fractional seconds.
+          schema: { type: string, format: date-time }
+        - name: cursor
+          in: query
+          description: Exclusive upper bound from nextCursor; keep all other filters unchanged.
+          schema: { type: string }
+        - name: category
+          in: query
+          description: Server-side Events page category; dpi excludes firewall and service kinds.
+          schema: { type: string, enum: [all, service, proxy, dpi, firewall, iec104] }
+        - name: detections
+          in: query
+          description: With 1, match only service.av.detected and service.av.block_flow.
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
-          description: Array of events
+          description: Legacy bare array for only-limit callers; EventPage when query or filter parameters are present.
           content:
             application/json:
-              schema: { type: array, items: { $ref: "#/components/schemas/Event" } }
+              schema:
+                oneOf:
+                  - { type: array, items: { $ref: "#/components/schemas/Event" } }
+                  - { $ref: "#/components/schemas/EventPage" }
+        "400":
+          description: Invalid limit, timestamp, cursor, or category.
+        "502":
+          description: Engine implementation does not support filtered queries.
 
   /flows:
     get:
@@ -755,6 +1346,85 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/AuditRecord" } }
 
   # ── PCAP Analysis ────────────────────────────────────────────────
+  /pcap/config:
+    get:
+      summary: Get PCAP capture settings
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Capture settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapConfig" }
+    post:
+      summary: Save PCAP capture settings (admin)
+      tags: [PCAP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PcapConfig" }
+      responses:
+        "200":
+          description: Saved settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapConfig" }
+        "400": { description: Invalid capture settings }
+
+  /pcap/start:
+    post:
+      summary: Start PCAP capture (admin)
+      tags: [PCAP]
+      requestBody:
+        required: false
+        description: >
+          An omitted or empty body starts the committed (running) PCAP
+          configuration. A nonempty body is used for this capture only and is
+          never saved. Start and stop never write configuration; save PCAP
+          settings through the staged PCAP configuration endpoint and commit.
+          If no engine is connected, the response is "pcap start queued".
+          Omitted fields use their normal defaults rather than saved values.
+          The complete configuration must select at least one interface or
+          zone; an empty selection is rejected. Logical interfaces resolve to
+          their Device when set, otherwise their Name, and the kernel device
+          must exist. Explicit interfaces that resolve to missing devices are
+          rejected. Zones include only members with existing kernel devices;
+          a zone with none is rejected with its name and unbound members.
+          Start responses and status list resolved kernel devices only.
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PcapConfig" }
+      responses:
+        "200":
+          description: Capture started with resolved kernel devices
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+        "400": { description: Invalid or unresolved interface, zone, or filter }
+
+  /pcap/stop:
+    post:
+      summary: Stop PCAP capture (admin)
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Capture status after stopping
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+
+  /pcap/status:
+    get:
+      summary: Get PCAP capture status
+      tags: [PCAP]
+      responses:
+        "200":
+          description: Current capture state and resolved devices
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PcapStatus" }
+
   /pcap/analyze:
     post:
       summary: Upload a PCAP file for DPI analysis and policy generation
@@ -841,6 +1511,12 @@ paths:
   /firewall/rules/preview:
     post:
       summary: Dry-run a proposed rule against recent traffic
+      description: >
+        Matches the rule against recent events. For an iec104 rule, each
+        decoded IEC104 object event (request, response, apci, malformed,
+        unsupported) is matched in the session orientation (client to
+        server port 2404); decision events do not count. readOnly iec104
+        rules do not match in a preview yet.
       tags: [Firewall]
       requestBody:
         required: true

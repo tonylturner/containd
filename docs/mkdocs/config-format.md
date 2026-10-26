@@ -165,8 +165,15 @@ Canonical JSON configuration for export/import and persistent state.
 ```
 
 Notes:
+- Serialized firewall rules always include `ics`; `{}` means the rule has no
+  ICS predicate. Input rules may omit this field.
 - `zones` must be unique.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
+- `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).
+- `pcap.zones` captures every configured interface assigned to each listed zone; interface and zone selections are combined and deduplicated when capture starts.
+- `pcap.filter.port` accepts one port (for example `"2404"`) or an inclusive range (for example `"1000-2000"`). It matches source or destination ports in TCP/UDP packets; it cannot be combined with `proto: "icmp"`.
+- The live capture filter currently parses untagged Ethernet IPv4. Non-initial IPv4 fragments do not expose ports and therefore do not match a port filter.
+- Capture start rejects unknown interfaces or zones, zones with no configured interfaces, and an empty selection. `GET /api/v1/pcap/status` reports the resolved kernel devices.
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
 - `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).
@@ -180,6 +187,7 @@ Notes:
   - `staticRoutes` are installed via netlink (Linux only today; IPv4 only).
   - `policyRules` are installed via netlink as basic policy-based routing (Linux only today; src/dst CIDR selection, `table` selection).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
+- Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
@@ -190,10 +198,10 @@ Limitations (current):
 
 ## API endpoints
 - `GET /api/v1/config` – fetch current config (404 if none).
-- `POST /api/v1/config` – replace config (validates).
+- `POST /api/v1/config` – replace the candidate config (validates; stages, never applies).
 - `POST /api/v1/config/validate` – validate JSON without saving.
 - `GET /api/v1/config/export` – export current config.
-- `POST /api/v1/config/import` – import+save config (validates).
+- `POST /api/v1/config/import` – replace the candidate config from an export (validates; stages, never applies).
 - `GET/POST /api/v1/config/candidate` – fetch/save candidate config.
 - `GET /api/v1/config/diff` – view running vs candidate.
 - `POST /api/v1/config/commit` – promote candidate to running.

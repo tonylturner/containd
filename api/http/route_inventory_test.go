@@ -142,6 +142,7 @@ func routeProbeRequest(t *testing.T, method, path string) *http.Request {
 }
 
 func TestAPIEndpointInventorySanity(t *testing.T) {
+	t.Setenv("CONTAIND_CONFIG_BACKUP_DIR", t.TempDir())
 	routes := newRouteInventoryServer(t).Routes()
 
 	for _, route := range routes {
@@ -161,6 +162,14 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 			req := routeProbeRequest(t, route.Method, path)
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, req)
+
+			// Every operational/read route, including mutation verbs, must be
+			// header-free. Successful configuration routes alone classify edits.
+			state := configResponseRouteState(route.Method, route.Path)
+			if rec.Code < 200 || rec.Code >= 300 {
+				state = ""
+			}
+			assertConfigResponseHeader(t, rec, state)
 
 			if rec.Code >= 500 &&
 				rec.Code != http.StatusNotImplemented &&

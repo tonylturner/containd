@@ -466,7 +466,7 @@ type DataPlaneConfig struct {
 	DPIEnabled      bool            `json:"dpiEnabled,omitempty"`      // master DPI on/off
 	DPIMode         string          `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
 	DPIProtocols    map[string]bool `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
-	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua"
+	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua","iec104"; an absent key is enabled
 	DPIExclusions   []DPIExclusion  `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
 
 	// NFLogGroup, when non-zero, enables kernel-side logging for rules
@@ -512,6 +512,7 @@ type ExportConfig struct {
 type PCAPConfig struct {
 	Enabled        bool                `json:"enabled,omitempty"`
 	Interfaces     []string            `json:"interfaces,omitempty"`
+	Zones          []string            `json:"zones,omitempty"`
 	Snaplen        int                 `json:"snaplen,omitempty"`
 	MaxSizeMB      int                 `json:"maxSizeMB,omitempty"`
 	MaxFiles       int                 `json:"maxFiles,omitempty"`
@@ -528,6 +529,7 @@ type PCAPFilter struct {
 	Src   string `json:"src,omitempty"`
 	Dst   string `json:"dst,omitempty"`
 	Proto string `json:"proto,omitempty"` // "tcp", "udp", "icmp", "any"
+	Port  string `json:"port,omitempty"`  // single port or range; TCP/UDP source or destination
 }
 
 type PCAPForwardTarget struct {
@@ -786,7 +788,7 @@ type Rule struct {
 	Destinations []string        `json:"destinations,omitempty"` // CIDR strings
 	Protocols    []Protocol      `json:"protocols,omitempty"`
 	Identities   []string        `json:"identities,omitempty"`
-	ICS          ICSPredicate    `json:"ics,omitempty"`
+	ICS          ICSPredicate    `json:"ics"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`
 	Log          bool            `json:"log,omitempty"` // log matching traffic
@@ -798,9 +800,10 @@ type Protocol struct {
 }
 
 // ICSPredicate captures ICS-specific primitives for rules.
-// All seven supported ICS protocols are covered: modbus, dnp3, cip, s7comm, mms, bacnet, opcua.
+// It covers modbus, dnp3, cip, s7comm, mms, bacnet, opcua and iec104.
+// JSON decoding is strict (ics_json.go).
 type ICSPredicate struct {
-	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, s7comm, mms, bacnet, opcua
+	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104
 	FunctionCode  []uint8  `json:"functionCode,omitempty"`  // function/service codes (all protocols)
 	UnitID        *uint8   `json:"unitId,omitempty"`        // optional Modbus unit id
 	Addresses     []string `json:"addresses,omitempty"`     // register/address ranges as strings
@@ -809,6 +812,19 @@ type ICSPredicate struct {
 	WriteOnly     bool     `json:"writeOnly,omitempty"`     // write-only class
 	Direction     string   `json:"direction,omitempty"`     // "request", "response", or "" (both)
 	Mode          string   `json:"mode,omitempty"`          // "learn" or "enforce"
+
+	// IEC 60870-5-104 predicates (protocol "iec104").
+	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255; int so JSON is a numeric array, never base64
+	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
+	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
+	IOA     []IOARange `json:"ioa,omitempty"`
+}
+
+// IOARange is a closed IEC104 information object address range,
+// endpoints 0..16777215.
+type IOARange struct {
+	Start uint32 `json:"start"`
+	End   uint32 `json:"end"`
 }
 
 type AVConfig struct {

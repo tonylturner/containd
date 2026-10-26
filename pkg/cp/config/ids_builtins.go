@@ -57,18 +57,6 @@ func builtinIDSRules() []IDSRule {
 			},
 			Labels: map[string]string{"mitre": "T0843", "category": "ics"},
 		},
-		{
-			ID:          "IDS-MODBUS-004",
-			Title:       "Modbus Exception Response",
-			Description: "Exception response (FC >= 128) may indicate scanning, fuzzing, or unauthorized access attempts.",
-			Proto:       "modbus",
-			Severity:    "medium",
-			Message:     "Modbus exception response observed",
-			When: IDSCondition{
-				Field: "attr.function_code", Op: "gt", Value: float64(127),
-			},
-			Labels: map[string]string{"mitre": "T0846", "category": "ics"},
-		},
 
 		// ── DNP3 ──────────────────────────────────────────────────
 		{
