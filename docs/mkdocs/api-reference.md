@@ -45,6 +45,82 @@ Successful staged edits return `X-Containd-Config: staged`. Successful commit,
 commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
 Operational, read, preview-only and failed responses carry neither header value.
 
+## Orchestrator Client Contract
+
+Orchestrators that push a whole policy, such as RangerDanger, apply it with
+these two calls (paths below are relative to `/api/v1`):
+
+1. `POST /config/candidate` with the full document. A non-2xx response means
+   staging failed; report the error body. Staging alone never activates policy.
+2. `POST /config/commit`. A 200 with `X-Containd-Config: committed` means the
+   requested snapshot was applied. With `dataplane.enforcement: true`, the nft
+   ruleset has been installed; nft errors, including missing `NET_ADMIN`, are
+   failures, never ruleset warnings. Keep enforcement enabled for a firewall.
+3. Optionally, `GET /config` and compare running with what was submitted
+   (secrets are redacted). Check `GET /health` for continuing runtime health.
+
+Commit, commit-confirmed and rollback restore the pre-request running document
+and IDS bank on apply failure, then reapply them. The failed candidate stays
+staged for correction; previous snapshots and any pre-existing confirmed-commit
+deadline are restored too. HTTP 500 returns, for example:
+
+```json
+{
+  "error": "configuration apply failed",
+  "detail": "ruleset: nft apply failed: ...",
+  "restored": true,
+  "reapplied": true
+}
+```
+
+`restored` and `reapplied` describe the two recovery operations separately.
+A false value includes `restoreError` or `reapplyError`; `healthError` means
+persisting the recovery health failed. Do not assume a non-2xx leaves the live
+firewall unchanged: a failed reapply leaves runtime synchronization uncertain.
+A store preflight/validation failure before promotion is HTTP 400 without
+recovery fields and does not promote running. A disconnected request is not
+proof of success or failure; read running, candidate and health before retrying.
+
+`GET /health` remains HTTP 200 liveness. Its existing `iec104Enforcement`
+object also contains `rulesetAvailable`, `rulesetReason` and `configApplyError`.
+The last field persists a failed replay or failed recovery across management
+restarts until a successful apply. Health uses summary errors to avoid exposing
+policy diagnostics without authentication; the commit response carries details.
+Ruleset availability is false when the engine cannot be queried, no enforced
+ruleset has been applied, the last
+ruleset attempt failed, or config replay/recovery failed. The original
+`active`, `healthy` and `reason` fields still describe IEC104 queue/reset
+health separately; an inactive IEC104 policy is not proof nft is available.
+Intentionally disabling enforcement can apply an in-memory snapshot with 200,
+but does not install nft rules and does not imply `rulesetAvailable: true`.
+A successful commit does not guarantee later queue/reset readiness or packet
+delivery; check health and infrastructure warnings.
+
+Interface, routing, engine service (including the auxiliary DHCP redirect),
+IPv4 forwarding and PCAP problems remain 200 + `X-Containd-Warnings` when the
+firewall snapshot applies. Management service-apply failures and dataplane
+configuration failures are fatal and trigger recovery. Auxiliary warning
+sources are best-effort during recovery too; recovery success certifies the
+firewall snapshot, not every network or service side effect.
+
+Do not fall back to `POST /config/import` when commit fails. Import only
+stages: its 200 with `X-Containd-Config: staged` does not change running or
+the live firewall. Older clients, including RangerDanger 0.1.36, fall back on
+any commit error and can report that staged import as success. This existing
+client quirk is not an activation guarantee. Nft failures now trigger that
+fallback instead of returning a misleading 200 + ruleset warning; operators
+must fix enforcement availability and explicitly commit again.
+
+On an appliance with a [reserved management path](management-reservation.md),
+the submitted document must keep the reserved interface's `device` binding and
+set `dataplane.enforcement: true`. Copy the binding from `GET /config`.
+Otherwise staging is rejected with HTTP 400 and running remains unchanged.
+
+`POST /config/confirm` only cancels the pending rollback deadline; its
+`committed` header acknowledges confirmation, not a new runtime apply.
+Factory reset also uses the strict apply path, but is destructive and does not
+restore wiped users/config/audit data if its runtime apply fails.
+
 ## Event Retention and Page Limits
 
 `GET /api/v1/events?limit=N` returns at most `N` events (default 500, maximum

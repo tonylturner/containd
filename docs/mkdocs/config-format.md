@@ -2,6 +2,16 @@
 
 Canonical JSON configuration for export/import and persistent state.
 
+Imports stage a candidate; commit is required to activate it. Failed commit,
+commit-confirmed or rollback restores and reapplies the pre-request running
+document and IDS bank while retaining the candidate. Inspect the error body's
+`restored`/`reapplied` fields rather than assuming recovery succeeded. Nft
+ruleset failures are fatal, including missing `NET_ADMIN`; see the
+[Orchestrator Client Contract](api-reference.md#orchestrator-client-contract).
+Keep `dataplane.enforcement: true` to install firewall rules. The example below
+shows the existing intentionally disabled mode, which only applies an in-memory
+snapshot and cannot certify nft enforcement.
+
 ## Schema
 
 ```jsonc

@@ -133,22 +133,20 @@ components:
         iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
         ipv4Forwarding:
           type: string
+          enum: [enabled, disabled, unknown]
+          description: >
+            IPv4 forwarding read by the engine in its network namespace.
+            Unknown when the sysctl cannot be read or the engine is unreachable.
         managementBinding:
           type: object
           description: >
-            `configured` when a management grant names an existing device;
-            `unbound-appliance` when no granted interface is bound, so the
-            listed ports accept management on every existing NIC that is not
-            explicitly denied; `unknown` when state cannot be read.
+            Configured when a management grant names an existing device;
+            unbound-appliance when no granted interface is bound, so the listed
+            ports accept management on every existing NIC not explicitly denied;
+            unknown when state cannot be read.
           properties:
             state: { type: string, enum: [configured, unbound-appliance, unknown] }
             recoveryPorts: { type: array, items: { type: integer } }
-          enum: [enabled, disabled, unknown]
-          description: >
-            IPv4 forwarding state read by the engine from
-            /proc/sys/net/ipv4/ip_forward in its network namespace.
-            `unknown` means the sysctl could not be read or the management
-            API could not reach the engine.
 
     IEC104Enforcement:
       type: object
@@ -172,8 +170,35 @@ components:
             False after a queue bind, verdict submission, reset send,
             reset injector or bounded-worker failure. IEC104 envelope
             traffic then fails closed until readiness returns.
-        reason: { type: string, description: Machine-readable cause when unhealthy, else empty }
-      example: { active: true, healthy: true, reason: "" }
+        reason: { type: string, description: "Cause when IEC104 is unhealthy, else empty" }
+        rulesetAvailable:
+          type: boolean
+          description: >
+            Management API extension. True only when the engine reports a
+            nonempty enforced ruleset without error and there is no persisted
+            configuration replay/recovery fault. False for unavailable engine,
+            no enforced ruleset, failed last apply, or uncertain synchronization.
+            Independent of IEC104 active/healthy and not a packet-delivery test.
+        rulesetReason: { type: string, description: "Reason ruleset availability is false, else empty" }
+        configApplyError:
+          type: string
+          description: >
+            Persisted failed replay or failed restore/reapply, cleared by a
+            successful apply. Management API extension; empty when none recorded.
+
+      example: { active: true, healthy: true, reason: "", rulesetAvailable: true, rulesetReason: "", configApplyError: "" }
+
+    ConfigApplyError:
+      type: object
+      required: [error, detail, restored, reapplied]
+      properties:
+        error: { type: string, example: configuration apply failed }
+        detail: { type: string, description: Original runtime apply failure }
+        restored: { type: boolean, description: Pre-request stored state and IDS bank restored }
+        reapplied: { type: boolean, description: Restored snapshot successfully reapplied }
+        restoreError: { type: string, description: Present when stored-state restoration failed }
+        reapplyError: { type: string, description: Present when reapply failed or could not be attempted }
+        healthError: { type: string, description: Present when recovery health could not be persisted }
 
     PcapFilter:
       type: object
@@ -915,9 +940,16 @@ paths:
     post:
       summary: Commit candidate config and apply to data plane
       description: >
-        Promotes the candidate to running and applies it. Check
-        GET /health iec104Enforcement afterwards: a runtime queue or reset
-        injector failure keeps the config and reports unhealthy.
+        Applies and promotes the candidate as one serialized operation. Every
+        ruleset/dataplane apply failure returns 500 after attempting to restore
+        and reapply pre-request running state and IDS bank. Candidate is retained
+        on failure, including previous/pending state. Inspect recovery booleans;
+        failed reapply leaves synchronization uncertain and is exposed in health.
+        With dataplane.enforcement enabled, 200 means nft rules were installed;
+        intentionally disabled enforcement only applies the in-memory snapshot.
+        Auxiliary infrastructure errors may still produce warning headers.
+        Check health afterwards for continuing IEC104 queue/reset readiness.
+        Never treat import as a fallback activation step: import only stages.
       tags: [Config]
       responses:
         "200":
@@ -930,7 +962,49 @@ paths:
                 disabled, includes "ipv4 forwarding is disabled
                 (net.ipv4.ip_forward=0); routed traffic will not pass".
               schema: { type: string }
-        "400": { description: Candidate configuration is invalid }
+        "400": { description: Preflight or candidate validation failed; no promotion }
+        "500":
+          description: Runtime apply failed; inspect recovery outcomes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigApplyError" }
+        "403": { description: Admin role required }
+
+  /config/commit_confirmed:
+    post:
+      summary: Commit with a confirmation deadline
+      description: >
+        Same apply/recovery semantics as commit. Success starts a rollback timer
+        (60 seconds by default); failure restores the pre-request pending state.
+        Confirm before expiry to retain this running document. Expiry restores
+        stored state and requests replay; a replay error is retried and exposed
+        in health, not converted into a successful runtime apply.
+      tags: [Config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttl_seconds: { type: integer, format: int64, description: Positive seconds; omitted or nonpositive uses 60; duration overflow is rejected }
+      responses:
+        "200": { description: Applied and awaiting confirmation }
+        "400": { description: Invalid request or candidate; no promotion }
+        "403": { description: Admin role required }
+        "500":
+          description: Runtime apply failed; inspect recovery outcomes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigApplyError" }
+
+  /config/confirm:
+    post:
+      summary: Cancel pending automatic rollback
+      description: Confirms stored running state; does not reapply the runtime.
+      tags: [Config]
+      responses:
+        "200": { description: Confirmation recorded }
+        "400": { description: Confirmation failed }
         "403": { description: Admin role required }
 
   /config/import:
@@ -971,8 +1045,14 @@ paths:
       summary: Roll back to previous configuration
       tags: [Config]
       responses:
-        "200": { description: Rollback applied }
+        "200": { description: Previous configuration restored and applied }
+        "400": { description: Previous configuration unavailable or invalid; no promotion }
         "403": { description: Admin role required }
+        "500":
+          description: Apply failed; pre-request running state restored and reapplied if possible; candidate retained
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigApplyError" }
 
   # ── Users (admin) ─────────────────────────────────────────────────
   /users:
