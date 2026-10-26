@@ -13,13 +13,16 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func TestClientRulesetPreview(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
-	want := engine.RulesetPreview{Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}}
+	want := engine.RulesetPreview{Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"},
+		Warnings: []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow, Message: "inactive"}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var got config.Config
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {

@@ -70,10 +70,25 @@ type Entry struct {
 	Protocols    []Protocol
 	Action       Action
 	Log          bool // log matching traffic
-	// Future predicates
-	Identities []string // user/group roles
+	// Identities restricts the entry to flows of these user/group roles.
+	// The dataplane does not attach identities to flows: an ALLOW entry
+	// with identities never matches, and a DENY entry matches every
+	// identity.
+	Identities []string
 	ICS        ICSPredicate
 	Schedule   SchedulePredicate
+}
+
+// HasIdentityPredicate reports whether the entry is restricted to flows of
+// the listed identities.
+func (e Entry) HasIdentityPredicate() bool {
+	return len(e.Identities) > 0
+}
+
+// HasSchedulePredicate reports whether the entry is restricted to a
+// recurring time window. A timezone alone is no restriction.
+func (e Entry) HasSchedulePredicate() bool {
+	return !schedulePredicateEmpty(e.Schedule)
 }
 
 type Action string

@@ -427,14 +427,26 @@ components:
             properties:
               name: {type: string, example: tcp}
               port: {type: string, example: "2404", description: Single port or range "1000-2000"}
-        identities: {type: array, items: {type: string}}
+        identities:
+          type: array
+          items: {type: string}
+          description: >-
+            Not enforced yet: the dataplane does not attach identities to flows, so an
+            ALLOW rule with identities never matches and a DENY rule with identities
+            matches every flow its other predicates match.
         ics:
           allOf:
           - $ref: "#/components/schemas/ICSPredicate"
           description: Always present in serialized rules; `{}` denotes no ICS predicate.
         action: {type: string, enum: [ALLOW, DENY]}
         log: {type: boolean}
-        schedule: {$ref: '#/components/schemas/ScheduleConfig'}
+        schedule:
+          allOf:
+          - $ref: '#/components/schemas/ScheduleConfig'
+          description: >-
+            Enforced only on ICS rules that NFQUEUE steers to the engine (nonzero
+            nfqueueGroup). nftables decides every other rule: a scheduled ALLOW is
+            inactive and a scheduled DENY applies at all times.
 
     ICSPredicate:
       type: object
@@ -1595,6 +1607,9 @@ components:
       description: Stages device bindings. Mappings imply explicit mode when mode is omitted; none or - unbinds a device.
     IdentityMapping:
       type: object
+      description: >-
+        Runtime IP-to-identity mapping held by the management API. Firewall rule
+        evaluation does not consult these mappings yet; see FirewallRule.identities.
       properties:
         ip: {type: string}
         identities: {type: array, items: {type: string}, minItems: 1}

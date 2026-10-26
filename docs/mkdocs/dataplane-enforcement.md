@@ -14,6 +14,11 @@ that field to true in candidate and commit for kernel rule application. Starting
 capture or seeing decoded events does not prove that firewall policy is installed. Review the ruleset preview and engine status
 through `GET /api/v1/dataplane/ruleset` and check for apply errors.
 
+nftables cannot evaluate identity or schedule predicates. On a rule it decides,
+an `ALLOW` with either predicate is not installed, and a `DENY` drops without
+the predicate's condition. See
+[Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+
 ## Capture is not inline enforcement
 
 - **AF_PACKET** observes packet copies. Later dynamic blocks can affect subsequent

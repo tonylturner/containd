@@ -221,7 +221,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// nftables is first-match, so ALLOW exceptions (more specific) must
 	// emit before DENY rules (broader) — preserved by the sort above.
 	for _, e := range entries {
-		if c.QueueID > 0 && isDPIEligible(e) {
+		if queuedToEngine(e, c.QueueID) {
 			continue
 		}
 		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
@@ -251,7 +251,16 @@ func defaultPolicy(a rules.Action) string {
 //
 // Entries with zero protocols emit a single line with no proto/port match
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
+//
+// A predicate nftables cannot evaluate (identity, schedule) resolves toward
+// denial unless the rule is queued to the engine: an ALLOW entry emits no
+// line, and a DENY entry drops without the predicate's condition.
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
+	dpiEligible := isDPIEligible(e)
+	queued := queuedToEngine(e, queueID)
+	if !queued && e.Action == rules.ActionAllow && len(unenforcedPredicates(e, queueID)) > 0 {
+		return nil, nil
+	}
 	base := []string{}
 	if c := zoneClause("iifname", e.SourceZones, zoneIfaces); c != "" {
 		base = append(base, c)
@@ -261,9 +270,8 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 	}
 
 	// Pick the verdict once — same for every emitted protocol-variant line.
-	dpiEligible := isDPIEligible(e)
 	verdict := ""
-	if queueID > 0 && dpiEligible {
+	if queued {
 		verdict = fmt.Sprintf("queue num %d", queueID)
 	} else {
 		switch e.Action {
@@ -400,10 +408,79 @@ func sanitizeRuleIDForLog(id string) string {
 	return string(b)
 }
 
+// UnenforcedPredicate names a rule predicate that the component deciding
+// the rule's traffic cannot evaluate.
+type UnenforcedPredicate string
+
+const (
+	PredicateIdentity UnenforcedPredicate = "identity"
+	PredicateSchedule UnenforcedPredicate = "schedule"
+)
+
+// RuleWarning reports a firewall rule whose predicate resolves toward
+// denial because it cannot be evaluated: an ALLOW rule is inactive, and a
+// DENY rule applies as if the predicate always held.
+type RuleWarning struct {
+	RuleID    string              `json:"ruleId"`
+	Predicate UnenforcedPredicate `json:"predicate"`
+	Action    rules.Action        `json:"action"`
+	Message   string              `json:"message"`
+}
+
+// RuleWarnings lists, in rule ID order, every predicate of snap's firewall
+// rules that resolves toward denial under this compiler's queue setting.
+// Identity predicates are never evaluated. Schedules are evaluated by the
+// engine only for rules queued to it, so nftables cannot honour them on
+// any other rule.
+func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
+	if snap == nil {
+		return nil
+	}
+	var out []RuleWarning
+	for _, e := range snap.Firewall {
+		for _, p := range unenforcedPredicates(e, c.QueueID) {
+			out = append(out, ruleWarning(e, p))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
+	return out
+}
+
+// unenforcedPredicates lists e's predicates that no component evaluates
+// when the compiler queues to queueID.
+func unenforcedPredicates(e rules.Entry, queueID int) []UnenforcedPredicate {
+	var out []UnenforcedPredicate
+	if e.HasIdentityPredicate() {
+		out = append(out, PredicateIdentity)
+	}
+	if e.HasSchedulePredicate() && !queuedToEngine(e, queueID) {
+		out = append(out, PredicateSchedule)
+	}
+	return out
+}
+
+func ruleWarning(e rules.Entry, p UnenforcedPredicate) RuleWarning {
+	reason := "identity predicates are not enforced yet"
+	if p == PredicateSchedule {
+		reason = "schedules are enforced only on ICS rules inspected through NFQUEUE"
+	}
+	effect := "ALLOW rule inactive"
+	if e.Action != rules.ActionAllow {
+		effect = string(e.Action) + " rule applies as if the " + string(p) + " always matched"
+	}
+	return RuleWarning{RuleID: e.ID, Predicate: p, Action: e.Action, Message: reason + "; " + effect}
+}
+
 // isDPIEligible returns true if an entry requires DPI/ICS inspection and
 // should therefore be steered through NFQUEUE when a queue ID is configured.
 func isDPIEligible(e rules.Entry) bool {
 	return e.ICS.Protocol != ""
+}
+
+// queuedToEngine reports whether e's traffic is queued to the engine,
+// which then decides it, instead of being accepted or dropped by nftables.
+func queuedToEngine(e rules.Entry, queueID int) bool {
+	return queueID > 0 && isDPIEligible(e)
 }
 
 func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {
