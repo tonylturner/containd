@@ -335,6 +335,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Alerts page hides the earlier alert list while loading fails, as Flows, Templates and Sessions do, instead of showing it beside the error.
+- The Publish Internal Service wizard checks the port (1-65535) on the server step and shows the error under the port field, instead of accepting any value until Stage.
 - The topology status chip no longer reads ALL NOMINAL while firewall enforcement is degraded or unavailable. It shows the firewall enforcement state from health and, unless enforcing, why: a failed ruleset apply, a degraded schedule planner or health's reason.
 - The sessions, NAT, policy wizard, diagnostics (block flow) and dataplane (forward targets) pages format endpoints like the events and flows pages: a missing or zero port shows the address alone, and an IPv6 address with a port is bracketed (`[2001:db8::5]:502`).
 - Syslog RFC 5424 events and the web UI (events, flows, alerts, dashboard) show an endpoint without a port when the event has none, as for ICMP and ICMPv6 rule hits, and bracket an IPv6 address that has a port (`[2001:db8::1]:2404`). Before, syslog printed `addr:0` and the UI printed `addr:`.
