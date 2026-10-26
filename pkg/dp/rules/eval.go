@@ -51,13 +51,47 @@ type compiledPort struct {
 	low, high uint16
 }
 
-// compiledEntry pairs an Entry with pre-parsed address and port data so that
-// string parsing is done once at load time rather than on every packet.
+// compiledEntry pairs an Entry with pre-parsed address, network and port
+// data so that string parsing is done once at load time rather than on
+// every packet.
 type compiledEntry struct {
 	Entry
+	src, dst  networks        // pre-parsed Sources and Destinations
 	addresses []compiledAddr  // pre-parsed ICS addresses
 	ports     []compiledPort  // pre-parsed protocol port ranges (one per Protocol)
 	iec       *compiledIEC104 // set for ics.protocol iec104 entries only
+}
+
+// networks is one side's parsed CIDRs. listed records that the entry names
+// any CIDR on that side, parseable or not: a side whose CIDRs all fail to
+// parse matches no address.
+type networks struct {
+	listed bool
+	nets   []*net.IPNet
+}
+
+func compileNetworks(cidrs []string) networks {
+	side := networks{listed: len(cidrs) > 0}
+	for _, c := range cidrs {
+		if _, network, err := net.ParseCIDR(c); err == nil {
+			side.nets = append(side.nets, network)
+		}
+	}
+	return side
+}
+
+// holds reports whether ip is in the side's networks; an unlisted side
+// holds every address.
+func (n *networks) holds(ip net.IP) bool {
+	if !n.listed {
+		return true
+	}
+	for _, network := range n.nets {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
@@ -81,16 +115,15 @@ func (e *Evaluator) compile() {
 	}
 	e.compiled = make([]compiledEntry, len(e.snapshot.Firewall))
 	for i, entry := range e.snapshot.Firewall {
-		e.compiled[i] = CompileEntry(entry)
+		e.compiled[i] = compileEntry(entry)
 	}
 	e.decide = DecisionOrder(e.snapshot.Firewall)
 	e.tags = tagIndexes(e.snapshot.Firewall)
 }
 
-// CompileEntry pre-parses a single Entry for preview matching.
-// This avoids creating a full Evaluator/Snapshot for dry-run scenarios.
-func CompileEntry(entry Entry) compiledEntry {
-	ce := compiledEntry{Entry: entry}
+// compileEntry pre-parses a single Entry.
+func compileEntry(entry Entry) compiledEntry {
+	ce := compiledEntry{Entry: entry, src: compileNetworks(entry.Sources), dst: compileNetworks(entry.Destinations)}
 	if entry.ICS.Protocol == ProtocolIEC104 {
 		ce.iec = compileIEC104(entry.ICS)
 	}
@@ -132,16 +165,20 @@ func CompileEntry(entry Entry) compiledEntry {
 }
 
 // PreviewMatch tests a single rule against an EvalContext to determine if it
-// would match. This is used for dry-run/impact preview without affecting
-// enforcement. The entry is compiled on the fly for predicate evaluation.
+// would match, as the Evaluator matches it. This is used for dry-run/impact
+// preview without affecting enforcement. The entry is compiled on the fly;
+// the packet path matches entries compiled once per snapshot.
 func PreviewMatch(entry Entry, ctx EvalContext) bool {
-	ce := CompileEntry(entry)
-	return matchZones(ce.Entry, ctx) &&
-		matchCIDRs(ce.Entry, ctx) &&
-		matchProtoCompiled(&ce, ctx) &&
-		matchIdentities(ce.Entry, ctx) &&
-		matchICSCompiled(&ce, ctx) &&
-		matchSchedule(ce.Entry, ctx)
+	ce := compileEntry(entry)
+	return ce.matches(ctx)
+}
+
+// AddressScopeMatch reports whether the zones and addresses of the
+// snapshot's firewall entry i hold ctx. Its protocols, identities, ICS
+// predicate and schedule are not consulted. It allocates nothing.
+func (e *Evaluator) AddressScopeMatch(i int, ctx EvalContext) bool {
+	ce := &e.compiled[i]
+	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx)
 }
 
 func (e *Evaluator) Evaluate(ctx EvalContext) Action {
@@ -169,7 +206,7 @@ func (e *Evaluator) EvaluateMatch(ctx EvalContext) (Action, *Entry) {
 	return ActionDeny, nil
 }
 
-func matchZones(entry Entry, ctx EvalContext) bool {
+func matchZones(entry *Entry, ctx EvalContext) bool {
 	if len(entry.SourceZones) > 0 && !contains(entry.SourceZones, ctx.SrcZone) {
 		return false
 	}
@@ -179,14 +216,8 @@ func matchZones(entry Entry, ctx EvalContext) bool {
 	return true
 }
 
-func matchCIDRs(entry Entry, ctx EvalContext) bool {
-	if len(entry.Sources) > 0 && !ipInCIDRs(ctx.SrcIP, entry.Sources) {
-		return false
-	}
-	if len(entry.Destinations) > 0 && !ipInCIDRs(ctx.DstIP, entry.Destinations) {
-		return false
-	}
-	return true
+func matchCIDRs(ce *compiledEntry, ctx EvalContext) bool {
+	return ce.src.holds(ctx.SrcIP) && ce.dst.holds(ctx.DstIP)
 }
 
 // matchProtoCompiled uses pre-parsed port ranges for fast evaluation.
@@ -363,17 +394,6 @@ func matchAddress(entryAddrs []string, contextAddr string) bool {
 		val, ok := parseAddr(spec)
 		if ok && val == ctxVal {
 			return true
-		}
-	}
-	return false
-}
-
-func ipInCIDRs(ip net.IP, cidrs []string) bool {
-	for _, c := range cidrs {
-		if _, network, err := net.ParseCIDR(c); err == nil {
-			if network.Contains(ip) {
-				return true
-			}
 		}
 	}
 	return false
