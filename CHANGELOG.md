@@ -58,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Staging a configuration edit no longer copies the IDS rule bank. With a
+  30,000-rule bank, an edit drops from about 180 ms and 200 MB of allocation to
+  well under 1 ms. Banks are stored once per running, candidate and previous
+  configuration; obsolete banks are reclaimed after commit, rollback and reset.
+  The Config page diff uses bounded memory for large configurations.
 - Inventory endpoints return a JSON 503 when the engine inventory is
   unavailable instead of an empty list. Discovered assets, their peers and
   station addresses now have fixed caps with counted overflow.

@@ -40,8 +40,8 @@ type Store interface {
 	ConfirmCommit(ctx context.Context) error
 	Rollback(ctx context.Context) error
 
-	// Running IDS rules have a separate persisted bank. Load includes it in
-	// the returned snapshot; candidate/previous snapshots embed their banks.
+	// Running IDS rules retain a separate engine-consumer table. All config
+	// states reference immutable banks; Load returns the complete snapshot.
 	SaveIDSRules(ctx context.Context, rules []IDSRule) error
 	LoadIDSRules(ctx context.Context) ([]IDSRule, error)
 
@@ -55,6 +55,7 @@ type SQLiteStore struct {
 	pendingTimer       *time.Timer
 	autoRollbackNotify chan<- struct{}
 	options            storeOptions
+	recoveryHoldsBanks bool // protected by mu; saved apply rows may still need their banks
 }
 
 // SetAutoRollbackNotify registers a best-effort notification after a successful
@@ -84,7 +85,7 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	if err := wipeAllTx(ctx, tx); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
@@ -117,6 +118,10 @@ func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := store.extractBanks(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.checkAndSchedulePending(); err != nil {
 		db.Close()
 		return nil, err
@@ -140,6 +145,7 @@ func tuneSQLite(db *sql.DB) error {
 
 func bootstrapSchema(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS ids_banks (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS configs (
   key TEXT PRIMARY KEY,
   data TEXT NOT NULL,
@@ -173,31 +179,21 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	persisted := cloneConfigForPersist(cfg)
-	replaceIDSRules := cfg.IDS.Rules != nil
-	if replaceIDSRules {
-		persisted.IDS.Rules = nil
-	}
-	blob, err := json.Marshal(persisted)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin save tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if replaceIDSRules {
+	if cfg.IDS.Rules != nil {
 		if err := replaceChangedIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyRunning, string(blob), time.Now().Unix()); err != nil {
-		return fmt.Errorf("persist config: %w", err)
+	if err := writeConfigTx(ctx, tx, configKeyRunning, cfg); err != nil {
+		return err
 	}
-	return tx.Commit()
+	return s.commitStateTx(ctx, tx)
 }
 
 func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) error {
@@ -207,26 +203,15 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if err := s.ValidateConfig(cfg); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
-	blob, err := marshalStoredConfig(kind, cfg)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return err
 	}
-	_, err = s.db.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, kind, string(blob), time.Now().Unix())
-	if err != nil {
-		return fmt.Errorf("persist config: %w", err)
+	defer tx.Rollback() //nolint:errcheck
+	if err := writeConfigTx(ctx, tx, kind, cfg); err != nil {
+		return err
 	}
-	return nil
-}
-
-func cloneConfigForPersist(cfg *Config) *Config {
-	if cfg == nil {
-		return nil
-	}
-	cp := *cfg
-	if cfg.IDS.Rules != nil {
-		cp.IDS.Rules = append([]IDSRule(nil), cfg.IDS.Rules...)
-	}
-	return &cp
+	return s.commitStateTx(ctx, tx)
 }
 
 // Load returns a consistent running configuration including its IDS bank.
@@ -246,18 +231,7 @@ type configReader interface {
 }
 
 func loadRunningFrom(ctx context.Context, db configReader) (*Config, error) {
-	cfg, err := loadKindFrom(ctx, db, configKeyRunning)
-	if err != nil {
-		return nil, err
-	}
-	rules, err := loadIDSRulesFrom(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	if len(rules) > 0 || cfg.IDS.Rules == nil {
-		cfg.IDS.Rules = rules
-	}
-	return cfg, nil
+	return loadKindFrom(ctx, db, configKeyRunning)
 }
 
 func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
@@ -265,6 +239,10 @@ func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error
 }
 
 func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, error) {
+	return readKindFrom(ctx, db, kind, true)
+}
+
+func readKindFrom(ctx context.Context, db configReader, kind string, withBank bool) (*Config, error) {
 	row := db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, kind)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
@@ -280,6 +258,15 @@ func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, e
 	cfg := stored.Config
 	if err := UpgradeInPlace(&cfg); err != nil {
 		return nil, err
+	}
+	if !withBank {
+		cfg.IDS.Rules = nil
+		return &cfg, nil
+	}
+	if stored.BankID != 0 {
+		rules, err := loadBankFrom(ctx, db, stored.BankID)
+		cfg.IDS.Rules = rules
+		return &cfg, err
 	}
 	if kind == configKeyCandidate || kind == configKeyPrevious {
 		switch stored.SnapshotFormat {
@@ -418,6 +405,9 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 
 // SaveIDSRules replaces all stored IDS rules.
 func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
+	if err := validateIDS(IDSConfig{Rules: rules}); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -430,7 +420,20 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 	if err := replaceIDSRulesTx(ctx, tx, rules); err != nil {
 		return err
 	}
-	return tx.Commit()
+	cfg, err := readKindFrom(ctx, tx, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if cfg != nil {
+		cfg.IDS.Rules = rules
+		if cfg.IDS.Rules == nil {
+			cfg.IDS.Rules = []IDSRule{}
+		}
+		if err := writeConfigTx(ctx, tx, configKeyRunning, cfg); err != nil {
+			return err
+		}
+	}
+	return s.commitStateTx(ctx, tx)
 }
 
 func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {
@@ -460,18 +463,7 @@ func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {
 func (s *SQLiteStore) LoadIDSRules(ctx context.Context) ([]IDSRule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rules, err := s.loadIDSRulesRaw(ctx)
-	if err != nil || len(rules) > 0 {
-		return rules, err
-	}
-	cfg, err := s.loadRunningLocked(ctx)
-	if errors.Is(err, ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return cfg.IDS.Rules, nil
+	return s.loadIDSRulesRaw(ctx)
 }
 
 func (s *SQLiteStore) loadIDSRulesRaw(ctx context.Context) ([]IDSRule, error) {

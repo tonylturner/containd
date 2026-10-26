@@ -114,8 +114,15 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 	if err != nil {
 		return err
 	}
+	// No other writer or timer can run while mu is held. Defer collection
+	// while these saved rows may be needed, even if the transition removes all
+	// of their persisted references (notably reset and rollback).
+	s.recoveryHoldsBanks = true
+	defer func() { s.recoveryHoldsBanks = false }()
 	if err := transition(); err != nil {
-		return err
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, s.finishBankRecoveryLocked(cleanupCtx))
 	}
 	next, err := s.loadRunningLocked(ctx)
 	if err == nil {
@@ -125,8 +132,15 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 		err = s.setRuntimeApplyFaultLocked(ctx, "")
 	}
 	if err == nil {
+		// This is the last fallible operation on the success path. If collection
+		// fails, its transaction rolls back without deleting recovery's banks;
+		// compensate exactly as for a runtime failure.
+		err = s.finishBankRecoveryLocked(ctx)
+	}
+	if err == nil {
 		return nil
 	}
+	s.recoveryHoldsBanks = true
 	failure := &ApplyError{Err: err}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
@@ -146,6 +160,9 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 	}
 	if err := s.setRuntimeApplyFaultLocked(recoveryCtx, fault); err != nil {
 		failure.HealthError = fmt.Errorf("record runtime apply health: %w", err)
+	}
+	if err := s.finishBankRecoveryLocked(recoveryCtx); err != nil {
+		failure.HealthError = errors.Join(failure.HealthError, err)
 	}
 	return failure
 }
@@ -167,7 +184,7 @@ func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, saved []saved
 	if err := replaceIDSRulesTx(ctx, tx, bank); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitStateTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()

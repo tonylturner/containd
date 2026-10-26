@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -84,7 +85,41 @@ func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapsh
 	return config.HealthSnapshot{Config: cfg}, nil
 }
 
+func (m *mockStore) LoadCandidateDocument(ctx context.Context) (*config.Config, error) {
+	cfg, err := m.LoadCandidate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cp := *cfg
+	cp.IDS.Rules = nil
+	return &cp, nil
+}
+
+func (m *mockStore) LoadPair(ctx context.Context) (*config.Config, *config.Config, error) {
+	running, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return nil, nil, err
+	}
+	candidate, err := m.LoadCandidate(ctx)
+	return running, candidate, err
+}
+
 func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+	return m.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
+		bank := cfg.IDS.Rules
+		cfg.IDS.Rules = nil
+		if err := edit(cfg); err != nil {
+			return err
+		}
+		if cfg.IDS.Rules != nil {
+			return fmt.Errorf("bank-free candidate edit supplied IDS rules")
+		}
+		cfg.IDS.Rules = bank
+		return nil
+	})
+}
+
+func (m *mockStore) MutateCandidateIDS(ctx context.Context, edit func(*config.Config) error) error {
 	cfg, err := m.LoadCandidate(ctx)
 	if err != nil && err != config.ErrNotFound {
 		return err

@@ -129,7 +129,7 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			current, err := store.LoadCandidate(c.Request.Context())
+			current, err := loadCandidateDocument(c.Request.Context(), store)
 			if err != nil {
 				internalError(c, err)
 				return
@@ -202,7 +202,7 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			current, err := store.LoadCandidate(c.Request.Context())
+			current, err := loadCandidateDocument(c.Request.Context(), store)
 			if err != nil {
 				internalError(c, err)
 				return
