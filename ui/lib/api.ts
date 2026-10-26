@@ -874,8 +874,12 @@ export type IDSRuleSource = {
 };
 
 export type RulesetPreview = {
-  ruleset: string;
+  ruleset?: string;
   snapshot?: unknown;
+  runtime: {
+    iec104EnvelopeOpen: boolean;
+    reason: string;
+  };
   engineStatus?: unknown;
   engineStatusError?: string;
 };

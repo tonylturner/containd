@@ -228,3 +228,19 @@ func TestUSRulesetUnchangedByEnvelopeState(t *testing.T) {
 		t.Fatalf("US Modbus steering missing:\n%s", before)
 	}
 }
+
+func TestEnvelopeSampleUsesCandidateQueue(t *testing.T) {
+	g := &envelopeGate{}
+	for _, owned := range []uint16{0, 101, 102} {
+		g.own(owned)
+		for _, queue := range []int{0, 101, 102} {
+			want := owned != 0 && int(owned) == queue
+			if got := g.sampleOpen(queue); got != want {
+				t.Fatalf("owned=%d candidate=%d open=%v want=%v", owned, queue, got, want)
+			}
+			if g.comp != nil || g.installed || g.open {
+				t.Fatal("sample changed gate state")
+			}
+		}
+	}
+}

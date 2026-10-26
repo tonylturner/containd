@@ -4254,7 +4254,14 @@ paths:
     get:
       summary: Preview candidate ruleset and engine status (admin)
       tags: [Dataplane]
-      description: Compiles candidate without applying it. engineStatus or engineStatusError is included when an engine is available.
+      description: >-
+        Compiles candidate without applying it, using candidate enforcement settings,
+        the engine's reserved management access and live queue ownership sampled at request time.
+        Later queue ownership changes may change IEC 104 steering before commit.
+        A live engine is required; no default-compiler fallback is used.
+        When candidate enforcement is disabled, no nftables ruleset is compiled or returned;
+        runtime.reason states that enforcement is disabled and nothing would be applied.
+        engineStatus describes the last apply separately from the preview runtime sample.
       responses:
         '200':
           description: Success
@@ -4262,11 +4269,26 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [snapshot, runtime]
                 properties:
                   snapshot: {$ref: '#/components/schemas/RulesSnapshot'}
-                  ruleset: {type: string}
+                  ruleset: {type: string, description: Compiled nftables ruleset; omitted when candidate enforcement is disabled}
+                  runtime:
+                    type: object
+                    required: [iec104EnvelopeOpen, reason]
+                    properties:
+                      iec104EnvelopeOpen:
+                        type: boolean
+                        description: Whether the engine owns the candidate queue at sampling time; used only if enforcement is enabled and the candidate has an IEC 104 envelope.
+                      reason: {type: string, description: Explanation of disabled enforcement or the sampled envelope decision}
                   engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
                   engineStatusError: {type: string}
+        '400':
+          description: Invalid candidate configuration
+        '502':
+          description: Engine unavailable or unable to compile candidate; no ruleset returned
+        '503':
+          description: No engine with ruleset preview support is configured; no ruleset returned
   /security/conduits:
     get:
       summary: Summarize running zone-to-zone policy

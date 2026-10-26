@@ -188,21 +188,9 @@ func New(cfg Config) (*Engine, error) {
 	e.gate = &envelopeGate{}
 	e.bindGate()
 	if cfg.Enforce.Enabled {
-		comp := enforce.NewCompiler()
-		comp.ManagementReservation = e.managementReservation
-		if cfg.Enforce.TableName != "" {
-			comp.TableName = cfg.Enforce.TableName
-		}
-		// Wire the nflog group through to the compiler so rules with
-		// Log:true emit the appropriate `log prefix ... group N` clause.
-		// Compiler operates on int; cast safely (NFLogGroup is uint16).
-		comp.NFLogGroup = int(cfg.NFLogGroup)
-		// Wire NFQueueGroup so dpiEligible rules compile to
-		// `queue num N` instead of plain accept/drop. The capture
-		// manager (above) is set to nfqueue mode at the same group
-		// so the queued packets reach handlePacket → DPI →
-		// enforceDPIEvents and get an ICS-aware verdict.
-		comp.QueueID = int(cfg.NFQueueGroup)
+		comp := enforce.NewCompilerWithSettings(enforce.CompilerSettings{
+			TableName: cfg.Enforce.TableName, NFLogGroup: cfg.NFLogGroup, NFQueueGroup: cfg.NFQueueGroup,
+		}, e.managementReservation)
 		e.compiler = comp
 		if cfg.Enforce.Applier != nil {
 			e.applier = cfg.Enforce.Applier

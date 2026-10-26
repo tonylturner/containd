@@ -16,10 +16,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
-	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpids "github.com/tonylturner/containd/pkg/cp/ids"
-	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
@@ -41,21 +39,30 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 			internalError(c, err)
 			return
 		}
-		snap, err := compile.CompileSnapshot(cfg)
-		if err != nil {
+		if err := cfg.Validate(); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		comp := enforce.NewCompiler()
-		ruleset, err := comp.CompileFirewall(&snap)
+		type rulesetPreviewClient interface {
+			PreviewRuleset(context.Context, *config.Config) (dpengine.RulesetPreview, error)
+		}
+		ec, ok := engine.(rulesetPreviewClient)
+		if !ok || ec == nil {
+			apiError(c, http.StatusServiceUnavailable, "engine unavailable: ruleset preview requires a live engine")
+			return
+		}
+		preview, err := ec.PreviewRuleset(c.Request.Context(), cfg)
 		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
 
 		resp := gin.H{
-			"snapshot": snap,
-			"ruleset":  ruleset,
+			"snapshot": preview.Snapshot,
+			"runtime":  preview.Runtime,
+		}
+		if preview.Ruleset != "" {
+			resp["ruleset"] = preview.Ruleset
 		}
 		if engine != nil {
 			type rulesetStatusClient interface {
