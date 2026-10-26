@@ -427,6 +427,10 @@ components:
         eventCount: {type: integer, format: uint64}
         avDetected: {type: boolean}
         avBlocked: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+          description: Sorted TAG labels the flow's events carry; omitted when they carry none.
 
     FirewallRule:
       type: object

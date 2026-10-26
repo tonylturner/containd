@@ -310,6 +310,12 @@ HTTP 502 with the reason; HTTP 503 means no live engine.
 Flows that `TAG` rules match carry their labels as a sorted `tags` array in
 event `attributes`, and each item of `GET /api/v1/conntrack` carries `tags`,
 derived from the connection's original tuple under the running ruleset.
+Kernel-logged `firewall.rule.hit` events (`via: nflog`) carry the labels of
+their connection under the applied ruleset: the packet is oriented on the side
+that opened the connection by its conntrack direction, so a logged reply gets
+the same labels as its request. Their `flowId` names the packet's direction of
+the connection, as engine flow events do. Each item of `GET /api/v1/flows`
+carries `tags`, the sorted labels its events carry.
 
 ## Forwarding Health and Commit Warnings
 

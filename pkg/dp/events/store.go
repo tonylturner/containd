@@ -51,6 +51,8 @@ type FlowSummary struct {
 	// SessionID is set for an IEC104 session incarnation: its events from
 	// both wire directions form one group.
 	SessionID string `json:"session_id,omitempty"`
+	// Tags are the TAG labels the flow's events carry, sorted.
+	Tags []string `json:"tags,omitempty"`
 }
 
 const (
@@ -347,6 +349,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		return nil
 	}
 	byFlow := map[string]*FlowSummary{}
+	tags := map[string]labelSet{}
 	var order []string
 	for i := range s.general.events {
 		ev := s.general.at(i)
@@ -385,6 +388,12 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			f.LastSeen = ev.Timestamp
 		}
 		f.EventCount++
+		if labels, ok := ev.Attributes[KeyTags].([]string); ok {
+			if tags[key] == nil {
+				tags[key] = labelSet{}
+			}
+			tags[key].add(labels)
+		}
 		if f.Application == "" {
 			f.Application = ev.Proto
 		}
@@ -398,7 +407,9 @@ func (s *Store) Flows(limit int) []FlowSummary {
 	s.aborted.prune(s.general)
 	out := make([]FlowSummary, 0, len(byFlow))
 	for _, k := range order {
-		out = append(out, *byFlow[k])
+		f := *byFlow[k]
+		f.Tags = tags[k].sorted()
+		out = append(out, f)
 	}
 	// no sorting needed for v1; caller can sort.
 	if limit <= 0 || limit > len(out) {

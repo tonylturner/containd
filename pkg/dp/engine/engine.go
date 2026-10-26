@@ -376,7 +376,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(runCtx, e.nflogGroup, e.eventStore, func(perr error) {
+		stop, err := startNFLog(runCtx, e.nflogGroup, nflogRuleHits{e}, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
 		})
