@@ -8,6 +8,7 @@ import { InfoTip } from "../../components/InfoTip";
 import {
   api,
   type FirewallRule,
+  type FirewallRulePatch,
   type ICSPredicate,
   type Protocol,
   type RulePreview,
@@ -37,7 +38,7 @@ export function EditRuleModal({
   zones: Zone[];
   rule: FirewallRule;
   onClose: () => void;
-  onSave: (patch: Partial<FirewallRule>) => void;
+  onSave: (patch: FirewallRulePatch) => void;
 }) {
   const [description, setDescription] = useState(rule.description ?? "");
   const [action, setAction] = useState<"ALLOW" | "DENY">(rule.action);
@@ -62,7 +63,7 @@ export function EditRuleModal({
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
-  function buildPatch(): Partial<FirewallRule> | null {
+  function buildPatch(): FirewallRulePatch | null {
     setError(null);
     const ics = buildRuleICS({
       enabled: icsEnabled,
@@ -83,7 +84,7 @@ export function EditRuleModal({
       return null;
     }
     // The PATCH keeps every omitted key, so a cleared field sends its empty
-    // value.
+    // value and a disabled ICS filter sends null.
     return {
       description: description.trim(),
       action,
@@ -93,7 +94,7 @@ export function EditRuleModal({
       sources: splitCSV(sources) ?? [],
       destinations: splitCSV(destinations) ?? [],
       protocols: buildProtocols(proto, port),
-      ics: ics.ics,
+      ics: ics.ics ?? null,
     };
   }
 
@@ -108,7 +109,7 @@ export function EditRuleModal({
     const patch = buildPatch();
     if (!patch) return;
     setPreviewing(true);
-    const res = await api.previewFirewallRule({ ...rule, ...patch });
+    const res = await api.previewFirewallRule({ ...rule, ...patch, ics: patch.ics ?? undefined });
     setPreviewing(false);
     if (!res.ok) {
       setPreview(null);

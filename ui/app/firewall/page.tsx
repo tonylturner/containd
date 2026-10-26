@@ -14,6 +14,7 @@ import {
   type DataPlaneConfig,
   type DPIExclusion,
   type FirewallRule,
+  type FirewallRulePatch,
   type Gateway,
   type Interface,
   type InterfaceState,
@@ -160,7 +161,7 @@ export default function FirewallPage() {
     refresh();
   }
 
-  async function onUpdate(id: string, patch: Partial<FirewallRule>) {
+  async function onUpdate(id: string, patch: FirewallRulePatch) {
     setError(null);
     setNotice(null);
     const updated = await api.updateFirewallRule(id, patch);

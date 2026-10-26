@@ -14,6 +14,7 @@ const rule = {
   sources: ["10.10.0.5/32"],
   destinations: ["10.20.0.7/32"],
   protocols: [{ name: "tcp", port: "502" }],
+  ics: { protocol: "modbus", functionCode: [16], mode: "enforce" },
 };
 
 test("clearing rule fields in the editor clears them", async ({ page }) => {
@@ -51,6 +52,7 @@ test("clearing rule fields in the editor clears them", async ({ page }) => {
   await editor.locator("select").filter({ hasText: "Dest zone (any)" }).selectOption("");
   await editor.getByPlaceholder("sources CIDR (csv)").fill("");
   await editor.getByPlaceholder("destinations CIDR (csv)").fill(" ");
+  await editor.getByLabel("ICS Protocol Filter").uncheck();
   await editor.getByRole("button", { name: "Save changes" }).click();
 
   await expect.poll(() => patches.length).toBe(1);
@@ -63,5 +65,6 @@ test("clearing rule fields in the editor clears them", async ({ page }) => {
     sources: [],
     destinations: [],
     protocols: [{ name: "tcp", port: "502" }],
+    ics: null,
   });
 });
