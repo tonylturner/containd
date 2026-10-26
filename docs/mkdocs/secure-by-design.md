@@ -249,7 +249,7 @@ certificate or change browser trust.
 
 Management distributes the bundle's content to the engine, whose ICAP-over-TLS
 and FreshClam clients verify servers against the system roots plus the bundle.
-Other clients keep their own trust: the web console's loopback connection pins
-the configured management certificate, OpenVPN tunnels use their per-tunnel CA,
+Other clients keep their own trust: the in-app console's and SSH CLI sessions'
+loopback connection pins the certificate the HTTPS listener serves, OpenVPN tunnels use their per-tunnel CA,
 and browsers and remote CLI hosts use their own trust stores. Do not disable
 certificate verification to work around a rejected private-CA endpoint.

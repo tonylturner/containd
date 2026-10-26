@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- In IEC 104 envelopes a RST without payload closes a session only at the
+  sequence number its receiver expects next. A forged or stale RST no longer
+  makes the engine stop following a live connection.
 - In an IEC 104 enforce envelope a session starts only at a SYN of a handshake
   that connection tracking has not seen complete; a SYN sent into an
   established connection no longer opens one. The `iec104_envelope` nft chain
@@ -204,6 +207,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GET /api/v1/system/tls` adds `servedCertFile` and `servedKeyFile`, the
+  files the bound HTTPS listener serves now. A certificate upload returns
+  status `updated` when the listener serves the uploaded files (from its next
+  TLS handshake), and `stored` with a warning when they are served from the
+  next start. An upload that would replace only one of the served certificate
+  and key is refused with 409.
+- After resetting a fail-closed ICS connection it picked up mid-stream, the
+  engine answers the endpoints' challenge ACKs by sending the reset again, up
+  to three times within a second, as it does for IEC 104 sessions.
+- A failed reset of such a connection makes the `iec104Enforcement` health
+  object unhealthy while an enforce rule of another ICS protocol is loaded
+  (`active` stays false).
 - A client of a fail-closed ICS connection (Modbus, DNP3 and the other
   non-IEC 104 ICS rules in enforce mode with NFQUEUE) that loses its
   connection, for example by restarting, can reconnect at once from the same
@@ -224,8 +239,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry starts in management recovery until a valid configuration is
   committed. Before, the engine skipped such entries, so a rule matched only
   its valid entries.
-- With the HTTP listener disabled, SSH stays off and logs why. Before, it
-  started with CLI sessions that called an HTTP port management never bound.
+- SSH CLI sessions call the management API over HTTPS when the HTTP listener
+  is disabled, trusting only the certificate the HTTPS listener serves. SSH now
+  stays off only when neither listener is bound. The in-app console and SSH use
+  the same loopback connection, and neither follows a redirect.
 - Firewall rules with a schedule no longer re-read the schedule or its
   timezone for each packet: schedules are parsed once per applied ruleset.
 - Rule matching parses addresses once per applied ruleset, and the engine
@@ -307,13 +324,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An IEC 104 client that lost its connection without closing it, for example
+  by restarting, reconnects at once from the same source port in an enforce
+  envelope instead of being dropped until the session idles out.
+- With redirect-http-to-https enabled and HTTPS not served (disabled, or its
+  certificate failed at boot), the HTTP listener no longer redirects to a port
+  nothing listens on.
+- The in-app console and SSH no longer call an HTTP listener that redirects to
+  HTTPS; they call HTTPS.
 - The in-app console pins the certificate the HTTPS listener serves. Before,
   it pinned the saved setting, which a listener fallback or a certificate path
   saved after boot can make differ.
 - Management listener readouts agree with what is served. The TLS settings
   show the effective listeners, including environment overrides. The console
   calls the bound HTTP listener. SSH no longer falls back to port 8080: with no
-  bound HTTP listener it stays off and reports a fault. `show system` always
+  bound HTTP or HTTPS listener it stays off and reports a fault. `show system` always
   shows `ssh.listen`, and both saved-settings views say they exclude
   environment overrides.
 - Web UI: the zone form refuses names longer than 125 bytes or with leading

@@ -158,7 +158,9 @@ enforce-mode rules, `monitoring` when every ICS rule is in learn mode, or
 `unknown` when the engine cannot be read. `enforcement` stays the nftables-level
 state. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
-and `reason`, describing IEC104 queue/reset health independently. An inactive
+and `reason`, describing IEC104 queue/reset health independently. It also turns unhealthy, with `active`
+false, when the engine fails to reset an ICS connection it picked up mid-stream
+while an enforce rule of another ICS protocol is loaded. An inactive
 IEC104 policy is not proof nft is available. A successful commit does not
 guarantee later queue/reset readiness or packet delivery; check both health
 objects and infrastructure warnings.

@@ -199,7 +199,9 @@ address and reports the failed broader listener. A failure to bind that exact
 endpoint is fatal. Environment conflicts with the reservation remain fatal.
 Without a reservation, an HTTP/HTTPS bind failure of the stored listener
 settings puts the appliance into recovery on the default listeners (see
-above); SSH remains best effort. Correct stored listener settings and restart
+above); SSH remains best effort. SSH CLI sessions call the bound HTTP
+listener on loopback, or the bound HTTPS listener when HTTP is disabled or
+redirects to HTTPS; SSH stays off only when neither is bound. Correct stored listener settings and restart
 to restore the optional or stored listener: an ordinary commit does not rebind
 sockets, so listener changes take effect at the next restart.
 Management HTTP, legacy HTTP, HTTPS and SSH listener values are structurally
