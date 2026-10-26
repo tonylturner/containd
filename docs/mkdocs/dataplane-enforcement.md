@@ -98,6 +98,12 @@ exclusions never lower a rule. Coverage appears in:
   force: a failed apply leaves the previous rules installed, so after one
   `engineStatus.error` is set while `engineStatus.icsCoverage` still describes
   the previous rules (and is empty if no apply has succeeded yet).
+- `GET /api/v1/dataplane/ics-coverage`, readable by any authenticated user and
+  without the ruleset: `candidate` (or `candidateError` when the candidate does
+  not validate), `applied` with `appliedAt` and `applyError` (or
+  `engineStatusError` when the engine cannot be read). Each side is reported
+  even when the other fails; the admin-only ruleset preview keeps refusing an
+  invalid candidate with HTTP 400.
 - `POST /api/v1/firewall/rules/preview`: `icsCoverage` for the previewed rule
   under the running engine.
 - `GET /api/v1/health`: `icsEnforcement`, counts only (see
