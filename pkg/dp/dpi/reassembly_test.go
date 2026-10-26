@@ -14,11 +14,11 @@ import (
 var testNow = time.Unix(1000, 0).UTC()
 
 func feedSeq(r *reassembler, key string, seq uint32, strict bool, data ...byte) feedResult {
-	return r.feed(key, position{kind: posSeq, seq: seq}, data, testNow, strict, false)
+	return r.feed(key, position{kind: posSeq, seq: seq}, data, testNow, strict, false, false)
 }
 
 func feedOff(r *reassembler, key string, off int64, strict bool, data ...byte) feedResult {
-	return r.feed(key, position{kind: posOffset, off: off}, data, testNow, strict, true)
+	return r.feed(key, position{kind: posOffset, off: off}, data, testNow, strict, true, false)
 }
 
 func wantBuf(t *testing.T, got feedResult, base int64, data ...byte) {
@@ -38,13 +38,14 @@ func wantStreamErr(t *testing.T, got feedResult, kind StreamErrKind, off int64) 
 	}
 }
 
-// storedTotal recomputes the bytes held by every stream.
+// storedTotal recomputes the bytes held by every stream, consumed history
+// included.
 func storedTotal(r *reassembler) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, s := range r.streams {
-		n += s.stored()
+		n += s.held()
 	}
 	return n
 }
@@ -75,11 +76,11 @@ func TestReassemblerSequenceZeroAndWrap(t *testing.T) {
 func TestReassemblerAppendMode(t *testing.T) {
 	r := newReassembler(0, time.Minute)
 	app := position{kind: posAppend}
-	r.feed("f", app, []byte{1, 2}, testNow, true, false)
-	got := r.feed("f", app, []byte{1, 2}, testNow, true, false)
+	r.feed("f", app, []byte{1, 2}, testNow, true, false, false)
+	got := r.feed("f", app, []byte{1, 2}, testNow, true, false, false)
 	wantBuf(t, got, 0, 1, 2, 1, 2)
 	r.trim("f", 0, 4)
-	wantBuf(t, r.feed("f", app, []byte{9}, testNow, true, false), 4, 9)
+	wantBuf(t, r.feed("f", app, []byte{9}, testNow, true, false, false), 4, 9)
 }
 
 func TestReassemblerLenientSlidingWindow(t *testing.T) {
@@ -253,9 +254,9 @@ func TestReassemblerFailAndComplete(t *testing.T) {
 func TestReassemblerSweepKeepsSessionStreams(t *testing.T) {
 	r := newReassembler(0, 5*time.Second)
 	t0 := testNow
-	r.feed("legacy", position{kind: posSeq, seq: 1}, []byte{1}, t0, false, false)
-	r.feed("fresh", position{kind: posSeq, seq: 1}, []byte{1}, t0.Add(4*time.Second), false, false)
-	r.feed("session", position{kind: posOffset}, []byte{1}, t0, true, true)
+	r.feed("legacy", position{kind: posSeq, seq: 1}, []byte{1}, t0, false, false, false)
+	r.feed("fresh", position{kind: posSeq, seq: 1}, []byte{1}, t0.Add(4*time.Second), false, false, false)
+	r.feed("session", position{kind: posOffset}, []byte{1}, t0, true, true, false)
 	r.sweep(t0.Add(6 * time.Second))
 	r.mu.Lock()
 	_, legacy := r.streams["legacy"]

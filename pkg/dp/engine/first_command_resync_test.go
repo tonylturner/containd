@@ -15,13 +15,10 @@ import (
 // overlap, so its stream is the read followed by the prohibited command.
 // The engine must still drop the segment that completes that command.
 //
-// KNOWN DEFECT, marked with t.Skip while it reproduces: the conflict is a
-// stream error, the legacy stream restarts at the next segment's first
-// byte, and the decoder frames from the middle of the read. The Modbus
-// write's transaction ID becomes a 254-byte MBAP length (need more), the
-// DNP3 read's header CRC an invalid start (malformed, passes); either way
-// the complete prohibited command is accepted. When the engine drops it,
-// the test passes; then remove the skip.
+// The conflict is a stream error. Were the stream restarted at the next
+// segment's first byte, the decoder would frame from the middle of the
+// read and the complete prohibited command would pass; an enforce flow
+// fails closed instead.
 func TestFirstCommandAfterConflictingOverlap(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -42,11 +39,9 @@ func TestFirstCommandAfterConflictingOverlap(t *testing.T) {
 			// The overlap is not new data for the server; its verdict is
 			// not the property under test.
 			f.decide(0, ackPsh, conflict)
-			d := f.decide(8, ackPsh, concatFrames(tc.read[8:], tc.command))
-			if d.Action == capture.Drop {
-				return
+			if d := f.decide(8, ackPsh, concatFrames(tc.read[8:], tc.command)); d.Action != capture.Drop {
+				t.Fatalf("after a conflicting overlap the segment completing %s = %+v, want Drop", tc.name, d)
 			}
-			t.Skipf("KNOWN DEFECT: after a conflicting overlap the engine accepts the segment completing %s (decision %+v)", tc.name, d)
 		})
 	}
 }

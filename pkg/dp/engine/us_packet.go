@@ -38,7 +38,9 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // handleFlowPacket is the wire-oriented path for every protocol except
 // IEC104 sessions. A denied ICS message drops the current packet
 // and installs the existing dynamic flow block once the drop verdict is
-// submitted; a cached denial drops later packets of the same flow.
+// submitted; a cached denial drops later packets of the same flow. An
+// inline flow in the scope of an enforce ICS rule fails closed on a stream
+// error or decoder panic the same way (failClosedRule).
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture.Decision {
 	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
@@ -81,17 +83,25 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) capture
 		// unparsed, as before.
 		return acceptDecision
 	}
-	// Events come before the error: a stream error's malformed event is
-	// already among them, and the packet itself passes.
-	evs, _ := e.dpiMgr.OnPacket(state, &parsed)
-	e.RecordDPIEvents(state, &parsed, evs)
-	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, evs)
-	if !enforced {
-		return acceptDecision
+	scope := e.failClosedRule(pkt, state, &parsed)
+	parsed.FailClosed = scope != nil
+	res, panicErr := e.inspectFlow(state, &parsed)
+	if panicErr != nil {
+		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
-	e.verdictCache.Put(flowHash, v)
-	e.afterDrop(pkt.Token, e.dynamicBlockJob(v, evalCtx))
-	return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
+	// Events come before the error: a stream error's malformed event is
+	// already among them. Outside an enforce scope the packet itself passes.
+	e.RecordDPIEvents(state, &parsed, res.Events)
+	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, res.Events)
+	if enforced {
+		e.verdictCache.Put(flowHash, v)
+		e.afterDrop(pkt.Token, e.dynamicBlockJob(v, evalCtx))
+		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
+	}
+	if scope != nil && isStreamFailure(res) {
+		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedStream, res.Proto, res.Err)
+	}
+	return acceptDecision
 }
 
 // dynamicBlockJob installs the existing US dynamic block for a denied flow.
@@ -153,6 +163,20 @@ func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	}
 }
 
+// packetPanic is the error of a recovered packet-path panic.
+func packetPanic(r any) error {
+	return fmt.Errorf("engine: packet handler panic: %v", r)
+}
+
+// reportPacketPanic logs a recovered packet-path panic and reports it as a
+// worker health fault.
+func (e *Engine) reportPacketPanic(err error) {
+	if e.onError != nil {
+		e.onError(err)
+	}
+	e.iec.health.fault(faultWorker, err.Error())
+}
+
 func isIECPort(pkt capture.Packet) bool {
 	return pkt.Proto == 6 && (pkt.SrcPort == iec104Port || pkt.DstPort == iec104Port)
 }
@@ -168,18 +192,16 @@ func envelopeMarked(pkt capture.Packet) bool {
 // handling must not crash the process from the capture goroutine: it is
 // recovered, logged and reported as a worker health fault. The packet is
 // dropped when nft marked it as IEC104 envelope traffic (fail closed) and
-// accepted otherwise, as 0.1.31 always did.
+// accepted otherwise, as 0.1.31 always did. A decoder panic on an inline
+// flow in an enforce ICS scope is recovered earlier and drops the flow
+// (inspectFlow).
 func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			return
 		}
-		err := fmt.Errorf("engine: packet handler panic: %v", r)
-		if e.onError != nil {
-			e.onError(err)
-		}
-		e.iec.health.fault(faultWorker, err.Error())
+		e.reportPacketPanic(packetPanic(r))
 		d = acceptDecision
 		if envelopeMarked(pkt) {
 			d = capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}
