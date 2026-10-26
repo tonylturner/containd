@@ -305,6 +305,11 @@ connections to the original destination service and prevents reconnects for the
 interval. Neighbouring clients, services and transports remain unaffected.
 `durationSecs` is 1–3600 seconds, default 60. These are runtime operations, not
 candidate configuration changes, and require active nftables enforcement.
+Revocations never refuse management traffic: the management listeners stay
+reachable on the interfaces that grant management access, and the reserved
+management listener stays reachable, even when their tuples are revoked.
+Killing a management connection still deletes its kernel state, which can end
+that one connection.
 
 The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
 and counts/errors independently. Revocation is installed atomically before
@@ -314,5 +319,7 @@ packets are dropped. A failed revocation does not delete kernel state. Inspect
 each step even on HTTP 200. ICMP and other protocols are visible but cannot be
 killed through this port-based API.
 
-Revocations are kernel runtime state. Replacing the firewall ruleset or
-restarting the appliance clears them; they are not persisted configuration.
+Revocations are kernel runtime state in the nftables table
+`inet <enforceTable>`, not persisted configuration. They survive commits
+and expire after their interval. Disabling enforcement or renaming
+`enforceTable` removes them, and a recreated container starts without them.

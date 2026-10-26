@@ -222,9 +222,18 @@ func New(cfg Config) (*Engine, error) {
 // The lifecycle lock serializes the full swap/stop with Start: if Reconfigure
 // finishes before a queued Start runs, that Start binds the latest state and
 // later Start calls see the engine as already started.
-func (e *Engine) Reconfigure(fresh *Engine) {
+//
+// When fresh does not enforce, Reconfigure first deletes the nft tables this
+// engine installed, so the kernel stops enforcing too. If that fails it
+// returns the error and changes nothing.
+func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	if fresh.compiler == nil {
+		if err := e.gate.release(); err != nil {
+			return fmt.Errorf("remove enforcement tables: %w", err)
+		}
+	}
 
 	prevCancel := e.runCancel
 	prevCapture := e.runCapture
@@ -302,6 +311,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
 		_ = prevIEC.injector.Close()
 	}
+	return nil
 }
 
 func (e *Engine) Start(ctx context.Context) error {

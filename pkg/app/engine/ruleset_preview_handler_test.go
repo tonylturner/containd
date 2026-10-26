@@ -76,7 +76,7 @@ func TestRulesetPreviewSettingsMapping(t *testing.T) {
 		if want == "" {
 			want = "containd"
 		}
-		if err != nil || !strings.Contains(preview.Ruleset, "table inet "+want+" {") {
+		if err != nil || !strings.Contains(preview.Ruleset, "table inet "+want+"_policy {") || !strings.Contains(preview.Ruleset, "add table inet "+want+"\n") {
 			t.Fatalf("preview=%+v err=%v", preview, err)
 		}
 	}

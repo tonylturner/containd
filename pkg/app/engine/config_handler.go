@@ -25,7 +25,7 @@ import (
 type dataPlane interface {
 	ManagementReservation() *mgmtpath.Reservation
 	Events() *events.Store
-	Reconfigure(fresh *engine.Engine)
+	Reconfigure(fresh *engine.Engine) error
 	StartWithRetry(ctx context.Context) error
 }
 
@@ -49,7 +49,10 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 // sessions and NFQUEUE binding survive, and the DPI mock simulation keeps
 // running. It still asks the engine to start, which is a no-op while it runs
 // and retries the queue bind after an earlier attempt gave up. A changed
-// configuration rebuilds the engine as before.
+// configuration rebuilds the engine as before. A rebuild that cannot take
+// effect (the nft tables of a disabled enforcement cannot be removed) fails
+// the POST and leaves the applied configuration unchanged, so a retry
+// rebuilds again.
 func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager) http.HandlerFunc {
 	store := dp.Events()
 	var current appliedConfig
@@ -84,7 +87,10 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-				dp.Reconfigure(fresh)
+				if err := dp.Reconfigure(fresh); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 				current.mu.Lock()
 				current.applied, current.dp = true, next
 				current.mu.Unlock()

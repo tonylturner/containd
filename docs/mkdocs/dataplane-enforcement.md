@@ -14,6 +14,19 @@ that field to true in candidate and commit for kernel rule application. Starting
 capture or seeing decoded events does not prove that firewall policy is installed. Review the ruleset preview and engine status
 through `GET /api/v1/dataplane/ruleset` and check for apply errors.
 
+The engine owns only its own nftables tables, named after `dataplane.enforceTable`
+(default `containd`). Each apply replaces the policy table
+`inet <enforceTable>_policy` in one transaction and keeps the persistent table
+`inet <enforceTable>` (temporary blocks and revocations, below). Other tables in
+the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
+`inet containd_dhcp`, are left untouched. Everything else in
+`inet <enforceTable>`, such as the policy chains and sets an older containd
+version kept there, is removed on the next apply; flow blocks from an older
+version carry over with their remaining timeout. Disabling enforcement deletes
+the tables the running engine installed. Renaming the table replaces the old
+tables with the new ones on the next apply. A table name starts with a letter
+or underscore, followed by letters, digits, underscores and hyphens.
+
 nftables cannot evaluate identity or schedule predicates. On a rule it decides,
 an `ALLOW` with either predicate is not installed, and a `DENY` drops without
 the predicate's condition. See
@@ -53,6 +66,14 @@ Administrators can request temporary blocks through:
 
 - `POST /api/v1/dataplane/blocks/host`
 - `POST /api/v1/dataplane/blocks/flow`
+
+Temporary blocks and connection revocations live in the persistent nftables
+table `inet <enforceTable>` (default `inet containd`; sets `block_hosts`,
+`block_flows`, `revoke4`, `revoke6`, `revoke_service4` and `revoke_service6`).
+They act before the policy table's rules, including on established connections,
+and they persist across commits until their timeouts expire. Revocations skip
+traffic to the management listeners on the management interfaces and to the
+reserved management listener, so they cannot lock administrators out.
 
 See [API Reference](api-reference.md) for request fields. A decision or block
 request is not proof of delivery prevention; inspect verdict/apply errors and

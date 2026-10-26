@@ -134,6 +134,25 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 	}
 }
 
+// clearBlocksHandler removes every temporary block and connection revocation.
+func clearBlocksHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil {
+			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := dp.ClearBlocks(r.Context()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	}
+}
+
 // avApplyTimeout bounds how long a services apply waits for the scanner
 // backend to become ready; it stays within management's request timeout.
 const avApplyTimeout = 3 * time.Second

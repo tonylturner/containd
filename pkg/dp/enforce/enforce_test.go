@@ -29,8 +29,8 @@ func TestCompileFirewallBasic(t *testing.T) {
 	if !strings.Contains(ruleset, "table inet containd") {
 		t.Fatalf("missing table: %s", ruleset)
 	}
-	if !strings.Contains(ruleset, "set block_hosts") || !strings.Contains(ruleset, "set block_flows") {
-		t.Fatalf("missing dynamic sets")
+	if !strings.Contains(ruleset, "add set inet containd block_hosts") || !strings.Contains(ruleset, "add set inet containd block_flows") {
+		t.Fatalf("missing block sets: %s", ruleset)
 	}
 	if !strings.Contains(ruleset, "policy drop") {
 		t.Fatalf("missing default drop policy")
@@ -427,12 +427,11 @@ func TestFlowBlockKeysIncludeProtocol(t *testing.T) {
 	if !strings.Contains(text, "type ipv4_addr . ipv4_addr . inet_proto . inet_service;") {
 		t.Fatalf("set type omits protocol:\n%s", text)
 	}
-	lookup := "ip saddr . ip daddr . meta l4proto . th dport @block_flows drop"
-	start := strings.Index(text, "chain forward")
-	forward := text[start:]
-	block, established := strings.Index(forward, lookup), strings.Index(forward, "ct state { established, related } accept")
-	if block < 0 || established < 0 || block > established {
-		t.Fatalf("protocol-aware block must precede established accept:\n%s", forward)
+	// The blocks chain hooks forward before the policy chain (priority 0)
+	// with its established accept, and a drop there is final.
+	lookup := "add rule inet containd forward meta l4proto { tcp, udp } ip saddr . ip daddr . meta l4proto . th dport @block_flows drop\n"
+	if !strings.Contains(text, lookup) || !strings.Contains(text, "add chain inet containd forward { type filter hook forward priority -10;") {
+		t.Fatalf("protocol-aware block must drop in the earlier blocks chain:\n%s", text)
 	}
 }
 

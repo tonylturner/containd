@@ -11,14 +11,18 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // nftModel replays applied scripts like the kernel would for the envelope
-// chain: a full ruleset sets it, a switch replaces its rule.
+// chain of table containd_policy: replacing or deleting the table sets or
+// removes it, a switch replaces its rule.
 type nftModel struct {
 	mu       sync.Mutex
+	live     enforce.TableLayout // what ReadTable reports
+	readErr  error               // what ReadTable fails with
 	scripts  []string
 	envelope string // "", "drop" or "queue N"
 	failNext bool
@@ -32,18 +36,24 @@ func (m *nftModel) Apply(_ context.Context, script string) error {
 		return errors.New("nft: netlink busy")
 	}
 	m.scripts = append(m.scripts, script)
-	if strings.HasPrefix(script, "flush ruleset") {
+	if strings.Contains(script, enforce.DeleteTable("containd_policy")) {
 		m.envelope = ""
 		if i := strings.Index(script, "chain iec104_envelope {\n    "); i >= 0 {
 			m.envelope = envelopeState(script[i+len("chain iec104_envelope {\n    "):])
 		}
 		return nil
 	}
-	const add = "add rule inet containd iec104_envelope "
+	const add = "add rule inet containd_policy iec104_envelope "
 	if i := strings.Index(script, add); i >= 0 {
 		m.envelope = envelopeState(script[i+len(add):])
 	}
 	return nil
+}
+
+func (m *nftModel) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.live, m.readErr
 }
 
 func envelopeState(rule string) string {

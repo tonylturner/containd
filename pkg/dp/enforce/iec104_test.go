@@ -132,11 +132,11 @@ func TestIEC104EnvelopeSwitchGolden(t *testing.T) {
 	c.QueueID = 100
 	c.TableName = "containd"
 	if got, want := c.IEC104EnvelopeSwitch(true),
-		"flush chain inet containd iec104_envelope\nadd rule inet containd iec104_envelope "+envelopeVerdict+"\n"; got != want {
+		"flush chain inet containd_policy iec104_envelope\nadd rule inet containd_policy iec104_envelope "+envelopeVerdict+"\n"; got != want {
 		t.Fatalf("open switch = %q, want %q", got, want)
 	}
 	if got, want := c.IEC104EnvelopeSwitch(false),
-		"flush chain inet containd iec104_envelope\nadd rule inet containd iec104_envelope drop\n"; got != want {
+		"flush chain inet containd_policy iec104_envelope\nadd rule inet containd_policy iec104_envelope drop\n"; got != want {
 		t.Fatalf("close switch = %q, want %q", got, want)
 	}
 }

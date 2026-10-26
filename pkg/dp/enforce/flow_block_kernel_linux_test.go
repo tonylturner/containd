@@ -15,7 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// Run only inside a disposable network namespace: compilation flushes nftables.
+// Run only inside a disposable network namespace: the test replaces containd's nft tables.
 func TestKernelFlowBlockProtocolKeys(t *testing.T) {
 	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
 		t.Skip("requires CONTAIND_KERNEL_TESTS=1 in an isolated Linux container with NET_ADMIN and nft")

@@ -213,6 +213,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
+	mux.HandleFunc("/internal/blocks/clear", clearBlocksHandler(dpEngine))
 	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr))
 	registerAVHandlers(mux, avMgr)
 	mux.HandleFunc("/internal/trust", trustHandler(avMgr))

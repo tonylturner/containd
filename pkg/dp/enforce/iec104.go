@@ -103,10 +103,7 @@ func (c *Compiler) writeIEC104EnvelopeChain(buf *bytes.Buffer) {
 // IEC104EnvelopeChain. Apply it only to a ruleset compiled for a snapshot
 // that SteersIEC104.
 func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
-	table := c.TableName
-	if table == "" {
-		table = "containd"
-	}
+	table := c.policyTable()
 	return fmt.Sprintf("flush chain inet %s %s\nadd rule inet %s %s %s\n",
 		table, IEC104EnvelopeChain, table, IEC104EnvelopeChain, c.iec104EnvelopeVerdict(open))
 }

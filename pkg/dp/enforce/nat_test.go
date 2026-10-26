@@ -45,15 +45,43 @@ func TestNATConfiguredZones(t *testing.T) {
 	}
 }
 
+// assertDeclaredSets requires every @set reference to name a set declared in
+// the same table, inside a table block or by an add set command.
 func assertDeclaredSets(t *testing.T, text string) {
 	t.Helper()
+	tableBlock := regexp.MustCompile(`^table inet (\w+) \{$`)
+	setInBlock := regexp.MustCompile(`^\s+set (\w+) \{$`)
+	command := regexp.MustCompile(`^add (set|rule) inet (\w+) (\w+)`)
+	ref := regexp.MustCompile(`@(\w+)`)
 	declared := map[string]bool{}
-	for _, m := range regexp.MustCompile(`(?m)^\s*set\s+(\w+)\s*\{`).FindAllStringSubmatch(text, -1) {
-		declared[m[1]] = true
+	type use struct{ table, set string }
+	var uses []use
+	block := ""
+	for _, line := range strings.Split(text, "\n") {
+		table := block
+		if m := tableBlock.FindStringSubmatch(line); m != nil {
+			block = m[1]
+			continue
+		}
+		if line == "}" {
+			block = ""
+			continue
+		}
+		if m := command.FindStringSubmatch(line); m != nil {
+			table = m[2]
+			if m[1] == "set" {
+				declared[table+" "+m[3]] = true
+			}
+		} else if m := setInBlock.FindStringSubmatch(line); m != nil && block != "" {
+			declared[block+" "+m[1]] = true
+		}
+		for _, m := range ref.FindAllStringSubmatch(line, -1) {
+			uses = append(uses, use{table, m[1]})
+		}
 	}
-	for _, m := range regexp.MustCompile(`@(\w+)`).FindAllStringSubmatch(text, -1) {
-		if !declared[m[1]] {
-			t.Errorf("undeclared set %s:\n%s", m[1], text)
+	for _, u := range uses {
+		if !declared[u.table+" "+u.set] {
+			t.Errorf("undeclared set %s in table %q:\n%s", u.set, u.table, text)
 		}
 	}
 }

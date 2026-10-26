@@ -3,7 +3,6 @@
 package enforce
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/netip"
@@ -21,21 +20,23 @@ type ConnectionRevoker interface {
 	RevokeConnections(context.Context, []conntrack.Entry, string, time.Duration) error
 }
 
-func (c *Compiler) writeRevocations(buf *bytes.Buffer) {
+// revocationSets returns the name and type of each revocation set.
+func revocationSets() [][2]string {
+	var sets [][2]string
 	for _, family := range []string{"4", "6"} {
 		addr := "ipv" + family + "_addr"
-		for _, service := range []bool{false, true} {
-			name, typ := "revoke"+family, addr+" . "+addr+" . inet_proto . inet_service . inet_service"
-			if service {
-				name = "revoke_service" + family
-				typ = addr + " . " + addr + " . inet_proto . inet_service"
-			}
-			fmt.Fprintf(buf, "  set %s {\n    type %s;\n    flags timeout;\n  }\n", name, typ)
-		}
+		sets = append(sets,
+			[2]string{"revoke" + family, addr + " . " + addr + " . inet_proto . inet_service . inet_service"},
+			[2]string{"revoke_service" + family, addr + " . " + addr + " . inet_proto . inet_service"})
 	}
+	return sets
+}
+
+// revocationRules returns the rules of the revocations chain.
+func revocationRules() []string {
 	// Kernel-generated resets traverse OUTPUT with the rejected packet's
 	// conntrack association. Let resets pass rather than rejecting our own RST.
-	buf.WriteString("  chain revocations {\n    tcp flags & rst == rst return;\n")
+	out := []string{"tcp flags & rst == rst return"}
 	for _, family := range []string{"4", "6"} {
 		ip := "ip"
 		if family == "6" {
@@ -67,12 +68,12 @@ func (c *Compiler) writeRevocations(buf *bytes.Buffer) {
 					if proto == "tcp" {
 						action = "reject with tcp reset"
 					}
-					fmt.Fprintf(buf, "    meta l4proto %s %s%s @%s %s;\n", proto, key, ports, name, action)
+					out = append(out, fmt.Sprintf("meta l4proto %s %s%s @%s %s", proto, key, ports, name, action))
 				}
 			}
 		}
 	}
-	buf.WriteString("  }\n  chain revocation_output {\n    type filter hook output priority 0; policy accept;\n    jump revocations;\n  }\n")
+	return out
 }
 
 // RevokeConnections commits all keys atomically, before conntrack is deleted.
@@ -93,8 +94,8 @@ func (u *NftUpdater) revocationBatch(entries []conntrack.Entry, scope string, tt
 	if ttl < time.Second || ttl > time.Hour || ttl%time.Second != 0 || len(entries) == 0 {
 		return "", fmt.Errorf("revocation needs entries and a 1–3600 second interval")
 	}
-	if u.TableName == "" || sanitizeIdent(u.TableName) != u.TableName {
-		return "", fmt.Errorf("invalid nft table name")
+	if err := ValidateTableName(u.TableName); err != nil {
+		return "", err
 	}
 	keys := map[string]bool{}
 	for _, e := range entries {

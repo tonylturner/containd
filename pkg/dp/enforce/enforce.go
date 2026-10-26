@@ -46,31 +46,34 @@ type Compiler struct {
 }
 
 func NewCompiler() *Compiler {
-	return &Compiler{TableName: "containd"}
+	return &Compiler{TableName: defaultTableName}
 }
 
-// CompileFirewall builds an nftables ruleset for the snapshot's firewall entries.
-// Zone/interface bindings and dynamic sets are added in later phases.
+// CompileFirewall builds the nft script for the snapshot: one transaction
+// that replaces the policy table and ensures the dynamic table (see
+// tables.go). No other table in the namespace is touched.
 func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if snap == nil {
 		return "", errors.New("snapshot is nil")
 	}
-	table := c.TableName
-	if table == "" {
-		table = "containd"
+	if err := ValidateTableName(c.DynamicTable()); err != nil {
+		return "", err
+	}
+	table := c.policyTable()
+	locals, err := resolveLocalInput(snap)
+	if err != nil {
+		return "", err
 	}
 
 	var buf bytes.Buffer
-	buf.WriteString("flush ruleset\n")
+	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
-	c.writeDynamicSets(&buf)
-	c.writeRevocations(&buf)
 	// Declared before the forward chain that jumps to it.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
 	}
-	if err := c.writeInputChain(&buf, snap); err != nil {
+	if err := c.writeInputChain(&buf, snap, locals); err != nil {
 		return "", err
 	}
 	if err := c.writeForwardChain(&buf, snap); err != nil {
@@ -83,6 +86,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 	buf.WriteString("}\n")
+	if err := c.writeDynamicTable(&buf, locals); err != nil {
+		return "", err
+	}
 	return buf.String(), nil
 }
 
@@ -115,22 +121,12 @@ func (c *Compiler) writeZoneIfaceSets(buf *bytes.Buffer, snap *rules.Snapshot) {
 	}
 }
 
-func (c *Compiler) writeDynamicSets(buf *bytes.Buffer) {
-	buf.WriteString("  set block_hosts {\n")
-	buf.WriteString("    type ipv4_addr;\n")
-	buf.WriteString("    flags timeout;\n")
-	buf.WriteString("  }\n")
-	buf.WriteString("  set block_flows {\n")
-	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_proto . inet_service;\n")
-	buf.WriteString("    flags timeout;\n")
-	buf.WriteString("  }\n")
-}
-
-func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
+// writeInputChain emits the input chain; locals is snap's local input,
+// resolved by resolveLocalInput.
+func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot, locals []rules.LocalServiceRule) error {
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
-	buf.WriteString("    jump revocations;\n")
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
@@ -138,19 +134,7 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
-	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
-	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
 	for _, lr := range locals {
-		if lr.RecoverUnbound {
-			live, err := mgmtpath.Devices()
-			if err != nil {
-				return fmt.Errorf("discover management bindings: %w", err)
-			}
-			lr.Ifaces, _ = mgmtpath.ResolveBindings(lr.Ifaces, lr.DeniedIfaces, live)
-			if len(lr.Ifaces) == 0 {
-				continue
-			}
-		}
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {
 			return err
@@ -168,18 +152,8 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
-
-	buf.WriteString("    jump revocations;\n")
-
-	// block_hosts/block_flows must fire BEFORE ct established so that
-	// retroactive blocks (added by enforceDPIEvents.ApplyVerdict when a
-	// DPI verdict denies a function-code-violating Modbus PDU, for
-	// example) actually drop subsequent packets of an already-established
-	// flow. Without this ordering, ct established below would short-
-	// circuit and the block_flows entry would only catch new flows.
-	buf.WriteString("    ip saddr @block_hosts drop;\n")
-	buf.WriteString("    ip daddr @block_hosts drop;\n")
-	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . meta l4proto . th dport @block_flows drop;\n")
+	// Revocations and temporary blocks act in the dynamic table's earlier
+	// forward chain, before anything below (see writeDynamicTable).
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -594,9 +568,11 @@ func validateCIDRList(sources []string) ([]string, error) {
 	return out, nil
 }
 
-// Applier installs an nftables ruleset.
+// Applier installs an nftables ruleset and reads the live layout of a
+// dynamic table, so an install can converge it (see InstallScript).
 type Applier interface {
 	Apply(ctx context.Context, ruleset string) error
+	ReadTable(ctx context.Context, table string) (TableLayout, error)
 }
 
 // NftApplier uses the system `nft` binary.
@@ -632,15 +608,18 @@ type Updater interface {
 	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
 }
 
-// NftUpdater uses the system `nft` binary to update dynamic sets.
+// NftUpdater uses the system `nft` binary to update the block sets.
 type NftUpdater struct {
-	Path      string
+	Path string
+	// TableName is the dynamic table that holds the sets.
 	TableName string
 }
 
+// NewNftUpdater returns an updater for the dynamic table named table
+// (default containd).
 func NewNftUpdater(table string) *NftUpdater {
 	if table == "" {
-		table = "containd"
+		table = defaultTableName
 	}
 	return &NftUpdater{Path: "nft", TableName: table}
 }
@@ -691,6 +670,9 @@ func (u *NftUpdater) buildBlockFlowArgs(srcIP, dstIP net.IP, proto, dport string
 }
 
 func (u *NftUpdater) run(ctx context.Context, args []string) error {
+	if err := ValidateTableName(u.TableName); err != nil {
+		return err
+	}
 	path := u.Path
 	if path == "" {
 		path = "nft"

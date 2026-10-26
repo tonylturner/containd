@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -62,7 +63,10 @@ func (g *envelopeGate) sampleOpen(queue int) bool {
 }
 
 // apply compiles snap in the current envelope state and installs it. The
-// compiler's envelope state is set here and nowhere else.
+// compiler's envelope state is set here and nowhere else. The transaction
+// also converges comp's dynamic table from its live layout and, when comp
+// owns differently named tables than the installed ruleset, removes the
+// installed ones; the returned ruleset is comp's alone.
 func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applier enforce.Applier, snap *rules.Snapshot) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -75,7 +79,15 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	if applier == nil {
 		return compiled, errors.New("no applier configured")
 	}
-	if err := applier.Apply(ctx, compiled); err != nil {
+	live, err := applier.ReadTable(ctx, comp.DynamicTable())
+	if err != nil {
+		return compiled, fmt.Errorf("read nft table %s: %w", comp.DynamicTable(), err)
+	}
+	retire := ""
+	if g.comp != nil {
+		retire = g.comp.RetireTables(comp)
+	}
+	if err := applier.Apply(ctx, comp.InstallScript(live, retire, compiled)); err != nil {
 		return compiled, err
 	}
 	g.comp, g.applier = comp, applier
@@ -85,6 +97,24 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 		g.ok() // the kernel holds the current state again
 	}
 	return compiled, nil
+}
+
+// release deletes the tables of the installed ruleset, if any, and forgets
+// it. On failure the ruleset stays installed and recorded.
+func (g *envelopeGate) release() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.comp == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), envelopeSwitchTimeout)
+	defer cancel()
+	if err := g.applier.Apply(ctx, g.comp.DeleteTables()); err != nil {
+		return err
+	}
+	g.comp, g.applier = nil, nil
+	g.installed, g.open = false, false
+	return nil
 }
 
 // own records the queue group this engine has bound (0: none) and writes

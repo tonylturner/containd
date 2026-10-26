@@ -15,7 +15,7 @@ import (
 
 // TestKernelIEC104SteeringLoads applies a compiled ruleset with IEC104
 // envelope steering to the kernel. It needs root, CAP_NET_ADMIN and nft
-// (it flushes the ruleset of its network namespace), so it skips otherwise
+// (it replaces containd's tables in its network namespace), so it skips otherwise
 // unless CONTAIND_KERNEL_TESTS=1. Run in a throwaway container:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/enforce.test ./pkg/dp/enforce
@@ -23,7 +23,7 @@ import (
 //	  -v "$PWD/build:/w" --entrypoint /w/enforce.test containd/containd:dev -test.run Kernel -test.v
 func TestKernelIEC104SteeringLoads(t *testing.T) {
 	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
-		t.Skip("set CONTAIND_KERNEL_TESTS=1 in a throwaway network namespace: the test flushes the nft ruleset")
+		t.Skip("set CONTAIND_KERNEL_TESTS=1 in a throwaway network namespace: the test replaces containd's nft tables")
 	}
 	if _, err := exec.LookPath("nft"); err != nil || os.Geteuid() != 0 {
 		t.Fatalf("CONTAIND_KERNEL_TESTS=1 needs root and nft (lookup err %v)", err)
@@ -71,7 +71,7 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 
 func nftList(t *testing.T, chain string) string {
 	t.Helper()
-	out, err := exec.Command("nft", "list", "chain", "inet", "containd", chain).CombinedOutput()
+	out, err := exec.Command("nft", "list", "chain", "inet", PolicyTable(""), chain).CombinedOutput()
 	if err != nil {
 		t.Fatalf("list %s: %v: %s", chain, err, out)
 	}
