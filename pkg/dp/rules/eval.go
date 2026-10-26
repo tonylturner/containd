@@ -57,7 +57,7 @@ type compiledPort struct {
 type compiledEntry struct {
 	Entry
 	src, dst  networks        // pre-parsed Sources and Destinations
-	addresses []compiledAddr  // pre-parsed ICS addresses
+	addresses addrSet         // pre-parsed ICS addresses
 	ports     []compiledPort  // pre-parsed protocol port ranges (one per Protocol)
 	iec       *compiledIEC104 // set for ics.protocol iec104 entries only
 }
@@ -148,29 +148,34 @@ func compileEntry(entry Entry) compiledEntry {
 	return ce
 }
 
+// addrSet is an ICS address predicate's parsed specifications. listed
+// records that the predicate names any, parseable or not: one whose
+// specifications all fail to parse matches no address.
+type addrSet struct {
+	listed bool
+	ranges []compiledAddr
+}
+
 // compileAddrs parses ICS address specifications: a single value ("0x0100",
 // "256") or a dash-separated range ("0x0100-0x01FF", "100-511"), hex (0x
 // prefix) or decimal, mixed freely. Specifications that parse as neither
 // are skipped.
-func compileAddrs(specs []string) []compiledAddr {
-	if len(specs) == 0 {
-		return nil
-	}
-	out := make([]compiledAddr, 0, len(specs))
+func compileAddrs(specs []string) addrSet {
+	set := addrSet{listed: len(specs) > 0}
 	for _, spec := range specs {
 		if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
 			low, okLow := parseAddr(parts[0])
 			high, okHigh := parseAddr(parts[1])
 			if okLow && okHigh {
-				out = append(out, compiledAddr{low: low, high: high})
+				set.ranges = append(set.ranges, compiledAddr{low: low, high: high})
 				continue
 			}
 		}
 		if val, ok := parseAddr(spec); ok {
-			out = append(out, compiledAddr{low: val, high: val})
+			set.ranges = append(set.ranges, compiledAddr{low: val, high: val})
 		}
 	}
-	return out
+	return set
 }
 
 // PreviewMatch tests a single rule against an EvalContext to determine if it
@@ -293,15 +298,15 @@ func matchICSUnitID(pred ICSPredicate, ctx EvalContext) bool {
 	return ctx.ICS.UnitID != nil && *pred.UnitID == *ctx.ICS.UnitID
 }
 
-func matchICSAddresses(addresses []compiledAddr, ctx EvalContext) bool {
-	if len(addresses) == 0 {
+func matchICSAddresses(addresses addrSet, ctx EvalContext) bool {
+	if !addresses.listed {
 		return true
 	}
 	ctxVal, ok := parseAddr(ctx.ICS.Address)
 	if !ok {
 		return false
 	}
-	for _, a := range addresses {
+	for _, a := range addresses.ranges {
 		if ctxVal >= a.low && ctxVal <= a.high {
 			return true
 		}
