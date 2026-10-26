@@ -44,6 +44,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // way (failClosedRule).
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
+	e.iec.answerPickupChallenge(pkt)
 	parsed := dpi.ParsedPacket{
 		Payload:      pkt.Payload,
 		Proto:        pkt.Transport,

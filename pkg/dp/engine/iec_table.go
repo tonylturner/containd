@@ -80,7 +80,7 @@ type iecSession struct {
 	heldBytes  int
 	stopParse  bool // learn envelope: parsing stopped after a stream error
 	reconnects bool // first STARTDT con counts as a reconnect
-	reset      *iecReset
+	reset      *connReset
 	next       *iecSession         // new incarnation whose handshake is pending
 	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
 	inventory  *iecInventoryLedger
@@ -142,6 +142,10 @@ type iecTable struct {
 	inventory       iecInventoryInput
 	inventoryTokens map[capture.Token]*iecSession
 
+	// pickups are the resets of picked-up inline flows (closePickedUp),
+	// which share this table's injector, worker and health.
+	pickups *pickupResets
+
 	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
 	pressureOffline bool
 
@@ -170,6 +174,7 @@ func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 		held:       make(map[capture.Token]*iecSession),
 		aborts:     make(map[capture.Token]*abortTxn),
 		reconnect:  make(map[string]time.Time),
+		pickups:    newPickupResets(),
 
 		inventoryTokens: make(map[capture.Token]*iecSession),
 	}
@@ -241,6 +246,21 @@ func hasEnforceIEC(snap *rules.Snapshot, globalMode string) (hasIEC, enforce boo
 	return hasIEC, enforce
 }
 
+// hasEnforceICS reports whether a snapshot loads an enforce rule of an ICS
+// protocol other than IEC104, whose inline flows fail closed.
+func hasEnforceICS(snap *rules.Snapshot, globalMode string) bool {
+	if snap == nil {
+		return false
+	}
+	for _, entry := range snap.Firewall {
+		if entry.ICS.Protocol != "" && !strings.EqualFold(entry.ICS.Protocol, iecProtocol) &&
+			rules.EffectiveMode(entry.ICS.Mode, globalMode) == "enforce" {
+			return true
+		}
+	}
+	return false
+}
+
 // setPolicy installs the snapshot's IEC104 policy. Live sessions whose
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
@@ -271,6 +291,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 	t.mu.Unlock()
 	if t.health != nil {
 		t.health.clear(faultEnvelope)
+		t.health.setICS(hasEnforceICS(snap, t.globalMode))
 		t.health.setActive(active)
 	}
 	t.apply(acts)

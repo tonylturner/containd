@@ -34,10 +34,15 @@ var transientFaults = []string{faultQueue, faultVerdict, faultReset, faultWorker
 
 // iecHealth tracks IEC104 enforcement health. Faults are recorded whether
 // or not an enforce envelope is loaded; they make the object unhealthy only
-// while one is (active describes the loaded runtime envelope).
+// while one is (active describes the loaded runtime envelope). The reset
+// injector also closes inline ICS connections picked up mid-stream
+// (closePickedUp), so while an enforce rule of another ICS protocol is
+// loaded (ics) a reset fault makes the object unhealthy too, with active
+// still false.
 type iecHealth struct {
 	mu        sync.Mutex
 	active    bool
+	ics       bool
 	faults    map[string]string
 	unhealthy bool // enforce_unhealthy was emitted and not yet followed by enforce_healthy
 	emit      func(outcome, errText string)
@@ -51,10 +56,13 @@ func newIECHealth(emit func(outcome, errText string)) *iecHealth {
 func (h *iecHealth) status() IEC104Enforcement {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.active || len(h.faults) == 0 {
-		return IEC104Enforcement{Active: h.active, Healthy: true}
+	if h.active && len(h.faults) > 0 {
+		return IEC104Enforcement{Active: true, Healthy: false, Reason: h.reasonLocked()}
 	}
-	return IEC104Enforcement{Active: true, Healthy: false, Reason: h.reasonLocked()}
+	if reason, ok := h.faults[faultReset]; ok && h.ics {
+		return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason}
+	}
+	return IEC104Enforcement{Active: h.active, Healthy: true}
 }
 
 // injectorReady reports whether resets can be sent.
@@ -85,6 +93,16 @@ func (h *iecHealth) setActive(active bool) {
 	outcome, reason := h.transitionLocked()
 	h.mu.Unlock()
 	h.report(outcome, reason)
+}
+
+// setICS records whether the loaded runtime has an enforce rule of an ICS
+// protocol other than IEC104. It changes status only, not the
+// enforce_healthy/enforce_unhealthy events, which describe IEC104
+// envelopes.
+func (h *iecHealth) setICS(ics bool) {
+	h.mu.Lock()
+	h.ics = ics
+	h.mu.Unlock()
 }
 
 // fault records a failure of cause with a human reason.
