@@ -51,7 +51,10 @@ func validateReservedBootEnvironment(cfg *config.Config, r *mgmtpath.Reservation
 }
 
 func reservationBootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
-	return errors.Join(config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
+	if r == nil {
+		return nil
+	}
+	return errors.Join(cfg.Validate(), config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
 }
 
 // Only listeners are replaced, and only in memory. APIs continue to expose the

@@ -734,10 +734,24 @@ paths:
                     type: string
                     description: >
                       Residual stored-config conflict after boot normalization; empty
-                      when clear. While set, management serves recovery with safe
-                      boot-only listeners and blocks service/engine apply. A safe
-                      commit, rollback or factory reset clears it. A fresh engine
-                      has no applied ruleset; this is not fail-closed enforcement.
+                      when clear. Blocks stored service/config replay and installs a
+                      minimal enforcement-on default-deny recovery ruleset instead.
+                      A safe commit, rollback or factory reset clears it.
+                  recovery:
+                    type: string
+                    description: >
+                      Empty without a bootFault. Reports "recovery: new transit
+                      dropped" only when the engine confirms the exact recovery
+                      ruleset applied successfully. Otherwise reports recovery
+                      pending or failed; established/related traffic is not denied.
+                  listenerFaults:
+                    type: array
+                    nullable: true
+                    items: { type: string }
+                    description: >
+                      Boot-only optional HTTP/HTTPS/SSH/loopback listener failures.
+                      Reserved HTTP remains mandatory; these diagnostics do not
+                      block safe policy apply. Correct settings and restart.
                   rollbackFault:
                     type: string
                     description: Last refused rollback, retained across restarts

@@ -53,6 +53,8 @@ type mgmtListenerConfig struct {
 	allowedOrigins      []string
 	tlsCert             string
 	tlsKey              string
+	optionalFault       func(error)
+	reservedHTTPAddr    string
 }
 
 func Run(ctx context.Context, opts Options) error {
@@ -83,9 +85,17 @@ func Run(ctx context.Context, opts Options) error {
 	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
 		return err
 	}
-	listenerCfg, err := resolveMgmtListenerConfig(logger, runtimeCfg)
+	listenerFaults := &bootListenerFaults{logger: logger}
+	var optionalFault func(error)
+	if opts.Reservation != nil {
+		optionalFault = listenerFaults.record
+	}
+	listenerCfg, err := resolveMgmtListenerConfig(logger, runtimeCfg, optionalFault)
 	if err != nil {
 		return err
+	}
+	if opts.Reservation != nil {
+		listenerCfg.reservedHTTPAddr = net.JoinHostPort(opts.Reservation.Local.Addr().String(), fmt.Sprint(opts.Reservation.Port))
 	}
 
 	var engineClient httpapi.EngineClient
@@ -95,7 +105,7 @@ func Run(ctx context.Context, opts Options) error {
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)))
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list))
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -127,7 +137,7 @@ func Run(ctx context.Context, opts Options) error {
 	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex)
+	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault)
 	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 
@@ -251,12 +261,13 @@ func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservat
 	}
 }
 
-func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config) (mgmtListenerConfig, error) {
+func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {
 	listenerCfg := mgmtListenerConfig{
-		httpAddr:    resolveHTTPAddr(cfg),
-		httpsAddr:   resolveHTTPSAddr(cfg),
-		enableHTTP:  boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
-		enableHTTPS: boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		httpAddr:      resolveHTTPAddr(cfg),
+		httpsAddr:     resolveHTTPSAddr(cfg),
+		enableHTTP:    boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
+		enableHTTPS:   boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		optionalFault: optionalFault,
 	}
 	listenerCfg.httpLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpAddr)
 	listenerCfg.httpsLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpsAddr)
@@ -274,6 +285,9 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config) (m
 	tlsCert, tlsKey, err := ensureSelfSignedTLSFiles(listenerCfg.tlsCert, listenerCfg.tlsKey, detectIPs())
 	if err != nil {
 		logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
+		if listenerCfg.optionalFault != nil {
+			listenerCfg.optionalFault(fmt.Errorf("https TLS certificate: %w", err))
+		}
 		listenerCfg.enableHTTPS = false
 		return listenerCfg, nil
 	}
@@ -324,7 +338,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*
 		if listenerCfg.redirectHTTPToHTTPS {
 			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
 		}
-		srv, lns, err := buildHTTPServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr)
+		srv, lns, err := buildListenerServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
 		if err != nil {
 			return nil, nil, errChPrefix("http", err)
 		}
@@ -332,8 +346,11 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*
 		listeners = append(listeners, lns...)
 	}
 	if listenerCfg.enableHTTPS {
-		srv, lns, err := buildHTTPSServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey))
+		srv, lns, err := buildListenerServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
 		if err != nil {
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
 			return nil, nil, errChPrefix("https", err)
 		}
 		servers = append(servers, srv...)

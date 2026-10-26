@@ -73,8 +73,11 @@ func TestEngineSyncTransitions(t *testing.T) {
 			}
 			for i, id := range tt.bootIDs {
 				bootID = id
-				if got := s.poll(context.Background()); got != (id != "down") {
-					t.Fatalf("poll %d reachable = %v", i, got)
+				before := calls
+				reachable := s.poll(context.Background())
+				wantReachable := id != "down" && !(calls > before && calls == tt.failApply)
+				if reachable != wantReachable {
+					t.Fatalf("poll %d reachable = %v", i, reachable)
 				}
 				if calls != tt.wantApplies[i] {
 					t.Fatalf("poll %d applies = %d, want %d", i, calls, tt.wantApplies[i])
@@ -275,7 +278,7 @@ func TestEngineSyncForcedReplayRetries(t *testing.T) {
 			t.Fatalf("forced replay lost during outage: %d", calls.Load())
 		}
 		fail.Store(false)
-		time.Sleep(engineSyncInterval)
+		time.Sleep(2 * engineSyncInterval) // failed applies now share outage backoff
 		synctest.Wait()
 		if calls.Load() != 3 {
 			t.Fatalf("forced replay did not retry apply failure: %d", calls.Load())
@@ -424,7 +427,7 @@ func waitForRollback(t *testing.T, store config.Store) {
 	}
 }
 
-func TestEngineSyncBootFaultWaitsWithoutReplayOrSpam(t *testing.T) {
+func TestEngineSyncBootFaultAppliesRecoveryWithoutSpam(t *testing.T) {
 	ctx := context.Background()
 	r := &mgmtpath.Reservation{Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
 	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"), config.WithManagementReservation(r))
@@ -449,14 +452,45 @@ func TestEngineSyncBootFaultWaitsWithoutReplayOrSpam(t *testing.T) {
 	for range 3 {
 		s.poll(ctx)
 	}
-	if calls != 0 || logs.Len() != 0 {
+	if calls != 1 || logs.Len() != 1 || !s.recovery {
 		t.Fatalf("fault retried/logged: %d %v", calls, logs.All())
 	}
 	if err := store.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	s.poll(ctx)
-	if calls != 1 || !s.applied {
+	if calls != 2 || !s.applied || s.recovery {
 		t.Fatal("recovery did not resume replay")
+	}
+	if err := store.SetManagementBootFault(ctx, "another boot fault"); err != nil {
+		t.Fatal(err)
+	}
+	s.poll(ctx)
+	s.lastBootID = "old-boot"
+	s.poll(ctx)
+	s.poll(ctx)
+	if calls != 4 {
+		t.Fatal("recovery not applied exactly once per engine boot")
+	}
+}
+
+func TestEngineSyncRepeatedApplyErrorLogsOnce(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	s := engineSync{
+		logger: zap.New(core).Sugar(),
+		health: syncHealthFunc(func(context.Context) (engineapi.RuntimeHealth, error) {
+			return engineapi.RuntimeHealth{BootID: "a"}, nil
+		}),
+		apply: func(context.Context) ([]string, error) {
+			return nil, errors.New("recovery ruleset: nft apply failed")
+		},
+	}
+	for range 3 {
+		if s.poll(context.Background()) {
+			t.Fatal("apply failure must back off")
+		}
+	}
+	if logs.Len() != 1 || s.applied {
+		t.Fatalf("repeated apply failure: %v applied=%v", logs.All(), s.applied)
 	}
 }

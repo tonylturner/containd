@@ -98,10 +98,10 @@ func TestConnContextWithLocalIPAndRequestLookup(t *testing.T) {
 	}
 }
 
-func TestBuildHTTPServers(t *testing.T) {
+func TestBuildListenerServersHTTP(t *testing.T) {
 	t.Parallel()
 
-	servers, listeners, err := buildHTTPServers(http.NewServeMux(), ":0", "127.0.0.1:0")
+	servers, listeners, err := buildListenerServers(http.NewServeMux(), ":0", "127.0.0.1:0", nil, "", nil)
 	if err != nil {
 		t.Fatalf("buildHTTPServers error: %v", err)
 	}
@@ -113,10 +113,10 @@ func TestBuildHTTPServers(t *testing.T) {
 	}
 }
 
-func TestBuildHTTPSServers(t *testing.T) {
+func TestBuildListenerServersHTTPS(t *testing.T) {
 	t.Parallel()
 
-	servers, listeners, err := buildHTTPSServers(http.NewServeMux(), "127.0.0.1:0", "", &tls.Config{})
+	servers, listeners, err := buildListenerServers(http.NewServeMux(), "127.0.0.1:0", "", &tls.Config{}, "", nil)
 	if err != nil {
 		t.Fatalf("buildHTTPSServers error: %v", err)
 	}

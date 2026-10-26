@@ -53,35 +53,31 @@ func localIPFromRequest(r *http.Request) net.IP {
 	return nil
 }
 
-func buildHTTPServers(handler http.Handler, addr string, loopbackAddr string) ([]*http.Server, []net.Listener, error) {
+// In reserved mode the primary HTTP bind serves the reserved endpoint and is
+// mandatory. A wildcard may fail because a different address is occupied: bind
+// the reserved endpoint independently in that case. TLS and convenience
+// loopback sockets are independent best effort.
+func buildListenerServers(handler http.Handler, addr, loopbackAddr string, tlsCfg *tls.Config, reservedAddr string, optionalFault func(error)) ([]*http.Server, []net.Listener, error) {
 	var servers []*http.Server
 	var listeners []net.Listener
 	addrs := []string{addr}
 	if loopbackAddr != "" && loopbackAddr != addr {
 		addrs = append(addrs, loopbackAddr)
 	}
-	for _, a := range addrs {
+	for i, a := range addrs {
 		ln, err := net.Listen("tcp", a)
-		if err != nil {
-			return nil, nil, err
+		if err != nil && i == 0 && tlsCfg == nil && reservedAddr != "" && a != reservedAddr && optionalFault != nil {
+			optionalFault(err)
+			ln, err = net.Listen("tcp", reservedAddr)
 		}
-		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP}
-		servers = append(servers, srv)
-		listeners = append(listeners, ln)
-	}
-	return servers, listeners, nil
-}
-
-func buildHTTPSServers(handler http.Handler, addr string, loopbackAddr string, tlsCfg *tls.Config) ([]*http.Server, []net.Listener, error) {
-	var servers []*http.Server
-	var listeners []net.Listener
-	addrs := []string{addr}
-	if loopbackAddr != "" && loopbackAddr != addr {
-		addrs = append(addrs, loopbackAddr)
-	}
-	for _, a := range addrs {
-		ln, err := net.Listen("tcp", a)
 		if err != nil {
+			if optionalFault != nil && (tlsCfg != nil || i > 0) {
+				optionalFault(err)
+				continue
+			}
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
 			return nil, nil, err
 		}
 		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP, TLSConfig: tlsCfg}

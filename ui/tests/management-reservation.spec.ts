@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 test("Interfaces explains immutable access and exposes guard faults", async ({ page }) => {
   let bootFault = "interfaces[0].addresses conflicts with reserved management path";
+  let recovery = "recovery pending: ruleset not applied";
+  let listenerFaults: string[] = [];
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const data: Record<string, unknown> = {
@@ -15,6 +17,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
         active: true, device: "eth7", local: "10.99.99.2/24", sources: ["10.99.99.10", "10.99.99.3"], port: 8080,
         guard: { active: true, faults: 1, lastFault: { reason: "source address removed" } },
         bootFault,
+        recovery, listenerFaults,
         rollbackFault: "rollback refused: interfaces conflicts with reserved management path",
       },
     };
@@ -31,11 +34,22 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   await expect(note.getByRole("status")).toContainText("Configuration apply paused");
   await expect(note.getByRole("status")).toContainText("Commit a safe configuration");
   await expect(note.getByRole("status")).toContainText("has not received");
+  await expect(note.getByRole("status")).toContainText("recovery pending: ruleset not applied");
+  await expect(note).not.toContainText("recovery: new transit dropped");
+  recovery = "recovery: new transit dropped";
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(note.getByRole("status")).toContainText("recovery: new transit dropped");
   await expect(note.getByRole("button")).toHaveCount(0);
   bootFault = "";
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(note.getByRole("status")).toHaveCount(0);
   await expect(note).toContainText("RangerDanger management access is reserved");
+  listenerFaults = ["https 192.0.2.250:8443: cannot assign requested address"];
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(note.getByRole("status")).toContainText("Optional listener boot faults");
+  await expect(note.getByRole("status")).toContainText("192.0.2.250:8443");
+  await expect(note.getByRole("status")).toContainText("Reserved HTTP management remains available");
+  await expect(note).not.toContainText("recovery: new transit dropped");
 });
 
 test("Interfaces omits the note when no reservation is configured", async ({ page }) => {

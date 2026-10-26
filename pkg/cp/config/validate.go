@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,14 +80,12 @@ func validateHostname(h string) error {
 }
 
 func validateMgmt(m MgmtConfig) error {
-	if m.ListenAddr != "" && len(m.ListenAddr) > 128 {
-		return fmt.Errorf("mgmt.listenAddr too long")
-	}
-	if m.HTTPListenAddr != "" && len(m.HTTPListenAddr) > 128 {
-		return fmt.Errorf("mgmt.httpListenAddr too long")
-	}
-	if m.HTTPSListenAddr != "" && len(m.HTTPSListenAddr) > 128 {
-		return fmt.Errorf("mgmt.httpsListenAddr too long")
+	for _, listener := range []struct{ field, addr string }{
+		{"mgmt.listenAddr", m.ListenAddr}, {"mgmt.httpListenAddr", m.HTTPListenAddr}, {"mgmt.httpsListenAddr", m.HTTPSListenAddr},
+	} {
+		if err := validateManagementListenerAddress(listener.field, listener.addr); err != nil {
+			return err
+		}
 	}
 	if m.TLSCertFile != "" && len(m.TLSCertFile) > 256 {
 		return fmt.Errorf("mgmt.tlsCertFile too long")
@@ -104,11 +103,35 @@ func validateMgmt(m MgmtConfig) error {
 }
 
 func validateSSH(s SSHConfig) error {
-	if s.ListenAddr != "" && len(s.ListenAddr) > 128 {
-		return fmt.Errorf("ssh.listenAddr too long")
+	if err := validateManagementListenerAddress("ssh.listenAddr", s.ListenAddr); err != nil {
+		return err
 	}
 	if s.AuthorizedKeysDir != "" && len(s.AuthorizedKeysDir) > 256 {
 		return fmt.Errorf("ssh.authorizedKeysDir too long")
+	}
+	return nil
+}
+
+func validateManagementListenerAddress(field, addr string) error {
+	if addr == "" {
+		return nil // unset uses the appliance default
+	}
+	if len(addr) > 128 {
+		return fmt.Errorf("%s too long", field)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	n, portErr := strconv.Atoi(port)
+	validHost := true
+	if strings.Contains(host, ":") {
+		_, parseErr := netip.ParseAddr(host)
+		validHost = parseErr == nil
+	} else {
+		validHost = strings.IndexFunc(host, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.')
+		}) == -1 && !strings.ContainsAny(addr, "[]")
+	}
+	if err != nil || portErr != nil || strings.ContainsAny(port, "+- ") || n < 1 || n > 65535 || !validHost {
+		return fmt.Errorf("%s must be host:port or :port with a numeric port in 1..65535", field)
 	}
 	return nil
 }

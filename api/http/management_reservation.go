@@ -14,7 +14,10 @@ import (
 // input. It reads the guard in the engine's network namespace.
 type ManagementGuardHealth func(context.Context) (netcfg.ManagementHealth, error)
 
-func managementReservationHandler(store config.Store, health ManagementGuardHealth) gin.HandlerFunc {
+// ManagementListenerFaults exposes boot-only optional listener failures.
+type ManagementListenerFaults func() []string
+
+func managementReservationHandler(store config.Store, health ManagementGuardHealth, engine EngineClient, listeners ManagementListenerFaults) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		r := config.ReservationForStore(store)
 		if r == nil {
@@ -52,9 +55,20 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 			internalError(c, err)
 			return
 		}
+		recovery := ""
+		if bootFault != "" {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
+			recovery = managementRecoveryStatus(ctx, store, engine)
+			cancel()
+		}
+		var listenerFaults []string
+		if listeners != nil {
+			listenerFaults = listeners()
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"bootFault": bootFault,
-			"active":    true, "device": r.Device, "local": r.Local.String(),
+			"recovery":  recovery, "listenerFaults": listenerFaults,
+			"active": true, "device": r.Device, "local": r.Local.String(),
 			"sources": sources, "port": r.Port, "guard": guard, "rollbackFault": fault,
 		})
 	}

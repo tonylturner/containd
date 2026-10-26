@@ -126,24 +126,46 @@ appliance defaults **in memory for this boot only**. The API still shows the
 stored values for diagnosis. Conflicting deployment environment listeners and
 engine binds remain fatal: the operator must fix the deployment.
 
-Initial service rendering and engine replay are blocked while the boot fault
-holds, without repeated apply attempts or warning spam. Staging is not recovery:
+Initial stored service rendering and normal engine replay are blocked while the
+boot fault holds. Instead, management pushes one minimal recovery dataplane
+configuration through the engine API: enforcement on, no capture interfaces, DPI,
+stored interfaces, routing, zones, rules, NAT or services, and default deny.
+Recovery is replayed once per engine boot; failures retry with capped backoff and
+unchanged errors are not repeatedly logged. Staging is not recovery:
 a validated commit or rollback clears the fault transactionally and resumes
 normal apply; factory reset also recovers. A later boot whose normalization
 resolves the conflict clears the persisted fault as well.
 
-**This is management recovery, not a fail-closed dataplane mode.** Before its
-first apply a fresh engine has no loaded rule snapshot and no compiled/applied
-nftables ruleset (`ruleset` is empty and `appliedAt` is the zero timestamp).
-Capture uses deployment startup settings (none by default); stored interfaces,
-routes, services, DPI and PCAP settings have not been replayed. The env-backed
-return-path pin and source-address guard are active independently. The compiled
-INPUT allow exists only after a ruleset apply, not from the guard alone. In a
-fresh container namespace there is no containd firewall table (Docker DNS NAT
-chains may still exist): there is no student firewall/default-deny enforcement.
-Existing kernel rules or a still-running split engine retain their prior state; management does not claim they have been
-reset or are safe. The reserved HTTP access gate and normal authentication still
-serve recovery. Do not infer traffic isolation from a healthy management guard.
+**Recovery: new transit dropped.** Once the engine reports the recovery ruleset
+applied, all new forwarded connections are denied. Existing/related connections
+remain accepted by the ordinary compiler. INPUT defaults to drop with loopback,
+established/related and the env-backed reserved HTTP rule; the compiler's existing
+ICMP and TCP 8081 accepts remain (roadmap 1.1). This does not promise zero traffic
+before the first successful apply or enforcement if the kernel/engine cannot
+apply rules. No stored runtime configuration is replayed. Existing interfaces,
+routes or services in a still-running split engine are not torn down: recovery
+replaces enforcement, not the underlying network/service ownership state.
+
+The reservation API's `recovery` status is verified against the engine's actual
+ruleset, apply timestamp and error, not inferred from guard health or a successful
+POST. It reports pending/failed truthfully when unreachable, not yet applied, or
+rejected. Interfaces shows the same status. A safe promotion replaces recovery
+with the normal running configuration through the serialized apply path.
+
+With a reservation, only HTTP serving the reserved local address/port is
+mandatory. Failed optional HTTPS, SSH and convenience loopback listeners are
+logged and exposed as boot-only `listenerFaults`; they do not prevent startup or
+block applying otherwise safe policy. If a wildcard HTTP socket is unavailable
+because another address is occupied, management independently binds the reserved
+address and reports the failed broader listener. A failure to bind that exact
+endpoint is fatal. Environment conflicts with the reservation remain fatal.
+Without a reservation HTTP/HTTPS bind failures retain their previous fatal
+behavior (SSH remains best effort). Correct stored listener settings and restart
+to restore the optional listener: an ordinary commit does not rebind sockets.
+Management HTTP, legacy HTTP, HTTPS and SSH listener values are structurally
+validated at staging/commit/import: empty (default), `host:port` or `:port`, with
+numeric ports 1–65535. Validation does not require the host address to be local;
+bind availability is a runtime check.
 
 ## Faults and visibility
 
@@ -190,6 +212,7 @@ Run `bash scripts/smoke-mgmt-reservation.sh` from the worktree root; see
 `test/mgmt-reservation/README.md`. This separate Compose project publishes no
 ports and proves health/login, an all-access-off commit, exact-source-only
 reachability, substrate rejection, deterministic NIC renumbering, residual-conflict
-boot/no-apply, and safe commit/factory-reset recovery. It never connects to
+boot/fail-closed transit enforcement, safe commit/factory-reset recovery, and
+non-fatal optional HTTPS bind failure. It never connects to
 or changes the RangerDanger stack. Guard history is process-local; the last
 refused rollback survives store reopen.

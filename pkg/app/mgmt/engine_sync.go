@@ -28,6 +28,8 @@ type engineSync struct {
 
 	applied    bool
 	lastBootID string
+	recovery   bool
+	lastError  string
 }
 
 // startEngineSync returns a stop-and-join function so Run never closes its
@@ -42,7 +44,7 @@ func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store confi
 		store:  store,
 		health: health,
 		apply: func(ctx context.Context) ([]string, error) {
-			return httpapi.ApplyRunningConfig(ctx, store, engine, services)
+			return httpapi.ApplyBootConfig(ctx, store, engine, services)
 		},
 		logger: logger,
 	}
@@ -97,16 +99,18 @@ func (s *engineSync) run(ctx context.Context) {
 	}
 }
 
-// poll controls retry pacing: boot faults wait quietly at the normal interval
-// without contacting the engine. Otherwise it reports health reachability, not
-// apply success; health failures use the capped backoff.
+// poll replays once per engine boot and mode transition. Failed attempts retry
+// with capped backoff and log only changed errors, not a warning every tick.
 func (s *engineSync) poll(ctx context.Context) bool {
-	if err := config.CheckManagementBootFault(ctx, s.store); err != nil {
+	err := config.CheckManagementBootFault(ctx, s.store)
+	recovery := errors.Is(err, config.ErrManagementBootFault)
+	if err != nil && !recovery {
+		s.logError(err)
+		return false
+	}
+	if recovery != s.recovery {
 		s.applied = false
-		if !errors.Is(err, config.ErrManagementBootFault) {
-			s.logger.Warnf("engine sync boot fault check: %v", err)
-		}
-		return true
+		s.recovery = recovery
 	}
 	healthCtx, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
 	health, err := s.health.RuntimeHealth(healthCtx)
@@ -128,11 +132,19 @@ func (s *engineSync) poll(ctx context.Context) bool {
 		s.logger.Warnf("engine sync: %s", warning)
 	}
 	if err != nil {
-		s.logger.Warnf("failed to replay running config to engine: %v", err)
-		return true
+		s.logError(err)
+		return false
 	}
+	s.lastError = ""
 	s.applied = true
 	s.lastBootID = health.BootID
-	s.logger.Infof("replayed running config to engine (bootId=%q)", health.BootID)
+	s.logger.Infof("replayed config to engine (bootId=%q recovery=%v)", health.BootID, recovery)
 	return true
+}
+
+func (s *engineSync) logError(err error) {
+	if s.lastError != err.Error() {
+		s.logger.Warnf("failed to replay config to engine: %v", err)
+		s.lastError = err.Error()
+	}
 }
