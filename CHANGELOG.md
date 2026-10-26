@@ -562,6 +562,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine detected, and `DELETE /api/v1/anomalies` clears them. Before,
   management never reached the engine's anomaly detector: the list was always
   empty and a clear did nothing.
+- The learn mode API reads the engine's learner: `GET /api/v1/learn/profiles`
+  lists learned profiles, `POST /api/v1/learn/generate` and
+  `POST /api/v1/learn/apply` use rules generated from them, and
+  `DELETE /api/v1/learn` clears them. Before, management never reached the
+  engine's learner: profiles and generated rules were always empty.
 - Discovered ICS assets, their peers and station addresses have fixed caps
   with counted overflow.
 - Complete the management OpenAPI route reference and guard it against the
