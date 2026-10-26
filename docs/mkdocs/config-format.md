@@ -209,7 +209,17 @@ Notes:
     src/dst CIDR selection, table IDs 1–252). Priority 0 selects automatic priority.
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
-- `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
+- `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
+  `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
+  generate matches; custom zone names are supported.
+- Each enabled `firewall.nat.portForwards` entry translates traffic arriving in
+  its `ingressZone` to `destIp`/`destPort`; disabled entries generate no rules.
+  The ingress zone must have bound interfaces. When source NAT is enabled,
+  forwarded DNAT traffic is masqueraded only for that entry's translated target,
+  using the route-selected egress interface rather than an assumed `lan` zone.
+  The destination sees the firewall's egress address, ensuring a return path.
+  Port-forward enablement is independent of `firewall.nat.enabled`; disabling
+  source NAT leaves DNAT enabled and requires a routed return path.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
