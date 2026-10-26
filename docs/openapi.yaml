@@ -316,7 +316,10 @@ components:
               name: { type: string, example: tcp }
               port: { type: string, example: "2404", description: Single port or range "1000-2000" }
         identities: { type: array, items: { type: string } }
-        ics: { $ref: "#/components/schemas/ICSPredicate" }
+        ics:
+          allOf:
+            - $ref: "#/components/schemas/ICSPredicate"
+          description: Always present in serialized rules; `{}` denotes no ICS predicate.
         action: { type: string, enum: [ALLOW, DENY] }
         log: { type: boolean }
 

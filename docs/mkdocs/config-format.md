@@ -165,6 +165,8 @@ Canonical JSON configuration for export/import and persistent state.
 ```
 
 Notes:
+- Serialized firewall rules always include `ics`; `{}` means the rule has no
+  ICS predicate. Input rules may omit this field.
 - `zones` must be unique.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
 - `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).

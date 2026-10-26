@@ -4,61 +4,11 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
 )
-
-func TestICSPredicateIsZeroEveryField(t *testing.T) {
-	assertJSONZero := func(t *testing.T, p ICSPredicate) {
-		t.Helper()
-		body, err := p.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if p.IsZero() != (string(body) == "{}") {
-			t.Fatalf("IsZero() = %v, MarshalJSON() = %s", p.IsZero(), body)
-		}
-	}
-	if !(ICSPredicate{}).IsZero() {
-		t.Fatal("zero predicate is not zero")
-	}
-	assertJSONZero(t, ICSPredicate{})
-	typ := reflect.TypeFor[ICSPredicate]()
-	for i := range typ.NumField() {
-		t.Run(typ.Field(i).Name, func(t *testing.T) {
-			var p ICSPredicate
-			f := reflect.ValueOf(&p).Elem().Field(i)
-			switch f.Kind() {
-			case reflect.String:
-				f.SetString("set")
-			case reflect.Bool:
-				f.SetBool(true)
-			case reflect.Pointer:
-				// A pointer to zero is still a restriction (unit ID 0).
-				f.Set(reflect.New(f.Type().Elem()))
-			case reflect.Slice:
-				f.Set(reflect.MakeSlice(f.Type(), 1, 1))
-			default:
-				t.Fatalf("add a non-zero test value for %s", f.Type())
-			}
-			if p.IsZero() {
-				t.Fatal("IsZero ignores this field")
-			}
-			assertJSONZero(t, p)
-			// MarshalJSON omits empty slices, whether nil or non-nil.
-			if f.Kind() == reflect.Slice {
-				f.Set(reflect.MakeSlice(f.Type(), 0, 0))
-				if !p.IsZero() {
-					t.Fatal("empty slice must be zero")
-				}
-				assertJSONZero(t, p)
-			}
-			f.SetZero()
-			assertJSONZero(t, p)
-		})
-	}
-}
 
 func TestRuleICSJSON(t *testing.T) {
 	for _, tc := range []struct {
@@ -66,16 +16,16 @@ func TestRuleICSJSON(t *testing.T) {
 		ics  ICSPredicate
 		want string
 	}{
-		{"zero", ICSPredicate{}, `{"id":"r","action":"ALLOW"}`},
+		{"zero", ICSPredicate{}, `{"id":"r","ics":{},"action":"ALLOW"}`},
 		{"iec104", ICSPredicate{Protocol: "iec104", TypeIDs: []int{45}},
 			`{"id":"r","ics":{"protocol":"iec104","typeIds":[45]},"action":"ALLOW"}`},
 		{"unit zero", ICSPredicate{Protocol: "modbus", UnitID: new(uint8)},
 			`{"id":"r","ics":{"protocol":"modbus","unitId":0},"action":"ALLOW"}`},
 		{"non-nil empty slice", ICSPredicate{Addresses: []string{}},
-			`{"id":"r","action":"ALLOW"}`},
+			`{"id":"r","ics":{},"action":"ALLOW"}`},
 		{"all empty slices", ICSPredicate{FunctionCode: []uint8{}, Addresses: []string{},
 			ObjectClasses: []uint16{}, TypeIDs: []int{}, Classes: []string{}, CA: []uint16{}, IOA: []IOARange{}},
-			`{"id":"r","action":"ALLOW"}`},
+			`{"id":"r","ics":{},"action":"ALLOW"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := json.Marshal(Rule{ID: "r", Action: "ALLOW", ICS: tc.ics})
@@ -83,6 +33,36 @@ func TestRuleICSJSON(t *testing.T) {
 				t.Fatalf("Marshal = %s, %v; want %s", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestRuleICSPredicateRoundTripUnchanged(t *testing.T) {
+	const input = `{"id":"r","ics":{"protocol":"iec104","typeIds":[45],"classes":["control"],"ca":[1],"ioa":[{"start":12,"end":34}],"direction":"response","mode":"enforce"},"action":"ALLOW"}`
+	var rule Rule
+	if err := json.Unmarshal([]byte(input), &rule); err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonicalInput, canonicalGot any
+	if err := json.Unmarshal([]byte(input), &canonicalInput); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got, &canonicalGot); err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(canonicalInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := json.Marshal(canonicalGot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(canonical, want) {
+		t.Fatalf("rule changed on round trip:\n got %s\nwant %s", canonical, want)
 	}
 }
 
