@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { normalizeManagementRecovery } from "../lib/api-console";
+import { normalizeManagementRecovery } from "../lib/api-health";
 
 // GET /health reports boot recovery (managementRecovery) with or without a
 // management reservation. The shell shows it in amber on every page while it

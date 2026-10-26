@@ -1,21 +1,3 @@
-/** Runtime IEC 104 enforcement health. `active` describes the loaded
- * runtime envelope, not the saved config. */
-export type IEC104EnforcementHealth = {
-  active: boolean;
-  healthy: boolean;
-  reason: string;
-};
-
-export type HealthResponse = {
-  status: string;
-  component: string;
-  build?: string;
-  time?: string;
-  iec104Enforcement?: IEC104EnforcementHealth;
-  icsEnforcement?: ICSEnforcementHealth;
-  managementRecovery?: ManagementRecoveryHealth;
-};
-
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
 export type ApiResult<T> =
   | { ok: true; data: T; warning?: string }
@@ -91,7 +73,12 @@ export type {
   ICSEnforcementHealth,
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
-export type { ManagementRecoveryHealth } from "./api-console";
+export { fetchHealth } from "./api-health";
+export type {
+  HealthResponse,
+  IEC104EnforcementHealth,
+  ManagementRecoveryHealth,
+} from "./api-health";
 export type { IEC104Inventory } from "./api-inventory";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
@@ -109,16 +96,8 @@ import { authAPI } from "./api-auth";
 import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
-import { fetchWithSession } from "./api-core";
-import {
-  normalizeManagementRecovery,
-  type ManagementRecoveryHealth,
-} from "./api-console";
 import type { FirewallRule } from "./api-firewall";
-import {
-  normalizeICSEnforcementHealth,
-  type ICSEnforcementHealth,
-} from "./api-ics-coverage";
+import type { HealthResponse } from "./api-health";
 
 export type DPIExclusion = {
   value: string;
@@ -883,30 +862,6 @@ export type ConfigBackup = {
   size: number;
   idsRuleCount?: number;
 };
-
-export async function fetchHealth(
-  signal?: AbortSignal,
-): Promise<HealthResponse | null> {
-  try {
-    const res = await fetchWithSession(
-      "/api/v1/health",
-      {
-        cache: "no-store",
-      },
-      signal,
-    );
-    if (!res.ok) return null;
-    const body = (await res.json()) as HealthResponse;
-    return {
-      ...body,
-      icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement),
-      managementRecovery: normalizeManagementRecovery(body?.managementRecovery),
-    };
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") throw e;
-    return null;
-  }
-}
 
 export const api = {
   ...authAPI,
