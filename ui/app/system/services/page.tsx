@@ -21,27 +21,15 @@ export default function ServicesOverviewPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const reportedSeries = useCallback(
-    (svc: string): number[] | null => {
+  // A card charts only the per-minute series the API reports; without one it
+  // shows no chart.
+  const spark = useCallback(
+    (svc: string, title: string, color: string, background: string) => {
       const s = (status as any)?.[svc];
-      return Array.isArray(s?.sparkline) && s.sparkline.length ? (s.sparkline as number[]) : null;
+      if (!Array.isArray(s?.sparkline) || s.sparkline.length === 0) return undefined;
+      return { values: s.sparkline as number[], title, color, background };
     },
     [status],
-  );
-  // Antivirus shows only a reported series, never a fabricated trend.
-  const avSeries = reportedSeries("av");
-
-  const series = useCallback(
-    (svc: string, fallback: number[]) => {
-      const reported = reportedSeries(svc);
-      if (reported) return reported;
-      const s = (status as any)?.[svc];
-      if (typeof s?.count === "number") {
-        return [s.count, Math.max(1, Math.round((s.count as number) * 1.1)), s.count];
-      }
-      return fallback;
-    },
-    [status, reportedSeries],
   );
 
   const rate = useCallback(
@@ -172,12 +160,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Syslog"
           loading={loading}
-          spark={{
-            values: series("syslog", [2, 4, (status as any)?.syslog?.configured_forwarders ?? 3, 6, 5, 7]),
-            color: "var(--primary)",
-            background: "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
-            title: "Forwarding volume (simulated)",
-          }}
+          spark={spark(
+            "syslog",
+            "Syslog events per minute",
+            "var(--primary)",
+            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
+          )}
           rate={rate("syslog")}
           errorsRate={errRate("syslog")}
         >
@@ -198,12 +186,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Proxies"
           loading={loading}
-          spark={{
-            values: series("proxy", [5, 7, (status as any)?.proxy?.envoy_running ? 9 : 6, 8, 10, 7]),
-            color: "var(--purple)",
-            background: "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
-            title: "Proxy request volume",
-          }}
+          spark={spark(
+            "proxy",
+            "Proxy events per minute",
+            "var(--purple)",
+            "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
+          )}
           rate={rate("proxy")}
           errorsRate={errRate("proxy")}
         >
@@ -228,15 +216,19 @@ export default function ServicesOverviewPage() {
                 Rate: {(rate("proxy") ?? 0).toFixed(1)} /min
               </>
             )}
-            <br />
-            Envoy rate: {typeof (status as any)?.envoy?.rate_per_min === "number" ? (status as any).envoy.rate_per_min.toFixed(1) : "0.0"} /min
-            {typeof (status as any)?.envoy?.errors_rate_per_min === "number" && (
-              <> · errors {(status as any).envoy.errors_rate_per_min.toFixed(1)}/min</>
+            {rate("envoy") !== null && (
+              <>
+                <br />
+                Envoy rate: {(rate("envoy") ?? 0).toFixed(1)} /min
+                {errRate("envoy") !== null && <> · errors {(errRate("envoy") ?? 0).toFixed(1)}/min</>}
+              </>
             )}
-            <br />
-            Nginx rate: {typeof (status as any)?.nginx?.rate_per_min === "number" ? (status as any).nginx.rate_per_min.toFixed(1) : "0.0"} /min
-            {typeof (status as any)?.nginx?.errors_rate_per_min === "number" && (
-              <> · errors {(status as any).nginx.errors_rate_per_min.toFixed(1)}/min</>
+            {rate("nginx") !== null && (
+              <>
+                <br />
+                Nginx rate: {(rate("nginx") ?? 0).toFixed(1)} /min
+                {errRate("nginx") !== null && <> · errors {(errRate("nginx") ?? 0).toFixed(1)}/min</>}
+              </>
             )}
             <br />
             Telemetry: access logs when enabled.
@@ -249,12 +241,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="DNS"
           loading={loading}
-          spark={{
-            values: series("dns", [4, 6, (status as any)?.dns?.running ? 9 : 5, 7, 10, 8]),
-            color: "var(--primary)",
-            background: "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))",
-            title: "Resolver queries (simulated)",
-          }}
+          spark={spark(
+            "dns",
+            "DNS events per minute",
+            "var(--primary)",
+            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))",
+          )}
           rate={rate("dns")}
           errorsRate={errRate("dns")}
         >
@@ -283,12 +275,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="NTP"
           loading={loading}
-          spark={{
-            values: series("ntp", [2, 3, (status as any)?.ntp?.running ? 5 : 3, 6, 5, 7]),
-            color: "var(--teal)",
-            background: "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(37,99,235,0.04))",
-            title: "Sync stability (simulated)",
-          }}
+          spark={spark(
+            "ntp",
+            "NTP events per minute",
+            "var(--teal)",
+            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(37,99,235,0.04))",
+          )}
           rate={rate("ntp")}
           errorsRate={errRate("ntp")}
         >
@@ -317,12 +309,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="DHCP"
           loading={loading}
-          spark={{
-            values: series("dhcp", [3, 5, (status as any)?.dhcp?.listen_ifaces ?? 4, 6, 8, 7]),
-            color: "var(--teal)",
-            background: "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))",
-            title: "Lease churn (simulated)",
-          }}
+          spark={spark(
+            "dhcp",
+            "DHCP events per minute",
+            "var(--teal)",
+            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))",
+          )}
           rate={rate("dhcp")}
           errorsRate={errRate("dhcp")}
         >
@@ -349,12 +341,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="VPN"
           loading={loading}
-          spark={{
-            values: series("vpn", [3, 4, (status as any)?.vpn?.wg_peers ?? 2, 6, 8, 7]),
-            color: "var(--primary)",
-            background: "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
-            title: "Tunnel activity (simulated)",
-          }}
+          spark={spark(
+            "vpn",
+            "VPN events per minute",
+            "var(--primary)",
+            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
+          )}
           rate={rate("vpn")}
           errorsRate={errRate("vpn")}
         >
@@ -386,16 +378,12 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
-          spark={
-            avSeries
-              ? {
-                  values: avSeries,
-                  color: "var(--purple)",
-                  background: "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))",
-                  title: "AV detections",
-                }
-              : undefined
-          }
+          spark={spark(
+            "av",
+            "AV scans per minute",
+            "var(--purple)",
+            "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))",
+          )}
           rate={rate("av")}
           errorsRate={errRate("av")}
         >
@@ -403,30 +391,37 @@ export default function ServicesOverviewPage() {
             <span>Async AV scanning</span>
             <InfoTip label="Optional ICAP or embedded ClamAV scanning without inline latency spikes." />
           </div>
-          <p className="mt-2 text-xs text-(--text-muted)">
-            Mode: {(status?.av as any)?.mode ?? "icap"}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
-            <br />
-            Block TTL: {(status?.av as any)?.block_ttl ?? "600"}s{" "}
-            {(status?.av as any)?.freshclam_last && `freshclam ${ (status?.av as any)?.freshclam_last }`}
-            {(status?.av as any)?.clamav_custom_defs && (
-              <>
-                <br />
-                Custom defs: {(status?.av as any)?.clamav_custom_defs}
-              </>
-            )}
-            {(status?.av as any)?.last_render && (
-              <>
-                <br />
-                Last update: {(status?.av as any)?.last_render}
-              </>
-            )}
-            {rate("av") !== null && (
-              <>
-                <br />
-                Rate: {(rate("av") ?? 0).toFixed(1)} /min
-              </>
-            )}
-          </p>
+          {(status?.av as any)?.available === false ? (
+            <p className="mt-2 text-xs text-(--text-muted)">
+              Engine status unavailable: {(status?.av as any)?.error ?? "no reason reported"}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-(--text-muted)">
+              Mode: {(status?.av as any)?.mode}, Enabled: {(status?.av as any)?.enabled ? "yes" : "no"}
+              <br />
+              {/* The engine blocks for 600 seconds when no TTL is set. */}
+              Block TTL: {(status?.av as any)?.block_ttl || 600}s{" "}
+              {(status?.av as any)?.freshclam_last && `freshclam ${ (status?.av as any)?.freshclam_last }`}
+              {(status?.av as any)?.clamav_custom_defs && (
+                <>
+                  <br />
+                  Custom defs: {(status?.av as any)?.clamav_custom_defs}
+                </>
+              )}
+              {(status?.av as any)?.last_render && (
+                <>
+                  <br />
+                  Last update: {(status?.av as any)?.last_render}
+                </>
+              )}
+              {rate("av") !== null && (
+                <>
+                  <br />
+                  Rate: {(rate("av") ?? 0).toFixed(1)} /min
+                </>
+              )}
+            </p>
+          )}
           <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
           </Link>
