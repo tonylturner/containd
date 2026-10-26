@@ -1,40 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const aborts = Object.fromEntries(
-  [
-    "deny",
-    "timeout",
-    "bound",
-    "midstream",
-    "fail_close",
-    "injector",
-    "stream",
-    "framing",
-    "transport",
-    "policy",
-    "queue",
-    "unhealthy",
-  ].map((reason, i) => [reason, i]),
-);
-const pressure = {
-  heldPackets: 12,
-  heldBytes: 8192,
-  oldestPendingSeconds: 0.625,
-  activeSessions: 7,
-  trackedSessions: 9,
-  limits: {
-    heldPackets: 256,
-    heldPacketsPerSession: 32,
-    heldBytesPerSession: 65536,
-    pendingSeconds: 1,
-    sessions: 4096,
-    resetWorkerJobs: 256,
-  },
-  aborts,
-  resetWorkerRejections: 3,
-  verdictFailures: 2,
-  injectorFailures: 1,
-};
+import { pressure } from "./fixtures/iec104-pressure";
 
 for (const unavailable of [false, true]) {
   test(
