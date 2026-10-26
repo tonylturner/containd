@@ -5,9 +5,7 @@ package engineapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
@@ -16,24 +14,12 @@ import (
 // ListAnomalies fetches recent protocol anomalies, newest first, from the
 // engine's anomaly detector.
 func (c *HTTPClient) ListAnomalies(ctx context.Context, limit int) ([]anomaly.Anomaly, error) {
-	u := c.BaseURL + "/internal/anomalies"
+	path := "/internal/anomalies"
 	if limit > 0 {
-		u += "?limit=" + strconv.Itoa(limit)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, engineStatusError(resp, "engine anomalies status")
+		path += "?limit=" + strconv.Itoa(limit)
 	}
 	var out []anomaly.Anomaly
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := c.getJSON(ctx, path, "engine anomalies status", &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -45,17 +31,5 @@ func (c *HTTPClient) ListAnomalies(ctx context.Context, limit int) ([]anomaly.An
 // ClearAnomalies resets the engine's anomaly detector, including its
 // recorded anomalies.
 func (c *HTTPClient) ClearAnomalies(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/internal/anomalies", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return engineStatusError(resp, "engine anomalies clear status")
-	}
-	return nil
+	return c.deleteOK(ctx, "/internal/anomalies", "engine anomalies clear status")
 }

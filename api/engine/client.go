@@ -39,6 +39,42 @@ func engineStatusError(resp *http.Response, prefix string) error {
 	return fmt.Errorf("%s %d: %s", prefix, resp.StatusCode, detail)
 }
 
+// getJSON decodes the 200 response of a GET to path into out. Any other
+// status returns an error that starts with statusPrefix.
+func (c *HTTPClient) getJSON(ctx context.Context, path, statusPrefix string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return engineStatusError(resp, statusPrefix)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// deleteOK sends a DELETE to path and requires a 200 response. Any other
+// status returns an error that starts with statusPrefix.
+func (c *HTTPClient) deleteOK(ctx context.Context, path, statusPrefix string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return engineStatusError(resp, statusPrefix)
+	}
+	return nil
+}
+
 func (c *HTTPClient) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if c.BaseURL == "" {
 		return fmt.Errorf("engine BaseURL is empty")

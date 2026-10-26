@@ -4,11 +4,13 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/learn"
@@ -144,6 +146,10 @@ func addSignatureHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		if err := sc.AddSignature(c.Request.Context(), sig); err != nil {
+			if errors.Is(err, engineclient.ErrSignatureExists) {
+				apiError(c, http.StatusConflict, "signature already exists")
+				return
+			}
 			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}

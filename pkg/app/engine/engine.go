@@ -220,6 +220,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/learn", learnHandler(dpEngine))
 	mux.HandleFunc("/internal/learn/profiles", learnProfilesHandler(dpEngine))
 	mux.HandleFunc("/internal/learn/rules", learnRulesHandler(dpEngine))
+	mux.HandleFunc("/internal/signatures", signaturesHandler(dpEngine))
+	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/firewall/counters", ruleCountersHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))

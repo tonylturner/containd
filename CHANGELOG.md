@@ -567,6 +567,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/v1/learn/apply` use rules generated from them, and
   `DELETE /api/v1/learn` clears them. Before, management never reached the
   engine's learner: profiles and generated rules were always empty.
+- The signatures API reads and changes the engine's signature set:
+  `GET /api/v1/signatures` lists the loaded signatures, `POST` adds a live
+  signature until the engine restarts, `DELETE /api/v1/signatures/{id}` removes
+  one and `GET /api/v1/signatures/matches` lists recent matches. Adding an ID
+  that is already loaded returns `409`. Before, management never reached the
+  engine: the lists were always empty and adds and deletes failed.
 - Discovered ICS assets, their peers and station addresses have fixed caps
   with counted overflow.
 - Complete the management OpenAPI route reference and guard it against the

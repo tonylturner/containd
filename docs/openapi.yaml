@@ -3503,6 +3503,7 @@ paths:
               schema: {type: array, items: {$ref: '#/components/schemas/SignaturesSignature'}}
     post:
       summary: Add live custom signature (admin)
+      description: The signature is active until the engine restarts. Signature IDs are unique.
       tags: [Signatures]
       requestBody:
         required: true
@@ -3516,6 +3517,8 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: Signature added, content: {application/json: {schema: {$ref: '#/components/schemas/SignaturesSignature'}}}}
+        "400": {description: Invalid signature, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "409": {description: A signature with this ID is already loaded, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /signatures/{id}:
     delete:

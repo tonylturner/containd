@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 )
 
@@ -23,6 +24,11 @@ func (m *signatureMockEngine) ListSignatures(context.Context) ([]signatures.Sign
 	return m.added, nil
 }
 func (m *signatureMockEngine) AddSignature(_ context.Context, sig signatures.Signature) error {
+	for _, have := range m.added {
+		if have.ID == sig.ID {
+			return engineclient.ErrSignatureExists
+		}
+	}
 	m.added = append(m.added, sig)
 	return nil
 }
@@ -53,5 +59,23 @@ func TestAddSignatureValidatesThreshold(t *testing.T) {
 	}
 	if len(eng.added) != 1 || eng.added[0].Threshold.WindowSeconds != 60 {
 		t.Fatalf("added = %+v", eng.added)
+	}
+}
+
+func TestAddSignatureDuplicateIDConflicts(t *testing.T) {
+	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
+	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	const body = `{"id":"DUP","conditions":[{"field":"kind","op":"equals","value":"exception"}]}`
+	for i, want := range []int{http.StatusOK, http.StatusConflict} {
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/signatures", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		s.ServeHTTP(rec, req)
+		if rec.Code != want || (want == http.StatusConflict && !strings.Contains(rec.Body.String(), "signature already exists")) {
+			t.Fatalf("POST %d = %d %s, want %d", i+1, rec.Code, rec.Body.String(), want)
+		}
+	}
+	if len(eng.added) != 1 {
+		t.Fatalf("added = %+v, want one signature", eng.added)
 	}
 }
