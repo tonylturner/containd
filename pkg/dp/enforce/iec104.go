@@ -18,9 +18,10 @@ import (
 const iec104Port = 2404
 
 // IEC104EnvelopeChain is the regular chain every IEC104 envelope steering
-// rule jumps to. It holds one rule: the marked queue verdict while the
-// engine owns its queue, and drop otherwise. Switching
-// replaces that one rule in a single nft transaction, so the ruleset never
+// rule jumps to. While the engine owns its queue it queues every packet
+// with EnvelopeMark, and HandshakeMark as the generic ICS queue does
+// (queueRules); otherwise it holds one rule, drop. Switching flushes and
+// refills the chain in a single nft transaction, so the ruleset never
 // passes through a state where envelope traffic is neither queued to the
 // engine nor dropped, and no other rule changes.
 const IEC104EnvelopeChain = "iec104_envelope"
@@ -72,32 +73,37 @@ func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot,
 	return nil
 }
 
-// iec104EnvelopeVerdict is the one rule of IEC104EnvelopeChain: the marked
-// queue verdict when open, drop when closed.
-func (c *Compiler) iec104EnvelopeVerdict(open bool) string {
+// iec104EnvelopeRules are the rules of IEC104EnvelopeChain: the marked
+// queue rules when open, drop when closed.
+func (c *Compiler) iec104EnvelopeRules(open bool) []string {
 	if !open {
-		return "drop"
+		return []string{"drop"}
 	}
-	return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
-		^QueueMarkMask, EnvelopeMark, c.QueueID)
+	return c.queueRules(EnvelopeMark)
 }
 
 // writeIEC104EnvelopeChain emits IEC104EnvelopeChain in the state of
 // c.IEC104EnvelopeOpen.
 func (c *Compiler) writeIEC104EnvelopeChain(buf *bytes.Buffer) {
 	buf.WriteString("  chain " + IEC104EnvelopeChain + " {\n")
-	buf.WriteString("    " + c.iec104EnvelopeVerdict(c.IEC104EnvelopeOpen) + ";\n")
+	for _, rule := range c.iec104EnvelopeRules(c.IEC104EnvelopeOpen) {
+		buf.WriteString("    " + rule + ";\n")
+	}
 	buf.WriteString("  }\n")
 }
 
 // IEC104EnvelopeSwitch returns the nft script that sets the envelope state
-// of an installed ruleset: one transaction that replaces the single rule of
-// IEC104EnvelopeChain. Apply it only to a ruleset compiled for a snapshot
-// that SteersIEC104.
+// of an installed ruleset: one transaction that flushes IEC104EnvelopeChain
+// and adds the rules of the state. Apply it only to a ruleset compiled for
+// a snapshot that SteersIEC104.
 func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
 	table := c.policyTable()
-	return fmt.Sprintf("flush chain inet %s %s\nadd rule inet %s %s %s\n",
-		table, IEC104EnvelopeChain, table, IEC104EnvelopeChain, c.iec104EnvelopeVerdict(open))
+	var b strings.Builder
+	fmt.Fprintf(&b, "flush chain inet %s %s\n", table, IEC104EnvelopeChain)
+	for _, rule := range c.iec104EnvelopeRules(open) {
+		fmt.Fprintf(&b, "add rule inet %s %s %s\n", table, IEC104EnvelopeChain, rule)
+	}
+	return b.String()
 }
 
 // compileIEC104Steering returns the client-to-server and server-to-client

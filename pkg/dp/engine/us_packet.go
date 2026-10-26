@@ -40,8 +40,8 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // and installs the existing dynamic flow block once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow. An
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
-// error, a SYN that would resynchronize its stream, a stream picked up
-// mid-connection, or a decoder panic the same way (failClosedRule).
+// error, a stream picked up mid-connection, or a decoder panic the same
+// way (failClosedRule).
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	parsed := dpi.ParsedPacket{
@@ -118,7 +118,12 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 		return e.stillDenied(pkt.Token, state, &parsed)
 	}
 	if scope != nil && isStreamFailure(res) {
-		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedReason(res.Err), res.Proto, res.Err)
+		reason := failClosedReason(res.Err)
+		denied := e.failClosed(pkt.Token, state, &parsed, scope, reason, res.Proto, res.Err)
+		if reason == failClosedMidStream && !res.Failed {
+			e.closePickedUp(pkt, state)
+		}
+		return denied
 	}
 	return acceptDecision
 }

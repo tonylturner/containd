@@ -185,6 +185,7 @@ func (h *iecHarness) pkt(fromClient bool, flags capture.TCPFlags, seq, ack uint3
 	} else {
 		p.SrcIP, p.DstIP, p.SrcPort, p.DstPort = h.server, h.client, iec104Port, h.cport
 	}
+	markHandshake(&p)
 	return p
 }
 

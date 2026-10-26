@@ -71,7 +71,8 @@ func TestQueueMarks(t *testing.T) {
 		{EnvelopeMark, true, false},
 		{HandshakeMark, false, true},
 		{HandshakeMark | 0x5, false, true},
-		{EnvelopeMark | HandshakeMark, false, false},
+		{EnvelopeMark | HandshakeMark, true, true},
+		{EnvelopeMark | HandshakeMark | 0x5, true, true},
 		{0x00ffffff, false, false},
 	} {
 		if EnvelopeMarked(tc.mark) != tc.envelope || HandshakeMarked(tc.mark) != tc.handshake {

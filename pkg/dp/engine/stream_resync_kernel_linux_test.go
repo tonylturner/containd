@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -48,9 +49,10 @@ func TestStreamResyncKernelOutOfWindowRST(t *testing.T) {
 }
 
 // TestStreamResyncKernelRestartPickup restarts the engine under an open
-// connection. The connection's next read is a mid-stream pickup and gets
-// no answer; a new connection from the same client address is not
-// blocked and its read is answered.
+// connection. The connection's next read is a mid-stream pickup: it never
+// reaches the server, and the engine resets the connection at both
+// endpoints at once. The client then reconnects from the same source port
+// and its read is answered.
 func TestStreamResyncKernelRestartPickup(t *testing.T) {
 	ctx := newFirstCommandLab(t)
 	srv := startModbusRecorder(t)
@@ -61,21 +63,19 @@ func TestStreamResyncKernelRestartPickup(t *testing.T) {
 	c.read()
 	restartFirstCommandEngine(ctx, t, e, nil)
 
+	start := time.Now()
 	c.write(c.next(3, 0, 2))
-	c.expectSilence()
-	var conn net.Conn
-	err := inNetns(fcClientNS, func() (err error) {
-		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(src)}, Timeout: fcReplyWait}
-		conn, err = d.DialContext(ctx, "tcp", net.JoinHostPort(fcServerIP, "502"))
-		return err
-	})
-	if err != nil {
-		t.Fatalf("reconnect from %s: %v", src, err)
+	c.expectReset()
+	t.Logf("picked-up connection reset after %v", time.Since(start))
+	if ends := srv.ended(t, src, 1); !errors.Is(ends[0], syscall.ECONNRESET) {
+		t.Fatalf("server connection ended with %v, want a reset", ends[0])
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	next := &fcClient{t: t, src: src, conn: conn.(*net.TCPConn), tid: 50}
+	port := c.localPort()
+	_ = c.conn.Close()
+	next, took := dialFrom(ctx, t, src, port, 502)
+	t.Logf("reconnect from %s:%d took %v", src, port, took)
 	next.read()
-	if fcs, _, _ := srv.seen(src); len(fcs) != 2 {
+	if fcs, _, _ := srv.seen(src); !slices.Equal(fcs, []uint8{3, 3}) {
 		t.Fatalf("server answered FCs %v, want the read before the restart and the new connection's read", fcs)
 	}
 }

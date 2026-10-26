@@ -78,6 +78,7 @@ func TestReconfigureRunsQueueShutdownResetsBeforeStoppingWorker(t *testing.T) {
 			TCP: capture.TCPMeta{Valid: true, Seq: 1001, Ack: 5001, Flags: capture.TCPFlagACK}},
 	}
 	for _, pkt := range packets {
+		markHandshake(&pkt)
 		if decision := e.handlePacket(pkt); decision.Action != capture.Accept {
 			t.Fatalf("handshake packet decision = %+v, want Accept", decision)
 		}

@@ -29,11 +29,12 @@ import (
 //
 // A SYN anchors a legacy stream. A stream that fails closed has stricter
 // rules: only a SYN of a handshake the kernel's connection tracking has
-// not seen complete (TCPHandshake) anchors it, a SYN with a new sequence
-// number on its live stream is a StreamResync error (see open), and its
-// bytes are not framed when the stream was picked up mid-connection, a
-// StreamMidStream error without a malformed event (see feed). The payload of a fail-closed RST is not
-// fed, as no receiver delivers it.
+// not seen complete (TCPHandshake) anchors it, never one on its live
+// stream (see open), the payload of a SYN it is not anchored at is a
+// StreamResync error, and its bytes are not framed when the stream was
+// picked up mid-connection, a StreamMidStream error without a malformed
+// event (see feed). The payload of a fail-closed RST is not fed, as no
+// receiver delivers it.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
@@ -55,14 +56,15 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	key, session, pos := streamKey(state, pkt)
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
-		if se := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake); se != nil {
-			errEvent = streamError(state, pkt, &res, se)
+		anchored := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		if pkt.FailClosed && len(pkt.Payload) > 0 && !anchored {
+			errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
 		}
 	}
 	if stream && res.Err == nil {
 		if err := m.reassembler.failure(key); err != nil {
 			if pkt.HasOffset || pkt.FailClosed {
-				res.Err = err // already reported with its event; not re-emitted
+				res.Err, res.Failed = err, true // already reported with its event; not re-emitted
 				return res
 			}
 			m.reassembler.complete(key) // the flow no longer fails closed: start fresh

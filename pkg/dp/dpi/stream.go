@@ -74,8 +74,9 @@ const (
 	// StreamUnverifiedRetransmission is a retransmission of consumed bytes
 	// older than the history a verifying stream keeps.
 	StreamUnverifiedRetransmission
-	// StreamResync is a SYN with a new sequence number on a live stream
-	// that fails closed.
+	// StreamResync is the payload of a SYN that does not anchor the stream
+	// it belongs to, which fails closed: the payload's place in the stream
+	// is unknown.
 	StreamResync
 	// StreamDecoderPanic is a stream whose framing decoder panicked
 	// (Manager.FailStream).
@@ -136,4 +137,7 @@ type InspectResult struct {
 	// Err is the framed decoder's *FrameError or a *StreamError. A legacy
 	// decoder's OnPacket error passes through unchanged, as OnPacket did.
 	Err error
+	// Failed reports a stream that had failed before this packet: Err is
+	// the error it failed with, and nothing was inspected.
+	Failed bool
 }
