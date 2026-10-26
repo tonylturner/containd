@@ -304,12 +304,14 @@ export default function ICSPolicyPage() {
                   <ICSCoverageCell view={coverage.view} ruleId={r.id} />
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(r)}
-                    className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-                  >
-                    Edit
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
+                    >
+                      Edit
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -317,7 +319,7 @@ export default function ICSPolicyPage() {
         </table>
       </div>
 
-      {editing && (
+      {editing && canEdit && (
         <EditICSModal
           rule={editing}
           globalMode={dpiConfig.dpiMode}

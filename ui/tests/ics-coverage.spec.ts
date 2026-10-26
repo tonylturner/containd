@@ -284,6 +284,8 @@ test("a viewer sees per-rule coverage without the admin-only ruleset", async ({ 
   await expect(coverageOf(page, "plc-read").getByText("applied: enforcing")).toHaveClass(/badge-secure/);
   await expect(coverageOf(page, "plc-queue")).toContainText(`Running engine: ${queueDown.message}`);
   await expect(page.getByRole("status", { name: /ICS protocol rules not enforcing/ })).toBeVisible();
+  // Editing is admin-only; the server refuses a viewer's change anyway.
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
   expect(seen.rulesetRequests).toBe(0);
   expect(seen.errors).toEqual([]);
 });
