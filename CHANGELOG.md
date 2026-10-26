@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   series show held packets and bytes, oldest pending age and sessions against
   the fixed limits, plus abort reasons and failure totals. They separate denied
   commands from queue pressure.
+- Passive IEC 104 inventory: a read-only section on the Assets page and
+  `GET /api/v1/inventory/iec104` list controlling and controlled station pairs,
+  their common addresses, IOAs and type IDs, first and last seen, and command
+  attempt and acceptance counts. Fixed caps, LRU eviction, 24-hour idle expiry
+  and overflow counters bound it. It never feeds the learner or auto-ALLOW.
 
 ### Changed
 
@@ -46,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inventory endpoints return a JSON 503 when the engine inventory is
+  unavailable instead of an empty list. Discovered assets, their peers and
+  station addresses now have fixed caps with counted overflow.
 - Complete the management OpenAPI route reference and guard it against the
   registered router, including optional identity and audit endpoints.
 - Document staged dataplane settings, session and lab authentication, filtered
