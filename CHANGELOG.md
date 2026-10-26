@@ -209,7 +209,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `GET /api/v1/system/tls` returns cleaned certificate paths, the subject and expiry of the certificate the bound HTTPS listener serves (`servedCertSubject`, `servedCertNotAfter`), and the bound listener addresses (`boundHttpListenAddr`, `boundHttpsListenAddr`).
+- `GET /api/v1/system/tls` returns cleaned certificate paths, the subject and expiry of the certificate the bound HTTPS listener serves (`servedCertSubject`, `servedCertNotAfter`), and the bound listener addresses (`boundHttpListenAddr`, `boundHttpsListenAddr`), with `httpListenChanges` and `httpsListenChanges` saying whether the next start binds another listener. Every wildcard spelling of a port is the same listener; a listener bound at a specific address in place of a configured wildcard shows its next-start row.
 - System Settings shows the listeners, certificate files and certificate served now, and adds a "(next start)" row only where the next start differs.
 - The UI shows the detail of API errors, such as why a certificate upload was rejected.
 - The ICS and firewall pages label enforcement health "ICS connection reset unhealthy" when the engine fails to reset a Modbus or DNP3 connection it picked up mid-stream and no IEC 104 enforce envelope is active.
@@ -333,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - HTTP redirects to HTTPS only when the HTTPS listener bound.
 - SSH exec requests report exit status 0 on success and 1 on a failed or empty command, and the appliance shell reports 0 when it closes, so OpenSSH clients no longer exit 255.
+- With the Linux shell (`ssh.shellMode` linux), a shell killed by a signal reports exit-signal with the signal's name (RFC 4254) instead of exit status 4294967295, and a shell wait error reports 1 instead of 0.
 - In an IEC 104 enforce envelope, the server's RST refusing a client's SYN (for example, a station that does not listen on 2404) now reaches the client, which fails at once instead of retrying its SYN until it times out. Every other packet before the SYN-ACK, apart from the client's SYN, is still dropped.
 - An IEC 104 client that lost its connection without closing it, for example
   by restarting, reconnects at once from the same source port in an enforce
