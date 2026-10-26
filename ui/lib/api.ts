@@ -46,6 +46,7 @@ export type {
 export type {
   RulesetEngineStatus,
   RulesetPreview,
+  SchedulePlannerStatus,
 } from "./api-dataplane";
 export type {
   FirewallRule,
@@ -75,6 +76,7 @@ export type {
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export { fetchHealth } from "./api-health";
 export type {
+  EnforcementHealth,
   HealthResponse,
   IEC104EnforcementHealth,
   ManagementRecoveryHealth,

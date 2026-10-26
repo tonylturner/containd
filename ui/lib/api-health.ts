@@ -36,11 +36,34 @@ export function normalizeManagementRecovery(value: unknown): ManagementRecoveryH
   };
 }
 
+/**
+ * General firewall enforcement, apart from IEC 104. Degraded: a ruleset is in
+ * force but the last apply failed, or the schedule planner is degraded.
+ * Unavailable: no ruleset in force, or a persisted recovery fault.
+ */
+export type EnforcementHealth = {
+  state: "enforcing" | "degraded" | "disabled" | "unavailable" | "unknown";
+  reason: string;
+};
+
+const ENFORCEMENT_STATES: ReadonlySet<string> = new Set(["enforcing", "degraded", "disabled", "unavailable", "unknown"]);
+
+/** An unrecognised state reads as unknown; a missing object as none. */
+export function normalizeEnforcementHealth(value: unknown): EnforcementHealth | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { state, reason } = value as Record<string, unknown>;
+  return {
+    state: typeof state === "string" && ENFORCEMENT_STATES.has(state) ? (state as EnforcementHealth["state"]) : "unknown",
+    reason: typeof reason === "string" ? reason : "",
+  };
+}
+
 export type HealthResponse = {
   status: string;
   component: string;
   build?: string;
   time?: string;
+  enforcement?: EnforcementHealth;
   iec104Enforcement?: IEC104EnforcementHealth;
   icsEnforcement?: ICSEnforcementHealth;
   managementRecovery?: ManagementRecoveryHealth;
@@ -61,6 +84,7 @@ export async function fetchHealth(
     const body = (await res.json()) as HealthResponse;
     return {
       ...body,
+      enforcement: normalizeEnforcementHealth(body?.enforcement),
       icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement),
       managementRecovery: normalizeManagementRecovery(body?.managementRecovery),
     };

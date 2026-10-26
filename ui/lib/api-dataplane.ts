@@ -23,13 +23,37 @@ export type RulesetPreview = {
   engineStatusError?: string;
 };
 
-/** The engine's applied ruleset; icsCoverage includes its runtime faults. */
+/**
+ * The engine's schedule planner, present when the installed ruleset has
+ * scheduled rules. The kernel holds windows up to horizonEnd; past it a
+ * scheduled ALLOW stops matching and a scheduled DENY applies.
+ */
+export type SchedulePlannerStatus = {
+  lastRefill: string;
+  horizonEnd: string;
+  state: "ok" | "degraded";
+  /** Why the planner is degraded. */
+  reason?: string;
+  /** The last refill's error; the next successful refill clears it. */
+  lastError?: string;
+  lastErrorAt?: string;
+};
+
+/**
+ * The installed ruleset; icsCoverage includes its runtime faults. A failed
+ * apply leaves it in force: ruleset, snapshotVersion, appliedAt and warnings
+ * keep describing it, while error, failedSnapshotVersion and failedAt
+ * describe the failed apply until the next success clears them.
+ */
 export type RulesetEngineStatus = {
   ruleset?: string;
   appliedAt?: string;
   error?: string;
+  failedSnapshotVersion?: string;
+  failedAt?: string;
   warnings?: RuleWarning[];
   snapshotVersion?: string;
+  schedulePlanner?: SchedulePlannerStatus;
   icsCoverage?: ICSCoverageRule[];
 };
 

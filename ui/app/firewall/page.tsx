@@ -33,6 +33,8 @@ import {
 import { DPIConfigSection } from "./firewall-dpi-config";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
+import { AppliedRulesetStatus } from "./firewall-ruleset-status";
+import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
 import { tagsInUse } from "./firewall-rule-policy";
@@ -352,6 +354,9 @@ export default function FirewallPage() {
       )}
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
+        <EnforcementHealthIndicator health={health?.enforcement} />
+      </Card>
+      <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-(--text)">Outbound readiness</div>
           <div className="flex flex-wrap gap-2 text-xs">
@@ -432,6 +437,7 @@ export default function FirewallPage() {
             {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
           </p>
         )}
+        {rulesetPreview?.engineStatus && <AppliedRulesetStatus status={rulesetPreview.engineStatus} />}
         <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
         <RuleWarningList scope="applied" warnings={rulesetPreview?.engineStatus?.warnings} />
         {rulesetPreview?.ruleset && (

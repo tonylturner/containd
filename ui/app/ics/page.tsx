@@ -29,6 +29,7 @@ import {
 import { summarizeIEC104 } from "./iec104";
 import { IEC104HealthIndicator } from "./iec104-health";
 import { useHealth } from "../../hooks/useHealth";
+import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
 import { useICSCoverage } from "./use-ics-coverage";
 
@@ -144,6 +145,7 @@ export default function ICSPolicyPage() {
           </div>
         )}
         <div className="mt-3 space-y-2">
+          <EnforcementHealthIndicator health={health?.enforcement} />
           <ICSEnforcementIndicator health={health?.icsEnforcement} />
           <IEC104HealthIndicator health={health?.iec104Enforcement} />
         </div>
