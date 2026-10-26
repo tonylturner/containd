@@ -152,6 +152,28 @@ or APDU ID. Midstream traffic stays untracked; existing sessions remain inspecte
 New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
 at capacity.
 
+## Live IEC 104 APCI anomalies
+
+Tracked IEC 104 sessions produce observational `ids` / `anomaly` events in
+both learn and enforce mode:
+
+| `anomaly_type` | Observation |
+| --- | --- |
+| `iec104_data_while_stopped` | I-frame before STARTDT con or after STOPDT con |
+| `iec104_send_sequence` | N(S) gap or backwards step |
+| `iec104_ack_sequence` | N(R) outside [last acknowledged, next unsent], modulo 32768 |
+| `iec104_test_timeout` | TESTFR act without an opposite-direction TESTFR con within t1 (15 seconds) |
+
+STOPDT act alone does not stop data observation: I-frames remain valid until
+STOPDT con. Data-while-stopped alerts occur only on the first offending I-frame
+per stopped period; STARTDT con re-arms the alert for the next stopped period.
+Sequence checks use the ordered, TCP-deduplicated APDU stream, not
+individual packets or information objects. Each alert carries `session_id`,
+`direction`, and protocol evidence; frame-triggered alerts also carry `apdu_id`.
+Timers run without incoming packets. State is bounded by the session table,
+discarded when observation ends, and fresh for each reconnect. These alerts
+never change firewall decisions, enforcement health, or learned rules.
+
 ## PCAP Offline Analysis
 
 The public management endpoints `POST /api/v1/pcap/analyze` (multipart `file`) and

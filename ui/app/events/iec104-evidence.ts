@@ -1,9 +1,8 @@
 import { parseICSEvidence, type TelemetryEvent } from "../../lib/api";
 import { iec104TypeInfo } from "../ics/iec104";
 
-// Presentation of IEC 104 enforcement evidence for Events,
-// Alerts and Flows. A decision says what a rule decided; only the absence of
-// an ics.verdict listing an APDU means it was delivered.
+// Presentation of IEC 104 enforcement evidence and APCI observations for
+// Events, Alerts and Flows. Decoding and allow decisions do not prove delivery.
 
 export type EvidenceSeverity = "critical" | "high" | "medium" | "low";
 export type EvidenceVariant = "success" | "warning" | "error" | "info" | "neutral";
@@ -66,7 +65,34 @@ const SESSION_VIEW = {
   enforce_healthy: { badge: "healthy", variant: "success", severity: "low", headline: "IEC 104 enforcement healthy" },
 } as const;
 
+const APCI_ANOMALY_LABELS: Record<string, string> = {
+  iec104_data_while_stopped: "IEC 104 data transfer not started",
+  iec104_send_sequence: "IEC 104 send sequence anomaly",
+  iec104_ack_sequence: "IEC 104 acknowledgement anomaly",
+  iec104_test_timeout: "IEC 104 TESTFR confirmation timeout",
+};
+
 export function describeICSEvidence(ev: TelemetryEvent): EvidenceView | null {
+  const attrs = ev.attributes ?? {};
+  const anomalyType = String(attrs["anomaly_type"] ?? "");
+  const anomalyLabel = Object.hasOwn(APCI_ANOMALY_LABELS, anomalyType)
+    ? APCI_ANOMALY_LABELS[anomalyType]
+    : undefined;
+  if (ev.proto === "ids" && ev.kind === "anomaly" && anomalyLabel) {
+    return {
+      headline: anomalyLabel,
+      badge: "observation",
+      variant: "info",
+      severity: "medium",
+      message: String(attrs["message"] ?? anomalyLabel),
+      sessionId: String(attrs["session_id"] ?? ""),
+      alert: true,
+      rows: [
+        { label: "Anomaly", value: anomalyLabel },
+        ...iec104AttributeRows(attrs),
+      ],
+    };
+  }
   const evidence = parseICSEvidence(ev);
   if (!evidence) return null;
 
@@ -150,6 +176,12 @@ export function iec104AttributeRows(attrs: Record<string, unknown>): EvidenceRow
   return present([
     ["APCI", scalar("apci_type")],
     ["U function", scalar("u_function")],
+    ["N(S)", scalar("send_sequence")],
+    ["Expected N(S)", scalar("expected_send_sequence")],
+    ["N(R)", scalar("receive_sequence")],
+    ["Last acknowledged", scalar("last_acked")],
+    ["Next unsent", scalar("next_unsent")],
+    ["t1 (seconds)", scalar("t1_seconds")],
     ["Type ID", typeof typeId === "number" ? typeLabel(typeId) : undefined],
     ["Class", scalar("class")],
     ["Direction", scalar("direction")],

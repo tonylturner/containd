@@ -171,7 +171,7 @@ export default function AlertsPage() {
       ) : (
         <div className="flex gap-4">
           {/* Alert list */}
-          <div className={`${selected ? "w-1/2" : "w-full"} transition-all`}>
+          <div className={selected ? "min-w-0 flex-1" : "min-w-0 w-full"}>
             <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -207,7 +207,7 @@ export default function AlertsPage() {
 
           {/* Detail panel */}
           {selected && (
-            <div className="w-1/2 shrink-0">
+            <div className="w-1/2 min-w-0 shrink-0">
               <AlertDetailPanel event={selected} onClose={() => setSelected(null)} />
             </div>
           )}
