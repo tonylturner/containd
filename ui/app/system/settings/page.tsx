@@ -82,7 +82,8 @@ export default function SystemSettingsPage() {
     if (res.state === "failed") {
       setError(res.error || "Failed to upload trusted CA bundle.");
     } else if (res.state === "stored") {
-      setWarning(`Trusted CA bundle stored, but the engine could not apply it: ${res.detail}. The next commit retries it.`);
+      const reason = res.warnings.length > 0 ? `: ${res.warnings.join("; ")}` : "";
+      setWarning(`Trusted CA bundle stored (revision ${res.revision}), but the engine did not apply it${reason}. The next commit retries it.`);
     } else {
       setStatus(`Trusted CA bundle applied by the engine (revision ${res.revision}).`);
     }

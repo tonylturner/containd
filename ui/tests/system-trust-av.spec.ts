@@ -37,17 +37,30 @@ test("trusted CA upload reports the revision the engine applied", async ({ page 
   await expect(page.getByText("Trusted CA bundle applied by the engine (revision sha256:abc123).")).toBeVisible();
 });
 
-test("trusted CA stored but not applied is not reported as saved", async ({ page }) => {
+test("trusted CA stored but not applied is not reported as applied", async ({ page }) => {
   await mockAPI(page, {
     "/api/v1/system/tls": { json: { httpEnabled: true, httpsEnabled: true } },
     "/api/v1/system/tls/trusted-ca": {
-      status: 503,
-      json: { error: "trusted CA bundle saved but not applied by the engine", detail: "engine unavailable" },
+      json: { status: "stored", revision: "sha256:abc123", warnings: ["trust: engine unavailable"] },
     },
   });
   await uploadCA(page);
-  await expect(page.getByRole("status").filter({ hasText: "stored, but the engine could not apply it: engine unavailable" })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "stored (revision sha256:abc123), but the engine did not apply it: trust: engine unavailable",
+    }),
+  ).toBeVisible();
   await expect(page.getByText(/applied by the engine \(revision/)).toHaveCount(0);
+});
+
+test("trusted CA upload without a config store is an error, not stored", async ({ page }) => {
+  await mockAPI(page, {
+    "/api/v1/system/tls": { json: { httpEnabled: true, httpsEnabled: true } },
+    "/api/v1/system/tls/trusted-ca": { status: 503, json: { error: "config store unavailable" } },
+  });
+  await uploadCA(page);
+  await expect(page.getByText("config store unavailable")).toBeVisible();
+  await expect(page.getByText(/Trusted CA bundle (stored|applied)/)).toHaveCount(0);
 });
 
 async function openServices(page: Page, av: Record<string, unknown>) {

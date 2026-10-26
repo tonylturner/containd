@@ -270,10 +270,12 @@ candidate edit:
 
 After storing the bundle, management sends its content and revision
 (`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads
-management's file. An `updated` response with the `revision` means the engine
-applied it. If the engine is unavailable or rejects it, the bundle stays stored
-and the request returns `503`; every commit, rollback, boot replay and `SIGHUP`
-reload sends it again.
+management's file. Every successful upload returns `200` with the stored
+`revision`. Status `updated` means the engine applied it. Status `stored` means
+the engine is unavailable or rejected it: the bundle stays stored, `warnings`
+and the `X-Containd-Warnings` header say why, and every commit, rollback, boot
+replay and `SIGHUP` reload sends it again. `503` means the config store is
+unavailable and nothing was stored.
 
 The engine's antivirus clients trust the system roots plus this bundle:
 

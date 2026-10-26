@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,18 +112,48 @@ func TestTrustedCAUpload(t *testing.T) {
 		t.Fatalf("clear pushed %+v", last)
 	}
 
-	// An engine that cannot apply the bundle is reported, not hidden.
+	// A bundle the engine cannot apply is stored, and the response says so
+	// with its revision and a warning instead of reporting it applied.
 	engine.trustErr = errors.New("dial tcp: connection refused")
-	post(encode(setTrustedCARequest{PEM: chain}), http.StatusServiceUnavailable, "saved but not applied")
-	if got, err := os.ReadFile(path); err != nil || strings.TrimSpace(string(got)) != strings.TrimSpace(chain) {
+	stored := func(router *gin.Engine, body, wantRevision, wantWarning string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
+		var got struct {
+			Status   string   `json:"status"`
+			Revision string   `json:"revision"`
+			Warnings []string `json:"warnings"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+			t.Fatalf("stored upload: %d %s", rec.Code, rec.Body)
+		}
+		want := []string{"trust: " + wantWarning}
+		if got.Status != "stored" || got.Revision != wantRevision || !slices.Equal(got.Warnings, want) {
+			t.Fatalf("stored upload = %+v, want stored %s with warnings %q", got, wantRevision, want)
+		}
+		if header := rec.Header().Values("X-Containd-Warnings"); !slices.Equal(header, want) {
+			t.Fatalf("X-Containd-Warnings = %q, want %q", header, want)
+		}
+	}
+	stored(router, encode(setTrustedCARequest{PEM: chain}), trust.Revision(string(original)), "dial tcp: connection refused")
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
 		t.Fatalf("bundle not saved when the engine failed: %q, %v", got, err)
 	}
 	noEngine := gin.New()
 	noEngine.POST("/upload", trustedCAUploadHandler(store, nil, dir))
+	stored(noEngine, `{"clear":true}`, trust.NoRevision, "engine unavailable")
+
+	// Only a missing config store is unavailable; nothing is stored then.
+	engine.trustErr = nil
+	noStore := gin.New()
+	noStore.POST("/upload", trustedCAUploadHandler(nil, engine, dir))
 	rec := httptest.NewRecorder()
-	noEngine.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "engine unavailable") {
-		t.Fatalf("no engine: %d %s", rec.Code, rec.Body)
+	noStore.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(encode(setTrustedCARequest{PEM: chain}))))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "config store unavailable") {
+		t.Fatalf("no store: %d %s", rec.Code, rec.Body)
+	}
+	if got, err := os.ReadFile(path); err != nil || len(got) != 0 {
+		t.Fatalf("upload without a store changed the bundle: %q, %v", got, err)
 	}
 }
 

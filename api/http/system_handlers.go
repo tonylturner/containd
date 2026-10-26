@@ -181,8 +181,9 @@ func pushTrustedCA(ctx context.Context, cfg *config.Config, engine EngineClient)
 }
 
 // trustedCAUploadHandler keeps the storage boundary explicit and testable.
-// A stored bundle is pushed to the engine at once; failing to apply it there
-// is reported, and the next config apply retries it.
+// A stored bundle is pushed to the engine at once. When the engine cannot
+// apply it, the upload still succeeds with status "stored" and a warning,
+// and the next config apply retries it.
 func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
@@ -226,12 +227,16 @@ func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir str
 			internalError(c, err)
 			return
 		}
-		auditLog(c, audit.Record{Action: "system.tls.trusted_ca.set", Target: bundle.Revision})
+		status, warnings := "updated", []string{}
+		record := audit.Record{Action: "system.tls.trusted_ca.set", Target: bundle.Revision}
 		if err := pushTrustedCA(c.Request.Context(), cfg, engine); err != nil {
-			apiErrorDetail(c, http.StatusServiceUnavailable, "trusted CA bundle saved but not applied by the engine", err.Error())
-			return
+			status = "stored"
+			warnings = append(warnings, fmt.Sprintf("trust: %v", err))
+			record.Result, record.Detail = "warning", warnings[0]
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "updated", "revision": bundle.Revision})
+		auditLog(c, record)
+		setWarningHeader(c, warnings)
+		c.JSON(http.StatusOK, gin.H{"status": status, "revision": bundle.Revision, "warnings": warnings})
 	}
 }
 

@@ -4493,7 +4493,8 @@ paths:
         the default is /data/tls/trusted_ca.pem. The stored content and its
         revision are then sent to the engine, whose ICAP-over-TLS and FreshClam
         clients trust the system roots plus this bundle. Every config apply
-        sends the bundle again.
+        sends the bundle again, so a bundle the engine could not apply is
+        retried by the next commit.
       tags: [System]
       requestBody:
         required: true
@@ -4502,21 +4503,31 @@ paths:
             schema: {$ref: '#/components/schemas/SetTrustedCARequest'}
       responses:
         '200':
-          description: Bundle stored or cleared and applied by the engine
+          description: >-
+            Bundle stored or cleared. Status updated means the engine applied
+            it; status stored means the engine is unavailable or did not apply
+            it, and warnings say why.
+          headers:
+            X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
           content:
             application/json:
               schema:
                 type: object
+                required: [status, revision, warnings]
                 properties:
-                  status: {type: string}
+                  status: {type: string, enum: [updated, stored]}
                   revision: {type: string, description: 'sha256:<hex> of the stored bundle, or none when cleared'}
+                  warnings:
+                    type: array
+                    items: {type: string}
+                    description: Why the engine did not apply the stored bundle; empty when status is updated
         '400':
           description: Invalid JSON, empty or invalid CA bundle, conflicting clear and PEM, or path outside /data
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '503':
-          description: Bundle stored, but the engine is unavailable or did not apply it
+          description: Config store unavailable; nothing was stored
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
