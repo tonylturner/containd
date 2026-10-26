@@ -17,7 +17,7 @@ type MeteredService = "syslog" | "proxy" | "envoy" | "nginx" | "dns" | "ntp" | "
 
 // The engine reports antivirus scans only while it answers.
 function meterOf(status: ServicesStatus | null, svc: MeteredService): ServiceMeter | undefined {
-  if (svc === "av") return status?.av.available ? status.av : undefined;
+  if (svc === "av") return status?.av?.available ? status.av : undefined;
   return status?.[svc];
 }
 
