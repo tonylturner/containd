@@ -5,18 +5,11 @@ package httpapi
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -158,8 +151,6 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 				_ = conn.WriteJSON(resp{Output: ""})
 				continue
 			}
-			// Re-read the served certificate for every command, including
-			// commands on an already established WebSocket after rotation.
 			apiClient, err := cliAPIForRequest(c)
 			if err != nil {
 				_ = conn.WriteJSON(resp{Error: err.Error()})
@@ -181,121 +172,21 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-var servedManagementCertificate atomic.Pointer[string]
-
-// SetServedManagementCertificate records the certificate file the HTTPS
-// listener this process's management has bound serves, which the console
-// pins; "" records that no HTTPS listener is bound. Management records it
-// with config.SetBoundManagementListeners.
-func SetServedManagementCertificate(certFile string) {
-	servedManagementCertificate.Store(&certFile)
-}
-
-func servedCertificate() string {
-	if certFile := servedManagementCertificate.Load(); certFile != nil {
-		return *certFile
-	}
-	return ""
-}
-
 // cliAPIForRequest is the API client of an in-app console command: it calls
-// the management listener this process has bound on loopback, never a
-// destination derived from the request, and pins the certificate that
-// listener serves, never one named by the saved settings.
+// the management API on loopback as SSH CLI sessions do (see
+// LoopbackManagementAPI), with the caller's bearer token.
 func cliAPIForRequest(c *gin.Context) (*cli.API, error) {
-	// Listener settings bind at startup, so the saved configuration can
-	// name a listener or certificate that is not bound. Management serves
-	// each bound port on 127.0.0.1 too.
-	bound := config.BoundManagementListeners()
-	apiClient := &cli.API{}
-	// Always prefer HTTP for internal calls when it is bound.
-	if port := bound.HTTP.Port(); port != 0 {
-		apiClient.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
-	} else if port := bound.HTTPS.Port(); port != 0 {
-		certFile := servedCertificate()
-		if certFile == "" {
-			return nil, errors.New("console: the bound HTTPS listener recorded no certificate")
-		}
-		client, err := consoleHTTPSClient(certFile)
-		if err != nil {
-			return nil, fmt.Errorf("console: %w", err)
-		}
-		apiClient.BaseURL, apiClient.Client = fmt.Sprintf("https://127.0.0.1:%d", port), client
-	} else {
-		return nil, errors.New("console: no management HTTP or HTTPS listener bound")
+	baseURL, client, err := LoopbackManagementAPI()
+	if err != nil {
+		return nil, fmt.Errorf("console: %w", err)
 	}
+	apiClient := &cli.API{BaseURL: baseURL, Client: client}
 	// Pass through the caller's bearer token so in-app console commands
 	// can access the same protected endpoints as the UI session.
 	if tok := strings.TrimSpace(bearerOrCookie(c)); tok != "" {
 		apiClient.Token = tok
 	}
 	return apiClient, nil
-}
-
-// consoleHTTPSClient trusts only the served leaf, not the host's system CAs.
-// Use the certificate's own SAN as the verification name while dialing loopback;
-// an operator certificate need not contain 127.0.0.1. Normal TLS verification
-// (including validity and server usage) remains enabled, with an exact leaf pin
-// as an additional constraint even when the leaf is itself a CA.
-func consoleHTTPSClient(certFile string) (*http.Client, error) {
-	data, err := os.ReadFile(certFile)
-	if err != nil {
-		return nil, fmt.Errorf("read management TLS certificate %q: %w", certFile, err)
-	}
-	var leaf *x509.Certificate
-	for len(bytes.TrimSpace(data)) > 0 {
-		data = bytes.TrimSpace(data)
-		if !bytes.HasPrefix(data, []byte("-----BEGIN CERTIFICATE-----")) {
-			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
-		}
-		block, rest := pem.Decode(data)
-		if block == nil || block.Type != "CERTIFICATE" {
-			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse management TLS certificate %q: %w", certFile, err)
-		}
-		if leaf == nil {
-			leaf = cert
-		}
-		data = rest
-	}
-	if leaf == nil {
-		return nil, fmt.Errorf("parse management TLS certificate %q: no certificates", certFile)
-	}
-	var name string
-	if len(leaf.DNSNames) > 0 {
-		name = leaf.DNSNames[0]
-	} else if len(leaf.IPAddresses) > 0 {
-		name = leaf.IPAddresses[0].String()
-	} else {
-		return nil, fmt.Errorf("management TLS certificate %q has no DNS or IP subject alternative name", certFile)
-	}
-	roots := x509.NewCertPool()
-	roots.AddCert(leaf)
-	return &http.Client{
-		Timeout: 10 * time.Second,
-		// Do not forward bearer tokens through redirects, even to another port
-		// on the same hostname or to an HTTP endpoint.
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return errors.New("console: management API redirect refused")
-		},
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS13,
-				RootCAs:    roots,
-				ServerName: name,
-				VerifyConnection: func(state tls.ConnectionState) error {
-					if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, leaf.Raw) {
-						return errors.New("console: management TLS certificate does not match its certificate file")
-					}
-					return nil
-				},
-			},
-		},
-	}, nil
 }
 
 func matchCommandTokens(tokens []string, available []string) (string, []string) {

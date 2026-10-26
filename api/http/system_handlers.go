@@ -30,8 +30,14 @@ type tlsInfoResponse struct {
 	HTTPEnabled     bool   `json:"httpEnabled"`
 	HTTPSEnabled    bool   `json:"httpsEnabled"`
 
+	// CertFile and KeyFile are the files the HTTPS listener serves when
+	// management next starts with this configuration.
 	CertFile string `json:"certFile,omitempty"`
 	KeyFile  string `json:"keyFile,omitempty"`
+	// ServedCertFile and ServedKeyFile are the files the bound HTTPS
+	// listener serves now; empty when no HTTPS listener is bound.
+	ServedCertFile string `json:"servedCertFile,omitempty"`
+	ServedKeyFile  string `json:"servedKeyFile,omitempty"`
 
 	CertSubject  string   `json:"certSubject,omitempty"`
 	CertIssuer   string   `json:"certIssuer,omitempty"`
@@ -56,6 +62,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 		// configuration, under this process's environment.
 		listeners := config.EffectiveManagementListeners(cfg)
 		certFile, keyFile := mgmttls.ResolveFiles(cfg)
+		served := currentServedManagement()
 
 		resp := tlsInfoResponse{
 			HTTPListenAddr:  listeners.HTTP.Addr,
@@ -64,6 +71,8 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			HTTPSEnabled:    listeners.HTTPS.Enabled,
 			CertFile:        certFile,
 			KeyFile:         keyFile,
+			ServedCertFile:  served.CertFile,
+			ServedKeyFile:   served.KeyFile,
 		}
 
 		if certDER, err := readFirstCertDER(certFile); err == nil && len(certDER) > 0 {
@@ -93,8 +102,14 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 	return tlsCertUploadHandler(store, "/data")
 }
 
-// tlsCertUploadHandler writes the management certificate and key, which must
-// both be under dataDir.
+// tlsCertUploadHandler writes the management certificate and key files that
+// management serves when it next starts with the saved configuration, which
+// must both be under dataDir. The bound HTTPS listener reloads the files it
+// serves at its next TLS handshake after they change, so when they are those
+// files the upload is served at once (status "updated"). Otherwise it is
+// served from the next start (status "stored", with a warning that says so).
+// An upload that would replace only one of the served files is refused: the
+// listener would pair it with the other one.
 func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 	under := filepath.Clean(dataDir) + string(os.PathSeparator)
 	return func(c *gin.Context) {
@@ -138,6 +153,13 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			return
 		}
 
+		served := currentServedManagement()
+		liveCert, liveKey := served.CertFile != "" && sameFilePath(certFile, served.CertFile), served.KeyFile != "" && sameFilePath(keyFile, served.KeyFile)
+		if liveCert != liveKey {
+			apiError(c, http.StatusConflict, fmt.Sprintf("the HTTPS listener serves certificate %q with key %q; writing certificate %q (source: %s) and key %q (source: %s) would pair a new file with a served one", served.CertFile, served.KeyFile, certFile, cert.Source, keyFile, key.Source))
+			return
+		}
+
 		if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
 			internalError(c, err)
 			return
@@ -156,9 +178,23 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
+		status, warnings := "updated", []string{}
+		switch {
+		case served.CertFile == "":
+			status = "stored"
+			warnings = append(warnings, "no HTTPS listener is bound; the certificate is served when management next starts with HTTPS enabled")
+		case !liveCert:
+			status = "stored"
+			warnings = append(warnings, fmt.Sprintf("the HTTPS listener serves %q; the certificate is served from the next management start", served.CertFile))
+		}
 		auditLog(c, audit.Record{Action: "system.tls.cert.set", Target: certFile, Detail: certAuditDetail(pair.Leaf)})
-		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+		setWarningHeader(c, warnings)
+		c.JSON(http.StatusOK, gin.H{"status": status, "warnings": warnings})
 	}
+}
+
+func sameFilePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 type setTrustedCARequest struct {

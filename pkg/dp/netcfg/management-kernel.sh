@@ -12,7 +12,7 @@ esac
 mkdir -p "$root/build"
 GOFLAGS=-mod=mod GOOS=linux GOARCH="$arch" CGO_ENABLED=0 \
   go test -c -o "$root/build/netcfg.test" ./pkg/dp/netcfg
-project="containd-v033fix-kernel-$(date +%s)-$$"
+project="containd-netcfg-kernel-$(date +%s)-$$"
 image="$project:local"
 trap 'docker image rm "$image" >/dev/null' EXIT
 docker build -t "$image" - <<'EOF'
@@ -22,6 +22,6 @@ EOF
 docker run --rm --name "$project" --cap-add NET_ADMIN --cap-add SYS_ADMIN --device /dev/net/tun \
   --sysctl net.ipv4.conf.default.rp_filter=1 \
   --sysctl net.ipv4.conf.all.rp_filter=1 \
-  -e CONTAIND_MANAGEMENT_KERNEL_TEST=1 -v "$root/build:/w:ro" \
+  -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$root/build:/w:ro" \
   "$image" /w/netcfg.test \
   -test.run '^TestManagementKernelMatrix$' -test.v

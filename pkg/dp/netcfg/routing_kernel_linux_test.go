@@ -16,10 +16,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// routingKernelContext gates the routing kernel tests, which change routes
+// and policy rules and create network namespaces: they run only when
+// CONTAIND_NETNS_KERNEL_TEST=1 as root in a disposable Linux container with
+// NET_ADMIN, SYS_ADMIN and iproute2, such as:
+//
+//	GOOS=linux CGO_ENABLED=0 go test -c -o build/netcfg.test ./pkg/dp/netcfg
+//	docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
+//	  sh -c "apk add -q iproute2 && /w/netcfg.test -test.run RoutingKernel -test.v"
 func routingKernelContext(t *testing.T) context.Context {
 	t.Helper()
-	if os.Getenv("CONTAIND_ROUTING_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
-		t.Skip("requires opt-in disposable Linux namespace, root, NET_ADMIN and iproute2")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 as root in a disposable Linux container with NET_ADMIN and iproute2")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)

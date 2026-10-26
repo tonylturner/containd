@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,7 @@ func TestNewValidatesRequiredOptions(t *testing.T) {
 	base := Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -66,8 +68,9 @@ func TestNewValidatesRequiredOptions(t *testing.T) {
 	}{
 		{name: "missing listen addr", opts: Options{}, want: "listen addr required"},
 		{name: "missing base url", opts: Options{ListenAddr: ":2222"}, want: "baseURL required"},
-		{name: "missing user store", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080"}, want: "user store required"},
-		{name: "missing jwt secret", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", UserStore: userStore, HostKeyPath: "x", AuthorizedKeysDir: "y"}, want: "JWT secret required"},
+		{name: "missing API client", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080"}, want: "API client required"},
+		{name: "missing user store", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", APIClient: http.DefaultClient}, want: "user store required"},
+		{name: "missing jwt secret", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", APIClient: http.DefaultClient, UserStore: userStore, HostKeyPath: "x", AuthorizedKeysDir: "y"}, want: "JWT secret required"},
 		{name: "valid", opts: base, want: ""},
 	}
 
@@ -113,6 +116,7 @@ func TestEnsureHostKeyAndAuthorizedKeys(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       hostKeyPath,
 		AuthorizedKeysDir: filepath.Join(tmp, "authorized_keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -154,6 +158,7 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -192,6 +197,7 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	labServer, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key_lab"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys_lab"),
 		LabMode:           true,
@@ -234,6 +240,7 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(tmp, "host_key"),
 		AuthorizedKeysDir: filepath.Join(tmp, "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
