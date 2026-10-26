@@ -10,6 +10,7 @@ import type {
   ApiResult,
   ConduitMap,
   FirewallRule,
+  ICSPredicate,
   Interface,
   InterfaceState,
   NATConfig,
@@ -18,6 +19,14 @@ import type {
   RuleWarning,
   Zone,
 } from "./api";
+
+/**
+ * A firewall rule PATCH body: an omitted key keeps the stored value, and
+ * `ics: null` removes the rule's ICS predicate.
+ */
+export type FirewallRulePatch = Partial<Omit<FirewallRule, "ics">> & {
+  ics?: ICSPredicate | null;
+};
 
 /** Rule impact preview: the rule matched in isolation against recent events. */
 export type RulePreview = {
@@ -89,7 +98,7 @@ export const networkAPI = {
   },
   updateFirewallRule: async (
     id: string,
-    r: Partial<FirewallRule>,
+    r: FirewallRulePatch,
   ): Promise<ApiResult<FirewallRule>> => {
     const result = await patchJSONResult<unknown>(
       `/api/v1/firewall/rules/${encodeURIComponent(id)}`,

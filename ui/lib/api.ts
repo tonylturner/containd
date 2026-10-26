@@ -49,7 +49,7 @@ export {
 } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
-export type { RulePreview } from "./api-network";
+export type { FirewallRulePatch, RulePreview } from "./api-network";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 import { inventoryAPI } from "./api-inventory";
