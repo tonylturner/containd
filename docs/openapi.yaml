@@ -2258,6 +2258,13 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429":
+          description: Too many failed authentication codes for this account (outside lab mode); the code check is locked
+          headers:
+            Retry-After: {schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
 
   /auth/logout:
     post:
@@ -2341,6 +2348,7 @@ paths:
         "200": {description: MFA disabled, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
         "401": {description: Current password or authentication code invalid, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "409": {description: MFA is required for this account and cannot be self-disabled, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "429": {description: "Too many failed current-password or authentication-code checks for this account (outside lab mode); retry after Retry-After", headers: {Retry-After: {schema: {type: integer}}}, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Dashboard ─────────────────────────────────────────────────────
   /dashboard:
@@ -4192,7 +4200,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '429':
-          description: Sensitive write rate limit exceeded
+          description: Sensitive write rate limit exceeded, or too many failed current-password checks for this account (outside lab mode)
           headers:
             Retry-After:
               description: Seconds to wait before retrying

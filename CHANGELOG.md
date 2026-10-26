@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Outside lab mode, wrong TOTP codes and wrong current passwords are limited
+  per account across all client addresses, on web/API and SSH. Five wrong
+  codes, or ten wrong current passwords, without a success lock that check
+  for 15 minutes. A locked check is refused before the guess is checked
+  (web/API `429` with `Retry-After`), and each lock writes one denied audit
+  record. The counts survive a restart. Password login is never locked by
+  these limits; resetting the account's password lifts them.
 - A TOTP code is accepted once per account. Web/API login, MFA self-disable
   and SSH login refuse a code whose time step is not later than the last
   accepted one, including after a restart.
