@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Terminal } from "xterm";
-import type { FitAddon } from "xterm-addon-fit";
-import "xterm/css/xterm.css";
+import type { Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 
 import { api, getSessionToken } from "../lib/api";
 import { apiWebSocketURL } from "../lib/api-core";
@@ -59,8 +59,8 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         } catch {}
       }
       const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("xterm"),
-        import("xterm-addon-fit"),
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
       ]);
       if (disposed || !containerRef.current) return;
       term = new Terminal({
