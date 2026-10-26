@@ -451,6 +451,17 @@ func (e *Engine) recordApplyFailure(version string, err error) {
 	e.rulesetStatus.Store(&st)
 }
 
+// releaseRulesetStatus records that no ruleset is installed after the
+// tables were deleted. The loaded snapshot stays, so the status is the one
+// an engine without enforcement reports for it. Callers hold lifecycleMu.
+func (e *Engine) releaseRulesetStatus() {
+	prev := e.rulesetStatus.Load()
+	if prev == nil {
+		return
+	}
+	e.rulesetStatus.Store(&RulesetStatus{SnapshotVersion: prev.SnapshotVersion, AppliedAt: prev.AppliedAt})
+}
+
 // RevokeConnections installs operator revocations through the active enforcement
 // backend. Unsupported or disabled backends cannot report a successful kill.
 func (e *Engine) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {

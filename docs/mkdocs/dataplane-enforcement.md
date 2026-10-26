@@ -23,7 +23,8 @@ the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
 `inet <enforceTable>`, such as the policy chains and sets an older containd
 version kept there, is removed on the next apply; flow blocks from an older
 version carry over with their remaining timeout. Disabling enforcement deletes
-the tables the running engine installed. Renaming the table replaces the old
+the tables the running engine installed, and the ruleset status then reports
+no installed ruleset. Renaming the table replaces the old
 tables with the new ones on the next apply. A table name starts with a letter
 or underscore, followed by letters, digits, underscores and hyphens.
 

@@ -96,3 +96,43 @@ func TestRulesetStatusKeepsInstalledRevisionOnFailedApply(t *testing.T) {
 		t.Fatalf("status after the next apply = %+v", st)
 	}
 }
+
+// Turning enforcement off deletes the installed tables, so the status stops
+// describing a ruleset; it keeps the loaded snapshot, as an engine that
+// never enforced reports it.
+func TestRulesetStatusAfterReleaseReportsNothingInstalled(t *testing.T) {
+	applier := &recordingApplier{}
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	snap := rules.Snapshot{Version: "v1", Default: rules.ActionDeny, Firewall: []rules.Entry{
+		{ID: "maint", Protocols: []rules.Protocol{{Name: "tcp", Port: "22"}}, Action: rules.ActionAllow, Identities: []string{"operator"}}}}
+	if err := e.ApplyRules(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	applier.err = errors.New("nft apply failed")
+	if err := e.ApplyRules(ctx, rules.Snapshot{Version: "v2"}); err == nil {
+		t.Fatal("apply error swallowed")
+	}
+	installed := e.RulesetStatus()
+	if installed.Ruleset == "" || installed.Error == "" || installed.Warnings == nil {
+		t.Fatalf("status before release = %+v", installed)
+	}
+	applier.err = nil
+	disabled, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reconfigure(disabled); err != nil {
+		t.Fatal(err)
+	}
+	st := e.RulesetStatus()
+	if st.Ruleset != "" || st.Warnings != nil || st.Error != "" || st.FailedSnapshotVersion != "" || st.FailedAt != nil {
+		t.Fatalf("status after release = %+v, want no installed ruleset", st)
+	}
+	if st.SnapshotVersion != "v1" || !st.AppliedAt.Equal(installed.AppliedAt) {
+		t.Fatalf("status after release = %+v, want the loaded snapshot v1 applied at %v", st, installed.AppliedAt)
+	}
+}

@@ -246,8 +246,9 @@ func New(cfg Config) (*Engine, error) {
 // later Start calls see the engine as already started.
 //
 // When fresh does not enforce, Reconfigure first deletes the nft tables this
-// engine installed, so the kernel stops enforcing too. If that fails it
-// returns the error and changes nothing.
+// engine installed, so the kernel stops enforcing too, and the ruleset status
+// stops describing them. If that fails it returns the error and changes
+// nothing.
 func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
@@ -255,6 +256,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 		if err := e.gate.release(); err != nil {
 			return fmt.Errorf("remove enforcement tables: %w", err)
 		}
+		e.releaseRulesetStatus()
 	}
 
 	prevCancel := e.runCancel
