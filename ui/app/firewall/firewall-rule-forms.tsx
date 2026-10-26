@@ -82,14 +82,16 @@ export function EditRuleModal({
       setError(ics.error);
       return null;
     }
+    // The PATCH keeps every omitted key, so a cleared field sends its empty
+    // value.
     return {
-      description: description.trim() || undefined,
+      description: description.trim(),
       action,
-      log: log || undefined,
-      sourceZones: srcZone ? [srcZone] : undefined,
-      destZones: dstZone ? [dstZone] : undefined,
-      sources: splitCSV(sources),
-      destinations: splitCSV(destinations),
+      log,
+      sourceZones: srcZone ? [srcZone] : [],
+      destZones: dstZone ? [dstZone] : [],
+      sources: splitCSV(sources) ?? [],
+      destinations: splitCSV(destinations) ?? [],
       protocols: buildProtocols(proto, port),
       ics: ics.ics,
     };
