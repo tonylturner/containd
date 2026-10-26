@@ -26,8 +26,11 @@ import (
 )
 
 type Options struct {
-	ListenAddr          string
+	ListenAddr string
+	// CLI sessions call the management API at BaseURL with APIClient,
+	// adding the X-Containd-SSH-Connection header to every request.
 	BaseURL             string
+	APIClient           cli.HTTPClient
 	HostKeyPath         string
 	AuthorizedKeysDir   string
 	AllowPassword       bool
@@ -72,6 +75,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.BaseURL == "" {
 		return nil, errors.New("ssh baseURL required")
+	}
+	if opts.APIClient == nil {
+		return nil, errors.New("ssh API client required")
 	}
 	if opts.UserStore == nil {
 		return nil, errors.New("user store required")
@@ -238,7 +244,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{connection: conn}}
+	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{client: s.opts.APIClient, connection: conn}}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 

@@ -4,11 +4,15 @@
 package mgmtapp
 
 import (
+	"bytes"
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -91,5 +95,47 @@ func TestGetAllowedOriginsAndRedirect(t *testing.T) {
 	}
 	if got := rec.Header().Get("Location"); got != "https://fw.example:8443/api" {
 		t.Fatalf("redirect location = %q", got)
+	}
+}
+
+// The HTTPS listener serves a certificate replaced in place from its next
+// handshake, which a certificate upload to the served files relies on.
+func TestCertReloaderServesReplacedFiles(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+	reloader := newCertReloader(certFile, keyFile)
+	served := func() []byte {
+		t.Helper()
+		cert, err := reloader.GetCertificate(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cert.Certificate[0]
+	}
+	if _, _, err := ensureSelfSignedTLSFiles(certFile, keyFile, nil); err != nil {
+		t.Fatal(err)
+	}
+	first := served()
+	_, _, next := sshTestKeyPair(t, dir, "next")
+	for _, name := range []string{"next.crt", "next.key"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := certFile
+		if strings.HasSuffix(name, ".key") {
+			target = keyFile
+		}
+		if err := os.WriteFile(target, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Filesystem timestamps can be coarse; the reloader compares them.
+		later := time.Now().Add(time.Minute)
+		if err := os.Chtimes(target, later, later); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := served(); bytes.Equal(got, first) || !bytes.Equal(got, next.Certificate[0]) {
+		t.Fatal("reloader kept serving the replaced certificate")
 	}
 }

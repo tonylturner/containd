@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
@@ -248,14 +249,14 @@ func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
 	}
 }
 
-// The certificate recorded for the console is the one the HTTPS listener
-// serves: an environment override, generated when missing, rather than the
-// saved setting; none when HTTPS is not served.
+// The certificate and key recorded for the console and SSH are the files the
+// HTTPS listener serves: environment overrides, generated when missing,
+// rather than the saved settings; none when HTTPS is not served.
 func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 	dir := t.TempDir()
-	envCert := filepath.Join(dir, "env.crt")
+	envCert, envKey := filepath.Join(dir, "env.crt"), filepath.Join(dir, "env.key")
 	t.Setenv("CONTAIND_TLS_CERT_FILE", envCert)
-	t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "env.key"))
+	t.Setenv("CONTAIND_TLS_KEY_FILE", envKey)
 	cfg := config.DefaultConfig()
 	cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "saved.crt")
 	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "saved.key")
@@ -264,15 +265,15 @@ func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := listener.servedCertificate(); got != envCert {
-		t.Fatalf("served certificate = %q, want %q", got, envCert)
+	if got := listener.servedManagement(); got.CertFile != envCert || got.KeyFile != envKey {
+		t.Fatalf("served = %+v, want %q and %q", got, envCert, envKey)
 	}
 	if _, err := os.Stat(envCert); err != nil {
 		t.Fatalf("served certificate not generated: %v", err)
 	}
 	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
 	cfg.System.Mgmt.EnableHTTP = boolPtr(true)
-	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedCertificate() != "" {
-		t.Fatalf("served certificate without HTTPS = %q, %v", listener.servedCertificate(), err)
+	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedManagement() != (httpapi.ServedManagement{}) {
+		t.Fatalf("served without HTTPS = %+v, %v", listener.servedManagement(), err)
 	}
 }

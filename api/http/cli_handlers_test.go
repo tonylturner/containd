@@ -239,8 +239,8 @@ func bindConsoleTest(t *testing.T, l config.ManagementListeners) {
 func bindConsoleHTTPS(t *testing.T, addr, certFile string) {
 	t.Helper()
 	bindConsoleTest(t, config.ManagementListeners{HTTPS: config.ManagementListener{Addr: addr, Enabled: true}})
-	SetServedManagementCertificate(certFile)
-	t.Cleanup(func() { SetServedManagementCertificate("") })
+	SetServedManagement(ServedManagement{CertFile: certFile})
+	t.Cleanup(func() { SetServedManagement(ServedManagement{}) })
 }
 
 // consoleTestConfig saves certFile and the default listeners, neither of
@@ -446,8 +446,8 @@ func TestConsoleHTTPStillPreferred(t *testing.T) {
 		HTTP:  config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true},
 		HTTPS: config.ManagementListener{Addr: ":1", Enabled: true},
 	})
-	SetServedManagementCertificate("/unreadable")
-	t.Cleanup(func() { SetServedManagementCertificate("") })
+	SetServedManagement(ServedManagement{CertFile: "/unreadable"})
+	t.Cleanup(func() { SetServedManagement(ServedManagement{}) })
 	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: config.DefaultConfig()}), "untrusted.example")
 	if errText != "" || !strings.Contains(output, "http") || calls.Load() != 1 {
 		t.Fatalf("HTTP call: output=%q error=%q calls=%d", output, errText, calls.Load())
@@ -552,7 +552,7 @@ func TestConsolePinsTheServedCertificate(t *testing.T) {
 	}
 	// Trusting any other file refuses the listener before the bearer is sent.
 	for _, other := range []string{"saved.crt", "env.crt"} {
-		SetServedManagementCertificate(filepath.Join(dir, other))
+		SetServedManagement(ServedManagement{CertFile: filepath.Join(dir, other)})
 		if _, errText := executeConsoleTest(t, router, "untrusted.example"); errText == "" || calls.Load() != 1 {
 			t.Fatalf("pinned %s: error=%q calls=%d", other, errText, calls.Load())
 		}

@@ -5,7 +5,6 @@ package mgmtapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -34,14 +34,18 @@ type sshRuntimeConfig struct {
 	shellMode      string
 }
 
-func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
+// startSSH starts the SSH server, whose CLI sessions call the management
+// listeners this process has bound (see httpapi.LoopbackManagementAPI); it
+// stays off with a fault when they have none to call.
+func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
 	configureSSHPolicy(store, userStore)
 	rt := resolveSSHRuntimeConfig(cfg)
-	baseURL, err := sshBaseURL(httpAddr, loopbackAddr)
+	baseURL, apiClient, err := httpapi.LoopbackManagementAPI()
 	if err != nil {
-		logger.Warnf("ssh disabled: %v", err)
+		err = fmt.Errorf("ssh disabled: CLI sessions have no management API to call: %w", err)
+		logger.Warn(err)
 		if optionalFault != nil {
-			optionalFault(fmt.Errorf("ssh disabled: %w", err))
+			optionalFault(err)
 		}
 		return "", false
 	}
@@ -49,6 +53,7 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 	opts := sshserver.Options{
 		ListenAddr:          rt.sshAddr,
 		BaseURL:             baseURL,
+		APIClient:           apiClient,
 		HostKeyPath:         rt.hostKeyPath,
 		AuthorizedKeysDir:   rt.authKeysDir,
 		AllowPassword:       rt.allowPassword,
@@ -208,24 +213,4 @@ func authKeysDirNeedsBootstrap(authKeysDir string) bool {
 		return true
 	}
 	return len(entries) == 0
-}
-
-// sshBaseURL is the management API URL of SSH CLI sessions: the served
-// HTTP listener httpAddr through loopbackAddr, the loopback listener
-// management adds for it, or on 127.0.0.1 when httpAddr itself accepts
-// loopback connections. SSH sessions call the API with a plain HTTP client
-// that cannot pin the HTTPS certificate, so without a served HTTP listener
-// (httpAddr empty) SSH has no listener to call and stays off.
-func sshBaseURL(httpAddr, loopbackAddr string) (string, error) {
-	if httpAddr == "" {
-		return "", errors.New("the management HTTP listener is disabled; SSH CLI sessions call the management API over loopback HTTP and cannot use the HTTPS listener")
-	}
-	if loopbackAddr != "" && loopbackAddr != httpAddr {
-		return "http://" + loopbackAddr, nil
-	}
-	port := config.ManagementListener{Addr: httpAddr, Enabled: true}.Port()
-	if port == 0 {
-		return "", fmt.Errorf("management HTTP address %q names no port", httpAddr)
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 }

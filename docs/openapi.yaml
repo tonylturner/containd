@@ -1598,7 +1598,12 @@ components:
         starts with the saved configuration: CONTAIND_MGMT_ADDR and
         CONTAIND_MGMT_HTTPS_ADDR take precedence over the saved addresses, then
         the defaults :8080 and :8443 apply. A saved listener change binds at the
-        next start.
+        next start. certFile and keyFile, and the certificate fields, are the
+        files the HTTPS listener serves at the next start: CONTAIND_TLS_CERT_FILE
+        and CONTAIND_TLS_KEY_FILE, then the saved paths, then the defaults.
+        servedCertFile and servedKeyFile are the files the bound HTTPS listener
+        serves now, which a listener fallback to the defaults or a path saved
+        after boot makes differ.
       properties:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}
@@ -1606,6 +1611,8 @@ components:
         httpsEnabled: {type: boolean}
         certFile: {type: string}
         keyFile: {type: string}
+        servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
+        servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         certSubject: {type: string}
         certIssuer: {type: string}
         certNotAfter: {type: string}
@@ -4752,7 +4759,11 @@ paths:
     post:
       summary: Replace TLS certificate and key files (admin)
       tags: [System]
-      description: Writes validated PEM artifacts under /data; does not change saved listener paths.
+      description: >-
+        Writes a validated PEM certificate and key to the files the HTTPS listener
+        serves at the next start (certFile and keyFile of GET /system/tls), under
+        /data; does not change saved listener paths. The bound HTTPS listener
+        reloads the files it serves at its next TLS handshake after they change.
       requestBody:
         required: true
         content:
@@ -4760,12 +4771,23 @@ paths:
             schema: {$ref: '#/components/schemas/SetTLSCertRequest'}
       responses:
         '200':
-          description: Success
+          description: >-
+            Files written. Status updated means the bound HTTPS listener serves
+            these files and presents the new certificate from its next handshake.
+            Status stored means it serves other files, or no HTTPS listener is
+            bound, and the new certificate is served from the next management
+            start; the warnings array and X-Containd-Warnings say so.
+          headers:
+            X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
         '409':
-          description: The resolved certificate or key path is outside /data; the error names the path and its selecting environment variable, config field, or default.
+          description: >-
+            Nothing written. The resolved certificate or key path is outside /data
+            (the error names the path and its selecting environment variable,
+            config field, or default), or only one of the two is a file the bound
+            HTTPS listener serves, which would pair the new file with the served one.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

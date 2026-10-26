@@ -11,7 +11,8 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
-	"time"
+
+	"github.com/tonylturner/containd/pkg/cli"
 )
 
 type connectionContextKey struct{}
@@ -91,14 +92,14 @@ func connectionFromContext(ctx context.Context) *sshConnection {
 // The CLI HTTP facade intentionally discards success bodies. Preserve reset
 // warnings here for SSH presentation without changing ordinary CLI commands.
 type resetAwareClient struct {
+	client     cli.HTTPClient
 	connection *sshConnection
 }
 
 func (c *resetAwareClient) Do(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("X-Containd-SSH-Connection", c.connection.id)
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(clone)
+	resp, err := c.client.Do(clone)
 	if err != nil || req.Method != http.MethodPost || req.URL.Path != "/api/v1/system/factory-reset" || resp.StatusCode != http.StatusOK {
 		return resp, err
 	}

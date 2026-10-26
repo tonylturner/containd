@@ -173,6 +173,7 @@ func newTestSSHServer(t *testing.T) (*Server, *users.SQLiteStore, *recordingAudi
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(tmp, "host_key"),
 		AuthorizedKeysDir: filepath.Join(tmp, "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),

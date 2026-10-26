@@ -36,7 +36,10 @@ func TestSSHListenerFailureIsVisible(t *testing.T) {
 	reported := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startSSH(ctx, zap.NewNop().Sugar(), config.DefaultConfig(), nil, store, nil, "127.0.0.1:8080", "", nil, func(err error) {
+	// CLI sessions have a listener to call; SSH itself cannot bind.
+	config.SetBoundManagementListeners(config.ManagementListeners{HTTP: config.ManagementListener{Addr: "127.0.0.1:8080", Enabled: true}})
+	t.Cleanup(func() { config.SetBoundManagementListeners(config.ManagementListeners{}) })
+	startSSH(ctx, zap.NewNop().Sugar(), config.DefaultConfig(), nil, store, nil, nil, func(err error) {
 		faults.record(err)
 		reported <- err
 	})
