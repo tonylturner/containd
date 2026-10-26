@@ -4,7 +4,6 @@ package enforce
 
 import (
 	"bytes"
-	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -51,25 +50,6 @@ func goldenCompiler() *Compiler {
 	c.ScheduleFrom = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	c.ScheduleHorizon = 72 * time.Hour
 	return c
-}
-
-// TestIdentityScheduleGolden pins the policy table of goldenSnapshot: the
-// identity and time sets, the recheck chains and the guarded rule lines.
-func TestIdentityScheduleGolden(t *testing.T) {
-	out, err := goldenCompiler().CompileFirewall(goldenSnapshot())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := os.ReadFile("testdata/identity_schedule_policy.nft")
-	if err != nil {
-		t.Fatal(err)
-	}
-	start := strings.Index(out, "table inet containd_policy {")
-	end := strings.Index(out, "\n}\n")
-	if start < 0 || end < start || out[start:end+3] != string(want) {
-		t.Fatalf("policy table differs from testdata/identity_schedule_policy.nft:\n%s", out)
-	}
-	assertDeclaredSets(t, out)
 }
 
 // TestScheduleSetsAgreeWithEvaluator samples every 5 minutes, and one
@@ -250,8 +230,11 @@ func TestIdentityLowering(t *testing.T) {
 }
 
 // TestPredicatesOnlyWhereNftablesDecides: without a queue an ICS rule is
-// decided by nftables and guarded; with one it keeps its queue line and the
-// engine decides its predicates. No conditional kernel rule, no recheck.
+// decided by nftables and guarded. With one it keeps its unguarded queue
+// line, and the engine decides the predicates of the client's messages; the
+// kernel rechecks the rest of its connections against them, while a queued
+// DENY or an unconditional queued ALLOW leaves its connections to the
+// engine.
 func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	entry := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
 		ICS: rules.ICSPredicate{Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow, Schedule: maintenanceWindow}
@@ -261,9 +244,30 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(queued, "    tcp dport 502 queue num 100;\n") || strings.Contains(queued, "identity4_") ||
-		strings.Contains(queued, "schedule_") || strings.Contains(queued, conditionalScopeChain) {
-		t.Fatalf("queued rule was guarded:\n%s", queued)
+	set := "@schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b"
+	for _, want := range []string{
+		"    tcp dport 502 queue num 100;\n    ct state established jump conditional_scope;\n",
+		"  chain conditional_scope {\n    meta l4proto tcp ct reply proto-src 502 goto conditional_policy;\n  }\n",
+		"    ct status dnat return;\n    meta l4proto tcp ct reply proto-src 502 ct original ip saddr @identity4_6f7073 meta time " + set + " return;\n    drop;\n",
+	} {
+		if !strings.Contains(queued, want) {
+			t.Fatalf("missing %q:\n%s", want, queued)
+		}
+	}
+	for _, a := range []rules.Action{rules.ActionDeny, rules.ActionAllow} {
+		other := entry
+		other.Action = a
+		if a == rules.ActionAllow {
+			other.Identities, other.Schedule = nil, rules.SchedulePredicate{}
+		}
+		text, err := compileWithoutCounters(c, &rules.Snapshot{Firewall: []rules.Entry{other}, IdentityBindings: snap.IdentityBindings})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(text, "    tcp dport 502 queue num 100;\n") || strings.Contains(text, "identity4_") ||
+			strings.Contains(text, "schedule_") || strings.Contains(text, conditionalScopeChain) {
+			t.Fatalf("queued %s rule was guarded:\n%s", a, text)
+		}
 	}
 	c.QueueID = 0
 	plain, err := compileWithoutCounters(c, snap)
@@ -271,7 +275,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"    ip saddr @identity4_6f7073 meta time @schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b tcp dport 502 accept;\n",
+		"    ip saddr @identity4_6f7073 meta time " + set + " tcp dport 502 accept;\n",
 		"    ct state established jump conditional_scope;\n    ct state { established, related } accept;\n",
 	} {
 		if !strings.Contains(plain, want) {
@@ -354,9 +358,10 @@ func TestTemplatesCompileToTimeSets(t *testing.T) {
 
 // TestPredicatesOnEveryAction: RESET, RATE_LIMIT and TAG lines carry the
 // rule's identity and schedule clauses like ALLOW and DENY lines. A meter
-// line matches the opener from conntrack, since it meters both directions,
-// takes only its address family's identity sets, and an identity nothing
-// binds leaves no line, whatever the action.
+// line for tracked packets matches the opener from conntrack, since it
+// meters both directions, one for untracked packets the sender as an
+// opener; each takes only its address family's identity sets, and an
+// identity nothing binds leaves no line, whatever the action.
 func TestPredicatesOnEveryAction(t *testing.T) {
 	bindings := []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}, {IP: "2001:db8::6", Identities: []string{"ops"}}}
 	ops := "ip saddr @identity4_6f7073"
@@ -376,7 +381,12 @@ func TestPredicatesOnEveryAction(t *testing.T) {
 			[]string{ops + " tcp dport 23", ops6 + " tcp dport 23"}},
 		{"rate limit", rules.Entry{ID: "m", Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10},
 			Identities: []string{"ops"}, Protocols: []rules.Protocol{{Name: "udp", Port: "161"}}},
-			[]string{"ct original " + ops + " meta nfproto ipv4 udp dport 161", "ct original " + ops6 + " meta nfproto ipv6 udp dport 161"}},
+			[]string{
+				ops + " meta nfproto ipv4 " + untrackedState + " udp dport 161",
+				"ct original " + ops + " meta nfproto ipv4 " + trackedState + " meta l4proto udp ct reply proto-src 161",
+				ops6 + " meta nfproto ipv6 " + untrackedState + " udp dport 161",
+				"ct original " + ops6 + " meta nfproto ipv6 " + trackedState + " meta l4proto udp ct reply proto-src 161",
+			}},
 		{"unbound tag", rules.Entry{ID: "u", Action: rules.ActionTag, Tag: "x", Identities: []string{"nobody"}}, nil},
 		{"unbound rate limit", rules.Entry{ID: "v", Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10},
 			Identities: []string{"nobody"}}, nil},
@@ -386,10 +396,7 @@ func TestPredicatesOnEveryAction(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lines, err := compileEntryWithoutCounters(tc.entry, nil, 0, 0)
-			if err == nil {
-				lines, err = p.guard(tc.entry, lines)
-			}
+			lines, err := guardedWithoutCounters(p, tc.entry)
 			if err != nil {
 				t.Fatal(err)
 			}

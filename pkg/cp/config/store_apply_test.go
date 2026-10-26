@@ -136,3 +136,46 @@ func TestFailedConfirmedApplyCannotExpireAfterRestoration(t *testing.T) {
 		t.Fatalf("candidate changed: %+v %v", candidate, err)
 	}
 }
+
+// A transition that fails at runtime from management recovery restores the
+// refused running configuration and its boot fault without reapplying it.
+func TestApplyChangeFromRecoveryDoesNotReapplyRefusedConfig(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cfg.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	refused := DefaultConfig()
+	refused.System.Hostname = "refused"
+	if err := store.Save(ctx, refused); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetManagementBootFault(ctx, "refused at boot"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := DefaultConfig()
+	candidate.System.Hostname = "candidate"
+	if err := store.SaveCandidate(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	var applied []string
+	err = store.ApplyChange(ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
+		applied = append(applied, next.System.Hostname)
+		return errors.New("apply failed")
+	})
+	var failure *ApplyError
+	if !errors.As(err, &failure) || !failure.Recovery || failure.RestoreError != nil || failure.ReapplyError != nil {
+		t.Fatalf("apply result: %v", err)
+	}
+	if !reflect.DeepEqual(applied, []string{"candidate"}) {
+		t.Fatalf("applied %q, want only the candidate", applied)
+	}
+	if fault, err := store.ManagementBootFault(ctx); err != nil || fault != "refused at boot" {
+		t.Fatalf("boot fault = %q, %v", fault, err)
+	}
+	running, err := store.Load(ctx)
+	if err != nil || running.System.Hostname != "refused" {
+		t.Fatalf("running = %v, %v", running, err)
+	}
+}

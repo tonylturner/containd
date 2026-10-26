@@ -72,18 +72,18 @@ type identitySet struct {
 func (s identitySet) name() string { return identitySetName(s.family, s.label) }
 
 // identitySets returns the sets e's identity predicate matches against, one
-// per label and family with bound addresses. A rule whose addresses are
-// IPv4 CIDRs takes no IPv6 set: nft cannot match both families in one rule,
-// and the rule cannot match an IPv6 flow anyway.
+// per label and family with bound addresses, in the families e's addresses
+// can match (entryFamilies): a rule whose addresses are all IPv4 cannot
+// match an IPv6 flow, so it takes no IPv6 set, and the reverse.
 func (idx identityIndex) identitySets(e rules.Entry) []identitySet {
 	labels := slices.Clone(e.Identities)
 	slices.Sort(labels)
 	labels = slices.Compact(labels)
-	ipv4Only := len(e.Sources) > 0 || len(e.Destinations) > 0
+	families := entryFamilies(e)
 	var out []identitySet
 	for _, label := range labels {
 		for f := range identityFamilies {
-			if len(idx[label][f]) > 0 && (f == 0 || !ipv4Only) {
+			if len(idx[label][f]) > 0 && families[f] {
 				out = append(out, identitySet{f, label})
 			}
 		}
@@ -108,11 +108,12 @@ func (idx identityIndex) writeIdentitySet(buf *bytes.Buffer, set identitySet) {
 }
 
 // identityWarnings reports the rules whose identity predicate no bound
-// address can satisfy: such a rule matches nothing, ALLOW or DENY.
+// address can satisfy: such a rule matches nothing, ALLOW or DENY. A rule
+// whose addresses share no family is familyWarnings'.
 func identityWarnings(snap *rules.Snapshot, idx identityIndex) []RuleWarning {
 	var out []RuleWarning
 	for _, e := range snap.Firewall {
-		if !e.HasIdentityPredicate() || len(idx.identitySets(e)) > 0 {
+		if !e.HasIdentityPredicate() || len(idx.identitySets(e)) > 0 || entryFamilies(e) == [2]bool{} {
 			continue
 		}
 		out = append(out, RuleWarning{RuleID: e.ID, Predicate: PredicateIdentity, Action: e.Action,

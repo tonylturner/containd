@@ -31,11 +31,17 @@ type RuntimeStore interface {
 
 // ApplyError reports the original failure and both compensating operations.
 // Nil restore/reapply errors mean those operations succeeded.
+//
+// Recovery reports that the restored state is management recovery: the
+// running configuration was refused at boot, so the store did not reapply
+// it, and the caller must re-enter recovery and record the outcome in
+// ReapplyError and the runtime apply fault.
 type ApplyError struct {
 	Err          error
 	RestoreError error
 	ReapplyError error
 	HealthError  error
+	Recovery     bool
 }
 
 func (e *ApplyError) Error() string {
@@ -110,6 +116,10 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 	if err != nil {
 		return err
 	}
+	recovering := false
+	for _, row := range saved {
+		recovering = recovering || row.key == bootFaultKey
+	}
 	bank, err := s.loadIDSRulesRaw(ctx)
 	if err != nil {
 		return err
@@ -145,14 +155,15 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	failure.RestoreError = s.restoreApplyStateLocked(recoveryCtx, saved, bank)
-	if failure.RestoreError == nil {
-		if previous == nil {
-			failure.ReapplyError = errors.New("no previous running document to reapply")
-		} else {
-			failure.ReapplyError = apply(recoveryCtx, next, previous)
-		}
-	} else {
+	switch {
+	case failure.RestoreError != nil:
 		failure.ReapplyError = errors.New("reapply not attempted: store restoration failed")
+	case recovering:
+		failure.Recovery = true
+	case previous == nil:
+		failure.ReapplyError = errors.New("no previous running document to reapply")
+	default:
+		failure.ReapplyError = apply(recoveryCtx, next, previous)
 	}
 	fault := ""
 	if failure.RestoreError != nil || failure.ReapplyError != nil {

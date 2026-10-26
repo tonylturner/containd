@@ -80,7 +80,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	var buf bytes.Buffer
 	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
-	c.writeZoneIfaceSets(&buf, snap)
+	preds.zones.writeSets(&buf)
 	if err := writeRuleObjects(&buf, snap); err != nil {
 		return "", err
 	}
@@ -94,7 +94,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
 	}
-	if err := c.writeInputChain(&buf, snap, locals); err != nil {
+	if err := c.writeInputChain(&buf, preds.zones, locals); err != nil {
 		return "", err
 	}
 	if err := c.writeForwardChain(&buf, snap, preds); err != nil {
@@ -113,50 +113,25 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	return buf.String(), nil
 }
 
-func (c *Compiler) writeZoneIfaceSets(buf *bytes.Buffer, snap *rules.Snapshot) {
-	if len(snap.ZoneIfaces) == 0 {
-		return
-	}
-	zones := make([]string, 0, len(snap.ZoneIfaces))
-	for z := range snap.ZoneIfaces {
-		zones = append(zones, z)
-	}
-	sort.Strings(zones)
-	for _, z := range zones {
-		ifaces := snap.ZoneIfaces[z]
-		if len(ifaces) == 0 {
-			continue
-		}
-		setName := "zone_" + sanitizeIdent(z) + "_ifaces"
-		buf.WriteString(fmt.Sprintf("  set %s {\n", setName))
-		buf.WriteString("    type ifname;\n")
-		buf.WriteString("    elements = { ")
-		for i, iface := range ifaces {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.WriteString(fmt.Sprintf("\"%s\"", iface))
-		}
-		buf.WriteString(" }\n")
-		buf.WriteString("  }\n")
-	}
-}
-
 // writeInputChain emits the input chain; locals is snap's local input,
 // resolved by resolveLocalInput.
-func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot, locals []rules.LocalServiceRule) error {
+func (c *Compiler) writeInputChain(buf *bytes.Buffer, zones zoneIndex, locals []rules.LocalServiceRule) error {
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
-	c.writeManagementInput(buf)
+	if err := c.writeManagementInput(buf); err != nil {
+		return err
+	}
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
-	c.writeEngineAPIInput(buf)
+	if err := c.writeEngineAPIInput(buf); err != nil {
+		return err
+	}
 	for _, lr := range locals {
-		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
+		line, err := compileLocalInputRule(lr, zones)
 		if err != nil {
 			return err
 		}
@@ -179,7 +154,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 	// RATE_LIMIT meters come first, so that they meter every packet of a
 	// flow, before IEC104 steering, NFQUEUE and the established accept.
 	meters, tags, decide := forwardSections(snap.Firewall)
-	if err := c.writeEntries(buf, snap, preds, meters); err != nil {
+	if err := c.writeEntries(buf, preds, meters); err != nil {
 		return err
 	}
 
@@ -194,14 +169,16 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 	// IEC104 rules come first and steer both directions of their session
 	// scope, marked; they replace the rule's own line.
 	if c.QueueID > 0 {
-		c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap)
+		if err := c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap, preds.zones); err != nil {
+			return err
+		}
 		var queued []rules.Entry
 		for _, e := range decide {
 			if isDPIEligible(e) && !isIEC104Rule(e) {
 				queued = append(queued, e)
 			}
 		}
-		if err := c.writeEntries(buf, snap, preds, queued); err != nil {
+		if err := c.writeEntries(buf, preds, queued); err != nil {
 			return err
 		}
 	}
@@ -223,7 +200,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 			rest = append(rest, e)
 		}
 	}
-	if err := c.writeEntries(buf, snap, preds, rest); err != nil {
+	if err := c.writeEntries(buf, preds, rest); err != nil {
 		return err
 	}
 	buf.WriteString("  }\n")
@@ -232,16 +209,17 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 
 // writeEntries emits the lines of entries in order, with their identity
 // and schedule predicates.
-func (c *Compiler) writeEntries(buf *bytes.Buffer, snap *rules.Snapshot, preds *predicates, entries []rules.Entry) error {
+func (c *Compiler) writeEntries(buf *bytes.Buffer, preds *predicates, entries []rules.Entry) error {
 	for _, e := range entries {
-		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
-		if err == nil {
-			lines, err = preds.guard(e, lines)
-		}
+		lines, err := compileEntry(e, preds.zones, c.QueueID, c.NFLogGroup)
 		if err != nil {
 			return err
 		}
-		for _, line := range lines {
+		guarded, err := preds.guard(e, lines)
+		if err != nil {
+			return err
+		}
+		for _, line := range guarded {
 			buf.WriteString("    " + line + ";\n")
 		}
 	}
@@ -255,29 +233,39 @@ func defaultPolicy(a rules.Action) string {
 	return "drop"
 }
 
-// compileEntry returns one nft rule line per protocol on the entry. Rules
-// declaring multiple protocols (e.g. one ALLOW for tcp/502 + tcp/20000 +
-// tcp/8080) used to compile to a single nft line for the first protocol
-// only — silently dropping every other protocol the operator declared.
-// Now each protocol becomes its own line, matching the operator's intent.
-//
-// Entries with zero protocols emit a single line with no proto/port match
-// (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
+// ruleLine is one nft line of a rule, before its identity and schedule
+// predicates (predicates.guard).
+type ruleLine struct {
+	// family is the address family the line is restricted to, or
+	// familyAny.
+	family int
+	// ct marks a line that matches packets of both directions by their
+	// connection's original tuple; its predicates must too.
+	ct   bool
+	text string
+}
+
+// compileEntry returns the lines of one rule: one per protocol (a rule
+// without protocols matches every protocol) and address family, and, for
+// RESET and RATE_LIMIT, per form of the action (actionForms, meterLines).
+// A rule that can match nothing, because its zones have no interfaces or
+// its sources and destinations share no address family, has no lines.
 //
 // Identity and schedule predicates are not part of these lines: the forward
 // chain adds them (predicates.guard).
 //
-// Each line counts into the rule's counter; actionForms lowers the action.
-func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
-	dpiEligible := isDPIEligible(e)
+// Each line counts into the rule's counter.
+func compileEntry(e rules.Entry, zones zoneIndex, queueID int, nflogGroup int) ([]ruleLine, error) {
+	scopes, err := addrScopes(e)
+	if err != nil {
+		return nil, err
+	}
+	in, inOK := zones.clause("iifname", e.SourceZones)
+	out, outOK := zones.clause("oifname", e.DestZones)
+	if !inOK || !outOK || len(scopes) == 0 {
+		return nil, nil
+	}
 	queued := queuedToEngine(e, queueID)
-	base := []string{}
-	if c := zoneClause("iifname", e.SourceZones, zoneIfaces); c != "" {
-		base = append(base, c)
-	}
-	if c := zoneClause("oifname", e.DestZones, zoneIfaces); c != "" {
-		base = append(base, c)
-	}
 
 	// Build the optional log statement. Only emit for non-DPI rules:
 	// DPI-eligible rules already get visibility through the NFQUEUE
@@ -285,44 +273,37 @@ func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nf
 	// firewall.rule.hit event from EvaluateVerdict when an enforce-mode
 	// verdict is applied). Adding a kernel log here would double-count.
 	logStmt := ""
-	if e.Log && nflogGroup > 0 && !dpiEligible {
+	if e.Log && nflogGroup > 0 && !isDPIEligible(e) {
 		logStmt = fmt.Sprintf(`log prefix "%s" group %d`, logPrefix(e.ID, e.Action), nflogGroup)
 	}
 
-	// Treat "no protocols" as a single iteration with no proto match — the
-	// rule is constrained by zones/CIDRs alone.
 	protos := e.Protocols
 	if len(protos) == 0 {
 		protos = []rules.Protocol{{}}
 	}
-
-	lines := make([]string, 0, len(protos))
+	var lines []ruleLine
 	for _, p := range protos {
+		if e.Action == rules.ActionRateLimit && !queued {
+			metered, err := meterLines(e, p, scopes, zones, logStmt)
+			if err != nil {
+				return nil, err
+			}
+			lines = append(lines, metered...)
+			continue
+		}
 		forms, err := actionForms(e, p, queued, queueID, counterStmt(e.ID), logStmt)
 		if err != nil {
 			return nil, err
 		}
-		parts := append([]string(nil), base...)
 		match, err := protocolMatch(p)
 		if err != nil {
 			return nil, fmt.Errorf("entry %s: %w", e.ID, err)
 		}
-		if match != "" {
-			parts = append(parts, match)
-		}
-		// CIDR matching (skeleton uses ip saddr/daddr; no v6 yet).
-		if len(e.Sources) > 0 {
-			parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(e.Sources, ", ")))
-		}
-		if len(e.Destinations) > 0 {
-			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(e.Destinations, ", ")))
-		}
-		for _, f := range forms {
-			line := append([]string(nil), parts...)
-			if f.match != "" {
-				line = append([]string{f.match}, line...)
+		for _, s := range scopes {
+			for _, f := range forms {
+				parts := append([]string{f.match, in, out, match}, s.header(false)...)
+				lines = append(lines, ruleLine{family: s.family, text: joinClauses(append(parts, f.stmts))})
 			}
-			lines = append(lines, strings.Join(append(line, f.stmts), " "))
 		}
 	}
 	return lines, nil
@@ -409,26 +390,35 @@ func sanitizeRuleIDForLog(id string) string {
 	return string(b)
 }
 
-// RulePredicate names the rule predicate a warning is about.
+// RulePredicate names the part of a rule a warning is about.
 type RulePredicate string
 
-const PredicateIdentity RulePredicate = "identity"
+const (
+	// PredicateIdentity: no bound address satisfies the rule's identities.
+	PredicateIdentity RulePredicate = "identity"
+	// PredicateZone: none of the rule's source or destination zones has
+	// an interface (RuleWarning.Zones).
+	PredicateZone RulePredicate = "zone"
+	// PredicateAddressFamily: the rule's sources and destinations share no
+	// address family.
+	PredicateAddressFamily RulePredicate = "addressFamily"
+)
 
 // RuleWarning reports a firewall rule that does not act as written: one
-// whose identity predicate no bound address satisfies (Predicate), so it
-// matches nothing, or a DENY or RESET rule that an ALLOW shadows
-// (ShadowedBy).
+// that matches nothing, because of the part of the rule Predicate names, or
+// a DENY or RESET rule that an ALLOW shadows (ShadowedBy).
 type RuleWarning struct {
 	RuleID     string        `json:"ruleId"`
 	Predicate  RulePredicate `json:"predicate,omitempty"`
+	Zones      []string      `json:"zones,omitempty"`
 	ShadowedBy string        `json:"shadowedBy,omitempty"`
 	Action     rules.Action  `json:"action"`
 	Message    string        `json:"message"`
 }
 
-// RuleWarnings lists, in rule ID order, snap's firewall rules whose
-// identity predicate no bound address can satisfy, and every DENY or RESET
-// rule an ALLOW shadows (shadowWarnings).
+// RuleWarnings lists, in rule ID order, snap's firewall rules that match
+// nothing (zoneWarnings, familyWarnings, identityWarnings), and every DENY
+// or RESET rule an ALLOW shadows (shadowWarnings).
 func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	if snap == nil {
 		return nil
@@ -437,7 +427,13 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	if err != nil {
 		return nil // such a snapshot does not compile, so it has no ruleset to warn about
 	}
-	out := identityWarnings(snap, idx)
+	zones, err := newZoneIndex(snap.ZoneIfaces)
+	if err != nil {
+		return nil // likewise
+	}
+	out := zoneWarnings(snap, zones)
+	out = append(out, familyWarnings(snap)...)
+	out = append(out, identityWarnings(snap, idx)...)
 	out = append(out, shadowWarnings(snap)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
 	return out
@@ -455,7 +451,7 @@ func queuedToEngine(e rules.Entry, queueID int) bool {
 	return queueID > 0 && isDPIEligible(e)
 }
 
-func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]string) (string, error) {
+func compileLocalInputRule(r rules.LocalServiceRule, zones zoneIndex) (string, error) {
 	proto := strings.ToLower(strings.TrimSpace(r.Proto))
 	if proto != "tcp" && proto != "udp" {
 		return "", fmt.Errorf("local input %s invalid proto %q", r.ID, r.Proto)
@@ -466,57 +462,20 @@ func compileLocalInputRule(r rules.LocalServiceRule, zoneIfaces map[string][]str
 
 	parts := []string{}
 	if len(r.Ifaces) > 0 {
-		ifs := append([]string(nil), r.Ifaces...)
-		sort.Strings(ifs)
-		for i, v := range ifs {
-			ifs[i] = fmt.Sprintf("\"%s\"", v)
+		set, err := ifnameSet(r.Ifaces)
+		if err != nil {
+			return "", fmt.Errorf("local input %s: %w", r.ID, err)
 		}
-		parts = append(parts, fmt.Sprintf("iifname { %s }", strings.Join(ifs, ", ")))
-	} else if strings.TrimSpace(r.Zone) != "" {
-		z := strings.TrimSpace(r.Zone)
-		if len(zoneIfaces[z]) == 0 {
+		parts = append(parts, "iifname "+set)
+	} else if z := strings.TrimSpace(r.Zone); z != "" {
+		if len(zones[z]) == 0 {
 			// No interfaces for this zone -> rule never matches, omit.
 			return "", nil
 		}
-		setName := "zone_" + sanitizeIdent(z) + "_ifaces"
-		parts = append(parts, fmt.Sprintf("iifname @%s", setName))
+		parts = append(parts, "iifname @"+zoneSetName(z))
 	}
 	parts = append(parts, proto, fmt.Sprintf("dport %d", r.Port), "accept")
 	return strings.Join(parts, " "), nil
-}
-
-// zoneClause matches keyword (iifname or oifname) against the interfaces of
-// zones; "" when zones is empty. Zones without interfaces give an empty set,
-// so the rule never matches.
-func zoneClause(keyword string, zones []string, zoneIfaces map[string][]string) string {
-	if len(zones) == 0 {
-		return ""
-	}
-	ifs := collectZoneIfaces(zones, zoneIfaces)
-	if len(ifs) == 0 {
-		return keyword + " { }"
-	}
-	return fmt.Sprintf("%s { %s }", keyword, strings.Join(ifs, ", "))
-}
-
-func collectZoneIfaces(zones []string, zoneIfaces map[string][]string) []string {
-	if len(zones) == 0 || len(zoneIfaces) == 0 {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	var out []string
-	for _, z := range zones {
-		ifs := zoneIfaces[z]
-		for _, iface := range ifs {
-			if _, ok := seen[iface]; ok {
-				continue
-			}
-			seen[iface] = struct{}{}
-			out = append(out, fmt.Sprintf("\"%s\"", iface))
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func sanitizeIdent(s string) string {

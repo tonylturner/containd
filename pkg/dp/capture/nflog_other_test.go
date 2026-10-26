@@ -9,12 +9,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/tonylturner/containd/pkg/dp/events"
 )
 
 func TestStartNFLogUnavailableOnNonLinux(t *testing.T) {
-	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), nil)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "only supported on linux") {
 		t.Fatalf("StartNFLog error = %v, want linux-unavailable error", err)
 	}
@@ -30,7 +28,7 @@ func TestStartNFLogNonLinuxNoOpWhenDisabled(t *testing.T) {
 		group uint16
 		sink  RuleHitSink
 	}{
-		{name: "zero group", group: 0, sink: events.NewStore(1)},
+		{name: "zero group", group: 0, sink: &recordingSink{}},
 		{name: "nil sink", group: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -125,3 +125,69 @@ func TestClockStepped(t *testing.T) {
 		}
 	}
 }
+
+// The ruleset status carries the planner's state for the installed
+// ruleset: its horizon, a failing refill until the next success, and a
+// degraded state once the horizon is within an hour of its end or a refill
+// fails. A ruleset without scheduled rules has none.
+func TestRulesetStatusReportsSchedulePlanner(t *testing.T) {
+	log := &scriptLog{}
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: log}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	now := t0
+	e.gate.clock = func() time.Time { return now }
+	ctx := context.Background()
+	scheduled := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{ID: "maint", Action: rules.ActionAllow,
+		Protocols: []rules.Protocol{{Name: "tcp", Port: "22"}},
+		Schedule:  rules.SchedulePredicate{DaysOfWeek: []string{"Saturday"}, StartTime: "02:00", EndTime: "06:00"}}}}
+	if err := e.ApplyRules(ctx, scheduled); err != nil {
+		t.Fatal(err)
+	}
+	plan := func(state, reason string) *SchedulePlan {
+		t.Helper()
+		p := e.RulesetStatus().SchedulePlanner
+		if p == nil || p.State != state || p.Reason != reason {
+			t.Fatalf("planner at %v = %+v, want %s %q", now, p, state, reason)
+		}
+		return p
+	}
+	if p := plan(SchedulePlannerOK, ""); !p.LastRefill.Equal(t0) || !p.HorizonEnd.Equal(t0.Add(enforce.DefaultScheduleHorizon)) || p.LastError != "" {
+		t.Fatalf("planner after apply = %+v", p)
+	}
+	now = t0.Add(23*time.Hour + 30*time.Minute)
+	plan(SchedulePlannerDegraded, "schedule horizon ends within an hour")
+	now = t0.Add(25 * time.Hour)
+	plan(SchedulePlannerDegraded, "schedule horizon exhausted")
+
+	log.err = errors.New("nft unavailable")
+	if err := e.gate.planSchedules(ctx, now, false); err == nil {
+		t.Fatal("failed refill not reported")
+	}
+	if p := plan(SchedulePlannerDegraded, "schedule refill failing"); p.LastError != "nft unavailable" || p.LastErrorAt == nil || !p.LastRefill.Equal(t0) {
+		t.Fatalf("planner after a failed refill = %+v", p)
+	}
+	log.err = nil
+	if err := e.gate.planSchedules(ctx, now, false); err != nil {
+		t.Fatal(err)
+	}
+	if p := plan(SchedulePlannerOK, ""); !p.LastRefill.Equal(now) || p.LastError != "" || p.LastErrorAt != nil {
+		t.Fatalf("planner after the refill = %+v", p)
+	}
+
+	// A failed apply leaves the installed plan.
+	log.err = errors.New("nft unavailable")
+	if err := e.ApplyRules(ctx, rules.Snapshot{Default: rules.ActionDeny}); err == nil {
+		t.Fatal("apply error swallowed")
+	}
+	plan(SchedulePlannerOK, "")
+	log.err = nil
+	if err := e.ApplyRules(ctx, rules.Snapshot{Default: rules.ActionDeny}); err != nil {
+		t.Fatal(err)
+	}
+	if p := e.RulesetStatus().SchedulePlanner; p != nil {
+		t.Fatalf("planner of a ruleset without schedules = %+v", p)
+	}
+}

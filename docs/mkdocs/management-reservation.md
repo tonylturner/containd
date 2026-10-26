@@ -135,7 +135,10 @@ configuration through the engine API: enforcement on, no capture interfaces, DPI
 stored interfaces, routing, zones, rules, NAT or services, and default deny.
 Recovery retries if the engine is unavailable. Staging alone does not clear the
 fault: a validated commit or rollback resumes normal apply; factory reset also
-recovers. A later boot whose binding rediscovery resolves the conflict clears
+recovers. A commit, rollback or factory reset that fails at runtime while the
+fault holds restores the stored state, boot fault included, and management
+pushes the recovery configuration again; the refused configuration is never
+reapplied. A later boot whose binding rediscovery resolves the conflict clears
 the persisted fault as well.
 
 #### Without a reservation
@@ -148,8 +151,23 @@ apply as above. Management keeps serving with the stored listener settings.
 Stored services and runtime configuration are not replayed. The engine gets the
 recovery ruleset. Without a reservation, that ruleset also keeps the
 management listener INPUT allows compiled from the stored interface access, so
-management stays reachable exactly where it was. Everything else from the stored configuration is left out, and new transit is
-dropped. A valid commit or rollback, or a factory reset, leaves recovery. So
+management stays reachable exactly where it was. It admits the appliance
+default listeners (HTTP 8080, HTTPS 8443, SSH 2222) on the same interfaces as
+well. Management can depend on a static address that containd assigned and
+that a new container's interfaces lack, so once the recovery ruleset is
+applied, management also restores the stored static addresses of the
+physical interfaces whose devices that ruleset admits management on: the
+addresses only, without zones, gateways, VLANs, bridges or DHCP. A failure to
+address them is logged as a warning. Everything else from the stored
+configuration is left out, and new transit is dropped.
+
+Stored management listener settings that cannot be bound (an address the
+host no longer has, a port another process holds) do not stop management
+either. Management binds the appliance default listeners instead and enters
+recovery with the bind failure as its boot fault, joined to any validation
+failure; the API still shows the stored settings. Listeners that the
+environment sets (`CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR`), and the
+default listeners themselves, remain fatal when they cannot be bound. A valid commit or rollback, or a factory reset, leaves recovery. So
 does a later boot whose stored configuration is valid.
 
 **Recovery: new transit dropped.** Once the engine reports the recovery ruleset
@@ -178,9 +196,11 @@ block applying otherwise safe policy. If a wildcard HTTP socket is unavailable
 because another address is occupied, management independently binds the reserved
 address and reports the failed broader listener. A failure to bind that exact
 endpoint is fatal. Environment conflicts with the reservation remain fatal.
-Without a reservation HTTP/HTTPS bind failures retain their previous fatal
-behavior (SSH remains best effort). Correct stored listener settings and restart
-to restore the optional listener: an ordinary commit does not rebind sockets.
+Without a reservation, an HTTP/HTTPS bind failure of the stored listener
+settings puts the appliance into recovery on the default listeners (see
+above); SSH remains best effort. Correct stored listener settings and restart
+to restore the optional or stored listener: an ordinary commit does not rebind
+sockets, so commit listener changes only together with a restart.
 Management HTTP, legacy HTTP, HTTPS and SSH listener values are structurally
 validated at staging/commit/import: empty (default), `host:port` or `:port`, with
 numeric ports 1–65535. Validation does not require the host address to be local;

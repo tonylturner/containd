@@ -51,6 +51,7 @@ table inet containd_policy {
     elements = { 0-1793361600, 1793426400-1793440800, 1793516400-1793530800, 1793620800-9223372036 }
   }
   chain conditional_scope {
+    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } goto conditional_policy;
     meta l4proto tcp ct reply proto-src 22 goto conditional_policy;
     ct direction original iifname { "eth3" } oifname { "eth1" } goto conditional_policy;
     ct direction reply iifname { "eth1" } oifname { "eth3" } goto conditional_policy;
@@ -60,7 +61,7 @@ table inet containd_policy {
   }
   chain conditional_policy {
     ct status dnat return;
-    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } return;
+    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } ct original ip saddr @identity4_656e67696e656572 return;
     meta l4proto tcp ct reply proto-src 22 ct original ip saddr @identity4_656e67696e656572 return;
     meta l4proto tcp ct reply proto-src 22 ct original ip6 saddr @identity6_656e67696e656572 return;
     ct direction original iifname { "eth3" } oifname { "eth1" } meta time @schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b return;
@@ -83,8 +84,10 @@ table inet containd_policy {
   chain forward {
     type filter hook forward priority 0;
     policy drop;
-    ct original ip saddr @identity4_656e67696e656572 meta nfproto ipv4 udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
-    ct original ip6 saddr @identity6_656e67696e656572 meta nfproto ipv6 udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    ip saddr @identity4_656e67696e656572 meta nfproto ipv4 ct state { invalid, untracked } udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    ct original ip saddr @identity4_656e67696e656572 meta nfproto ipv4 ct state != { invalid, untracked } meta l4proto udp ct reply proto-src 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    ip6 saddr @identity6_656e67696e656572 meta nfproto ipv6 ct state { invalid, untracked } udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    ct original ip6 saddr @identity6_656e67696e656572 meta nfproto ipv6 ct state != { invalid, untracked } meta l4proto udp ct reply proto-src 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
     tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_f07ca10904fa3309" queue num 100;
     ct state established jump conditional_scope;
     ct state { established, related } accept;

@@ -69,7 +69,9 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			attempt++
 			return err
 		})
+		recoveryWarnings := reenterRecoveryLocked(c.Request.Context(), store, engine, err)
 		if err != nil {
+			setWarningHeader(c, recoveryWarnings)
 			var failure *config.ApplyError
 			if errors.As(err, &failure) {
 				body := gin.H{"error": "configuration apply failed", "detail": failure.Err.Error(), "restored": failure.RestoreError == nil, "reapplied": failure.ReapplyError == nil}

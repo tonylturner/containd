@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -357,4 +358,12 @@ func (m *Manager) SetEventLister(fn func(limit int) []dpevents.Event) {
 		return
 	}
 	m.Syslog.SetEventLister(fn)
+}
+
+// SetAuditLog makes the syslog forwarders also deliver audit records.
+func (m *Manager) SetAuditLog(log audit.ForwardLog) {
+	if m == nil || m.Syslog == nil {
+		return
+	}
+	m.Syslog.SetAuditLog(log)
 }

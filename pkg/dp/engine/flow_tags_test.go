@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"net"
 	"net/netip"
 	"reflect"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -148,5 +150,36 @@ func TestResetRuleDropsInspectedMessage(t *testing.T) {
 	}
 	if got, want := up.blockedAfter(e), []string{testClient + ">" + testServer + "/tcp:502"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("blocks = %v, want %v", got, want)
+	}
+}
+
+// A kernel-logged rule hit carries the labels of its connection, oriented
+// on the opener by the packet's conntrack direction, under the applied
+// snapshot. A hit whose packet did not decode has none.
+func TestNFLogRuleHitsCarryTags(t *testing.T) {
+	e, _ := newEnforceEngine(t, rules.ActionDeny, tagRules()...)
+	hits := nflogRuleHits{e}
+	client, server := net.ParseIP(testClient), net.ParseIP(testServer)
+	request := flow.Key{SrcIP: client, DstIP: server, SrcPort: 41000, DstPort: 502, Proto: 6}
+	reply := flow.Key{SrcIP: server, DstIP: client, SrcPort: 502, DstPort: 41000, Proto: 6, Dir: flow.DirReverse}
+	hits.RuleHit(events.Event{Kind: "firewall.rule.hit", FlowID: request.Hash(), Attributes: map[string]any{"ruleId": "r"}}, &request)
+	hits.RuleHit(events.Event{Kind: "firewall.rule.hit", FlowID: reply.Hash(), Attributes: map[string]any{"ruleId": "r"}}, &reply)
+	hits.RuleHit(events.Event{Kind: "firewall.rule.hit", Attributes: map[string]any{"ruleId": "r"}}, nil)
+	got := map[string]any{}
+	for _, ev := range e.Events().List(0) {
+		if ev.Kind == "firewall.rule.hit" {
+			got[ev.FlowID] = ev.Attributes[events.KeyTags]
+		}
+	}
+	want := map[string]any{request.Hash(): []string{"any", "plc"}, reply.Hash(): []string{"any", "plc"}, "": nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rule hit tags = %v, want %v", got, want)
+	}
+	flows := map[string][]string{}
+	for _, f := range e.Events().Flows(0) {
+		flows[f.FlowID] = f.Tags
+	}
+	if !reflect.DeepEqual(flows[request.Hash()], []string{"any", "plc"}) || !reflect.DeepEqual(flows[reply.Hash()], []string{"any", "plc"}) {
+		t.Fatalf("flow summaries = %v", flows)
 	}
 }

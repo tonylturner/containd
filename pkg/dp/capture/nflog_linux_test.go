@@ -8,12 +8,13 @@ package capture
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	nflog "github.com/florianl/go-nflog/v2"
-	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 type fakeNFLogHandle struct {
@@ -47,10 +48,11 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	oldOpenNFLog := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	fake := &fakeNFLogHandle{}
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	var flags uint16
+	openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) { flags = cfg.Flags; return fake, nil }
 
 	var reported int
-	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), func(error) { reported++ })
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, func(error) { reported++ })
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -59,6 +61,9 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	}
 	if fake.ctx == nil || fake.ctx.Err() != nil {
 		t.Fatalf("registration context before stop = %v, want active child context", fake.ctx)
+	}
+	if flags != nflog.FlagConntrack {
+		t.Fatalf("nflog flags = %#x, want conntrack direction", flags)
 	}
 	stop()
 	if fake.ctx.Err() != context.Canceled {
@@ -89,7 +94,7 @@ func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
 	fake := &fakeNFLogHandle{registerErr: wantErr}
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
-	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), nil)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("StartNFLog error = %v, want wrapped %v", err, wantErr)
 	}
@@ -118,7 +123,7 @@ func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stop, err := StartNFLog(ctx, 100, events.NewStore(1), nil)
+	stop, err := StartNFLog(ctx, 100, &recordingSink{}, nil)
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -158,7 +163,7 @@ func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
 		group uint16
 		sink  RuleHitSink
 	}{
-		{name: "zero group", group: 0, sink: events.NewStore(1)},
+		{name: "zero group", group: 0, sink: &recordingSink{}},
 		{name: "nil sink", group: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,9 +194,9 @@ func TestBuildRuleHitEventParsesPrefix(t *testing.T) {
 	a := nflog.Attribute{
 		Prefix: strPtr("containd:deny-ent-to-field:DENY "),
 	}
-	ev, ok := buildRuleHitEvent(a)
-	if !ok {
-		t.Fatal("expected event, got !ok")
+	ev, key, ok := buildRuleHitEvent(a)
+	if !ok || key != nil {
+		t.Fatalf("event %v key %v, want an event without a key", ok, key)
 	}
 	if ev.Kind != "firewall.rule.hit" {
 		t.Errorf("Kind = %q, want firewall.rule.hit", ev.Kind)
@@ -218,7 +223,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 		c := c
 		t.Run(c, func(t *testing.T) {
 			a := nflog.Attribute{Prefix: strPtr(c)}
-			if _, ok := buildRuleHitEvent(a); ok {
+			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for prefix %q", c)
 			}
 		})
@@ -227,7 +232,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 
 func TestBuildRuleHitEventNoPrefixIsNoop(t *testing.T) {
 	a := nflog.Attribute{} // Prefix nil
-	if _, ok := buildRuleHitEvent(a); ok {
+	if _, _, ok := buildRuleHitEvent(a); ok {
 		t.Error("expected !ok when no prefix is set")
 	}
 }
@@ -261,9 +266,13 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 		Prefix:  strPtr("containd:fw-test:DENY "),
 		Payload: bytesPtr(pkt),
 	}
-	ev, ok := buildRuleHitEvent(a)
+	ev, key, ok := buildRuleHitEvent(a)
 	if !ok {
 		t.Fatal("expected event, got !ok")
+	}
+	want := flow.Key{SrcIP: net.ParseIP("10.10.10.50"), DstIP: net.ParseIP("10.40.40.20"), SrcPort: 49152, DstPort: 502, Proto: 6}
+	if key == nil || key.Hash() != want.Hash() || ev.FlowID != want.Hash() {
+		t.Fatalf("key %+v flow %q, want the packet's original-direction key %q", key, ev.FlowID, want.Hash())
 	}
 	if ev.SrcIP != "10.10.10.50" {
 		t.Errorf("SrcIP = %q, want 10.10.10.50", ev.SrcIP)
@@ -285,6 +294,15 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 	}
 	if ev.Attributes["port"] != "502" {
 		t.Errorf("port attribute = %v, want \"502\"", ev.Attributes["port"])
+	}
+
+	// Conntrack's reply directions orient the key on the opener.
+	for ctinfo, dir := range map[uint32]flow.Direction{0: flow.DirForward, 2: flow.DirForward, 3: flow.DirReverse, 4: flow.DirReverse} {
+		a.CtInfo = &ctinfo
+		_, key, _ := buildRuleHitEvent(a)
+		if key == nil || key.Dir != dir {
+			t.Errorf("ctinfo %d: key %+v, want direction %d", ctinfo, key, dir)
+		}
 	}
 }
 
@@ -331,7 +349,7 @@ func TestRulePrefixRERejectsUnsafeRuleIDs(t *testing.T) {
 		c := c
 		t.Run(c, func(t *testing.T) {
 			a := nflog.Attribute{Prefix: strPtr(c)}
-			if _, ok := buildRuleHitEvent(a); ok {
+			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for malformed prefix %q", c)
 			}
 		})

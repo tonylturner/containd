@@ -130,11 +130,17 @@ exactly `state` and `reason`:
 
 - `enforcing`: enforcement is enabled and the engine reports an applied ruleset
   without error.
+- `degraded`: a ruleset is in force, but the last apply failed and left the
+  previous ruleset in force, or the schedule planner is degraded: a refill of
+  the schedule time sets is failing, or their horizon ends within an hour.
+  `engineStatus.schedulePlanner` in `GET /api/v1/dataplane/ruleset` shows the
+  planner's last refill, horizon end and last error.
 - `disabled`: `dataplane.enforcement: false` intentionally selects the supported
   in-memory-only mode; a successful commit does not install nft rules.
-- `unavailable`: the ruleset apply failed, no ruleset has been applied while
-  enforcement is enabled, or a persisted replay/recovery fault makes runtime
-  synchronization uncertain (including a failed disable operation).
+- `unavailable`: the ruleset apply failed with no ruleset in force, no ruleset
+  has been applied while enforcement is enabled, or a persisted replay/recovery
+  fault makes runtime synchronization uncertain (including a failed disable
+  operation).
 - `unknown`: the configuration/fault or engine state could not be read within
   the observation budget. Health waits through brief store contention, but it
   never waits past that shared budget or exposes an unapplied document. Enforcement
@@ -303,13 +309,20 @@ DENY retention does not resurrect old flow groups.
 ruleset: `snapshotVersion`, `since` (the apply time; every apply restarts the
 counters at zero) and `rules`, one entry per firewall rule in configuration
 order with `ruleId`, `action`, `packets`, `bytes` and, for `RATE_LIMIT` rules,
-`excessDrops`. Logging need not be on. When enforcement is off, nothing is
-applied yet, the last apply failed or nftables cannot be read, the response is
-HTTP 502 with the reason; HTTP 503 means no live engine.
+`excessDrops`. Logging need not be on. A failed apply leaves the installed
+ruleset in force, and the counters keep reporting it. When enforcement is off,
+nothing is applied yet or nftables cannot be read, the response is HTTP 502
+with the reason; HTTP 503 means no live engine.
 
 Flows that `TAG` rules match carry their labels as a sorted `tags` array in
 event `attributes`, and each item of `GET /api/v1/conntrack` carries `tags`,
 derived from the connection's original tuple under the running ruleset.
+Kernel-logged `firewall.rule.hit` events (`via: nflog`) carry the labels of
+their connection under the applied ruleset: the packet is oriented on the side
+that opened the connection by its conntrack direction, so a logged reply gets
+the same labels as its request. Their `flowId` names the packet's direction of
+the connection, as engine flow events do. Each item of `GET /api/v1/flows`
+carries `tags`, the sorted labels its events carry.
 
 ## Forwarding Health and Commit Warnings
 

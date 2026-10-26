@@ -38,6 +38,18 @@ func (e *Engine) flowTags(key flow.Key) []string {
 	return p.evaluator.Tags(ctx)
 }
 
+// nflogRuleHits appends the firewall.rule.hit events of kernel-logged
+// packets (capture.StartNFLog) to the engine's event store, with the TAG
+// labels of their connection under the applied snapshot.
+type nflogRuleHits struct{ e *Engine }
+
+func (h nflogRuleHits) RuleHit(ev events.Event, key *flow.Key) {
+	if key != nil {
+		ev.Attributes = events.WithTags(ev.Attributes, h.e.flowTags(*key))
+	}
+	h.e.eventStore.Append(ev)
+}
+
 // tagContext is the evaluation context of a connection tuple for TAG
 // rules, with the identities snap binds to the opener. Only TCP and UDP
 // carry a server port.

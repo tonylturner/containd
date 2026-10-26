@@ -11,12 +11,17 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func (c *Compiler) writeManagementInput(b *bytes.Buffer) {
+func (c *Compiler) writeManagementInput(b *bytes.Buffer) error {
 	r := c.ManagementReservation
 	if r == nil {
-		return
+		return nil
 	}
-	fmt.Fprintf(b, "    iifname %q ip saddr { %s } ip daddr %s tcp dport %d accept;\n", r.Device, reservationSources(r), r.Local.Addr(), r.Port)
+	dev, err := ifnameLiteral(r.Device)
+	if err != nil {
+		return fmt.Errorf("management reservation: %w", err)
+	}
+	fmt.Fprintf(b, "    iifname %s ip saddr { %s } ip daddr %s tcp dport %d accept;\n", dev, reservationSources(r), r.Local.Addr(), r.Port)
+	return nil
 }
 
 func reservationSources(r *mgmtpath.Reservation) string {
@@ -59,12 +64,20 @@ func resolveLocalInput(snap *rules.Snapshot) ([]rules.LocalServiceRule, error) {
 // from the management network.
 func (c *Compiler) managementExemptions(locals []rules.LocalServiceRule) (input, output []string, err error) {
 	if r := c.ManagementReservation; r != nil {
-		input = append(input, fmt.Sprintf("iifname %q ip saddr { %s } ip daddr %s tcp dport %d accept", r.Device, reservationSources(r), r.Local.Addr(), r.Port))
-		output = append(output, fmt.Sprintf("oifname %q ip saddr %s ip daddr { %s } tcp sport %d accept", r.Device, r.Local.Addr(), reservationSources(r), r.Port))
+		dev, err := ifnameLiteral(r.Device)
+		if err != nil {
+			return nil, nil, fmt.Errorf("management reservation: %w", err)
+		}
+		input = append(input, fmt.Sprintf("iifname %s ip saddr { %s } ip daddr %s tcp dport %d accept", dev, reservationSources(r), r.Local.Addr(), r.Port))
+		output = append(output, fmt.Sprintf("oifname %s ip saddr %s ip daddr { %s } tcp sport %d accept", dev, r.Local.Addr(), reservationSources(r), r.Port))
 	}
 	if p := c.EngineAPI; p != nil {
-		input = append(input, p.match()+" accept")
-		output = append(output, p.replyMatch()+" accept")
+		match, reply, err := p.matches()
+		if err != nil {
+			return nil, nil, err
+		}
+		input = append(input, match+" accept")
+		output = append(output, reply+" accept")
 	}
 	for _, lr := range locals {
 		// Only management listeners carry RecoverUnbound.
@@ -74,15 +87,13 @@ func (c *Compiler) managementExemptions(locals []rules.LocalServiceRule) (input,
 		if _, err := compileLocalInputRule(lr, nil); err != nil {
 			return nil, nil, err
 		}
-		ifs := append([]string(nil), lr.Ifaces...)
-		sort.Strings(ifs)
-		for i, v := range ifs {
-			ifs[i] = fmt.Sprintf("\"%s\"", v)
+		set, err := ifnameSet(lr.Ifaces)
+		if err != nil {
+			return nil, nil, fmt.Errorf("local input %s: %w", lr.ID, err)
 		}
 		proto := strings.ToLower(strings.TrimSpace(lr.Proto))
-		set := strings.Join(ifs, ", ")
-		input = append(input, fmt.Sprintf("iifname { %s } %s dport %d accept", set, proto, lr.Port))
-		output = append(output, fmt.Sprintf("oifname { %s } %s sport %d accept", set, proto, lr.Port))
+		input = append(input, fmt.Sprintf("iifname %s %s dport %d accept", set, proto, lr.Port))
+		output = append(output, fmt.Sprintf("oifname %s %s sport %d accept", set, proto, lr.Port))
 	}
 	return input, output, nil
 }

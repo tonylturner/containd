@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -12,11 +13,20 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// countingApplier records the applied ruleset and reports each counter it
-// declares with a distinct value: the n-th declared counter has n packets.
+// countingApplier records the installed ruleset and reports each counter
+// it declares with a distinct value: the n-th declared counter has n
+// packets. A failed apply installs nothing.
 type countingApplier struct {
 	recordingApplier
 	table string
+}
+
+func (a *countingApplier) Apply(_ context.Context, ruleset string) error {
+	if a.err != nil {
+		return a.err
+	}
+	a.ruleset = ruleset
+	return nil
 }
 
 var counterDecl = regexp.MustCompile(`(?m)^  counter (\S+) \{ \}$`)
@@ -68,13 +78,34 @@ func TestRuleCountersOfTheAppliedRuleset(t *testing.T) {
 		}
 	}
 
-	// A failed apply leaves no applied ruleset to report on.
+	// A failed apply leaves the installed ruleset and its counters.
 	applier.err = errors.New("nft: busy")
-	if err := e.ApplyRules(ctx, snap); err == nil {
+	failed := rules.Snapshot{Version: "v8", Default: rules.ActionDeny, Firewall: []rules.Entry{{ID: "other", Action: rules.ActionAllow}}}
+	if err := e.ApplyRules(ctx, failed); err == nil {
 		t.Fatal("apply should fail")
 	}
-	if _, err := e.RuleCounters(ctx); !errors.Is(err, ErrRuleCountersUnavailable) {
+	after, err := e.RuleCounters(ctx)
+	if err != nil {
 		t.Fatalf("after a failed apply: %v", err)
+	}
+	if after.SnapshotVersion != "v7" || !after.Since.Equal(got.Since) || !reflect.DeepEqual(after.Rules, got.Rules) {
+		t.Fatalf("counters after a failed apply = %+v, want the installed v7 %+v", after, got)
+	}
+}
+
+// A first apply that fails installs nothing to count.
+func TestRuleCountersUnavailableBeforeAnyInstall(t *testing.T) {
+	applier := &countingApplier{}
+	applier.err = errors.New("nft: busy")
+	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApplyRules(context.Background(), rules.Snapshot{Version: "v1", Default: rules.ActionDeny}); err == nil {
+		t.Fatal("apply should fail")
+	}
+	if _, err := e.RuleCounters(context.Background()); !errors.Is(err, ErrRuleCountersUnavailable) {
+		t.Fatalf("after a failed first apply: %v", err)
 	}
 }
 
