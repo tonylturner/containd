@@ -40,6 +40,7 @@ const SecurityView = dynamic(() => import("./SecurityView"), {
 import { Shell } from "../../components/Shell";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
 import { useHealth } from "../../hooks/useHealth";
+import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
@@ -48,6 +49,7 @@ import {
   nodeTypes,
   type TopoNodeData,
 } from "./topology-shared";
+import { TONE_COLORS, topologyStatus } from "./topology-status";
 
 /* ════════════════════════════════════════════════════════════════════
    INNER COMPONENT (needs ReactFlowProvider)
@@ -63,6 +65,7 @@ function TopologyInner() {
   const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
   const health = useHealth();
+  const installed = useInstalledRuleset();
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
@@ -134,6 +137,8 @@ function TopologyInner() {
 
   const selected = selectedId ? nodeDataRef.current[selectedId] : null;
   const selectedData = selected ? withHealth(selected, health) : null;
+  const status = topologyStatus(health, installed);
+  const statusColor = TONE_COLORS[status.tone];
 
   return (
     <div className={s.page}>
@@ -148,9 +153,10 @@ function TopologyInner() {
           ))}
         </div>
         <div className={s.topbarRight}>
-          <div className={s.statusChip}>
-            <div className={s.chipDot} style={{ background: topoError ? "#ef4444" : "#22c55e" }} />
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: topoError ? "#ef4444" : "#22c55e" }}>{topoError ? "UNAVAILABLE" : "ALL NOMINAL"}</span>
+          <div role="status" aria-label="Firewall enforcement" className={s.statusChip} title={status.reason ? `Firewall enforcement: ${status.reason}` : "Firewall enforcement"}>
+            <div className={s.chipDot} style={{ background: statusColor }} />
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: statusColor }}>{status.label}</span>
+            {status.reason && <span className={s.chipReason}>{status.reason}</span>}
           </div>
           <div className={s.statusChip}>
             <span style={{ color: "#4a4030" }}>LAST SYNC</span>

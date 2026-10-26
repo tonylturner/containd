@@ -55,6 +55,7 @@
   font-size: 9px; letter-spacing: 1px;
 }
 .chipDot { width: 5px; height: 5px; border-radius: 50%; }
+.chipReason { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; color: var(--text-dim); }
 
 .iconBtn {
   width: 28px; height: 28px; border: 1px solid var(--topo-border);
