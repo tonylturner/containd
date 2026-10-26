@@ -20,7 +20,11 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
+
+// redirectTable is the nft table holding the UDP/67 redirect.
+const redirectTable = "containd_dhcp"
 
 // Lease represents a DHCPv4 lease handed out by the embedded DHCP server.
 type Lease struct {
@@ -618,13 +622,26 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 	}
 
 	if !enabled {
-		cmd := exec.CommandContext(ctx, "nft", "delete", "table", "inet", "containd_dhcp")
+		cmd := exec.CommandContext(ctx, "nft", "delete", "table", "inet", redirectTable)
 		_ = cmd.Run()
 		return nil
 	}
 
+	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
+	cmd.Stdin = strings.NewReader(redirectScript(devs))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("dhcp: nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// redirectScript replaces the redirect table atomically, whether or not it
+// exists, with one UDP/67 redirect to the listener port per device.
+func redirectScript(devs []string) string {
 	var b strings.Builder
-	b.WriteString("table inet containd_dhcp {\n")
+	b.WriteString(enforce.DeleteTable(redirectTable))
+	b.WriteString("table inet " + redirectTable + " {\n")
 	b.WriteString("  chain prerouting {\n")
 	b.WriteString("    type nat hook prerouting priority -100; policy accept;\n")
 	for _, dev := range devs {
@@ -634,16 +651,7 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 	}
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
-
-	// Replace the table atomically.
-	script := "delete table inet containd_dhcp\n" + b.String()
-	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(script)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("dhcp: nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return b.String()
 }
 
 func contains(list []string, s string) bool {
