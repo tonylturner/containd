@@ -61,10 +61,11 @@ Administrators can request temporary blocks through:
 - `POST /api/v1/dataplane/blocks/host`
 - `POST /api/v1/dataplane/blocks/flow`
 
-Temporary blocks live in their own nftables table, `inet <enforceTable>_blocks`
-(default `inet containd_blocks`, sets `block_hosts` and `block_flows`). They drop
-forwarded traffic before the policy table's rules, including established
-connections, and they persist across commits until their timeouts expire.
+Temporary blocks and connection revocations live in their own nftables table,
+`inet <enforceTable>_blocks` (default `inet containd_blocks`; sets `block_hosts`,
+`block_flows`, `revoke4`, `revoke6`, `revoke_service4` and `revoke_service6`).
+They act before the policy table's rules, including on established connections,
+and they persist across commits until their timeouts expire.
 
 See [API Reference](api-reference.md) for request fields. A decision or block
 request is not proof of delivery prevention; inspect verdict/apply errors and

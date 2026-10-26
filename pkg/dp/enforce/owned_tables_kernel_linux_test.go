@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -33,8 +34,9 @@ func (l *netnsLab) tableExists(family, name string) bool {
 
 // TestKernelOwnedTablesKeepForeignStateAndBlocks applies a policy twice, with
 // its tables absent and then present, around a foreign table and a
-// temporary host block. Neither apply touches the foreign table, the block
-// keeps dropping forwarded traffic across the second apply, and deleting
+// temporary host block and a connection revocation. Neither apply touches
+// the foreign table, the block keeps dropping forwarded traffic and the
+// revocation stays installed across the second apply, and deleting
 // containd's tables leaves the foreign one.
 func TestKernelOwnedTablesKeepForeignStateAndBlocks(t *testing.T) {
 	lab := newNetnsLab(t, "own", 50, 60*time.Second)
@@ -61,6 +63,11 @@ func TestKernelOwnedTablesKeepForeignStateAndBlocks(t *testing.T) {
 	if err := lab.probe("198.18.60.2", 18050, "198.18.50.2"); err == nil {
 		t.Fatal("blocked host reachable")
 	}
+	revoked := conntrack.Entry{Proto: "tcp", Src: "198.18.50.2", Dst: "198.18.60.3", Sport: "41000", Dport: "18051",
+		ReplySrc: "198.18.60.3", ReplyDst: "198.18.50.2", ReplySport: "18051", ReplyDport: "41000"}
+	if err := NewNftUpdater("").RevokeConnections(lab.ctx, []conntrack.Entry{revoked}, "client-service", time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	lab.apply(t, c, snap) // tables present
 	if got := lab.run(t, "nft", "list", "table", "ip", "foreign_nat"); got != foreign {
 		t.Fatalf("foreign table changed:\n%s\nwant:\n%s", got, foreign)
@@ -70,6 +77,11 @@ func TestKernelOwnedTablesKeepForeignStateAndBlocks(t *testing.T) {
 	}
 	if err := lab.probe("198.18.60.2", 18050, "198.18.50.2"); err == nil {
 		t.Fatal("block stopped dropping after the second apply")
+	}
+	for _, set := range []string{"revoke4", "revoke_service4"} {
+		if listing := lab.run(t, "nft", "list", "set", "inet", "containd_blocks", set); !strings.Contains(listing, "198.18.60.3") {
+			t.Fatalf("revocation lost by the second apply:\n%s", listing)
+		}
 	}
 
 	lab.nft(t, c.ClearBlocks())

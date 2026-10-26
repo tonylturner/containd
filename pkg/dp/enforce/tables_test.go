@@ -46,8 +46,8 @@ func TestCompileFirewallTouchesOnlyOwnedTables(t *testing.T) {
 			}
 		}
 		policy := text[:strings.Index(text, "add table inet "+tc.blocks)]
-		if strings.Contains(policy, "@block_") {
-			t.Fatalf("table %q: policy table references block sets:\n%s", tc.table, policy)
+		if strings.Contains(policy, "@block_") || strings.Contains(policy, "@revoke") {
+			t.Fatalf("table %q: policy table references dynamic sets:\n%s", tc.table, policy)
 		}
 		for _, want := range []string{
 			"add chain inet " + tc.blocks + " forward { type filter hook forward priority -10; policy accept; }\n",
@@ -78,11 +78,12 @@ func TestRetireTablesOnlyOnRename(t *testing.T) {
 	}
 }
 
-func TestClearBlocksFlushesBothSets(t *testing.T) {
+func TestClearBlocksFlushesEveryDynamicSet(t *testing.T) {
 	c := NewCompiler()
 	c.TableName = "fw"
 	text := c.ClearBlocks()
-	for _, want := range []string{"add table inet fw_blocks\n", "flush set inet fw_blocks block_hosts\n", "flush set inet fw_blocks block_flows\n"} {
+	for _, want := range []string{"add table inet fw_blocks\n", "flush set inet fw_blocks block_hosts\n", "flush set inet fw_blocks block_flows\n",
+		"flush set inet fw_blocks revoke4\n", "flush set inet fw_blocks revoke6\n", "flush set inet fw_blocks revoke_service4\n", "flush set inet fw_blocks revoke_service6\n"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}

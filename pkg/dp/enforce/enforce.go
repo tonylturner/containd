@@ -62,7 +62,6 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
-	c.writeRevocations(&buf)
 	// Declared before the forward chain that jumps to it.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
@@ -117,7 +116,6 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
-	buf.WriteString("    jump revocations;\n")
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
@@ -155,10 +153,8 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
-
-	buf.WriteString("    jump revocations;\n")
-	// Temporary blocks drop in the blocks table's earlier forward chain,
-	// before anything below (see writeBlocksTable).
+	// Revocations and temporary blocks act in the blocks table's earlier
+	// forward chain, before anything below (see writeBlocksTable).
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.SliceStable(entries, func(i, j int) bool {

@@ -134,7 +134,7 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 	}
 }
 
-// clearBlocksHandler removes every temporary host and flow block.
+// clearBlocksHandler removes every temporary block and connection revocation.
 func clearBlocksHandler(dp *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

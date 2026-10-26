@@ -15,22 +15,31 @@ func TestRevocationRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, chain := range []string{"input", "forward", "revocation_output"} {
-		start := strings.Index(text, "chain "+chain+" {")
-		end := strings.Index(text[start:], "  }") + start
-		s := text[start:end]
-		jump := strings.Index(s, "jump revocations;")
-		accept := strings.Index(s, "accept;")
-		if jump < 0 || (accept >= 0 && jump > accept && chain != "revocation_output") {
-			t.Fatalf("revocation ordering:\n%s", s)
+	// Revocations live in the blocks table, whose input, forward and output
+	// chains run before the policy table's and jump to them before any
+	// other rule. The policy table neither declares nor references them.
+	policy := text[:strings.Index(text, "add table inet containd_blocks")]
+	if strings.Contains(policy, "revoke") || strings.Contains(policy, "revocations") {
+		t.Fatalf("policy table holds revocation state:\n%s", policy)
+	}
+	for _, chain := range []string{"input", "forward", "output"} {
+		hook := "add chain inet containd_blocks " + chain + " { type filter hook " + chain + " priority -10; policy accept; }\n"
+		first := "add rule inet containd_blocks " + chain + " "
+		if !strings.Contains(text, hook) || !strings.HasPrefix(text[strings.Index(text, first):], first+"jump revocations\n") {
+			t.Fatalf("revocation ordering in %s:\n%s", chain, text)
 		}
 	}
-	for _, key := range []string{"ct state { invalid, untracked } ip saddr", "tcp flags & rst == rst return;", "ct original ip saddr", "ct original ip6 saddr", "@revoke_service4", "@revoke_service6", "@revoke4 reject with tcp reset", "@revoke6 drop"} {
+	if strings.Index(text, "add rule inet containd_blocks forward jump revocations") > strings.Index(text, "@block_hosts drop") {
+		t.Fatalf("revocations must precede blocks:\n%s", text)
+	}
+	for _, key := range []string{"ct state { invalid, untracked } ip saddr", "revocations tcp flags & rst == rst return\n", "ct original ip saddr", "ct original ip6 saddr", "@revoke_service4", "@revoke_service6", "@revoke4 reject with tcp reset", "@revoke6 drop"} {
 		if !strings.Contains(text, key) {
 			t.Fatalf("missing %s", key)
 		}
 	}
+	assertDeclaredSets(t, text)
 }
+
 func TestRevocationNATKeys(t *testing.T) {
 	for _, e := range []conntrack.Entry{{Proto: "tcp", Src: "192.0.2.1", Dst: "198.51.100.1", Sport: "1234", Dport: "443", ReplySrc: "10.0.0.1", ReplyDst: "203.0.113.1", ReplySport: "8443", ReplyDport: "5678"}, {Proto: "udp", Src: "2001:db8::1", Dst: "2001:db8::2", Sport: "1234", Dport: "443", ReplySrc: "2001:db8:1::1", ReplyDst: "2001:db8:1::2", ReplySport: "8443", ReplyDport: "5678"}} {
 		for _, scope := range []string{"connection", "client-service"} {
@@ -40,6 +49,11 @@ func TestRevocationNATKeys(t *testing.T) {
 			}
 			if !strings.Contains(s, e.Src+" . "+e.Dst+" . "+e.Proto+" . 1234 . 443 timeout 30s") || !strings.Contains(s, e.ReplySrc+" . "+e.ReplyDst+" . "+e.Proto+" . 8443 . 5678 timeout 30s") {
 				t.Fatalf("missing tuple: %s", s)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+				if !strings.HasPrefix(line, "add element inet containd_blocks revoke") {
+					t.Fatalf("revocation outside the blocks table: %s", line)
+				}
 			}
 			if (scope == "client-service") != strings.Contains(s, "revoke_service") {
 				t.Fatal(s)

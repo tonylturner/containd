@@ -12,10 +12,11 @@ import (
 //
 //   - the policy table, inet <TableName>, which every apply replaces as a
 //     whole in one transaction;
-//   - the blocks table, inet <TableName>_blocks, which holds the temporary
-//     block sets and their drop chain. Applies create it if it is missing and
-//     keep its elements, so temporary blocks and their timeouts survive
-//     policy changes.
+//   - the blocks table, inet <TableName>_blocks, which holds the dynamic
+//     state: the temporary block sets, the connection revocation sets and
+//     the chains that enforce them. Applies create it if it is missing,
+//     rewrite its chains and keep its set elements, so blocks, revocations
+//     and their timeouts survive policy changes.
 
 const defaultTableName = "containd"
 
@@ -59,27 +60,49 @@ func (c *Compiler) RetireTables(next *Compiler) string {
 	return c.DeleteTables()
 }
 
-// ClearBlocks returns the script that removes every temporary block,
-// creating the empty block sets if they do not exist yet.
+// ClearBlocks returns the script that removes every temporary block and
+// connection revocation, creating the empty sets if they do not exist yet.
 func (c *Compiler) ClearBlocks() string {
 	var buf bytes.Buffer
 	table := BlocksTable(c.policyTable())
-	writeBlockSets(&buf, table)
-	buf.WriteString(fmt.Sprintf("flush set inet %s block_hosts\n", table))
-	buf.WriteString(fmt.Sprintf("flush set inet %s block_flows\n", table))
+	writeDynamicSets(&buf, table)
+	for _, set := range dynamicSets() {
+		buf.WriteString(fmt.Sprintf("flush set inet %s %s\n", table, set[0]))
+	}
 	return buf.String()
 }
 
-// writeBlocksTable ensures the blocks table without touching its set
-// elements. Its forward chain runs before the policy table's (priority 0),
-// and a drop there is final, so a block takes precedence over IEC104
-// steering, NFQUEUE and the established-flow accept of the policy table:
-// retroactive blocks also stop established flows.
+// blocksChains are the base chains of the blocks table. Each runs before
+// the policy table's chain on its hook (priority 0), and a drop or reject
+// there is final, so revocations and blocks take precedence over IEC104
+// steering, NFQUEUE and the established-flow accepts of the policy table:
+// they also stop established connections. Kernel-generated resets pass
+// output through the revocations chain unharmed.
+var blocksChains = []struct{ name, hook string }{
+	{"input", "input"},
+	{"forward", "forward"},
+	{"output", "output"},
+}
+
+// writeBlocksTable ensures the blocks table and rewrites its chains without
+// touching its set elements.
 func (c *Compiler) writeBlocksTable(buf *bytes.Buffer) {
 	table := BlocksTable(c.policyTable())
-	writeBlockSets(buf, table)
-	buf.WriteString(fmt.Sprintf("add chain inet %s forward { type filter hook forward priority -10; policy accept; }\n", table))
-	buf.WriteString(fmt.Sprintf("flush chain inet %s forward\n", table))
+	writeDynamicSets(buf, table)
+	buf.WriteString(fmt.Sprintf("add chain inet %s revocations\n", table))
+	for _, ch := range blocksChains {
+		buf.WriteString(fmt.Sprintf("add chain inet %s %s { type filter hook %s priority -10; policy accept; }\n", table, ch.name, ch.hook))
+	}
+	buf.WriteString(fmt.Sprintf("flush chain inet %s revocations\n", table))
+	for _, ch := range blocksChains {
+		buf.WriteString(fmt.Sprintf("flush chain inet %s %s\n", table, ch.name))
+	}
+	for _, rule := range revocationRules() {
+		buf.WriteString(fmt.Sprintf("add rule inet %s revocations %s\n", table, rule))
+	}
+	for _, ch := range blocksChains {
+		buf.WriteString(fmt.Sprintf("add rule inet %s %s jump revocations\n", table, ch.name))
+	}
 	for _, rule := range []string{
 		"ip saddr @block_hosts drop",
 		"ip daddr @block_hosts drop",
@@ -89,10 +112,19 @@ func (c *Compiler) writeBlocksTable(buf *bytes.Buffer) {
 	}
 }
 
-// writeBlockSets declares the blocks table and its sets. Re-adding an
+// dynamicSets returns the name and type of each set of the blocks table.
+func dynamicSets() [][2]string {
+	return append([][2]string{
+		{"block_hosts", "ipv4_addr"},
+		{"block_flows", "ipv4_addr . ipv4_addr . inet_proto . inet_service"},
+	}, revocationSets()...)
+}
+
+// writeDynamicSets declares the blocks table and its sets. Re-adding an
 // existing set keeps its elements.
-func writeBlockSets(buf *bytes.Buffer, table string) {
+func writeDynamicSets(buf *bytes.Buffer, table string) {
 	buf.WriteString(fmt.Sprintf("add table inet %s\n", table))
-	buf.WriteString(fmt.Sprintf("add set inet %s block_hosts { type ipv4_addr; flags timeout; }\n", table))
-	buf.WriteString(fmt.Sprintf("add set inet %s block_flows { type ipv4_addr . ipv4_addr . inet_proto . inet_service; flags timeout; }\n", table))
+	for _, set := range dynamicSets() {
+		buf.WriteString(fmt.Sprintf("add set inet %s %s { type %s; flags timeout; }\n", table, set[0], set[1]))
+	}
 }

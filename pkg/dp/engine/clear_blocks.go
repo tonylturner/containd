@@ -7,8 +7,9 @@ import (
 	"errors"
 )
 
-// ClearBlocks removes every temporary host and flow block. Blocks otherwise
-// outlive ruleset applies and engine restarts until their timeouts expire.
+// ClearBlocks removes every temporary host and flow block and every
+// connection revocation. They otherwise outlive ruleset applies and engine
+// restarts until their timeouts expire.
 // Without enforcement the engine owns no blocks table: there is nothing to
 // clear.
 func (e *Engine) ClearBlocks(ctx context.Context) error {
