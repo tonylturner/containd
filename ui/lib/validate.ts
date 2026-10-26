@@ -152,16 +152,23 @@ export function parseIdentityLabels(
  */
 export const MAX_ZONE_NAME_BYTES = 125;
 
+/** Zone names are identifiers: the API path /zones/{name} and the CLI take them bare. */
+const ZONE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+
 /**
- * Validates a zone name as the server does: not blank, no leading or
- * trailing whitespace, and at most 125 bytes of UTF-8. Returns null if valid.
+ * Validates a zone name. The server refuses a blank name, leading or
+ * trailing whitespace, and more than 125 bytes of UTF-8; the UI also keeps
+ * names to letters, digits, dash and underscore, because a name with '/'
+ * cannot be updated or deleted through /zones/{name} and other characters
+ * hurt the CLI. Returns null if valid.
  */
 export function validateZoneName(name: string): string | null {
   if (name.trim() === "") return "Zone name is required.";
   if (name.trim() !== name) return "Zone name cannot start or end with a space.";
+  if (!ZONE_NAME_RE.test(name)) return "Only letters, numbers, dash, and underscore allowed (no spaces).";
   const bytes = new TextEncoder().encode(name).length;
   if (bytes > MAX_ZONE_NAME_BYTES) {
-    return `Zone name is ${bytes} bytes; the limit is ${MAX_ZONE_NAME_BYTES} bytes (characters outside ASCII take 2 to 4 bytes each).`;
+    return `Zone name is ${bytes} bytes; the limit is ${MAX_ZONE_NAME_BYTES} bytes.`;
   }
   return null;
 }
