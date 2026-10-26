@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct DPI protocol coverage, supported rule predicates, learn-mode and PCAP
+  behavior, IDS conversion, and the distinction between nftables enforcement and
+  experimental eBPF code.
+- Document working log sinks and unwired SIEM export, the unauthenticated engine
+  API boundary, authentication limits, and published CSAF advisories; align runtime
+  package provenance and image-verification examples with the release workflow.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security
