@@ -14,7 +14,8 @@ engine runs:
 Zone firewall rules use the Linux nftables backend. Rules are ordered and match
 zones, CIDRs/assets, transport/port ranges, and optional identity, schedule, and
 ICS predicates. Generic evaluation uses the firewall default action when nothing
-matches. Actions are `ALLOW` or `DENY`.
+matches. Actions are `ALLOW` or `DENY`; an omitted or empty default action means
+`DENY`.
 
 DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
 global bypass: enforce-mode rules and independent kernel decisions can still
