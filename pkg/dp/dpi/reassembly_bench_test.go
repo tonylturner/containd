@@ -17,7 +17,7 @@ func BenchmarkReassemblerFeedInOrder(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		seq := uint32(100 + (i * len(payload)))
-		res := r.feed("bench-in-order", position{kind: posSeq, seq: seq}, payload, now, true, false)
+		res := r.feed("bench-in-order", position{kind: posSeq, seq: seq}, payload, now, true, false, false)
 		r.trim("bench-in-order", res.base, len(res.buf))
 	}
 }
@@ -31,8 +31,8 @@ func BenchmarkReassemblerFeedGapFill(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		r := newReassembler(64*1024, time.Minute)
-		r.feed("bench-gap", position{kind: posSeq, seq: 100}, first, now, true, false)
-		r.feed("bench-gap", position{kind: posSeq, seq: 105}, last, now, true, false)
-		r.feed("bench-gap", position{kind: posSeq, seq: 102}, missing, now, true, false)
+		r.feed("bench-gap", position{kind: posSeq, seq: 100}, first, now, true, false, false)
+		r.feed("bench-gap", position{kind: posSeq, seq: 105}, last, now, true, false, false)
+		r.feed("bench-gap", position{kind: posSeq, seq: 102}, missing, now, true, false, false)
 	}
 }

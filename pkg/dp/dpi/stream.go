@@ -71,6 +71,9 @@ const (
 	StreamOverflow StreamErrKind = iota + 1
 	StreamOverlapConflict
 	StreamOutOfOrderLimit
+	// StreamUnverifiedRetransmission is a retransmission of consumed bytes
+	// older than the history a verifying stream keeps.
+	StreamUnverifiedRetransmission
 )
 
 func (k StreamErrKind) String() string {
@@ -81,6 +84,8 @@ func (k StreamErrKind) String() string {
 		return "overlap_conflict"
 	case StreamOutOfOrderLimit:
 		return "out_of_order_limit"
+	case StreamUnverifiedRetransmission:
+		return "unverified_retransmission"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}
