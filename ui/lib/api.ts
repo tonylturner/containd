@@ -34,22 +34,33 @@ export {
   isAdmin,
 } from "./api-core";
 export {
+  fetchDataPlane,
+  getICSCoverage,
+  getRulesetPreview,
+  setDataPlane,
+} from "./api-dataplane";
+export {
   deletePcap,
   downloadPcapURL,
-  fetchDataPlane,
   getPcapConfig,
-  getICSCoverage,
   getPcapStatus,
-  getRulesetPreview,
   listPcaps,
   replayPcap,
-  setDataPlane,
   setPcapConfig,
   startPcap,
   stopPcap,
   tagPcap,
   uploadPcap,
-} from "./api-dataplane";
+} from "./api-pcap";
+export type {
+  PcapConfig,
+  PcapFilter,
+  PcapForwardTarget,
+  PcapItem,
+  PcapReplayRequest,
+  PcapStatus,
+  PcapTagRequest,
+} from "./api-pcap";
 export type {
   RulesetEngineStatus,
   RulesetPreview,
@@ -126,64 +137,6 @@ export type DataPlaneConfig = {
   dpiExclusions?: DPIExclusion[];
   nflogGroup?: number;
   nfqueueGroup?: number;
-};
-
-export type PcapForwardTarget = {
-  interface?: string;
-  enabled?: boolean;
-  host?: string;
-  port?: number;
-  proto?: "tcp" | "udp";
-};
-
-export type PcapFilter = {
-  src?: string;
-  dst?: string;
-  proto?: "any" | "tcp" | "udp" | "icmp";
-  port?: string;
-};
-
-export type PcapConfig = {
-  enabled?: boolean;
-  interfaces?: string[];
-  zones?: string[];
-  snaplen?: number;
-  maxSizeMB?: number;
-  maxFiles?: number;
-  mode?: "rolling" | "once";
-  promisc?: boolean;
-  bufferMB?: number;
-  rotateSeconds?: number;
-  filePrefix?: string;
-  filter?: PcapFilter;
-  forwardTargets?: PcapForwardTarget[];
-};
-
-export type PcapStatus = {
-  running: boolean;
-  interfaces?: string[];
-  startedAt?: string;
-  lastError?: string;
-};
-
-export type PcapItem = {
-  name: string;
-  interface: string;
-  sizeBytes: number;
-  createdAt: string;
-  tags?: string[];
-  status?: string;
-};
-
-export type PcapReplayRequest = {
-  name: string;
-  interface: string;
-  ratePps?: number;
-};
-
-export type PcapTagRequest = {
-  name: string;
-  tags: string[];
 };
 
 export type Zone = {

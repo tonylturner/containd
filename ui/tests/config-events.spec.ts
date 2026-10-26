@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { policyAPI } from "../lib/api-policy";
 import { servicesAPI } from "../lib/api-services";
-import { uploadPcap } from "../lib/api-dataplane";
+import { uploadPcap } from "../lib/api-pcap";
 import { CONFIG_COMMITTED, CONFIG_STAGED, notifyConfigMutation, subscribeConfigChanges } from "../lib/config-events";
 import { deleteJSON, deleteJSONResult, patchJSON, patchJSONResult, postJSON, postJSONResult } from "../lib/api-request";
 
