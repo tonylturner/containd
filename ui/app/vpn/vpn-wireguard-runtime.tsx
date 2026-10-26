@@ -7,18 +7,28 @@ export function WireGuardRuntimeCard({
   peerCount,
   peerNameByKey,
   runtime,
+  interfaceStateStatus,
+  onRetry,
   wgStatus,
 }: {
   cfgInterface: string;
   peerCount: number;
   peerNameByKey: Map<string, string>;
   runtime: InterfaceState | null;
+  interfaceStateStatus: "loading" | "ready" | "unavailable";
+  onRetry: () => void;
   wgStatus: WireGuardStatus | null;
 }) {
   return (
-    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
+    <section aria-label="WireGuard runtime" className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
       <h2 className="text-lg font-semibold text-[var(--text)]">Runtime</h2>
       <p className="mt-1 text-sm text-[var(--text)]">Kernel state (engine).</p>
+      {interfaceStateStatus === "unavailable" && (
+        <div role="status" className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <p>Interface state unavailable — the engine could not be reached. Link and runtime addresses are unknown.</p>
+          <button onClick={onRetry} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-3 text-sm">
         <div className="flex items-center justify-between">
@@ -27,7 +37,9 @@ export function WireGuardRuntimeCard({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[var(--text)]">Link</span>
-          {runtime ? (
+          {interfaceStateStatus !== "ready" ? (
+            <span className="text-[var(--text-muted)]">{interfaceStateStatus === "loading" ? "Loading…" : "interface state unavailable"}</span>
+          ) : runtime ? (
             <span className={runtime.up ? "text-emerald-400" : "text-amber-400"}>{runtime.up ? "up" : "down"}</span>
           ) : (
             <span className="text-[var(--text-muted)]">not present</span>
@@ -40,7 +52,7 @@ export function WireGuardRuntimeCard({
         <div className="flex items-center justify-between">
           <span className="text-[var(--text)]">Addresses</span>
           <span className="text-right font-mono text-xs text-[var(--text)]">
-            {(runtime?.addrs ?? []).length > 0 ? (runtime?.addrs ?? []).join(", ") : "—"}
+            {interfaceStateStatus !== "ready" ? (interfaceStateStatus === "loading" ? "Loading…" : "interface state unavailable") : runtime?.addrs?.length ? runtime.addrs.join(", ") : "—"}
           </span>
         </div>
         <div className="flex items-center justify-between">
@@ -103,6 +115,6 @@ export function WireGuardRuntimeCard({
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

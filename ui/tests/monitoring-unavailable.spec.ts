@@ -197,44 +197,131 @@ test("diagnostics keeps interface-state failure local and retries runtime addres
   await expect(connectivity.getByTitle("Use lan OS/Docker IP: 192.0.2.10")).toHaveCount(0);
 });
 
-for (const failedEndpoint of ["interfaces", "flows"] as const) {
-  test(`physical topology retries unavailable ${failedEndpoint} without rendering empty or stale runtime data`, async ({ page }) => {
-    let phase: "unavailable" | "empty" | "populated" = "unavailable";
-    await page.route("**/api/v1/config", (route) => route.fulfill({ json: {
-      interfaces: [], zones: [], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
-    } }));
-    await page.route("**/api/v1/system/inspection", (route) => route.fulfill({
-      status: 503, json: { error: "inspection unavailable" },
-    }));
-    await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "interfaces"
-      ? { status: 503, json: { error: "engine interface state unavailable" } }
-      : { json: phase === "empty" ? [] : [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }] }));
-    await page.route("**/api/v1/flows?*", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "flows"
-      ? { status: 503, json: { error: "engine flows unavailable" } }
-      : { json: phase === "empty" ? [] : [{
-        flowId: "flow-1", firstSeen: "2026-01-01T00:00:00Z", lastSeen: "2026-01-01T00:01:00Z", eventCount: 1,
-      }] }));
-    await page.goto("/topology/");
-    await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
-    const unavailable = page.getByRole("alert").filter({ hasText: "Physical topology unavailable" });
-    await expect(unavailable).toBeVisible();
-    await expect(page.getByText("HOST MACHINE", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("0 SESSIONS", { exact: true })).toHaveCount(0);
-    phase = "empty";
-    await unavailable.locator("..").getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(unavailable).toHaveCount(0);
-    await expect(page.getByText("HOST MACHINE", { exact: true })).toBeVisible();
-    await expect(page.getByText("0 SESSIONS", { exact: true })).toBeVisible();
-    await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
-    phase = "populated";
-    await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
-    await expect(page.getByText("1 SESSIONS", { exact: true })).toBeVisible();
-    await expect(page.getByText("eth9", { exact: true })).toBeVisible();
-    phase = "unavailable";
-    await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
-    await expect(unavailable).toBeVisible();
-    await expect(page.getByText("HOST MACHINE", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("1 SESSIONS", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
-  });
+for (const view of ["physical", "logical"] as const) {
+  for (const failedEndpoint of ["interfaces", "flows"] as const) {
+    test(`${view} topology retries unavailable ${failedEndpoint} without rendering empty or stale runtime data`, async ({ page }) => {
+      let phase: "unavailable" | "empty" | "populated" = "unavailable";
+      await page.route("**/api/v1/config", (route) => route.fulfill({ json: {
+        interfaces: view === "logical" ? [{ name: "lan", device: "eth9", zone: "lan" }] : [],
+        zones: [], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
+      } }));
+      await page.route("**/api/v1/system/inspection", (route) => route.fulfill({
+        status: 503, json: { error: "inspection unavailable" },
+      }));
+      await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "interfaces"
+        ? { status: 503, json: { error: "engine interface state unavailable" } }
+        : { json: phase === "empty" ? [] : [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }] }));
+      await page.route("**/api/v1/flows?*", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "flows"
+        ? { status: 503, json: { error: "engine flows unavailable" } }
+        : { json: phase === "empty" ? [] : [{
+          flowId: "flow-1", firstSeen: "2026-01-01T00:00:00Z", lastSeen: "2026-01-01T00:01:00Z", eventCount: 1,
+        }] }));
+      await page.goto("/topology/");
+      if (view === "physical") await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+      const unavailable = page.getByRole("alert").filter({ hasText: view === "physical" ? "Physical topology unavailable" : "Logical topology unavailable" });
+      const content = view === "physical" ? page.getByText("HOST MACHINE", { exact: true }) : page.locator(".react-flow");
+      const sessions = (count: number) => view === "physical"
+        ? page.getByText(`${count} SESSIONS`, { exact: true })
+        : page.locator(".react-flow__node-firewall").getByText(String(count), { exact: true });
+      await expect(unavailable).toBeVisible();
+      await expect(content).toHaveCount(0);
+      await expect(sessions(0)).toHaveCount(0);
+      phase = "empty";
+      await (view === "physical" ? unavailable.locator("..") : unavailable).getByRole("button", { name: "Retry", exact: true }).click();
+      await expect(unavailable).toHaveCount(0);
+      await expect(content).toBeVisible();
+      await expect(sessions(0)).toBeVisible();
+      await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
+      phase = "populated";
+      await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
+      await expect(sessions(1)).toBeVisible();
+      if (view === "logical") await page.locator(".react-flow__node-firewall").click();
+      await expect(page.getByText("eth9", { exact: true })).toBeVisible();
+      if (view === "logical") await expect(page.getByTitle("192.0.2.9/24")).toBeVisible();
+      phase = "unavailable";
+      await page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED);
+      await expect(unavailable).toBeVisible();
+      await expect(content).toHaveCount(0);
+      await expect(sessions(1)).toHaveCount(0);
+      await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
+    });
+  }
 }
+
+test("firewall quick-start rejects unavailable WAN discovery before staging any changes", async ({ page }) => {
+  let phase: "unavailable" | "empty" | "populated" = "unavailable";
+  const writes: { path: string; body: unknown }[] = [];
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }] }));
+  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
+    ? { status: 503, json: { error: "engine interface state unavailable" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.2/24"] }] }));
+  for (const [path, initial] of [
+    ["/routing", { gateways: [], routes: [], rules: [] }],
+    ["/firewall/nat", { enabled: false, sourceZones: [] }],
+    ["/firewall/rules", []],
+  ] as const) {
+    let saved: unknown = initial;
+    await page.route(`**/api/v1${path}`, (route) => {
+      if (route.request().method() === "POST") {
+        saved = route.request().postDataJSON();
+        writes.push({ path, body: saved });
+        return route.fulfill({ json: saved, headers: { "X-Containd-Config": "staged" } });
+      }
+      return route.fulfill({ json: path === "/firewall/rules" && !Array.isArray(saved) ? [saved] : saved });
+    });
+  }
+  await page.goto("/firewall/");
+  const quickStart = async () => {
+    await page.getByRole("button", { name: "Quick start (LAN→WAN)", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  };
+  await quickStart();
+  await expect(page.getByText(/Interface state unavailable — WAN address discovery failed/)).toBeVisible();
+  await expect(page.getByText(/Could not determine WAN IPv4 address/)).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+  phase = "empty";
+  await quickStart();
+  await expect(page.getByText(/Could not determine WAN IPv4 address/)).toBeVisible();
+  await expect(page.getByText(/Interface state unavailable — WAN address discovery failed/)).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+  phase = "populated";
+  await quickStart();
+  await expect(page.getByText(/Outbound quick start staged — commit to apply/)).toBeVisible();
+  expect(writes).toHaveLength(3);
+  expect(writes[0]).toMatchObject({ path: "/routing", body: { gateways: [{ name: "wan-gw", address: "192.0.2.1" }] } });
+  phase = "unavailable";
+  await quickStart();
+  await expect(page.getByText(/Interface state unavailable — WAN address discovery failed/)).toBeVisible();
+  expect(writes).toHaveLength(3);
+});
+
+test("VPN runtime distinguishes unavailable interface state from an absent WireGuard interface", async ({ page }) => {
+  let phase: "unavailable" | "empty" | "populated" = "unavailable";
+  await page.route("**/api/v1/services/vpn", (route) => route.fulfill({ json: {
+    wireguard: { enabled: true, interface: "wg0", addressCIDR: "10.8.0.1/24", peers: [] },
+    openvpn: { enabled: false, mode: "client" },
+  } }));
+  await page.route("**/api/v1/services/vpn/wireguard/status?*", (route) => route.fulfill({ json: { present: false, peers: [] } }));
+  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
+    ? { status: 503, json: { error: "engine interface state unavailable" } }
+    : { json: phase === "empty" ? [] : [{ name: "wg0", up: true, addrs: ["10.8.0.1/24"] }] }));
+  await page.goto("/vpn/");
+  const runtime = page.getByRole("region", { name: "WireGuard runtime", exact: true });
+  const unavailable = runtime.getByRole("status").filter({ hasText: "Interface state unavailable" });
+  await expect(unavailable).toBeVisible();
+  await expect(runtime.getByText("interface state unavailable", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("not present", { exact: true })).toHaveCount(0);
+  phase = "empty";
+  await unavailable.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(unavailable).toHaveCount(0);
+  await expect(runtime.getByText("not present", { exact: true })).toBeVisible();
+  phase = "populated";
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(runtime.getByText("up", { exact: true })).toBeVisible();
+  await expect(runtime.getByText("10.8.0.1/24", { exact: true })).toBeVisible();
+  phase = "unavailable";
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(unavailable).toBeVisible();
+  await expect(runtime.getByText("10.8.0.1/24", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("not present", { exact: true })).toHaveCount(0);
+});
