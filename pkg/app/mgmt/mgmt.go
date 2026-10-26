@@ -108,6 +108,11 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
+	auditLog, ok := stores.auditStore.(audit.ForwardLog)
+	if !ok {
+		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
+	}
+	serviceManager.SetAuditLog(auditLog)
 	var sshServer atomic.Pointer[sshserver.Server]
 	resetSessions := httpapi.FactoryResetSessions(func(_ context.Context, initiator string) {
 		if srv := sshServer.Load(); srv != nil {

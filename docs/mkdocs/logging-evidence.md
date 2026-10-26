@@ -24,16 +24,52 @@ levels. CLI queries include `show audit` and `show events`; see
 
 Two working syslog paths are distinct:
 
-- **Service event forwarder**: `services.syslog.forwarders` sends polled engine
+- **Service syslog forwarder**: `services.syslog.forwarders` sends polled engine
   and service telemetry over UDP or TCP. `services.syslog.format` selects JSON or
-  RFC5424 output. Retries/backoff and status counters expose failures; this is
-  best-effort forwarding, not a durable acknowledged stream. Bounded polling,
-  mixed event-source IDs, and failures can leave gaps. Audit database rows are
-  not automatically part of this telemetry feed.
+  RFC5424 output. Retries/backoff and status counters expose failures; event
+  forwarding is best-effort, not a durable acknowledged stream. Bounded polling,
+  mixed event-source IDs, and failures can leave gaps. The same forwarders also
+  carry audit records; see [Audit records over syslog](#audit-records-over-syslog).
 - **Application logger sink**: `CONTAIND_LOG_SYSLOG_ADDR` and
   `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
   The default protocol is UDP; TCP and Unix sockets are also supported. These
   logs are not the complete DPI event stream. Verify reception at the collector.
+
+### Audit records over syslog
+
+Every syslog forwarder also sends the audit database's records, oldest first,
+in the configured format:
+
+```text
+<109>1 2026-10-26T09:14:03Z fw1 containd - audit [audit@47450 id="42" actor="admin" source="api" action="config.commit" target="running" result="success" detail=""] admin config.commit running: success
+{"kind":"audit","host":"fw1","id":43,"timestamp":"2026-10-26T09:14:09Z","actor":"eve","source":"api","action":"auth.login","target":"eve","result":"denied","detail":"invalid credentials"}
+```
+
+- RFC5424 messages use MSGID `audit`, facility 13 (log audit), severity notice
+  for `success`, `ok` and `requested` results and warning otherwise. JSON
+  messages carry `"kind":"audit"`. Event messages never use either marker.
+- Detail is cut to 1024 bytes, target to 256 bytes and the other fields to 128
+  bytes; a cut ends in `…`. Control characters are escaped, so a value cannot
+  start a new line or message.
+- Each forwarder keeps a cursor, the last audit ID it delivered, in the audit
+  database. A forwarder is identified by protocol, address and port. Failed
+  delivery keeps the cursor and the next flush retries, so records sent during
+  a collector outage or before a restart are delivered later. A batch holds at
+  most `services.syslog.batchSize` records per forwarder and flush.
+- Delivery is at least once: after a crash a collector can receive a record
+  twice. Use `id` to deduplicate; IDs keep increasing, also across a factory
+  reset. TCP delivery means the local TCP stack accepted the message; UDP has
+  no delivery signal.
+- A newly configured forwarder starts after the newest record and does not
+  replay history. Removing a forwarder deletes its cursor. A factory reset
+  wipes the records and rewinds the cursors, so records written afterwards are
+  forwarded.
+
+`GET /api/v1/services/status` reports `syslog.audit`: `enabled`, `sent_total`,
+`failed_total`, `last_error`, `last_flush`, total `backlog`, and per forwarder
+`forwarder`, `last_id`, `backlog` (records not yet delivered), `last_error`
+and `last_sent`. A growing backlog or a set `last_error` means the collector is
+not receiving audit records.
 
 The top-level `export` configuration and `pkg/dp/export` CEF/JSON/Syslog library
 are **not wired into the runtime**. Setting that configuration does not export
