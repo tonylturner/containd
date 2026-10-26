@@ -39,6 +39,8 @@ LABEL org.opencontainers.image.title="containd-engine" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --from=builder /out/containd /usr/bin/containd
+# The engine needs CONTAIND_ENGINE_ADDR set to its address on the management
+# network; it refuses loopback or wildcard listeners in engine mode.
 EXPOSE 8081
 ENTRYPOINT ["/usr/bin/containd"]
 CMD ["engine"]

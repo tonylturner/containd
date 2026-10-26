@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- While enforcing, the unauthenticated engine API is admitted only from
+  loopback and, when `CONTAIND_ENGINE_ADDR` names one address, on that
+  address's interface. TCP 8081 is no longer accepted on every interface.
 - Firewall rules with identity or schedule predicates no longer compile to
   always-on rules. A predicate that cannot be evaluated resolves toward denial:
   such an ALLOW rule is inactive and such a DENY rule always applies. Schedules
@@ -85,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `containd engine` has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
+  engine's address on the management network; loopback and wildcard
+  listeners are refused at start, except loopback with a reserved management
+  path. This also applies to the engine-only image.
+- The Compose files no longer carry a commented engine-port mapping, and the
+  smoke compose no longer publishes 18081. Call the engine API with
+  `docker compose exec containd curl http://127.0.0.1:8081/...`.
 - `dataplane.enforceTable` must start with a letter or underscore and be at most
   248 characters, which is what nftables can address, and must not be
   `containd_dhcp` or an nft keyword such as `table` or `inet`. Staging and the
@@ -139,6 +149,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Disabling an ICS filter removes it from the rule. Before, the UI sent an
+  empty patch and reported success while the filter stayed. Clearing a rule's
+  description, logging, zones or address lists in the editor now clears them.
+- Service pages and topology no longer show simulated or random activity
+  charts. Service series are evenly spaced per minute, with zeros for quiet
+  minutes. The proxies page shows the Envoy and Nginx request rates it
+  reports.
 - Factory reset clears the engine's temporary blocks and connection
   revocations. A failed clear is reported as a `dynamic blocks:` warning.
 - The rule impact preview returns `warnings`, and the firewall rule editor's

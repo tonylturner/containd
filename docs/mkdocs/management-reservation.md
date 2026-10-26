@@ -142,7 +142,7 @@ the persisted fault as well.
 applied, all new forwarded connections are denied. Existing/related connections
 remain accepted by the ordinary compiler. INPUT defaults to drop with loopback,
 established/related and the env-backed reserved HTTP rule; the compiler's existing
-ICMP and TCP 8081 accepts remain. This does not promise zero traffic
+ICMP accepts remain, and the loopback engine API needs no rule of its own. This does not promise zero traffic
 before the first successful apply or enforcement if the kernel/engine cannot
 apply rules. No stored runtime configuration is replayed. Existing interfaces,
 routes or services in a still-running split engine are not torn down: recovery
