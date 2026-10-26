@@ -71,8 +71,13 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	for _, r := range cfg.Firewall.Rules {
-		srcs := expandCIDRTokens(append([]string(nil), r.Sources...), cfg)
-		dsts := expandCIDRTokens(append([]string(nil), r.Destinations...), cfg)
+		srcs, srcMatchable := expandCIDRTokens(r.Sources, cfg)
+		dsts, dstMatchable := expandCIDRTokens(r.Destinations, cfg)
+		if !srcMatchable || !dstMatchable {
+			// The snapshot has no never-match form: an empty side means
+			// any address. A rule that can match nothing is left out.
+			continue
+		}
 		entry := dprules.Entry{
 			ID:           r.ID,
 			SourceZones:  append([]string(nil), r.SourceZones...),
@@ -169,9 +174,13 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	return snap, nil
 }
 
-func expandCIDRTokens(in []string, cfg *config.Config) []string {
+// expandCIDRTokens resolves a rule side's CIDRs and VPN tokens. An empty
+// side matches any address. A side whose tokens all resolve to no address
+// (a VPN token with that VPN unconfigured) matches nothing and reports
+// matchable false.
+func expandCIDRTokens(in []string, cfg *config.Config) (cidrs []string, matchable bool) {
 	if len(in) == 0 {
-		return nil
+		return nil, true
 	}
 	out := make([]string, 0, len(in))
 	for _, raw := range in {
@@ -196,7 +205,7 @@ func expandCIDRTokens(in []string, cfg *config.Config) []string {
 		}
 	}
 	out = compactAndSortCIDRs(out)
-	return out
+	return out, len(out) > 0
 }
 
 func vpnCIDRs(cfg *config.Config) []string {
