@@ -133,6 +133,18 @@ other. Smoke fixture setup and isolation are documented in
 and IEC104 scenarios in
 [`test/iec104/README.md`](https://github.com/tonylturner/containd/blob/main/test/iec104/README.md).
 
+## Kernel Tests
+
+`CONTAIND_NETNS_KERNEL_TEST=1` is the one gate of the dataplane kernel tests
+in `pkg/dp/engine`, `pkg/dp/enforce`, `pkg/dp/capture`, `pkg/dp/session`,
+`pkg/dp/conntrack` and `pkg/dp/dhcpd`. Most of them replace containd's nft
+tables or create network namespaces, so they run only with the variable set,
+in a disposable privileged Linux container. The `pkg/dp/capture` and
+`pkg/dp/session` tests also run whenever they run as root; with the variable
+set, a missing prerequisite fails them instead of skipping. Each test's
+comment gives its container command. The `pkg/dp/netcfg` routing and
+management kernel tests keep their own variables.
+
 ## Kernel NFQUEUE Oracle
 
 `TestFirstCommandKernelOracle` in `pkg/dp/engine` routes a client network

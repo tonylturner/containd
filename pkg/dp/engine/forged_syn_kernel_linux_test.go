@@ -20,8 +20,9 @@ import (
 // client's next byte, as an attacker who knows the sequence numbers could
 // send to choose where framing starts. The kernel still tracks the
 // connection, so the SYN does not start a new one: the connection's next
-// read stays dropped as picked up mid-connection, and a new connection
-// from the same address is still inspected and answered.
+// read is a mid-stream pickup, never reaches the server and resets the
+// connection, and a new connection from the same address is still
+// inspected and answered.
 func TestForgedSYNKernelRestartPickup(t *testing.T) {
 	ctx := newFirstCommandLab(t)
 	srv := startModbusRecorder(t)
@@ -32,16 +33,11 @@ func TestForgedSYNKernelRestartPickup(t *testing.T) {
 	c.read()
 	restartFirstCommandEngine(ctx, t, e, nil)
 
-	local := c.conn.LocalAddr().(*net.TCPAddr)
-	syn := rawTCPSegment(local.IP, net.ParseIP(fcServerIP), uint16(local.Port), 502, c.sendSeq()-1, 0x02) // SYN
-	if err := inNetns(fcClientNS, func() error { return sendRaw(syn, net.ParseIP(fcServerIP)) }); err != nil {
-		t.Fatalf("send SYN: %v", err)
-	}
-	time.Sleep(100 * time.Millisecond)
+	c.forgeSYN(502)
 	c.write(c.next(3, 0, 2))
-	c.expectSilence()
-	if fcs, _, _ := srv.seen(src); len(fcs) != 1 {
-		t.Fatalf("server answered FCs %v, want only the read before the restart", fcs)
+	c.expectReset()
+	if fcs, n, _ := srv.seen(src); len(fcs) != 1 || n != 12 {
+		t.Fatalf("server received FCs %v in %d bytes, want only the read before the restart", fcs, n)
 	}
 
 	var conn net.Conn
@@ -61,6 +57,42 @@ func TestForgedSYNKernelRestartPickup(t *testing.T) {
 	if fcs, _, regs := srv.seen(src); len(fcs) != 2 || regs != [8]uint16{} {
 		t.Fatalf("server received FCs %v, registers %v; want the two reads only", fcs, regs)
 	}
+}
+
+// TestForgedSYNKernelLiveConnection sends, after the head of a read, a SYN
+// in the open connection whose sequence number would anchor a new stream
+// at the client's next byte. It passes without anchoring: the crafted
+// rest, which completes the read and a prohibited write were the stream
+// anchored at it, is framed from the read's start and dropped with the
+// write.
+func TestForgedSYNKernelLiveConnection(t *testing.T) {
+	ctx := newFirstCommandLab(t)
+	srv := startModbusRecorder(t)
+	startFirstCommandEngine(t, ctx)
+
+	c := dialFirstCommand(ctx, t, "198.18.50.47")
+	read := c.next(3, 0, 2)
+	c.write(read[:8])
+	c.forgeSYN(502)
+	// Transaction ID 0x00FE: the misframed MBAP length field.
+	c.write(append(read[8:], modbusADU(0x00FE, 6, 1, 0x1234)...))
+	c.expectSilence()
+	if fcs, n, regs := srv.seen(c.src); len(fcs) != 0 || n != 8 || regs != [8]uint16{} {
+		t.Fatalf("server received FCs %v in %d bytes, registers %v; want only the 8-byte read head", fcs, n, regs)
+	}
+}
+
+// forgeSYN sends, from the client's address and port, a SYN to the server
+// port whose sequence number precedes the client's next byte, and gives
+// the server time to answer it.
+func (c *fcClient) forgeSYN(dport uint16) {
+	c.t.Helper()
+	local := c.conn.LocalAddr().(*net.TCPAddr)
+	syn := rawTCPSegment(local.IP, net.ParseIP(fcServerIP), uint16(local.Port), dport, c.sendSeq()-1, 0x02) // SYN
+	if err := inNetns(fcClientNS, func() error { return sendRaw(syn, net.ParseIP(fcServerIP)) }); err != nil {
+		c.t.Fatalf("send SYN: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
 }
 
 // tcpSendQueue selects the send queue for TCP_QUEUE_SEQ (TCP_SEND_QUEUE).

@@ -54,9 +54,10 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 
 // FailStream fails the framed stream of a packet with a StreamError of
 // kind: StreamDecoderPanic when its decoder panicked, StreamDenied when the
-// policy denied the connection. The buffered bytes are dropped and the
-// stream stays failed, as after a stream error, so nothing on it is parsed
-// again. Later packets that fail closed get its error; the flow's end
+// policy denied the connection, StreamMidStream when the caller closes a
+// connection it picked up mid-connection. The buffered bytes are dropped
+// and the stream stays failed, as after a stream error, so nothing on it
+// is parsed again. Later packets that fail closed get its error; the flow's end
 // clears it. A flow without a framing decoder holds no stream and is left
 // alone.
 func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamErrKind) {

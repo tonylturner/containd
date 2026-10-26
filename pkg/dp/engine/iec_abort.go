@@ -4,7 +4,6 @@
 package engine
 
 import (
-	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/session"
@@ -229,20 +227,8 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 		t.mu.Lock()
 		established := s.reset.targets[iecDirSrv].valid
 		t.mu.Unlock()
-		if !established {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		err := t.ctDelete(ctx, conntrack.DeleteRequest{
-			Proto: "tcp",
-			Src:   s.client.Addr().String(),
-			Dst:   s.server.Addr().String(),
-			Sport: int(s.client.Port()),
-			Dport: int(s.server.Port()),
-		})
-		if err != nil && t.onError != nil {
-			t.onError(errors.New("iec104 abort: conntrack delete " + s.id + ": " + err.Error()))
+		if established {
+			t.deleteConntrack(s.client, s.server, "iec104 abort "+s.id)
 		}
 	}
 }
@@ -250,10 +236,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 // sendReset sends one RST and reports it. A failure keeps the session
 // dropped and makes enforcement unhealthy.
 func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
-	err := errInjectorUnavailable
-	if t.injector != nil {
-		err = t.injector.SendRST(r)
-	}
+	err := t.sendRST(r)
 	t.mu.Lock()
 	now := t.now()
 	s.reset.targets[target].sent = now
@@ -265,7 +248,6 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 		pressureTotals.injector.Add(1)
 		metrics.IEC104InjectorFailuresTotal.Inc()
 		extra[eventfields.KeyError] = err.Error()
-		t.health.fault(faultReset, "reset: "+err.Error())
 	}
 	t.emit([]events.Event{s.sessionEvent(outcome, extra, now)})
 }

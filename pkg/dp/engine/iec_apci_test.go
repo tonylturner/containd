@@ -279,6 +279,7 @@ func TestIECAPCICleanCaptures(t *testing.T) {
 						continue
 					}
 					p := capture.DecodeIPPacket(frame[14:])
+					markHandshake(&p) // as nft queues the capture's handshake
 					if p.Transport != "tcp" || !isIECPort(p) {
 						continue
 					}

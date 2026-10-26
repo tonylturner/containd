@@ -71,15 +71,15 @@ type stream struct {
 	// this direction carries in window.
 	closed    bool
 	closeNext uint32
-	// lost marks a fail-closed stream whose partial frame the idle sweep
-	// dropped: its next bytes cannot be framed, as for a stream that began
-	// without a SYN.
+	// lost marks a fail-closed stream that dropped its bytes: the idle
+	// sweep dropped its partial frame, or a handshake SYN began a new
+	// connection on its tuple. Its next bytes cannot be framed, as for a
+	// stream that began without a SYN.
 	lost bool
 }
 
 // pickedUp reports a stream whose bytes need not start at a frame: it
-// began without an observed SYN, or the idle sweep dropped its partial
-// frame.
+// began without an observed SYN, or it is lost.
 func (s *stream) pickedUp() bool { return !s.synSeen || s.lost }
 
 // midStream reports a stream that failed as picked up mid-connection.
@@ -146,40 +146,51 @@ func seqDiff(a, b uint32) int32 {
 // open anchors a legacy stream at a handshake. A late second capture of the
 // same SYN must not reset bytes already parsed on the first interface.
 //
-// A SYN with a new sequence number re-anchors the stream unless the stream
-// fails closed: a live fail-closed stream (one that no in-window FIN or RST
-// ended) does not resynchronize, and open returns its StreamResync error
-// for the caller to fail it. A failed fail-closed stream stays failed,
-// except one that began without a SYN and failed as picked up
-// mid-connection: a SYN starts the client's next connection on the tuple.
-// A stream that lost its partial frame was live, so it stays failed.
-//
 // A fail-closed SYN starts a stream, a new one or the next connection of a
-// failed or closed one, only when it belongs to a handshake the kernel's
-// connection tracking has not seen complete (handshake). Any other was
-// sent into an established connection, which a stream picked up
-// mid-connection, or none, may belong to: anchoring at it would let its
-// sender choose where framing starts.
-func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) *StreamError {
+// closed one, only when it belongs to a handshake the kernel's connection
+// tracking has not seen complete (handshake). Any other was sent into an
+// established connection, which a stream picked up mid-connection, or none,
+// may belong to: anchoring at it would let its sender choose where framing
+// starts. A failed fail-closed stream stays failed, except one that failed
+// as picked up mid-connection: the engine closes that connection, so a
+// handshake SYN starts the client's next one on the tuple.
+//
+// A SYN with a new sequence number on a live fail-closed stream (one that
+// no in-window FIN or RST ended) carries no payload and anchors nothing.
+// Without the handshake mark, connection tracking still holds the
+// connection established and the stream keeps its position: the server
+// answers such a SYN with a challenge ACK, and the RST a reconnecting
+// client sends in reply ends the stream in window (CloseStream). With the
+// mark, connection tracking starts a new connection that the stream cannot
+// follow: the stream drops its bytes and is lost, so its next bytes are a
+// mid-stream pickup.
+//
+// open reports whether the stream is anchored at this SYN: it started a
+// stream, or repeats the SYN its live stream started at.
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.streams[key]
 	switch {
 	case !ok:
 		if failClosed && !handshake {
-			return nil
+			return false
 		}
 	case failClosed && s.failed != nil:
-		if !midStream(s.failed) || s.synSeen || !handshake {
-			return nil
+		if !midStream(s.failed) || !handshake {
+			return false
 		}
 	case s.synSeen && s.synSeq == seq && !s.closed:
 		s.lastUpdate = now
-		return nil
+		return true
 	case failClosed && !s.closed:
-		return &StreamError{Kind: StreamResync, Offset: s.end()}
+		if handshake {
+			r.loseLocked(s)
+		}
+		s.lastUpdate = now
+		return false
 	case failClosed && !handshake:
-		return nil
+		return false
 	}
 	if ok {
 		r.bytesBuffered -= s.held()
@@ -187,7 +198,16 @@ func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, ha
 		r.activeStreams++
 	}
 	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, verify: failClosed, lastUpdate: now}
-	return nil
+	return true
+}
+
+// loseLocked drops the bytes of a live fail-closed stream, which keeps its
+// position: its next bytes need not start a frame (lost).
+func (r *reassembler) loseLocked(s *stream) {
+	r.bytesBuffered -= s.held()
+	s.base = s.end() // the position after the dropped bytes
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.lost = true
 }
 
 // feed adds one segment. A new stream starts at offset 0 in the given
@@ -527,16 +547,15 @@ func (r *reassembler) sweep(now time.Time) {
 		if s.keep || s.failed != nil || now.Sub(s.lastUpdate) <= r.idleTimeout {
 			continue
 		}
-		r.bytesBuffered -= s.held()
 		switch {
 		case !s.verify || s.closed:
+			r.bytesBuffered -= s.held()
 			delete(r.streams, key)
 			r.activeStreams--
 		case s.stored() > 0:
-			s.base = s.end() // the position after the dropped bytes
-			s.buf, s.ooo, s.hist = nil, nil, nil
-			s.lost = true
+			r.loseLocked(s)
 		default:
+			r.bytesBuffered -= len(s.hist)
 			s.hist = nil
 		}
 	}

@@ -54,8 +54,9 @@ rule covered only by several `ALLOW` rules together is not reported, and IEC
 | `TAG` | no | Labels matching flows and their events with `tag`; no kernel effect. |
 
 `RESET`, `RATE_LIMIT` and `TAG` act on a rule's L3/L4 scope and take no ICS
-protocol: IEC 104 keeps sole ownership of session resets, and an ICS rate or
-label is not defined. `RESET` cannot be the default action. Inside NFQUEUE
+protocol: the engine owns the resets of inspected ICS connections (aborted IEC
+104 sessions and connections picked up mid-stream), and an ICS rate or label
+is not defined. `RESET` cannot be the default action. Inside NFQUEUE
 inspection the engine cannot reject a queued packet, so a `RESET` rule that
 decides an inspected ICS message drops it like `DENY` and blocks the flow.
 

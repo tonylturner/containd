@@ -48,8 +48,14 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 		t.Fatalf("steering must precede the established accept:\n%s", listed)
 	}
 	// Compiled closed, the envelope drops; the switch opens and closes it
-	// in place without touching the forward chain.
-	const queued = "meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100"
+	// in place without touching the forward chain. Open, it queues with
+	// EnvelopeMark, and HandshakeMark too for a connection conntrack has
+	// not seen complete its handshake.
+	queued := []string{
+		"ct status assured meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+		"ct state != { invalid, untracked } meta mark set meta mark & 0xf3ffffff | 0x03000000 queue to 100",
+		"meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+	}
 	if env := nftList(t, IEC104EnvelopeChain); !strings.Contains(env, "drop") || strings.Contains(env, "queue") {
 		t.Fatalf("closed envelope chain:\n%s", env)
 	}
@@ -58,8 +64,11 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 			t.Fatalf("switch open=%v: %v", open, err)
 		}
 		env := nftList(t, IEC104EnvelopeChain)
-		if open != strings.Contains(env, queued) || open == strings.Contains(env, "drop") {
+		if open == strings.Contains(env, "drop") || open != strings.Contains(env, "queue") {
 			t.Fatalf("envelope chain after switch open=%v:\n%s", open, env)
+		}
+		if open && !strings.Contains(env, strings.Join(queued, "\n\t\t")+"\n") {
+			t.Fatalf("open envelope chain, want rules %q:\n%s", queued, env)
 		}
 		if got := nftList(t, "forward"); got != listed {
 			t.Fatalf("the switch changed the forward chain:\n%s", got)

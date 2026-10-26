@@ -17,14 +17,15 @@ import (
 
 // IEC104 decision reasons (logs and metrics only).
 const (
-	reasonIECAccept    = "iec104"
-	reasonIECHold      = "iec104_hold"
-	reasonIECAbort     = "iec104_abort"
-	reasonIECTombstone = "iec104_tombstone"
-	reasonIECClosed    = "iec104_closed"
-	reasonIECFailClose = "iec104_fail_closed"
-	reasonIECInvalid   = "iec104_invalid"
-	reasonIECUntracked = "iec104_untracked"
+	reasonIECAccept         = "iec104"
+	reasonIECHold           = "iec104_hold"
+	reasonIECAbort          = "iec104_abort"
+	reasonIECTombstone      = "iec104_tombstone"
+	reasonIECClosed         = "iec104_closed"
+	reasonIECFailClose      = "iec104_fail_closed"
+	reasonIECInvalid        = "iec104_invalid"
+	reasonIECUntracked      = "iec104_untracked"
+	reasonIECEstablishedSYN = "iec104_established_syn"
 )
 
 // iecResult is the outcome of one IEC104 envelope packet. Its actions are
@@ -151,14 +152,32 @@ func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 
 func isSYN(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK == 0 }
 
+// opens reports whether a client SYN may start a session or incarnation of
+// mode: in an enforce envelope only a SYN of a handshake that connection
+// tracking has not seen complete (handshakeMarked). One sent into an
+// established connection would let its sender choose where the session's
+// byte stream starts.
+func opens(mode string, pkt capture.Packet) bool {
+	return mode != "enforce" || handshakeMarked(pkt)
+}
+
 // newPacketLocked handles a packet of no known session: a SYN to 2404 opens
-// one; any other packet was not observed from its SYN.
+// one; any other packet was not observed from its SYN. An enforce SYN sent
+// into an established connection opens nothing and, without payload,
+// passes: the server answers it with a challenge ACK, a packet not
+// observed from its SYN, and that closes the connection.
 func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, now time.Time) (iecResult, bool) {
 	if isSYN(pkt.TCP.Flags) && dst.Port() == iec104Port {
 		ctx := t.sessionCtx(src, dst)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
 			return iecResult{}, false
+		}
+		if !opens(mode, pkt) {
+			if len(pkt.Payload) > 0 {
+				return dropped(reasonIECInvalid), true
+			}
+			return accepted(reasonIECEstablishedSYN), true
 		}
 		return t.openLocked(nil, src, dst, ctx, mode, pkt, now), true
 	}
@@ -227,25 +246,21 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		dir = iecDirClient
 	}
 	acts := t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)
-	// The receiver expects the packet's sequence number; the sender's
-	// receive point is the packet's ACK.
-	sender, receiver := dir, 1-dir
 	src, dst := client, server
 	if !fromClient {
 		src, dst = server, client
 	}
-	s.reset.targets[receiver] = resetTarget{valid: true}
-	s.reset.targets[receiver].r.Src, s.reset.targets[receiver].r.Dst, s.reset.targets[receiver].r.Seq = src, dst, pkt.TCP.Seq
-	if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
-		s.reset.targets[sender] = resetTarget{valid: true}
-		s.reset.targets[sender].r.Src, s.reset.targets[sender].r.Dst, s.reset.targets[sender].r.Seq = dst, src, pkt.TCP.Ack
+	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
+	s.reset.targets[1-dir] = resetTarget{valid: true, r: toReceiver}
+	if hasSender {
+		s.reset.targets[dir] = resetTarget{valid: true, r: toSender}
 	}
 	return droppedWith(reasonIECAbort, acts)
 }
 
 // tombstonePacketLocked drops every packet of an aborted incarnation and
-// answers challenge ACKs. A SYN with a new ISN starts the next incarnation;
-// a retransmitted old SYN does not.
+// answers challenge ACKs. A SYN with a new ISN starts the next incarnation
+// (opens); a retransmitted old SYN does not.
 func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
 	f := pkt.TCP.Flags
 	if dir == iecDirClient && isSYN(f) {
@@ -260,6 +275,9 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		if !matched {
 			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
 			return iecResult{acts: acts}, false
+		}
+		if !opens(mode, pkt) {
+			return dropped(reasonIECTombstone), true
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
 	}
@@ -277,7 +295,7 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 }
 
 // closedPacketLocked passes the payload-free tail of a closed session and
-// lets a new SYN open the next incarnation.
+// lets a new SYN open the next incarnation (opens).
 func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
 	if dir == iecDirClient && isSYN(pkt.TCP.Flags) && pkt.TCP.Seq != s.dirs[iecDirClient].isn {
 		ctx := t.sessionCtx(s.client, s.server)
@@ -286,7 +304,9 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
 			return iecResult{acts: acts}, false
 		}
-		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+		if opens(mode, pkt) {
+			return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+		}
 	}
 	if len(pkt.Payload) > 0 && s.mode == "enforce" {
 		return dropped(reasonIECClosed), true
@@ -306,7 +326,7 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 		if seq == c2s.isn {
 			return accepted(reasonIECAccept)
 		}
-		if s.dirs[iecDirSrv] == nil {
+		if s.dirs[iecDirSrv] == nil && opens(s.mode, pkt) {
 			s.dirs[iecDirClient] = newIECDir(seq) // the client retried with a new ISN
 			return accepted(reasonIECAccept)
 		}

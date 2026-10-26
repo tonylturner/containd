@@ -120,80 +120,35 @@ func inNetns(ns string, fn func() error) error {
 }
 
 // modbusRecorder is a Modbus/TCP server holding eight registers. It
-// records, per client address, every byte received and the function code
-// of every complete ADU, before it acts on or answers the ADU.
+// records, per client address, the function code of every complete ADU
+// before it acts on or answers the ADU.
 type modbusRecorder struct {
-	mu    sync.Mutex
-	ln    net.Listener
-	conns []net.Conn
-	fcs   map[string][]uint8
-	bytes map[string]int
-	regs  [8]uint16
+	*kernelServer
+	mu   sync.Mutex
+	fcs  map[string][]uint8
+	regs [8]uint16
 }
 
 func startModbusRecorder(t *testing.T) *modbusRecorder {
 	t.Helper()
-	r := &modbusRecorder{fcs: map[string][]uint8{}, bytes: map[string]int{}}
-	err := inNetns(fcServerNS, func() (err error) {
-		r.ln, err = net.Listen("tcp", net.JoinHostPort(fcServerIP, "502"))
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			c, err := r.ln.Accept()
-			if err != nil {
-				return
-			}
-			r.mu.Lock()
-			r.conns = append(r.conns, c)
-			r.mu.Unlock()
-			go r.serve(c)
-		}
-	}()
-	t.Cleanup(func() {
-		_ = r.ln.Close()
-		<-done
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		for _, c := range r.conns {
-			_ = c.Close()
-		}
-	})
+	r := &modbusRecorder{fcs: map[string][]uint8{}}
+	r.kernelServer = startKernelServer(t, 502, r.answer)
 	return r
 }
 
-func (r *modbusRecorder) serve(c net.Conn) {
-	src := c.RemoteAddr().(*net.TCPAddr).IP.String()
-	var buf []byte
-	tmp := make([]byte, 1024)
-	for {
-		n, err := c.Read(tmp)
-		r.mu.Lock()
-		r.bytes[src] += n
-		r.mu.Unlock()
-		buf = append(buf, tmp[:n]...)
-		for len(buf) >= 8 {
-			total := 6 + int(binary.BigEndian.Uint16(buf[4:6]))
-			if total < 8 {
-				return // not Modbus/TCP: no PDU
-			}
-			if len(buf) < total {
-				break
-			}
-			if _, werr := c.Write(r.handle(src, buf[:total])); werr != nil {
-				return
-			}
-			buf = buf[total:]
-		}
-		if err != nil {
-			return
-		}
+// answer handles the ADU at the start of buf.
+func (r *modbusRecorder) answer(src string, buf []byte) (int, []byte, error) {
+	if len(buf) < 8 {
+		return 0, nil, nil
 	}
+	total := 6 + int(binary.BigEndian.Uint16(buf[4:6]))
+	switch {
+	case total < 8:
+		return 0, nil, errors.New("not Modbus/TCP: no PDU")
+	case len(buf) < total:
+		return 0, nil, nil
+	}
+	return total, r.handle(src, buf[:total]), nil
 }
 
 // handle records and executes one ADU and returns its response.
@@ -227,14 +182,32 @@ func (r *modbusRecorder) handle(src string, adu []byte) []byte {
 
 // seen returns what the server received from src and its registers.
 func (r *modbusRecorder) seen(src string) (fcs []uint8, n int, regs [8]uint16) {
+	n = r.received(src)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.fcs[src]), r.bytes[src], r.regs
+	return slices.Clone(r.fcs[src]), n, r.regs
 }
 
 // startFirstCommandEngine runs the engine on NFQUEUE fcQueue with the
-// enforce policy applied to this namespace's nft ruleset.
+// Modbus enforce policy applied to this namespace's nft ruleset.
 func startFirstCommandEngine(t *testing.T, ctx context.Context) *Engine {
+	t.Helper()
+	scope := func(id string, action rules.Action, ics rules.ICSPredicate) rules.Entry {
+		return rules.Entry{
+			ID: id, Sources: []string{"198.18.50.0/24"}, Destinations: []string{fcServerIP + "/32"},
+			Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: ics, Action: action,
+		}
+	}
+	return startKernelEngine(t, ctx, rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
+		scope("modbus-read", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, ReadOnly: true}),
+		scope("modbus-write-deny", rules.ActionDeny, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}, WriteOnly: true}),
+		scope("modbus-diag-deny", rules.ActionDeny, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{8}}),
+	}})
+}
+
+// startKernelEngine runs the engine on NFQUEUE fcQueue, with its reset
+// injector, and applies snap to this namespace's nft ruleset.
+func startKernelEngine(t *testing.T, ctx context.Context, snap rules.Snapshot) *Engine {
 	t.Helper()
 	var errMu sync.Mutex
 	var errs []string
@@ -272,17 +245,6 @@ func startFirstCommandEngine(t *testing.T, ctx context.Context) *Engine {
 			t.Logf("engine error: %s", msg)
 		}
 	})
-	scope := func(id string, action rules.Action, ics rules.ICSPredicate) rules.Entry {
-		return rules.Entry{
-			ID: id, Sources: []string{"198.18.50.0/24"}, Destinations: []string{fcServerIP + "/32"},
-			Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: ics, Action: action,
-		}
-	}
-	snap := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
-		scope("modbus-read", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, ReadOnly: true}),
-		scope("modbus-write-deny", rules.ActionDeny, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}, WriteOnly: true}),
-		scope("modbus-diag-deny", rules.ActionDeny, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{8}}),
-	}}
 	if err := e.ApplyRules(ctx, snap); err != nil {
 		t.Fatalf("apply rules: %v", err)
 	}

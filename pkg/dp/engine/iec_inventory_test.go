@@ -314,6 +314,7 @@ func TestIECInventoryStartupCapture(t *testing.T) {
 					continue
 				}
 				p := capture.DecodeIPPacket(frame[14:])
+				markHandshake(&p) // as nft queues the capture's handshake
 				h.clock = time.Unix(int64(binary.LittleEndian.Uint32(hdr)), int64(binary.LittleEndian.Uint32(hdr[4:8]))*1000)
 				p.Timestamp = h.clock
 				p.Token = h.token()

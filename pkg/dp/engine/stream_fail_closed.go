@@ -20,13 +20,13 @@ import (
 
 // An inline flow in the scope of an enforce ICS rule fails closed when its
 // stream cannot be inspected: a conflicting overlap, a rewritten
-// retransmission, framing the decoder rejects, a SYN with a new sequence
-// number on its live stream, or a recovered decoder panic drops the packet
+// retransmission, framing the decoder rejects, the payload of a SYN its
+// stream is not anchored at, or a recovered decoder panic drops the packet
 // and denies the flow like a decoded denial. The flow's stream stays
 // failed instead of restarting at a later segment, so a sender cannot
-// choose where framing resumes; only a FIN or RST in window ends it
-// before the flow does. Learn-only flows, packets that are not inline and
-// the IEC104 path keep passing such packets.
+// choose where framing resumes; only a FIN or RST in window ends it before
+// the flow does. Learn-only flows, packets that are not inline and the
+// IEC104 path keep passing such packets.
 //
 // A decoded denial of such a flow fails its stream too (dpi.StreamDenied):
 // the denied bytes were consumed, so without it their retransmission would
@@ -36,15 +36,20 @@ import (
 //
 // A stream picked up mid-connection fails the same way, as an IEC104
 // session not observed from its SYN does: after an engine restart, after
-// the engine forgot an idle flow, or after the reassembly sweep dropped a
-// partial frame, framing could start inside a message. Its connection's
-// packets drop until the flow ends, but no flow block is installed: the
-// client's next connection anchors at its SYN and is inspected from its
-// first byte. Only a SYN or SYN-ACK of a handshake that the kernel's
-// connection tracking has not seen complete anchors a stream
-// (dpi.ParsedPacket.TCPHandshake): anchoring at one sent into an
-// established connection, such as a picked-up one, would let its sender
-// choose where framing starts.
+// the engine forgot an idle flow, after the reassembly sweep dropped a
+// partial frame, or after a SYN of a new handshake on its tuple, framing
+// could start inside a message. No flow block is installed, which would
+// also stop the client's next connection: the engine resets the connection
+// once (closePickedUp), its packets drop, and the client's next connection
+// anchors at its SYN and is inspected from its first byte. Only a SYN or
+// SYN-ACK of a handshake that the kernel's connection tracking has not
+// seen complete anchors a stream (dpi.ParsedPacket.TCPHandshake):
+// anchoring at one sent into an established connection, such as a
+// picked-up one, would let its sender choose where framing starts. Such a
+// SYN without payload passes and changes nothing: a client that lost its
+// connection and reconnects on the same port gets the server's challenge
+// ACK, and its RST in reply ends the old connection in the server, in
+// connection tracking and in the engine's stream.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).

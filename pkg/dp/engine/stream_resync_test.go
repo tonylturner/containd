@@ -157,21 +157,43 @@ func TestResyncCloseKeepsFailedStream(t *testing.T) {
 }
 
 // TestResyncSYNOnLiveStream sends a SYN with a new sequence number after
-// the head of a read and then the crafted rest: an enforce flow fails
-// closed at the SYN and stays failed, a learn flow re-anchors and passes
-// as before. An identical SYN retransmission changes nothing.
+// the head of a read and then the crafted rest. A SYN without payload
+// neither fails the stream nor blocks the flow. Sent into the established connection, the SYN
+// leaves the stream's framing: the read completes and the command is
+// denied. As the handshake of a new connection on the tuple, it leaves the
+// stream lost, so the crafted rest drops as a pickup. A SYN that carries
+// the crafted rest fails the flow closed. A learn flow re-anchors and
+// passes as before; an identical SYN retransmission changes nothing.
 func TestResyncSYNOnLiveStream(t *testing.T) {
 	for _, tc := range misframeCases() {
 		crafted := concatFrames(tc.read[8:], tc.command)
-		t.Run(tc.name+"/enforce", func(t *testing.T) {
+		scope := tc.proto + "-read"
+		t.Run(tc.name+"/enforce SYN into the connection", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
 			f.accept("read head", tc.read[:8])
-			scope := tc.proto + "-read"
-			f.failedClosed("SYN with a new sequence number", f.decide(8, capture.TCPFlagSYN, nil), scope, failClosedResync, 0)
+			if d := f.establishedSyn(8); d.Action != capture.Accept {
+				t.Fatalf("SYN into the connection = %+v, want Accept", d)
+			}
+			f.noBlock("SYN into the connection")
+			f.denyAt(8, "segment completing "+tc.name, tc.rule, crafted)
+		})
+		t.Run(tc.name+"/enforce SYN of a new handshake", func(t *testing.T) {
+			f := newModeFlow(t, "enforce", tc.port)
+			f.syn()
+			f.accept("read head", tc.read[:8])
+			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Accept {
+				t.Fatalf("handshake SYN on the live stream = %+v, want Accept", d)
+			}
+			f.noBlock("handshake SYN")
+			f.pickedUp("crafted segment", f.decide(8, ackPsh, crafted), scope, 0)
+		})
+		t.Run(tc.name+"/enforce SYN with data", func(t *testing.T) {
+			f := newModeFlow(t, "enforce", tc.port)
+			f.syn()
+			f.accept("read head", tc.read[:8])
+			f.failedClosed("SYN carrying the crafted rest", f.decide(8, capture.TCPFlagSYN, crafted), scope, failClosedResync, 0)
 			f.dropCachedAt(8, "crafted segment", crafted)
-			f.e.verdictCache = NewVerdictCache(time.Minute, 16)
-			f.failedClosed("crafted segment on the failed stream", f.decide(8, ackPsh, crafted), scope, failClosedResync, 1)
 		})
 		t.Run(tc.name+"/learn", func(t *testing.T) {
 			f := newModeFlow(t, "learn", tc.port)
