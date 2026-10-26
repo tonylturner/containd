@@ -2,7 +2,6 @@ import { authHeaders, fetchWithSession, handleUnauthorized } from "./api-core";
 import {
   deleteJSONResult,
   getJSON,
-  patchJSONResult,
   postJSONResult,
 } from "./api-request";
 

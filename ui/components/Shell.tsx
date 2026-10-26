@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
+import { ShellRecoveryBanner } from "./ManagementRecoveryBanner";
 import { ProfileModal } from "./ProfileModal";
 import {
   buildNavGroups,
@@ -559,6 +560,7 @@ export function Shell({
                     </div>
                   </div>
                 )}
+                <ShellRecoveryBanner />
                 <ConfigStatusBar />
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>

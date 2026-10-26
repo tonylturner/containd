@@ -9,6 +9,7 @@ import { Shell } from "../../components/Shell";
 import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
+import { TagList } from "../../components/TagList";
 
 /** Short form of an IEC 104 session ID ("<run>-<seq>"): run prefix and seq. */
 function shortSessionID(id: string): string {
@@ -132,7 +133,7 @@ function FlowsInner() {
       {!error && <>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
         <div className="w-full text-(--text-muted)">
-          Live flow summaries show active conversations and AV flags. Use Events for raw telemetry and Alerts for IDS investigations.
+          Live flow summaries show active conversations, AV flags and the labels of the TAG rules that matched them. Use Events for raw telemetry and Alerts for IDS investigations.
         </div>
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           Total flows: {flows.length}
@@ -167,6 +168,7 @@ function FlowsInner() {
                 <th className="px-4 py-3">Flow</th>
                 <th className="px-4 py-3">Detected app</th>
                 <th className="px-4 py-3">Source → Destination</th>
+                <th className="px-4 py-3">Tags</th>
                 <th className="px-4 py-3">First Seen</th>
                 <th className="px-4 py-3">Last Seen</th>
                 <th className="px-4 py-3 text-right">Signals</th>
@@ -175,7 +177,7 @@ function FlowsInner() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6">
+                  <td colSpan={7} className="px-4 py-6">
                     <SkeletonList rows={4} />
                   </td>
                 </tr>
@@ -208,6 +210,9 @@ function FlowsInner() {
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}
+                  </td>
+                  <td className="px-4 py-3 text-(--text)">
+                    <TagList tags={f.tags} />
                   </td>
                   <td className="px-4 py-3 text-(--text-muted)">
                     {new Date(f.firstSeen).toLocaleString()}

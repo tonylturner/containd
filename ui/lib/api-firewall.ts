@@ -103,14 +103,22 @@ export type FirewallRulePatch = Partial<
 };
 
 /**
- * A firewall rule that does not act as written: its identities match no
- * bound address (`predicate: "identity"`), so it matches nothing, or it is a
- * DENY or RESET rule that an ALLOW matching all of its traffic shadows
- * (`shadowedBy`).
+ * The part of a rule that makes it match nothing: identities no bound address
+ * satisfies, zones none of which has an interface, or sources and
+ * destinations that share no address family.
+ */
+export type RuleWarningPredicate = "identity" | "zone" | "addressFamily";
+
+/**
+ * A firewall rule that does not act as written: it matches nothing because
+ * of its `predicate`, or it is a DENY or RESET rule that an ALLOW matching
+ * all of its traffic shadows (`shadowedBy`).
  */
 export type RuleWarning = {
   ruleId: string;
-  predicate?: "identity";
+  predicate?: RuleWarningPredicate;
+  /** For predicate zone: the rule's zones without interfaces, sorted. */
+  zones?: string[];
   shadowedBy?: string;
   action: RuleAction;
   message: string;

@@ -48,25 +48,6 @@ export function parseTab(value: string | null): Tab {
   return "overview";
 }
 
-export function formatBytes(size: number) {
-  if (!Number.isFinite(size)) {
-    return "-";
-  }
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  const kb = size / 1024;
-  if (kb < 1024) {
-    return `${kb.toFixed(1)} KB`;
-  }
-  const mb = kb / 1024;
-  if (mb < 1024) {
-    return `${mb.toFixed(1)} MB`;
-  }
-  const gb = mb / 1024;
-  return `${gb.toFixed(1)} GB`;
-}
-
 // The API compares sections before redaction. JSON here supplies display lines
 // only: it must never decide whether a section changed.
 const SECTION_LABELS: Record<string, string> = {

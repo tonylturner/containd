@@ -6,7 +6,7 @@ import { api, type TelemetryEvent } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
-import { Pagination } from "../../components/TableControls";
+import { Pagination, SearchBar } from "../../components/TableControls";
 import { describeICSEvidence, iec104AttributeRows } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
 import { IEC104EvidencePanel } from "./iec104-alert-panel";
@@ -155,14 +155,7 @@ export default function AlertsPage() {
 
       {/* Search */}
       <div className="mb-3 max-w-lg">
-        <div className="relative">
-          <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search alerts by message, rule ID, IP..."
-            className="input-industrial w-full py-1.5 pl-9 pr-3 text-sm" />
-        </div>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, rule ID, IP..." className="w-full" />
       </div>
 
       {alerts.length === 0 ? (

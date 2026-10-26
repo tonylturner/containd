@@ -1,21 +1,3 @@
-/** Runtime IEC 104 enforcement health. `active` describes the loaded
- * runtime envelope, not the saved config. */
-export type IEC104EnforcementHealth = {
-  active: boolean;
-  healthy: boolean;
-  reason: string;
-};
-
-export type HealthResponse = {
-  status: string;
-  component: string;
-  build?: string;
-  time?: string;
-  iec104Enforcement?: IEC104EnforcementHealth;
-  icsEnforcement?: ICSEnforcementHealth;
-  managementRecovery?: ManagementRecoveryHealth;
-};
-
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
 export type ApiResult<T> =
   | { ok: true; data: T; warning?: string }
@@ -34,25 +16,37 @@ export {
   isAdmin,
 } from "./api-core";
 export {
+  fetchDataPlane,
+  getICSCoverage,
+  getRulesetPreview,
+  setDataPlane,
+} from "./api-dataplane";
+export {
   deletePcap,
   downloadPcapURL,
-  fetchDataPlane,
   getPcapConfig,
-  getICSCoverage,
   getPcapStatus,
-  getRulesetPreview,
   listPcaps,
   replayPcap,
-  setDataPlane,
   setPcapConfig,
   startPcap,
   stopPcap,
   tagPcap,
   uploadPcap,
-} from "./api-dataplane";
+} from "./api-pcap";
+export type {
+  PcapConfig,
+  PcapFilter,
+  PcapForwardTarget,
+  PcapItem,
+  PcapReplayRequest,
+  PcapStatus,
+  PcapTagRequest,
+} from "./api-pcap";
 export type {
   RulesetEngineStatus,
   RulesetPreview,
+  SchedulePlannerStatus,
 } from "./api-dataplane";
 export type {
   FirewallRule,
@@ -70,6 +64,7 @@ export type {
   RulePreview,
   RuleSchedule,
   RuleWarning,
+  RuleWarningPredicate,
 } from "./api-firewall";
 export type {
   ICSCoverageReason,
@@ -79,13 +74,19 @@ export type {
   ICSEnforcementHealth,
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
-export type { ManagementRecoveryHealth } from "./api-console";
+export { fetchHealth } from "./api-health";
+export type {
+  EnforcementHealth,
+  HealthResponse,
+  IEC104EnforcementHealth,
+  ManagementRecoveryHealth,
+} from "./api-health";
 export type { IEC104Inventory } from "./api-inventory";
 export type { TrustedCAUploadResult } from "./api-policy";
 export type { AVDefinition, AVDefinitionList } from "./api-services";
 export type {
   AVStatus, DHCPStatus, DNSStatus, NTPStatus, ProxyStatus, ProxyTelemetryStatus,
-  ServiceMeter, ServicesStatus, SyslogStatus, VPNStatus,
+  ServiceMeter, ServicesStatus, SyslogAuditForwarder, SyslogAuditStatus, SyslogStatus, VPNStatus,
 } from "./api-service-status";
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
@@ -97,16 +98,8 @@ import { authAPI } from "./api-auth";
 import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
-import { fetchWithSession } from "./api-core";
-import {
-  normalizeManagementRecovery,
-  type ManagementRecoveryHealth,
-} from "./api-console";
 import type { FirewallRule } from "./api-firewall";
-import {
-  normalizeICSEnforcementHealth,
-  type ICSEnforcementHealth,
-} from "./api-ics-coverage";
+import type { HealthResponse } from "./api-health";
 
 export type DPIExclusion = {
   value: string;
@@ -126,64 +119,6 @@ export type DataPlaneConfig = {
   dpiExclusions?: DPIExclusion[];
   nflogGroup?: number;
   nfqueueGroup?: number;
-};
-
-export type PcapForwardTarget = {
-  interface?: string;
-  enabled?: boolean;
-  host?: string;
-  port?: number;
-  proto?: "tcp" | "udp";
-};
-
-export type PcapFilter = {
-  src?: string;
-  dst?: string;
-  proto?: "any" | "tcp" | "udp" | "icmp";
-  port?: string;
-};
-
-export type PcapConfig = {
-  enabled?: boolean;
-  interfaces?: string[];
-  zones?: string[];
-  snaplen?: number;
-  maxSizeMB?: number;
-  maxFiles?: number;
-  mode?: "rolling" | "once";
-  promisc?: boolean;
-  bufferMB?: number;
-  rotateSeconds?: number;
-  filePrefix?: string;
-  filter?: PcapFilter;
-  forwardTargets?: PcapForwardTarget[];
-};
-
-export type PcapStatus = {
-  running: boolean;
-  interfaces?: string[];
-  startedAt?: string;
-  lastError?: string;
-};
-
-export type PcapItem = {
-  name: string;
-  interface: string;
-  sizeBytes: number;
-  createdAt: string;
-  tags?: string[];
-  status?: string;
-};
-
-export type PcapReplayRequest = {
-  name: string;
-  interface: string;
-  ratePps?: number;
-};
-
-export type PcapTagRequest = {
-  name: string;
-  tags: string[];
 };
 
 export type Zone = {
@@ -628,6 +563,8 @@ export type FlowSummary = {
   avBlocked?: boolean;
   /** IEC 104 session incarnation; set when the group is one IEC session. */
   session_id?: string;
+  /** Sorted TAG labels the flow's events carry; absent when none. */
+  tags?: string[];
 };
 
 /** Event kinds of IEC 104 enforcement evidence. */
@@ -929,30 +866,6 @@ export type ConfigBackup = {
   size: number;
   idsRuleCount?: number;
 };
-
-export async function fetchHealth(
-  signal?: AbortSignal,
-): Promise<HealthResponse | null> {
-  try {
-    const res = await fetchWithSession(
-      "/api/v1/health",
-      {
-        cache: "no-store",
-      },
-      signal,
-    );
-    if (!res.ok) return null;
-    const body = (await res.json()) as HealthResponse;
-    return {
-      ...body,
-      icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement),
-      managementRecovery: normalizeManagementRecovery(body?.managementRecovery),
-    };
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") throw e;
-    return null;
-  }
-}
 
 export const api = {
   ...authAPI,

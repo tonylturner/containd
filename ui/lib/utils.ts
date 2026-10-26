@@ -6,8 +6,9 @@ export function formatTimestamp(ts: string | Date): string {
   });
 }
 
-/** Binary-unit size, whole numbers from 10 up: "512 B", "1.5 KB", "12 MB". */
+/** Binary-unit size, whole numbers from 10 up: "512 B", "1.5 KB", "12 MB"; "-" when not a number. */
 export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes)) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;

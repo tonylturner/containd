@@ -11,7 +11,7 @@ import {
   isAdmin,
   type DataPlaneConfig,
   type FirewallRule,
-  type ICSPredicate,
+  type ICSPredicatePatch,
 } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
@@ -20,7 +20,6 @@ import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EditICSModal } from "./ics-edit-modal";
 import { RulePrecedenceNote } from "../firewall/firewall-rule-table";
-import { ManagementRecoveryBanner } from "../../components/ManagementRecoveryBanner";
 import {
   formatICSMode,
   PROTOCOL_KEYS,
@@ -28,7 +27,9 @@ import {
   protoMeta,
 } from "./ics-shared";
 import { summarizeIEC104 } from "./iec104";
-import { IEC104HealthIndicator, useHealth } from "./iec104-health";
+import { IEC104HealthIndicator } from "./iec104-health";
+import { useHealth } from "../../hooks/useHealth";
+import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
 import { useICSCoverage } from "./use-ics-coverage";
 
@@ -86,7 +87,7 @@ export default function ICSPolicyPage() {
 
   // The editor reports a disabled filter as no predicate; null clears the
   // stored one, where an omitted key would keep it.
-  async function onSave(id: string, ics: ICSPredicate | undefined) {
+  async function onSave(id: string, ics: ICSPredicatePatch | undefined) {
     setError(null);
     const result = await api.updateFirewallRule(id, { ics: ics ?? null });
     if (!result.ok) {
@@ -116,7 +117,6 @@ export default function ICSPolicyPage() {
         </button>
       }
     >
-      <ManagementRecoveryBanner recovery={health?.managementRecovery} />
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -145,6 +145,7 @@ export default function ICSPolicyPage() {
           </div>
         )}
         <div className="mt-3 space-y-2">
+          <EnforcementHealthIndicator health={health?.enforcement} />
           <ICSEnforcementIndicator health={health?.icsEnforcement} />
           <IEC104HealthIndicator health={health?.iec104Enforcement} />
         </div>
@@ -305,12 +306,14 @@ export default function ICSPolicyPage() {
                   <ICSCoverageCell view={coverage.view} ruleId={r.id} />
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(r)}
-                    className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-                  >
-                    Edit
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
+                    >
+                      Edit
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -318,7 +321,7 @@ export default function ICSPolicyPage() {
         </table>
       </div>
 
-      {editing && (
+      {editing && canEdit && (
         <EditICSModal
           rule={editing}
           globalMode={dpiConfig.dpiMode}

@@ -143,15 +143,22 @@ export function DetailContent({ data }: { data: TopoNodeData }) {
       {data.rules && data.rules.length > 0 && (
         <div className={s.panelSection}>
           <div className={s.panelSectionLabel}>Policy Rules</div>
+          <div className={s.ruleNote}>Any matching ALLOW wins; RATE_LIMIT and TAG are effects. Hits since the last apply.</div>
           <div className={s.ruleList}>
-            {data.rules.map((r, i) => (
+            {data.rules.map((r) => (
               <div
-                key={i}
-                className={`${s.ruleItem} ${r.action === "allow" ? s.ruleAllow : s.ruleDeny}`}
+                key={r.id}
+                aria-label={`Rule ${r.id}`}
+                className={`${s.ruleItem} ${r.kind === "allow" ? s.ruleAllow : r.kind === "deny" ? s.ruleDeny : s.ruleEffect}`}
               >
-                <span className={s.ruleAction}>{r.action.toUpperCase()}</span>
+                <span className={s.ruleAction}>{r.action}</span>
                 <span className={s.ruleDesc}>{r.desc}</span>
-                <span className={s.ruleHits}>{r.hits.toLocaleString()}</span>
+                <span
+                  className={s.ruleHits}
+                  title={r.hits === null ? "Not counted: no applied ruleset, or the rule is not applied" : r.action === "TAG" ? "Connections labelled since the last apply" : "Packets since the last apply"}
+                >
+                  {r.hits === null ? "\u2014" : r.hits.toLocaleString()}
+                </span>
               </div>
             ))}
           </div>

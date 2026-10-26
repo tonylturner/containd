@@ -1,11 +1,13 @@
 "use client";
 import React from "react";
 
-export function SearchBar({ value, onChange, placeholder }: {
+export function SearchBar({ value, onChange, placeholder, className = "w-full max-w-sm" }: {
   value: string; onChange: (s: string) => void; placeholder?: string;
+  /** Wrapper width classes; the default fits a toolbar row. */
+  className?: string;
 }) {
   return (
-    <div className="relative">
+    <div className={`relative ${className}`}>
       <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <circle cx="11" cy="11" r="8" />
         <path d="m21 21-4.35-4.35" />
@@ -15,7 +17,7 @@ export function SearchBar({ value, onChange, placeholder }: {
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder ?? "Search..."}
-        className="input-industrial w-full py-1.5 pl-9 pr-3 text-sm"
+        className="input-industrial input-industrial-search"
       />
     </div>
   );

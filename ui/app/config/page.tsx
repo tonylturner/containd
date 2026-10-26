@@ -26,7 +26,6 @@ import {
   buildBlockItems,
   buildDiffBlocks,
   findSelectedItem,
-  formatBytes,
   getBlockValue,
   parseTab,
   TAB_META,
@@ -403,7 +402,6 @@ function ConfigPage() {
               backupName={backupName}
               backups={backups}
               canEdit={canEdit}
-              formatBytes={formatBytes}
               onBackupNameChange={setBackupName}
               onCreateBackup={createBackup}
               onDeleteBackup={deleteBackup}

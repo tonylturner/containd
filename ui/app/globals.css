@@ -344,6 +344,11 @@ body::before {
   color: var(--text);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
+/* A search field with a leading icon. The base padding above is unlayered,
+   so padding utilities cannot make room for the icon. */
+.input-industrial.input-industrial-search {
+  padding: 6px 12px 6px 36px;
+}
 .input-industrial::placeholder {
   color: var(--text-dim);
 }

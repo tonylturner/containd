@@ -3,12 +3,12 @@
 import type { ConfigBackup } from "../../lib/api";
 
 import { Card } from "../../components/Card";
+import { formatBytes } from "../../lib/utils";
 
 export function ConfigBackupRecoveryCard({
   backupName,
   backups,
   canEdit,
-  formatBytes,
   onBackupNameChange,
   onCreateBackup,
   onDeleteBackup,
@@ -20,7 +20,6 @@ export function ConfigBackupRecoveryCard({
   backupName: string;
   backups: ConfigBackup[];
   canEdit: boolean;
-  formatBytes: (size: number) => string;
   onBackupNameChange: (value: string) => void;
   onCreateBackup: (redacted: boolean) => void;
   onDeleteBackup: (backup: ConfigBackup) => void;

@@ -292,6 +292,9 @@
 .ruleAction { font-size: 8px; padding: 1px 5px; border-radius: 1px; }
 .ruleAllow .ruleAction { background: var(--green-dim); color: var(--topo-green); }
 .ruleDeny .ruleAction { background: var(--red-dim); color: var(--topo-red); }
+.ruleEffect { border-left-color: var(--amber); }
+.ruleEffect .ruleAction { background: var(--amber-dim); color: var(--amber); }
+.ruleNote { margin: -2px 0 6px; font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
 .ruleDesc { flex: 1; color: var(--text-mid); }
 .ruleHits { color: var(--text-dim); }
 

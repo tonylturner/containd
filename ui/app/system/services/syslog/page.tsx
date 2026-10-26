@@ -10,6 +10,7 @@ import { useToast } from "../../../../components/ToastProvider";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
+import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -170,6 +171,7 @@ export default function SyslogPage() {
           ) : null}
         </div>
       )}
+      {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
 
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Forwarders</h2>

@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 
+import { useHealth } from "../hooks/useHealth";
 import type { ManagementRecoveryHealth } from "../lib/api";
 
 const TITLES: Record<Exclude<ManagementRecoveryHealth["state"], "inactive">, string> = {
@@ -13,7 +16,7 @@ const TITLES: Record<Exclude<ManagementRecoveryHealth["state"], "inactive">, str
  * Health's boot recovery state, which needs an operator: the stored running
  * configuration was refused at boot and is not applied. Nothing when inactive.
  */
-export function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRecoveryHealth | undefined }) {
+function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRecoveryHealth | undefined }) {
   if (!recovery || recovery.state === "inactive") return null;
   return (
     <aside role="status" aria-label="Boot recovery" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
@@ -27,4 +30,10 @@ export function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRec
       </p>
     </aside>
   );
+}
+
+/** The shell's banner, from the shared health poll. */
+export function ShellRecoveryBanner() {
+  const health = useHealth();
+  return <ManagementRecoveryBanner recovery={health?.managementRecovery} />;
 }
