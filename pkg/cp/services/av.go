@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,12 @@ import (
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
+)
+
+const (
+	// DefaultClamdSocket is the clamd socket used when none is configured.
+	DefaultClamdSocket = "/run/clamav/clamd.sock"
+	defaultAVTimeout   = 5 * time.Second
 )
 
 // AVManager handles antivirus configuration and async scan orchestration.
@@ -28,15 +35,13 @@ type AVManager struct {
 	OnEvent    func(kind string, attrs map[string]any)
 	OnVerdict  func(task ScanTask, res ScanResult)
 
-	icap           *ICAPClient
+	defsGen        uint64
 	clamdPath      string
 	clamdCmd       *exec.Cmd
 	clamdDone      <-chan struct{}
 	clamdLastStart time.Time
 	clamdLastStop  time.Time
 	clamdLastExit  string
-	clamdSocket    string
-	clamd          *ClamAVClient
 	freshclamPath  string
 	freshclamLast  time.Time
 	freshclamErr   string
@@ -66,11 +71,8 @@ func NewAVManager() *AVManager {
 		"/usr/sbin/freshclam",
 	})
 	return &AVManager{
-		icap:          NewICAPClient(),
 		clamdPath:     clamdPath,
 		freshclamPath: freshclamPath,
-		clamdSocket:   "/var/run/clamav/clamd.ctl",
-		clamd:         &ClamAVClient{Timeout: 5 * time.Second},
 		cache:         make(map[string]cachedVerdict),
 		maxCache:      1024,
 		queue:         NewScanQueue(2048),
@@ -115,9 +117,6 @@ func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
 	}
 	if strings.TrimSpace(cfg.ClamAV.CustomDefsPath) == "" {
 		cfg.ClamAV.CustomDefsPath = "/data/clamav/custom"
-	}
-	if m.icap != nil && cfg.MaxSizeBytes > 0 {
-		m.icap.MaxSize = cfg.MaxSizeBytes
 	}
 	m.customDefsPath = cfg.ClamAV.CustomDefsPath
 	m.mu.Unlock()
@@ -220,9 +219,6 @@ func (m *AVManager) probe(ctx context.Context, cfg config.AVConfig) error {
 		return m.stopClamd()
 	case "clamav":
 		m.startClamd(ctx, cfg.ClamAV)
-		if m.clamd != nil {
-			m.clamd.Socket = m.pickClamSocket()
-		}
 		m.startFreshclam(cfg.ClamAV)
 	}
 	return nil
@@ -237,12 +233,7 @@ func (m *AVManager) testICAP(ctx context.Context, cfg config.ICAPConfig) {
 	if addr == "" {
 		return
 	}
-	timeout := 3 * time.Second
-	if m.icap == nil {
-		m.icap = NewICAPClient()
-	}
-	m.icap.Timeout = timeout
-	if err := m.icap.Probe(ctx, srv); err != nil {
+	if err := (&ICAPClient{Timeout: avTimeout(m.Current())}).Probe(ctx, srv); err != nil {
 		m.mu.Lock()
 		m.lastError = err.Error()
 		m.lastTest = time.Now().UTC()
@@ -271,77 +262,111 @@ type ScanTask struct {
 
 // ScanResult is the outcome of a scan.
 type ScanResult struct {
-	Verdict string
-	Error   error
+	Verdict   string
+	Signature string // backend detection name or ICAP status for malware
+	Error     error
 }
 
-// Scan queues or performs an async scan and returns a cached verdict when possible.
-// For now, the implementation probes ICAP and immediately returns "clean".
+// Scan scans one task with the applied backend, using a verdict cached for
+// the same content, backend and definitions generation when present.
 func (m *AVManager) Scan(ctx context.Context, task ScanTask) ScanResult {
 	if m == nil {
 		return ScanResult{Verdict: "unknown", Error: fmt.Errorf("av manager nil")}
 	}
-	if !m.lastCfg.Enabled {
+	m.mu.Lock()
+	cfg := m.lastCfg
+	gen := m.defsGen
+	m.mu.Unlock()
+	if !cfg.Enabled {
 		return ScanResult{Verdict: "disabled", Error: nil}
 	}
-	// Count every scan attempt for telemetry.
-	m.emit("service.av.scan", map[string]any{"count": 1})
-	// Check cache.
-	key := task.Hash
-	if key != "" {
+	mode := avMode(cfg)
+	key := ""
+	if task.Hash != "" {
+		key = avCacheKey(cfg, gen, task.Hash)
 		if res, ok := m.cachedVerdict(key); ok {
 			return ScanResult{Verdict: res, Error: nil}
 		}
 	}
-	mode := strings.ToLower(strings.TrimSpace(m.lastCfg.Mode))
-	if mode == "" {
-		mode = "icap"
+	if cfg.MaxSizeBytes > 0 && int64(len(task.Preview)) > cfg.MaxSizeBytes {
+		return m.handleScanError(fmt.Errorf("payload of %d bytes exceeds maxSizeBytes %d", len(task.Preview), cfg.MaxSizeBytes), mode, task)
 	}
+	ctx, cancel := context.WithTimeout(ctx, avTimeout(cfg))
+	defer cancel()
+	var (
+		verdict   string
+		signature string
+	)
 	switch mode {
 	case "icap":
-		server := m.pickICAPServer()
-		verdict, err := m.icap.Scan(ctx, server, task.Preview)
+		res, err := (&ICAPClient{Timeout: avTimeout(cfg)}).Scan(ctx, firstICAPServer(cfg), task.Preview)
 		if err != nil {
-			return m.handleScanError(err, "icap", task)
+			return m.handleScanError(err, mode, task)
 		}
-		m.recordVerdict(key, verdict)
-		if verdict == "malware" {
-			m.emit("service.av.detected", map[string]any{
-				"hash":        task.Hash,
-				"proto":       task.Proto,
-				"source":      task.Source,
-				"dest":        task.Dest,
-				"error_count": 1,
-			})
-		}
-		return ScanResult{Verdict: verdict, Error: nil}
+		verdict, signature = res.Verdict, res.Status
 	case "clamav":
-		socket := m.pickClamSocket()
-		if m.clamd != nil {
-			m.clamd.Socket = socket
+		res, err := (&ClamAVClient{Timeout: avTimeout(cfg), Socket: clamdSocket(cfg)}).Scan(ctx, task.Preview)
+		if err != nil {
+			return m.handleScanError(err, mode, task)
 		}
-		if m.clamd != nil {
-			verdict, err := m.clamd.Scan(ctx, task.Preview)
-			if err != nil {
-				return m.handleScanError(err, "clamav", task)
-			}
-			m.recordVerdict(key, verdict)
-			if verdict == "malware" {
-				m.emit("service.av.detected", map[string]any{
-					"hash":        task.Hash,
-					"proto":       task.Proto,
-					"source":      task.Source,
-					"dest":        task.Dest,
-					"error_count": 1,
-				})
-			}
-			return ScanResult{Verdict: verdict, Error: nil}
-		}
-		m.emit("service.av.scan_error", map[string]any{"error": "clamav client unavailable"})
-		return ScanResult{Verdict: "error", Error: fmt.Errorf("clamav client unavailable")}
+		verdict, signature = res.Verdict, res.Signature
+	default:
+		return m.handleScanError(fmt.Errorf("unsupported av mode %q", mode), mode, task)
 	}
-	m.recordVerdict(key, "clean")
-	return ScanResult{Verdict: "clean", Error: nil}
+	m.recordVerdict(key, cfg.CacheTTL, verdict)
+	if verdict == "malware" {
+		m.emit("service.av.detected", map[string]any{
+			"hash":      task.Hash,
+			"proto":     task.Proto,
+			"source":    task.Source,
+			"dest":      task.Dest,
+			"signature": signature,
+		})
+	}
+	return ScanResult{Verdict: verdict, Signature: signature}
+}
+
+// avCacheKey binds a cached verdict to the backend that produced it and to
+// the definitions generation it was produced with.
+func avCacheKey(cfg config.AVConfig, gen uint64, hash string) string {
+	backend := avMode(cfg)
+	switch backend {
+	case "icap":
+		srv := firstICAPServer(cfg)
+		backend += "|" + strings.TrimSpace(srv.Address) + "|" + strings.TrimSpace(srv.Service) + "|" + strconv.FormatBool(srv.UseTLS)
+	case "clamav":
+		backend += "|" + clamdSocket(cfg)
+	}
+	return backend + "|" + strconv.FormatUint(gen, 10) + "|" + hash
+}
+
+func avMode(cfg config.AVConfig) string {
+	if mode := strings.ToLower(strings.TrimSpace(cfg.Mode)); mode != "" {
+		return mode
+	}
+	return "icap"
+}
+
+// avTimeout is the per-scan and per-probe deadline; zero selects the default.
+func avTimeout(cfg config.AVConfig) time.Duration {
+	if cfg.TimeoutSec > 0 {
+		return time.Duration(cfg.TimeoutSec) * time.Second
+	}
+	return defaultAVTimeout
+}
+
+func firstICAPServer(cfg config.AVConfig) config.ICAPServer {
+	if len(cfg.ICAP.Servers) == 0 {
+		return config.ICAPServer{}
+	}
+	return cfg.ICAP.Servers[0]
+}
+
+func clamdSocket(cfg config.AVConfig) string {
+	if sock := strings.TrimSpace(cfg.ClamAV.SocketPath); sock != "" {
+		return sock
+	}
+	return DefaultClamdSocket
 }
 
 func (m *AVManager) handleScanError(err error, mode string, task ScanTask) ScanResult {
@@ -460,6 +485,7 @@ func (m *AVManager) runFreshclam(ctx context.Context, cfg config.ClamAVConfig) {
 		} else {
 			m.freshclamErr = ""
 			m.freshclamLast = time.Now().UTC()
+			m.defsGen++
 		}
 		m.mu.Unlock()
 		if err != nil {
@@ -502,22 +528,6 @@ func (m *AVManager) RunFreshclamNow(ctx context.Context) error {
 	return nil
 }
 
-func (m *AVManager) pickICAPServer() config.ICAPServer {
-	cfg := m.lastCfg.ICAP
-	if len(cfg.Servers) == 0 {
-		return config.ICAPServer{}
-	}
-	return cfg.Servers[0]
-}
-
-func (m *AVManager) pickClamSocket() string {
-	sock := strings.TrimSpace(m.lastCfg.ClamAV.SocketPath)
-	if sock != "" {
-		return sock
-	}
-	return m.clamdSocket
-}
-
 func (m *AVManager) cachedVerdict(hash string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -532,7 +542,7 @@ func (m *AVManager) cachedVerdict(hash string) (string, bool) {
 	return v.verdict, true
 }
 
-func (m *AVManager) recordVerdict(hash, verdict string) {
+func (m *AVManager) recordVerdict(hash string, ttl time.Duration, verdict string) {
 	if hash == "" {
 		return
 	}
@@ -545,7 +555,6 @@ func (m *AVManager) recordVerdict(hash, verdict string) {
 		// simple eviction: reset cache.
 		m.cache = make(map[string]cachedVerdict)
 	}
-	ttl := m.lastCfg.CacheTTL
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
