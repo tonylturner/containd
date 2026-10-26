@@ -12,6 +12,7 @@ export type HealthResponse = {
   build?: string;
   time?: string;
   iec104Enforcement?: IEC104EnforcementHealth;
+  icsEnforcement?: ICSEnforcementHealth;
 };
 
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
@@ -47,7 +48,17 @@ export {
   tagPcap,
   uploadPcap,
 } from "./api-dataplane";
-export type { RulesetPreview, RuleWarning } from "./api-dataplane";
+export type {
+  RulesetEngineStatus,
+  RulesetPreview,
+  RuleWarning,
+} from "./api-dataplane";
+export type {
+  ICSCoverageReason,
+  ICSCoverageRule,
+  ICSCoverageState,
+  ICSEnforcementHealth,
+} from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
 export type { FirewallRulePatch, RulePreview } from "./api-network";
@@ -67,6 +78,10 @@ import { configAPI } from "./api-config";
 import { servicesAPI } from "./api-services";
 
 import { fetchWithSession } from "./api-core";
+import {
+  normalizeICSEnforcementHealth,
+  type ICSEnforcementHealth,
+} from "./api-ics-coverage";
 
 export type DPIExclusion = {
   value: string;
@@ -953,7 +968,8 @@ export async function fetchHealth(
       signal,
     );
     if (!res.ok) return null;
-    return (await res.json()) as HealthResponse;
+    const body = (await res.json()) as HealthResponse;
+    return { ...body, icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement) };
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     return null;

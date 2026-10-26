@@ -40,6 +40,9 @@ import { DPIConfigSection } from "./firewall-dpi-config";
 import { summarizeIEC104 } from "../ics/iec104";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
+import { formatICSMode } from "../ics/ics-shared";
+import { ICSCoverageCell, ICSCoverageNotice } from "../ics/ics-coverage";
+import { useICSCoverage } from "../ics/use-ics-coverage";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -55,6 +58,8 @@ export default function FirewallPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
+  const [rulesetError, setRulesetError] = useState("");
+  const coverage = useICSCoverage();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const confirm = useConfirm();
@@ -129,11 +134,12 @@ export default function FirewallPage() {
     setRulesetPreview(null);
     setRulesetState("loading");
     const preview = await getRulesetPreview();
-    if (!preview) {
+    if (!preview.ok) {
+      setRulesetError(preview.error);
       setRulesetState("error");
       return;
     }
-    setRulesetPreview(preview);
+    setRulesetPreview(preview.data);
     setRulesetState("idle");
   }
 
@@ -412,7 +418,7 @@ export default function FirewallPage() {
         )}
         {rulesetState === "error" && (
           <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Ruleset preview unavailable. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
+            Ruleset preview unavailable: {rulesetError}. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
           </div>
         )}
         {rulesetPreview?.engineStatusError && (
@@ -438,7 +444,10 @@ export default function FirewallPage() {
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
-      <div className="mt-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card">
+      <div className="mt-6">
+        {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
+      </div>
+      <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
@@ -476,15 +485,18 @@ export default function FirewallPage() {
                 </td>
                 <td className="px-4 py-3 text-(--text)">
                   {r.ics?.protocol ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge variant="neutral">
-                        {r.ics.mode === "learn" ? "safe learning" : "enforce"}
-                      </StatusBadge>
-                      <span className="text-xs text-(--text)">
-                        {r.ics.protocol === "iec104"
-                          ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
-                          : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
-                      </span>
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge variant="neutral">
+                          {formatICSMode(r.ics.mode, dpiConfig.dpiMode).label}
+                        </StatusBadge>
+                        <span className="text-xs text-(--text)">
+                          {r.ics.protocol === "iec104"
+                            ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
+                            : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
+                        </span>
+                      </div>
+                      <ICSCoverageCell view={coverage.view} ruleId={r.id} />
                     </div>
                   ) : "\u2014"}
                 </td>

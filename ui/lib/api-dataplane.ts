@@ -9,10 +9,12 @@ import {
 import {
   deleteJSONResult,
   getJSON,
+  getJSONResult,
   parseErrorBody,
   parseWarningHeader,
   postJSONResult,
 } from "./api-request";
+import { normalizeICSCoverageList, type ICSCoverageRule } from "./api-ics-coverage";
 
 import type {
   ApiResult,
@@ -41,8 +43,19 @@ export type RulesetPreview = {
     reason: string;
   };
   warnings?: RuleWarning[];
-  engineStatus?: unknown;
+  /** Coverage of the candidate's semantic ICS rules; empty when it has none. */
+  icsCoverage: ICSCoverageRule[];
+  engineStatus?: RulesetEngineStatus;
   engineStatusError?: string;
+};
+
+/** The engine's applied ruleset; icsCoverage includes its runtime faults. */
+export type RulesetEngineStatus = {
+  ruleset?: string;
+  appliedAt?: string;
+  error?: string;
+  warnings?: RuleWarning[];
+  icsCoverage: ICSCoverageRule[];
 };
 
 export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
@@ -88,8 +101,25 @@ export async function getPcapStatus(): Promise<PcapStatus | null> {
   return await getJSON<PcapStatus>("/api/v1/pcap/status");
 }
 
-export async function getRulesetPreview(): Promise<RulesetPreview | null> {
-  return await getJSON<RulesetPreview>("/api/v1/dataplane/ruleset");
+export async function getRulesetPreview(): Promise<ApiResult<RulesetPreview>> {
+  const res = await getJSONResult<Record<string, unknown> | null>("/api/v1/dataplane/ruleset");
+  if (!res.ok) return res;
+  const raw = res.data ?? {};
+  const preview = {
+    ...raw,
+    icsCoverage: normalizeICSCoverageList(raw.icsCoverage),
+  } as RulesetPreview;
+  const status = raw.engineStatus;
+  if (status && typeof status === "object" && !Array.isArray(status)) {
+    const st = status as Record<string, unknown>;
+    preview.engineStatus = {
+      ...st,
+      icsCoverage: normalizeICSCoverageList(st.icsCoverage),
+    } as RulesetEngineStatus;
+  } else {
+    delete preview.engineStatus;
+  }
+  return { ok: true, data: preview };
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {
