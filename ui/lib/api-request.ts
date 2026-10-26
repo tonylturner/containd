@@ -36,7 +36,7 @@ async function getBody(
   signal?: AbortSignal,
 ): Promise<{ status: number; body: unknown } | { status: number; failure: ApiFailure }> {
   const res = await fetchWithSession(path, { cache: "no-store", headers: authHeaders() }, signal);
-  if (handleUnauthorized(res)) return { status: 401, failure: { ok: false, error: "Unauthorized" } };
+  if (handleUnauthorized(res)) return { status: 401, failure: await failureOf(res) };
   clearAuthExpired();
   if (!res.ok) return { status: res.status, failure: await failureOf(res) };
   const body: unknown = await res.json().catch(() => undefined);
@@ -203,10 +203,16 @@ export function parseRetryAfter(res: Response, now = Date.now()): number | undef
   return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
 }
 
-/** The failure of a non-ok response: the server's message and Retry-After. */
+/**
+ * The failure of a non-ok response: the server's message and Retry-After.
+ * Callers run handleUnauthorized first, so a 401 still starts the
+ * session-expired check while its message is kept.
+ */
 export async function failureOf(res: Response): Promise<ApiFailure> {
   const retryAfter = parseRetryAfter(res);
-  const error = await parseErrorBody(res);
+  // A 401 keeps the server's reason, such as an invalid current password;
+  // only an empty body falls back to the bare status.
+  const error = (await parseErrorBody(res)) || (res.status === 401 ? "Unauthorized" : `request failed (${res.status})`);
   return retryAfter === undefined ? { ok: false, error } : { ok: false, error, retryAfter };
 }
 
@@ -242,7 +248,7 @@ export async function postJSONResult<T>(
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
@@ -269,7 +275,7 @@ export async function patchJSONResult<T>(
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
@@ -292,7 +298,7 @@ export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
       method: "DELETE",
       headers: authHeaders(),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
