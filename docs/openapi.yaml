@@ -5326,6 +5326,9 @@ paths:
         Management service status keyed by service. The av entry is the
         engine's live antivirus status (ready, db_version, counters); when the
         engine cannot be reached it is {"available": false, "error": ...}.
+        syslog.audit reports audit-record forwarding: enabled, sent_total,
+        failed_total, last_error, last_flush, backlog, and forwarders, a list
+        of {forwarder, last_id, backlog, last_error, last_sent}.
       responses:
         '200':
           description: Success

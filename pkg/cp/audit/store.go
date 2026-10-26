@@ -23,12 +23,25 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-// WipeAll deletes all persisted audit records.
+// WipeAll deletes all persisted audit records and rewinds every forward
+// cursor to the start, so forwarders deliver the records written after the
+// wipe. Record IDs keep increasing across a wipe.
 func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("audit store unavailable")
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_records`); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("wipe audit records: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM audit_records`); err != nil {
+		return fmt.Errorf("wipe audit records: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE forward_cursors SET last_id = 0`); err != nil {
+		return fmt.Errorf("rewind audit forward cursors: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("wipe audit records: %w", err)
 	}
 	return nil
@@ -78,6 +91,10 @@ CREATE TABLE IF NOT EXISTS audit_records (
   result TEXT,
   detail TEXT
 );
+CREATE TABLE IF NOT EXISTS forward_cursors (
+  consumer TEXT PRIMARY KEY,
+  last_id INTEGER NOT NULL
+);
 `
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create audit schema: %w", err)
@@ -106,12 +123,18 @@ func (s *SQLiteStore) List(ctx context.Context, limit int, offset ...int) ([]Rec
 	if len(offset) > 0 && offset[0] > 0 {
 		off = offset[0]
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, source, action, target, result, detail FROM audit_records ORDER BY id DESC LIMIT ? OFFSET ?`, limit, off)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+recordColumns+` FROM audit_records ORDER BY id DESC LIMIT ? OFFSET ?`, limit, off)
 	if err != nil {
 		return nil, fmt.Errorf("query audit records: %w", err)
 	}
-	defer rows.Close()
+	return scanRecords(rows)
+}
 
+const recordColumns = `id, ts, actor, source, action, target, result, detail`
+
+// scanRecords reads rows selected with recordColumns and closes them.
+func scanRecords(rows *sql.Rows) ([]Record, error) {
+	defer rows.Close()
 	var out []Record
 	for rows.Next() {
 		var rec Record

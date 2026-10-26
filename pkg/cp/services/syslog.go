@@ -14,6 +14,7 @@ import (
 	"time"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"go.uber.org/zap"
@@ -23,6 +24,7 @@ import (
 type SyslogManager struct {
 	mu         sync.Mutex
 	config     config.SyslogConfig
+	applied    bool // config holds an applied configuration
 	OnEvent    func(kind string, attrs map[string]any)
 	listEvents func(limit int) []dpevents.Event
 	lastID     uint64
@@ -37,6 +39,16 @@ type SyslogManager struct {
 	hitLimit   bool
 	batchSize  int
 	flushEvery time.Duration
+
+	// Audit forwarding. auditMu serializes audit flushes with cursor
+	// changes. Lock order is mu, then auditMu; a flush never holds both.
+	auditMu         sync.Mutex
+	auditLog        audit.ForwardLog
+	auditForwarders map[string]auditForwarderStatus
+	auditSentTotal  int
+	auditFailTotal  int
+	auditLastError  string
+	auditLastFlush  time.Time
 }
 
 func NewSyslogManager() *SyslogManager {
@@ -85,11 +97,14 @@ func (m *SyslogManager) Apply(ctx context.Context, cfg config.SyslogConfig) erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config = cfg
+	m.applied = true
 	m.batchSize = cfg.BatchSize
 	m.flushEvery = time.Duration(cfg.FlushEvery) * time.Second
 	if m.OnEvent != nil {
 		m.OnEvent("service.syslog.updated", map[string]any{"forwarders": len(cfg.Forwarders), "count": 1})
 	}
+	m.stopForwarder()
+	m.syncAuditCursors()
 	m.restartForwarder()
 	m.log.Infow("applied syslog config", "forwarders", len(cfg.Forwarders), "format", cfg.Format)
 	return nil
@@ -138,7 +153,7 @@ func (m *SyslogManager) SetEventLister(fn func(limit int) []dpevents.Event) {
 // restartForwarder replaces the forwarder loop. Callers hold m.mu.
 func (m *SyslogManager) restartForwarder() {
 	m.stopForwarder()
-	if len(m.config.Forwarders) == 0 || m.listEvents == nil {
+	if len(m.config.Forwarders) == 0 || (m.listEvents == nil && m.auditLog == nil) {
 		return
 	}
 	fwdCtx, cancel := context.WithCancel(context.Background())
@@ -158,6 +173,7 @@ func (m *SyslogManager) forwardLoop(ctx context.Context, interval time.Duration)
 			return
 		case <-ticker.C:
 			m.flushEvents(ctx)
+			m.flushAudit(ctx)
 		}
 	}
 }
@@ -257,6 +273,7 @@ func (m *SyslogManager) Status() map[string]any {
 		"batch_limit":           m.batchSize,
 		"hit_limit":             m.hitLimit,
 		"flush_interval_sec":    int(m.flushEvery.Seconds()),
+		"audit":                 m.auditStatus(),
 	}
 }
 
@@ -305,10 +322,7 @@ func (m *SyslogManager) formatEvent(ev dpevents.Event, proto string) string {
 }
 
 func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
-	host := m.hostname
-	if strings.TrimSpace(host) == "" {
-		host = "containd"
-	}
+	host := syslogHostname(m.hostname)
 	timestamp := ev.Timestamp.UTC().Format(time.RFC3339Nano)
 	sdata := map[string]any{
 		"proto": ev.Proto,
@@ -329,6 +343,13 @@ func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
 	sdJSON, _ := json.Marshal(sdata)
 	pri := "<14>" // facility=user(1)*8 + severity=informational(6)
 	return fmt.Sprintf("%s1 %s %s containd - - - [containd@47450 %s]", pri, timestamp, host, string(sdJSON))
+}
+
+func syslogHostname(host string) string {
+	if strings.TrimSpace(host) == "" {
+		return "containd"
+	}
+	return host
 }
 
 // Stop ends the forwarder loop until the next Apply.
