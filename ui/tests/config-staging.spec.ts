@@ -37,7 +37,7 @@ async function setup(page: Page) {
       "/ids/sources": [],
       "/security/conduits": {},
       "/interfaces": [{ name: "lan", device: "eth0", zone: "lan" }],
-      "/interfaces/state": [],
+      "/interfaces/state": [{ name: "eth0", index: 2, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: ["192.0.2.1/24"] }],
       "/pcap/config": { enabled: false, interfaces: ["lan"], snaplen: 65535 },
       "/pcap/status": { running: false },
       "/pcap/list": [],
@@ -120,6 +120,16 @@ test("capture start is immediate and does not persist defaults; saving defaults 
   await page.getByRole("button", { name: "Save PCAP defaults", exact: true }).click();
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
   expect(state.writes[1].path).toBe("/pcap/config");
+});
+
+test("capture cannot start when discovery reports the saved device is absent", async ({ page }) => {
+  const state = await setup(page);
+  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [] }));
+  await page.goto("/dataplane/");
+  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Kernel devices not found: eth0. Bind the interfaces or choose an available device.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start capture now", exact: true })).toBeDisabled();
+  expect(state.writes).toEqual([]);
 });
 
 test("PCAP generation stages one rule per request, including partial failure feedback", async ({ page }) => {

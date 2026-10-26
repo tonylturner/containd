@@ -303,8 +303,12 @@ test("Alerts lists IEC 104 evidence with a detail panel", async ({ page }) => {
   await page.goto("/alerts");
   await expect(page.getByText("deny: type 45 CA 1 IOA 2002 (matched rule, deny-other-iec104)")).toBeVisible();
   await page.getByText("Dropped 1 APDU of an aborted session").click();
-  await expect(page.getByText("IEC 104 Enforcement")).toBeVisible();
-  await expect(page.getByRole("link", { name: /Open session events/ })).toBeVisible();
+  await expect(page.getByText("IEC 104 Evidence", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "IEC 104 packets dropped", exact: true })).toBeVisible();
+  await expect(page.getByText("Dropped APDUs", { exact: true }).locator("..").getByText(`${session}/c/16`, { exact: true })).toBeVisible();
+  const sessionLink = page.getByRole("link", { name: /Open session events/ });
+  await expect(sessionLink).toBeVisible();
+  await expect(sessionLink).toHaveAttribute("href", `/events/?filter=iec104&session=${session}`);
   expect(errors).toEqual([]);
 });
 
