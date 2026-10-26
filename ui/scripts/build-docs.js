@@ -8,6 +8,7 @@ const uiRoot = path.join(__dirname, "..");
 const docsDir = path.join(repoRoot, "docs", "mkdocs");
 const docsOutDir = path.join(uiRoot, "public", "docs");
 const hashFile = path.join(docsOutDir, ".build-hash");
+const indexPath = path.join(docsOutDir, "index.html");
 
 function collectFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -27,9 +28,9 @@ function collectFiles(dir) {
 function buildHash() {
   const hasher = crypto.createHash("sha256");
   const inputs = [
+    __filename,
     path.join(repoRoot, "docs", "mkdocs.yml"),
     path.join(repoRoot, "docs", "requirements-mkdocs.txt"),
-    path.join(repoRoot, "linear-dashboard-cursor-rule.md"),
     ...collectFiles(docsDir),
   ].sort();
   for (const file of inputs) {
@@ -66,7 +67,7 @@ function runMkdocs() {
   }
   const result = spawnSync(
     "mkdocs",
-    ["build", "-f", "../docs/mkdocs.yml", "-d", "./public/docs"],
+    ["build", "-f", "../docs/mkdocs.yml", "-d", docsOutDir],
     {
       cwd: uiRoot,
       stdio: "inherit",
@@ -81,7 +82,7 @@ if (process.env.CONTAIND_SKIP_DOCS === "1") {
 
 const currentHash = buildHash();
 const previousHash = readStoredHash();
-if (currentHash && currentHash === previousHash) {
+if (currentHash && currentHash === previousHash && fs.existsSync(indexPath)) {
   process.exit(0);
 }
 
@@ -91,7 +92,6 @@ if (ran === true) {
   process.exit(0);
 }
 
-const indexPath = path.join(docsOutDir, "index.html");
 if (ran === null && fs.existsSync(indexPath)) {
   writeStoredHash(currentHash);
   process.exit(0);
