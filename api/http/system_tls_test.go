@@ -163,14 +163,32 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 	}
 }
 
-// The readout names the files the bound HTTPS listener serves next to the
-// files the saved settings name, which a listener fallback makes differ.
+// The readout names the files and certificate the bound HTTPS listener
+// serves, and the listeners management has bound, next to the ones the
+// next start serves, which a listener fallback or a later save makes
+// differ. Paths are cleaned, so equal strings name the same file.
 func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	t.Setenv(config.EnvManagementHTTPAddr, "")
+	t.Setenv(config.EnvManagementHTTPSAddr, "")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "tls"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	savedPEM, _ := generateTestCertPEM(t)
+	_, servedPEM := consoleTestCertificate(t)
+	savedCert, servedCert := filepath.Join(dir, "tls", "saved.crt"), filepath.Join(dir, "tls", "server.crt")
+	if err := os.WriteFile(savedCert, []byte(savedPEM), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(servedCert, servedPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.DefaultConfig()
-	cfg.System.Mgmt.TLSCertFile = "/data/tls/saved.crt"
-	cfg.System.Mgmt.TLSKeyFile = "/data/tls/saved.key"
+	cfg.System.Mgmt.HTTPSListenAddr = ":9443"
+	cfg.System.Mgmt.TLSCertFile = dir + "/tls/./saved.crt"
+	cfg.System.Mgmt.TLSKeyFile = dir + "//tls/saved.key"
 	read := func() tlsInfoResponse {
 		t.Helper()
 		router := gin.New()
@@ -186,13 +204,35 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 		}
 		return got
 	}
-	recordServed(t, ServedManagement{CertFile: "/data/tls/server.crt", KeyFile: "/data/tls/server.key"})
-	if got := read(); got.CertFile != "/data/tls/saved.crt" || got.KeyFile != "/data/tls/saved.key" ||
-		got.ServedCertFile != "/data/tls/server.crt" || got.ServedKeyFile != "/data/tls/server.key" {
-		t.Fatalf("fallback readout = %+v", got)
+
+	bindConsoleTest(t, config.ManagementListeners{
+		HTTP:  config.ManagementListener{Addr: ":8080", Enabled: true},
+		HTTPS: config.ManagementListener{Addr: ":8443", Enabled: true},
+	})
+	recordServed(t, ServedManagement{CertFile: dir + "/tls/../tls/server.crt", KeyFile: dir + "/tls/server.key/"})
+	got := read()
+	if got.CertFile != savedCert || got.KeyFile != filepath.Join(dir, "tls", "saved.key") ||
+		got.ServedCertFile != servedCert || got.ServedKeyFile != filepath.Join(dir, "tls", "server.key") {
+		t.Fatalf("fallback files = %+v", got)
 	}
+	if !strings.Contains(got.CertSubject, "containd.local") || got.CertNotAfter == "" ||
+		!strings.Contains(got.ServedCertSubject, "appliance.example") || got.ServedCertNotAfter == "" || got.ServedCertNotAfter == got.CertNotAfter {
+		t.Fatalf("certificates = %+v", got)
+	}
+	if got.BoundHTTPListenAddr != ":8080" || got.BoundHTTPSListenAddr != ":8443" || got.HTTPSListenAddr != ":9443" {
+		t.Fatalf("listeners = %+v", got)
+	}
+
+	// The saved files served now name the same file however they are spelled.
+	SetServedManagement(ServedManagement{CertFile: savedCert, KeyFile: filepath.Join(dir, "tls", "saved.key")})
+	if got := read(); got.ServedCertFile != got.CertFile || got.ServedKeyFile != got.KeyFile || got.ServedCertSubject != got.CertSubject {
+		t.Fatalf("served saved files = %+v", got)
+	}
+
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: ":8080", Enabled: true}, HTTPS: config.ManagementListener{Addr: ":8443"}})
 	SetServedManagement(ServedManagement{})
-	if got := read(); got.ServedCertFile != "" || got.ServedKeyFile != "" {
+	if got := read(); got.ServedCertFile != "" || got.ServedKeyFile != "" || got.ServedCertSubject != "" || got.ServedCertNotAfter != "" ||
+		got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" {
 		t.Fatalf("readout without HTTPS = %+v", got)
 	}
 }

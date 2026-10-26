@@ -216,10 +216,18 @@ export async function failureOf(res: Response): Promise<ApiFailure> {
   return retryAfter === undefined ? { ok: false, error } : { ok: false, error, retryAfter };
 }
 
+/**
+ * The message of an error body: its error (or message) followed by its
+ * detail when it carries one, such as the parse reason of a rejected
+ * certificate.
+ */
 export async function parseErrorBody(res: Response): Promise<string> {
   try {
     const body = await res.json();
-    return body.error || body.message || res.statusText;
+    const error = body.error || body.message || res.statusText;
+    const detail = typeof body.detail === "string" ? body.detail.trim() : "";
+    if (!detail) return error;
+    return error ? `${error}: ${detail}` : detail;
   } catch {
     return res.statusText;
   }

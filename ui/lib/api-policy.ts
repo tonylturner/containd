@@ -57,17 +57,12 @@ export const policyAPI = {
       });
       if (handleUnauthorized(res)) return { state: "failed", error: (await failureOf(res)).error };
       clearAuthExpired();
+      if (!res.ok) return { state: "failed", error: (await failureOf(res)).error };
       const body = (await res.json().catch(() => ({}))) as {
         status?: string;
         revision?: string;
         warnings?: string[];
-        error?: string;
-        detail?: string;
       };
-      if (!res.ok) {
-        const error = body.error || res.statusText;
-        return { state: "failed", error: body.detail ? `${error}: ${body.detail}` : error };
-      }
       const revision = body.revision ?? "";
       if (body.status === "stored") {
         return { state: "stored", revision, warnings: body.warnings ?? [] };
