@@ -24,6 +24,8 @@ type ParsedPacket struct {
 	DstPort uint16
 	TCPSeq  uint32 // TCP sequence number (0 for UDP)
 	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
+	TCPFin  bool   // the segment carries FIN
+	TCPRst  bool   // the segment carries RST
 
 	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
 	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)
@@ -168,7 +170,12 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	if m.reassembler != nil {
 		m.reassembler.complete(state.Key.Hash())
 	}
+	return m.flowEnd(state)
+}
 
+// flowEnd returns the decoders' flow-end events. Must be called with
+// streamMu held.
+func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
 	var out []Event
 	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {

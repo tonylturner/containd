@@ -66,7 +66,8 @@ func failClosedEvents(e *Engine) []events.Event {
 	var out []events.Event
 	for _, ev := range e.Events().List(0) {
 		reason, _ := eventfields.String(ev.Attributes, eventfields.KeyReason)
-		if ev.Kind == eventfields.KindDecision && (reason == failClosedStream || reason == failClosedPanic) {
+		if ev.Kind == eventfields.KindDecision && (reason == failClosedStream || reason == failClosedResync ||
+			reason == failClosedMidStream || reason == failClosedPanic) {
 			out = append(out, ev)
 		}
 	}
