@@ -9,6 +9,7 @@ import {
   CARDS,
   COMMON_PROTOCOLS,
   ICS_PROTOCOLS,
+  serverPortError,
   type WizardId,
   zoneLabel,
 } from "./wizard-shared";
@@ -143,6 +144,8 @@ export function WizardStepContent({
 
   if (active === "publish-service") {
     if (step === 0) {
+      // A blank port only disables Next; the message is for what was typed.
+      const portError = serverPort.trim() ? serverPortError(serverPort) : null;
       return (
         <div className="space-y-3">
           <div>
@@ -167,8 +170,15 @@ export function WizardStepContent({
               type="number"
               min={1}
               max={65535}
+              aria-invalid={portError ? true : undefined}
+              aria-describedby={portError ? "wizard-port-error" : undefined}
               className="input-industrial w-full"
             />
+            {portError && (
+              <p id="wizard-port-error" role="alert" className="mt-1 text-xs text-red-400">
+                {portError}
+              </p>
+            )}
           </div>
         </div>
       );

@@ -1,4 +1,5 @@
 import type { Zone } from "../../lib/api";
+import { validatePort } from "../../lib/validate";
 
 export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   modbus: { label: "Modbus/TCP", port: 502 },
@@ -13,6 +14,11 @@ export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
 
 export function zoneLabel(zone: Zone): string {
   return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
+}
+
+/** Why the publish-service port cannot be staged, or null when it can. */
+export function serverPortError(value: string): string | null {
+  return value.trim() ? validatePort(value) : "Enter a port.";
 }
 
 export function genId(): string {
