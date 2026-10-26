@@ -913,6 +913,73 @@ components:
         name: {type: string}
         up: {type: boolean}
       type: object
+    IEC104InventoryPoint:
+      type: object
+      required: [ioa, typeId, firstSeen, lastSeen]
+      properties:
+        ioa: {type: integer, minimum: 0, maximum: 16777215}
+        typeId: {type: integer, minimum: 0, maximum: 255}
+        firstSeen: {type: string, format: date-time}
+        lastSeen: {type: string, format: date-time}
+    IEC104InventoryCA:
+      type: object
+      required: [ca, firstSeen, lastSeen, attemptedCommands, acceptedCommands, points]
+      properties:
+        ca: {type: integer, minimum: 0, maximum: 65535}
+        firstSeen: {type: string, format: date-time}
+        lastSeen: {type: string, format: date-time}
+        attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
+        acceptedCommands: {type: integer, minimum: 0, description: Allowed commands with successful Accept verdicts for all carrying packets.}
+        points:
+          type: array
+          maxItems: 256
+          items: {$ref: '#/components/schemas/IEC104InventoryPoint'}
+    IEC104InventoryPair:
+      type: object
+      required: [controlling, controlled, firstSeen, lastSeen, attemptedCommands, acceptedCommands, cas]
+      properties:
+        controlling: {type: string, description: 'Controlling client IP:port (IPv6 bracketed).'}
+        controlled: {type: string, description: 'Controlled server IP:port (normally port 2404; IPv6 bracketed).'}
+        firstSeen: {type: string, format: date-time}
+        lastSeen: {type: string, format: date-time}
+        attemptedCommands: {type: integer, minimum: 0}
+        acceptedCommands: {type: integer, minimum: 0}
+        cas:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/IEC104InventoryCA'}
+    IEC104Inventory:
+      type: object
+      required: [pairs, limits, overflow]
+      properties:
+        pairs:
+          type: array
+          maxItems: 128
+          items: {$ref: '#/components/schemas/IEC104InventoryPair'}
+        limits:
+          type: object
+          required: [pairs, casPerPair, pointsPerCA, assets, peersPerAsset, stationAddressesPerAsset, maxIdleSeconds]
+          properties:
+            pairs: {type: integer, enum: [128]}
+            casPerPair: {type: integer, enum: [32]}
+            pointsPerCA: {type: integer, enum: [256]}
+            assets: {type: integer, enum: [1024]}
+            peersPerAsset: {type: integer, enum: [128]}
+            stationAddressesPerAsset: {type: integer, enum: [256]}
+            maxIdleSeconds: {type: integer, enum: [86400]}
+        overflow:
+          type: object
+          description: Capacity evictions or truncated observations since clear/restart; expiry is not overflow. Not unique missing devices.
+          required: [observations, pairs, cas, points, assets, peers, stationAddresses, outcomes]
+          properties:
+            observations: {type: integer, minimum: 0, description: Observations dropped because the inventory mutex was busy.}
+            pairs: {type: integer, minimum: 0}
+            cas: {type: integer, minimum: 0}
+            points: {type: integer, minimum: 0}
+            assets: {type: integer, minimum: 0}
+            peers: {type: integer, minimum: 0}
+            stationAddresses: {type: integer, minimum: 0}
+            outcomes: {type: integer, minimum: 0, description: Final outcomes dropped because the mutex was busy or their observation retention generation is no longer present.}
     InventoryDiscoveredAsset:
       properties:
         firstSeen: {format: date-time, type: string}
@@ -2997,8 +3064,13 @@ paths:
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}}
+        '503':
+          description: Engine inventory unavailable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     delete:
-      summary: Clear discovered inventory (admin)
+      summary: Clear legacy and IEC 104 inventories and overflow counters (admin)
       tags: [Inventory]
       responses:
         '200':
@@ -3006,6 +3078,28 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
+        '503':
+          description: Engine inventory unavailable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /inventory/iec104:
+    get:
+      summary: Read passive IEC 104 station pairs, CAs, points and command counts
+      description: Observational only; never generates learned rules. Entries use observation-recency LRU and 24-hour idle expiry. Counts cover retained history, not lifetime traffic. The engine observation feed is not connected yet.
+      tags: [Inventory]
+      responses:
+        '200':
+          description: IEC 104 inventory snapshot, fixed bounds and cumulative overflow counters
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IEC104Inventory'}
+        '503':
+          description: Engine inventory unavailable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 
   # ── Signatures ─────────────────────────────────────────────────
   /signatures:
@@ -3940,6 +4034,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}
+        '404':
+          description: Asset not found in the available engine inventory
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Engine inventory unavailable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
       parameters:
       - name: ip
         in: path

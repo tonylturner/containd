@@ -1,5 +1,6 @@
 "use client";
 
+import { IEC104Inventory } from "./IEC104Inventory";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useState } from "react";
@@ -21,6 +22,7 @@ const criticalityVariant = (c: string) =>
 
 export default function AssetsPage() {
   const toast = useToast();
+  const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export default function AssetsPage() {
   const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   async function refresh() {
+    setInventoryRefresh((key) => key + 1);
     const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
     setAssets(a ?? []);
     setZones(z ?? []);
@@ -268,6 +271,8 @@ export default function AssetsPage() {
           </tbody>
         </table>
       </div>
+
+      <IEC104Inventory refreshKey={inventoryRefresh} />
 
       {editing && isAdmin() && (
         <EditAssetModal
