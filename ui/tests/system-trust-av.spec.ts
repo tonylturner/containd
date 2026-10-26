@@ -73,10 +73,10 @@ async function openServices(page: Page, av: Record<string, unknown>) {
 
 test("antivirus card shows no fabricated detection series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav", clamav_custom_defs: "/data/clamav/custom" });
-  await expect(page.locator('[title^="AV detections"]')).toHaveCount(0);
+  await expect(page.locator('[title^="AV scans"]')).toHaveCount(0);
 });
 
-test("antivirus card shows a reported detection series", async ({ page }) => {
+test("antivirus card shows a reported scan series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav", sparkline: [1, 3, 2] });
-  await expect(page.locator('[title="AV detections"]')).toHaveCount(1);
+  await expect(page.locator('[title="AV scans per minute"]')).toHaveCount(1);
 });
