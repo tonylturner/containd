@@ -1,12 +1,11 @@
 import { notifyConfigMutation } from "./config-events";
 import {
-  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { getJSON, parseErrorBody, postJSONResult } from "./api-request";
+import { getJSON, getJSONShaped, isRecord, parseErrorBody, postJSONResult } from "./api-request";
 
 import type {
   AVConfig,
@@ -15,13 +14,10 @@ import type {
   DNSConfig,
   ForwardProxyConfig,
   NTPConfig,
-  OpenVPNProfileUploadResponse,
   ReverseProxyConfig,
   SyslogConfig,
   SystemInspection,
   SystemStats,
-  VPNConfig,
-  WireGuardStatus,
 } from "./api";
 import type { ServicesStatus } from "./api-service-status";
 
@@ -41,12 +37,20 @@ export type AVDefinitionList = {
 };
 
 export const servicesAPI = {
-  getServicesStatus: (signal?: AbortSignal) =>
-    getJSON<ServicesStatus>("/api/v1/services/status", signal),
+  getServicesStatus: async (signal?: AbortSignal): Promise<ServicesStatus | null> => {
+    const status = await getJSON<ServicesStatus>("/api/v1/services/status", signal);
+    if (!status) return null;
+    // The engine's antivirus entry is always present; a missing one reads as unreachable.
+    return isRecord(status.av) ? status : { ...status, av: { available: false, error: "antivirus status not reported" } };
+  },
   getSystemStats: (signal?: AbortSignal) =>
-    getJSON<SystemStats>("/api/v1/system/stats", signal),
+    getJSONShaped<SystemStats>("/api/v1/system/stats", {
+      objects: ["cpu", "memory", "disk", "ruleEval", "container", "runtime"],
+    }, signal),
   getSystemInspection: (signal?: AbortSignal) =>
-    getJSON<SystemInspection>("/api/v1/system/inspection", signal),
+    getJSONShaped<SystemInspection>("/api/v1/system/inspection", {
+      objects: ["host", "runtime", "container", "process", "security"],
+    }, signal),
   getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
   setSyslog: (cfg: SyslogConfig) =>
     postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg),
@@ -55,7 +59,7 @@ export const servicesAPI = {
     postJSONResult<AVConfig>("/api/v1/services/av", cfg),
   runAVUpdate: () =>
     postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
-  listAVDefs: () => getJSON<AVDefinitionList>("/api/v1/services/av/defs"),
+  listAVDefs: () => getJSONShaped<AVDefinitionList>("/api/v1/services/av/defs", { lists: ["files"] }),
   uploadAVDef: async (
     file: File,
   ): Promise<{ ok: true; data: { status: string; file: string; active: boolean } } | { ok: false; error: string }> => {
@@ -126,25 +130,5 @@ export const servicesAPI = {
   getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
   setDHCP: (cfg: DHCPConfig) =>
     postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
-  listDHCPLeases: () => getJSON<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases"),
-  getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
-  setVPN: (cfg: VPNConfig) =>
-    postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
-  uploadOpenVPNProfile: (name: string, ovpn: string) =>
-    postJSONResult<OpenVPNProfileUploadResponse>(
-      "/api/v1/services/vpn/openvpn/profile",
-      { name, ovpn },
-    ),
-  listOpenVPNClients: () =>
-    getJSON<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients"),
-  createOpenVPNClient: (name: string) =>
-    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", {
-      name,
-    }),
-  downloadOpenVPNClientURL: (name: string) =>
-    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`),
-  getWireGuardStatus: (iface?: string) =>
-    getJSON<WireGuardStatus>(
-      `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,
-    ),
+  listDHCPLeases: () => getJSONShaped<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases", { lists: ["leases"] }),
 };

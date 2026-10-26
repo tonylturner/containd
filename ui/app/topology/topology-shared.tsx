@@ -15,7 +15,7 @@ import {
   type SystemStats,
   type TelemetryEvent,
   type Zone,
-  fetchHealth,
+  type HealthResponse,
 } from "../../lib/api";
 import s from "./topology.module.css";
 import { normalizeFirewallRules } from "../../lib/api-normalize";
@@ -382,9 +382,31 @@ export function nodeOperatorHint(data: TopoNodeData): string {
   }
 }
 
+function uptimeSince(time: string | undefined): string | undefined {
+  const ms = time ? Date.now() - new Date(time).getTime() : NaN;
+  if (!(ms > 0)) return undefined;
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return `${d}d ${h}h ${m}m`;
+}
+
+/**
+ * The firewall node's identity from the shared health poll: hostname and
+ * version, and uptime when system stats did not report one.
+ */
+export function withHealth(data: TopoNodeData, health: HealthResponse | undefined): TopoNodeData {
+  if (data.nodeType !== "firewall") return data;
+  return {
+    ...data,
+    hostname: health?.component || "containd",
+    version: health?.build || "dev-build",
+    uptime: data.uptime ?? uptimeSince(health?.time) ?? "\u2014",
+  };
+}
+
 export async function buildTopology(): Promise<TopoResult | null> {
-  const [health, running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
-    fetchHealth(),
+  const [running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
     api.getRunningConfig(),
     api.listInterfaceState(),
     api.getOSRouting(),
@@ -523,18 +545,6 @@ export async function buildTopology(): Promise<TopoResult | null> {
   const gwCfg = (routing as RoutingConfig)?.gateways?.[0];
 
   const stats = sysStats as SystemStats | null;
-  let uptimeStr = "\u2014";
-  if (stats?.runtime?.uptime) {
-    uptimeStr = stats.runtime.uptime;
-  } else if (health?.time) {
-    const ms = Date.now() - new Date(health.time).getTime();
-    if (ms > 0) {
-      const d = Math.floor(ms / 86400000);
-      const h = Math.floor((ms % 86400000) / 3600000);
-      const m = Math.floor((ms % 3600000) / 60000);
-      uptimeStr = `${d}d ${h}h ${m}m`;
-    }
-  }
 
   const zoneAlerts: Record<string, number> = {};
   for (const ev of (events as TelemetryEvent[]) || []) {
@@ -582,9 +592,8 @@ export async function buildTopology(): Promise<TopoResult | null> {
   const fwData: TopoNodeData = {
     label: "CONTAIND",
     nodeType: "firewall",
-    hostname: health?.component || "containd",
-    version: health?.build || "dev-build",
-    uptime: uptimeStr,
+    // Hostname, version and an uptime fallback come from health: withHealth.
+    uptime: stats?.runtime?.uptime || undefined,
     cpu: stats?.cpu?.usagePercent != null ? Math.round(stats.cpu.usagePercent) : 0,
     mem: stats?.memory?.usagePercent != null
       ? Math.round(stats.memory.usagePercent)

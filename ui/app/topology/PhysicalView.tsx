@@ -8,10 +8,11 @@ import {
   Interface,
   InterfaceState,
   FlowSummary,
-  fetchHealth,
+  type HealthResponse,
   ServicesStatus,
 } from "../../lib/api";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
+import { useHealth } from "../../hooks/useHealth";
 import s from "./physical.module.css";
 import ts from "./topology.module.css";
 import { interfaceAddresses, runtimeFor } from "../../lib/interface-addresses";
@@ -24,7 +25,8 @@ import { TopologyAddress } from "./topology-address";
 interface PhysicalData {
   stats: SystemStats | null;
   inspection: SystemInspection | null;
-  health: { component?: string; build?: string; time?: string } | null;
+  /** From the shared health poll, not the snapshot fetch. */
+  health: HealthResponse | null;
   interfaces: Interface[];
   ifaceState: InterfaceState[];
   flows: FlowSummary[];
@@ -185,7 +187,8 @@ function ResBar({ name, val, pct, color }: { name: string; val: string; pct: num
    ════════════════════════════════════════════════════════════════════ */
 
 export default function PhysicalView() {
-  const [data, setData] = useState<PhysicalData | null>(null);
+  const [snapshot, setData] = useState<Omit<PhysicalData, "health"> | null>(null);
+  const health = useHealth();
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -194,11 +197,10 @@ export default function PhysicalView() {
 
   const fetchData = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [stats, inspection, health, running, ifaceState, flows, services] =
+      const [stats, inspection, running, ifaceState, flows, services] =
         await Promise.all([
           api.getSystemStats(signal).catch(() => null),
           api.getSystemInspection(signal).catch(() => null),
-          fetchHealth(signal).catch(() => null),
           api.getRunningConfig(signal),
           api.listInterfaceState(signal),
           api.listFlows(200, signal),
@@ -214,7 +216,6 @@ export default function PhysicalView() {
       setData({
         stats: stats as SystemStats | null,
         inspection: inspection as SystemInspection | null,
-        health,
         interfaces: running?.interfaces || [],
         ifaceState,
         flows,
@@ -246,7 +247,7 @@ export default function PhysicalView() {
     };
   }, [fetchData]);
 
-  if (loading || !data) {
+  if (loading || !snapshot) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
         {error ? (
@@ -263,6 +264,7 @@ export default function PhysicalView() {
     );
   }
 
+  const data: PhysicalData = { ...snapshot, health: health ?? null };
   const st = data.stats;
   const insp = data.inspection;
   const flags = computeFlags(data);

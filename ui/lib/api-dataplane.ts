@@ -83,7 +83,7 @@ export async function getRulesetPreview(): Promise<ApiResult<RulesetPreview>> {
 
 /** Candidate and applied ICS coverage for any authenticated user. */
 export async function getICSCoverage(): Promise<ApiResult<ICSCoverageReport>> {
-  const res = await getJSONResult<unknown>("/api/v1/dataplane/ics-coverage");
+  const res = await getJSONResult<Record<string, unknown>>("/api/v1/dataplane/ics-coverage");
   return res.ok ? { ok: true, data: normalizeICSCoverageReport(res.data) } : res;
 }
 

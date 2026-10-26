@@ -74,9 +74,10 @@ export function buildDiffBlocks(response: ConfigDiff | null | undefined): DiffBl
   return response.changedSections.map((key) => {
     const runningText = JSON.stringify(running?.[key] ?? null, null, 2);
     const candidateText = JSON.stringify(candidate[key] ?? null, null, 2);
-    const bankChanged = key === "ids" && (
-      response.idsBank.running.count !== response.idsBank.candidate.count ||
-      response.idsBank.running.sha256 !== response.idsBank.candidate.sha256
+    const bank = response.idsBank;
+    const bankChanged = key === "ids" && !!bank && (
+      bank.running.count !== bank.candidate.count ||
+      bank.running.sha256 !== bank.candidate.sha256
     );
     return {
       key,

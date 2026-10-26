@@ -2,7 +2,7 @@
 
 import { notifyConfigMutation } from "../../lib/config-events";
 
-import { postJSON } from "../../lib/api-request";
+import { getJSONList, postJSON } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useState } from "react";
@@ -55,17 +55,9 @@ type TemplateApplyResponse = {
 
 /* ── API helpers ───────────────────────────────────────────────── */
 
-async function fetchTemplates(): Promise<ICSTemplate[]> {
-  try {
-    const res = await fetch(apiURL("/api/v1/templates/ics"), {
-      credentials: "include",
-      cache: "no-store",
-    });
-    if (!res.ok) return [];
-    return (await res.json()) as ICSTemplate[];
-  } catch {
-    return [];
-  }
+/** The ICS templates; null when unavailable or not a list. */
+function fetchTemplates(): Promise<ICSTemplate[] | null> {
+  return getJSONList<ICSTemplate>("/api/v1/templates/ics");
 }
 
 async function previewTemplate(
@@ -112,7 +104,7 @@ function protoBadgeClass(proto: string): string {
 
 export default function TemplatesPage() {
   const canEdit = isAdmin();
-  const [templates, setTemplates] = useState<ICSTemplate[]>([]);
+  const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -172,7 +164,13 @@ export default function TemplatesPage() {
       </Card>
 
       {/* Template cards */}
-      {templates.length === 0 ? (
+      {templates === null ? (
+        <Card>
+          <p role="alert" aria-label="Templates unavailable" className="text-sm text-red-400">
+            ICS templates unavailable: the server did not return a template list.
+          </p>
+        </Card>
+      ) : templates.length === 0 ? (
         <Card>
           <p className="text-sm text-(--text-muted)">
             No templates available. Check that the backend has ICS templates

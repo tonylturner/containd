@@ -1,6 +1,6 @@
 import {
   deleteJSONResult,
-  getJSON,
+  getJSONList,
   getJSONResult,
   patchJSONResult,
   postJSONResult,
@@ -200,7 +200,7 @@ function normalizeIdentityBindings(value: unknown): IdentityBinding[] {
 
 export const firewallAPI = {
   listFirewallRules: async (signal?: AbortSignal) => {
-    const rules = await getJSON<unknown>("/api/v1/firewall/rules", signal);
+    const rules = await getJSONList<unknown>("/api/v1/firewall/rules", signal);
     if (rules == null) return null;
     return normalizeFirewallRules(rules);
   },
@@ -234,14 +234,14 @@ export const firewallAPI = {
 
   /** 502/503 when the engine has no readable applied ruleset; the error says why. */
   getRuleCounters: async (): Promise<ApiResult<RuleCounters>> => {
-    const res = await getJSONResult<unknown>("/api/v1/firewall/counters");
+    const res = await getJSONResult<Record<string, unknown>>("/api/v1/firewall/counters");
     if (!res.ok) return res;
     const counters = normalizeRuleCounters(res.data);
     return counters ? { ok: true, data: counters } : { ok: false, error: "malformed counters response" };
   },
 
   listIdentityBindings: async (): Promise<ApiResult<IdentityBinding[]>> => {
-    const res = await getJSONResult<unknown>("/api/v1/identities");
+    const res = await getJSONResult<Record<string, unknown>>("/api/v1/identities");
     return res.ok ? { ok: true, data: normalizeIdentityBindings(res.data) } : res;
   },
   /** Stages the binding, replacing any existing binding of its address. */

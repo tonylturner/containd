@@ -9,6 +9,7 @@ import {
 import {
   deleteJSONResult,
   getJSON,
+  getJSONList,
   parseErrorBody,
   parseWarningHeader,
   postJSONResult,
@@ -101,7 +102,7 @@ export async function getPcapStatus(): Promise<PcapStatus | null> {
 }
 
 export async function listPcaps(): Promise<PcapItem[]> {
-  const res = await getJSON<PcapItem[]>("/api/v1/pcap/list");
+  const res = await getJSONList<PcapItem>("/api/v1/pcap/list");
   return res ?? [];
 }
 
