@@ -36,7 +36,7 @@ func TestShowServicesStatusDetailedTable(t *testing.T) {
 	t.Parallel()
 
 	body := bytes.NewBufferString(`{
-	  "syslog": {"configured_forwarders": 2, "format": "json", "protos": "tcp"},
+	  "syslog": {"configured_forwarders": 2, "format": "json", "protos": ["udp", "tcp"]},
 	  "proxy": {
 	    "forward_enabled": "true",
 	    "reverse_enabled": true,
@@ -64,7 +64,7 @@ func TestShowServicesStatusDetailedTable(t *testing.T) {
 	for _, want := range []string{
 		"SERVICE",
 		"syslog",
-		"forwarders=2 format=json proto=tcp",
+		"forwarders=2 format=json proto=udp,tcp",
 		"envoy-forward",
 		"path=/usr/bin/envoy",
 		"nginx-reverse",

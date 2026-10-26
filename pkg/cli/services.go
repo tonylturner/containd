@@ -382,6 +382,14 @@ func fmtAny(v any) string {
 		return fmt.Sprintf("%.0f", t)
 	case string:
 		return t
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, item := range t {
+			if p := fmtAny(item); p != "" {
+				parts = append(parts, p)
+			}
+		}
+		return strings.Join(parts, ",")
 	default:
 		return ""
 	}
