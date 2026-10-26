@@ -103,35 +103,30 @@ func applyQuickstartRouting(ctx context.Context, api *API, wanDev, gwIP string) 
 	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
-	nextGW := config.Gateway{
+	gateway := config.Gateway{
 		Name:        quickstartGatewayName,
 		Address:     gwIP,
 		Iface:       wanDev,
 		Description: "Quick start: WAN default gateway",
 	}
-	foundGW := false
-	for i := range routing.Gateways {
-		if routing.Gateways[i].Name == quickstartGatewayName {
-			routing.Gateways[i] = nextGW
-			foundGW = true
-			break
-		}
-	}
-	if !foundGW {
-		routing.Gateways = append(routing.Gateways, nextGW)
-	}
-	foundDefault := false
-	for i := range routing.Routes {
-		if isDefaultQuickstartRoute(routing.Routes[i].Dst) && routing.Routes[i].Table == 0 {
-			routing.Routes[i] = config.StaticRoute{Dst: "default", Gateway: quickstartGatewayName, Iface: wanDev, Table: 0}
-			foundDefault = true
-			break
-		}
-	}
-	if !foundDefault {
-		routing.Routes = append(routing.Routes, config.StaticRoute{Dst: "default", Gateway: quickstartGatewayName, Iface: wanDev, Table: 0})
-	}
+	route := config.StaticRoute{Dst: "default", Gateway: quickstartGatewayName, Iface: wanDev, Table: 0}
+	routing.Gateways = upsertFirst(routing.Gateways, gateway, func(g config.Gateway) bool { return g.Name == quickstartGatewayName })
+	routing.Routes = upsertFirst(routing.Routes, route, func(r config.StaticRoute) bool {
+		return isDefaultQuickstartRoute(r.Dst) && r.Table == 0
+	})
 	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+}
+
+// upsertFirst replaces the first item that matches with item, or appends item
+// when none does.
+func upsertFirst[T any](items []T, item T, match func(T) bool) []T {
+	for i := range items {
+		if match(items[i]) {
+			items[i] = item
+			return items
+		}
+	}
+	return append(items, item)
 }
 
 func isDefaultQuickstartRoute(dst string) bool {

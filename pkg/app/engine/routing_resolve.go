@@ -42,20 +42,22 @@ func resolveInterfaceRef(ref string, byLogical map[string]string) string {
 	return name
 }
 
-// resolveRoutingIfaces maps route Iface fields that refer to logical interface names
-// (e.g. "wan", "lan1") into kernel device names using Interface.Device bindings.
+// resolveRoutingIfaces maps the Iface fields of gateways and routes that refer to
+// logical interface names (e.g. "wan", "lan1") into kernel device names using
+// Interface.Device bindings. A route without an Iface uses its named gateway's
+// Iface in the dataplane, so both must name kernel devices.
 //
 // This keeps the control-plane model stable while allowing the dataplane to apply
 // routes against the kernel's interface namespace.
 func resolveRoutingIfaces(routing config.RoutingConfig, ifaces []config.Interface) config.RoutingConfig {
-	if len(routing.Routes) == 0 {
-		return routing
-	}
 	byLogical := logicalInterfaceDeviceMap(ifaces)
 
 	out := routing
+	out.Gateways = append([]config.Gateway(nil), routing.Gateways...)
+	for i := range out.Gateways {
+		out.Gateways[i].Iface = resolveInterfaceRef(out.Gateways[i].Iface, byLogical)
+	}
 	out.Routes = append([]config.StaticRoute(nil), routing.Routes...)
-
 	for i := range out.Routes {
 		out.Routes[i].Iface = resolveInterfaceRef(out.Routes[i].Iface, byLogical)
 	}
