@@ -74,6 +74,17 @@ const (
 	// StreamUnverifiedRetransmission is a retransmission of consumed bytes
 	// older than the history a verifying stream keeps.
 	StreamUnverifiedRetransmission
+	// StreamResync is a SYN with a new sequence number on a live stream
+	// that fails closed.
+	StreamResync
+	// StreamDecoderPanic is a stream whose framing decoder panicked
+	// (Manager.FailStream).
+	StreamDecoderPanic
+	// StreamMidStream is a stream that fails closed but was picked up
+	// mid-connection: it began without an observed SYN (the flow was first
+	// seen after its handshake, or ended and was seen again), or the idle
+	// sweep dropped its partial frame. Its bytes need not start a frame.
+	StreamMidStream
 )
 
 func (k StreamErrKind) String() string {
@@ -86,6 +97,12 @@ func (k StreamErrKind) String() string {
 		return "out_of_order_limit"
 	case StreamUnverifiedRetransmission:
 		return "unverified_retransmission"
+	case StreamResync:
+		return "resync"
+	case StreamDecoderPanic:
+		return "decoder_panic"
+	case StreamMidStream:
+		return "midstream"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}

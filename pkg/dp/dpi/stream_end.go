@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
+package dpi
+
+import "github.com/tonylturner/containd/pkg/dp/flow"
+
+// A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST
+// (CloseStream, ResetStream), or fails (FailStream). A stream that fails
+// closed must stay aligned with what its receiver accepts, so a close that
+// the receiver would ignore leaves it as it is.
+
+// CloseStream handles the FIN or RST (pkt.TCPFin, pkt.TCPRst) of a legacy
+// flow stream once the caller has decided the packet. It reports whether
+// the segment ended the sender's stream and returns the decoders' flow-end
+// events when it did.
+//
+// A packet that fails closed ends its stream only in window: a RST at the
+// next sequence number the stream expects, a FIN right after the stream's
+// contiguous bytes. The stream is then closed and holds no bytes until a
+// SYN anchors a new one, a segment starts one mid-stream, or the idle sweep
+// removes it. A failed stream never ends at a close, and only a packet
+// that fails closed ends a fail-closed stream. Other streams end at any
+// FIN or RST.
+func (m *Manager) CloseStream(state *flow.State, pkt *ParsedPacket) (bool, []Event, error) {
+	if m == nil || len(m.decoders) == 0 || m.reassembler == nil || pkt.HasOffset || !pkt.TCPFin && !pkt.TCPRst {
+		return false, nil, nil
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	key, _, pos := streamKey(state, pkt)
+	if !m.reassembler.end(key, pos, len(pkt.Payload), pkt.TCPRst, pkt.FailClosed) {
+		return false, nil, nil
+	}
+	evs, err := m.flowEnd(state)
+	return true, evs, err
+}
+
+// ResetStream ends peer's legacy stream, the opposite direction of a
+// connection whose RST CloseStream ended, and returns the decoders'
+// flow-end events. As with CloseStream, a failed stream never ends this
+// way and only a packet that fails closed ends a fail-closed stream.
+func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, error) {
+	if m == nil || len(m.decoders) == 0 || m.reassembler == nil {
+		return nil, nil
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	if !m.reassembler.endPeer(peer.Key.Hash(), pkt.FailClosed) {
+		return nil, nil
+	}
+	return m.flowEnd(peer)
+}
+
+// FailStream fails the framed stream of a packet whose decoder panicked:
+// the buffered bytes are dropped and the stream stays failed, as after a
+// stream error, so they are never parsed again. Later packets that fail
+// closed get its StreamDecoderPanic error; the flow's end clears it. A flow
+// without a framing decoder holds no stream and is left alone.
+func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket) {
+	if m == nil || !m.reassembles(pkt) {
+		return
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	framer := firstFramer(m.candidates(state), state)
+	if framer == nil {
+		return
+	}
+	key, _, _ := streamKey(state, pkt)
+	m.reassembler.fail(key, &StreamError{Kind: StreamDecoderPanic, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
+}
+
+// end handles a FIN or RST that the stream key's own direction sent at pos,
+// after n payload bytes, and reports whether it ended the stream. See
+// CloseStream.
+func (r *reassembler) end(key string, pos position, n int, rst, failClosed bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.streams[key]
+	if !failClosed {
+		if ok && (s.failed != nil || s.verify) {
+			return false
+		}
+		r.completeLocked(key)
+		return true
+	}
+	if !ok || s.failed != nil || s.mode != posSeq || pos.kind != posSeq {
+		return false
+	}
+	if s.closed {
+		return rst && pos.seq == s.closeNext // a RST following this direction's FIN
+	}
+	next := s.seq0 + uint32(s.end())
+	if rst && pos.seq != next || !rst && pos.seq+uint32(n) != next {
+		return false
+	}
+	if !rst {
+		next++ // the FIN takes one sequence number
+	}
+	r.closeLocked(s, next)
+	return true
+}
+
+// endPeer ends a stream at a RST of the opposite direction and reports
+// whether it ended; see ResetStream.
+func (r *reassembler) endPeer(key string, failClosed bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.streams[key]
+	switch {
+	case !ok:
+		return true
+	case s.failed != nil || s.verify && !failClosed:
+		return false
+	case !failClosed:
+		r.completeLocked(key)
+	case !s.closed:
+		r.closeLocked(s, s.seq0+uint32(s.end()))
+	}
+	return true
+}
+
+// closeLocked closes a fail-closed stream; next is the sequence number a
+// later RST of its direction carries in window.
+func (r *reassembler) closeLocked(s *stream, next uint32) {
+	r.bytesBuffered -= s.held()
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.closed, s.closeNext = true, next
+}

@@ -287,9 +287,6 @@ func firstCommandCases(denied []byte) []firstCommandCase {
 			f.syn()
 			f.deny("denied", c.rule, c.frame)
 		}},
-		{"first payload without handshake", func(f *fcFlow, _ firstCommandProtocol, c firstCommand) {
-			f.deny("denied", c.rule, c.frame)
-		}},
 		{"after reads on the same flow", func(f *fcFlow, p firstCommandProtocol, c firstCommand) {
 			f.syn()
 			f.accept("read 1", p.read(1))
