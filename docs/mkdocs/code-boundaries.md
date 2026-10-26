@@ -131,15 +131,38 @@ Domain files currently include:
 - `ui/lib/api-config.ts`
 - `ui/lib/api-services.ts`
 - `ui/lib/api-console.ts`
-- `api-network.ts`
-- `api-policy.ts`
-- `api-dataplane.ts`
+- `ui/lib/api-network.ts`
+- `ui/lib/api-policy.ts`
+- `ui/lib/api-firewall.ts` (rules, actions, warnings, counters, identity bindings)
+- `ui/lib/api-dataplane.ts`
+- `ui/lib/api-health.ts`, `ui/lib/api-service-status.ts`
+- `ui/lib/api-ics-coverage.ts`, `ui/lib/api-iec104.ts`, `ui/lib/api-iec-pressure.ts`, `ui/lib/api-inventory.ts`
+- `ui/lib/api-pcap.ts`
+- `ui/lib/api-normalize.ts` (response normalizers)
+
+Shared hooks live in `ui/hooks/` (`useHealth.ts` is the one health store that
+the shell banner and pages subscribe to).
 
 Placement rules:
 - session/base URL/auth state only in `api-core.ts`
 - generic fetch/JSON/result helpers only in `api-request.ts`
 - endpoint families in domain files named by feature area
 - keep `api.ts` as the facade and re-export surface, not the place where new feature families get implemented
+
+## Firewall Page Boundaries
+
+Primary page:
+- `ui/app/firewall/page.tsx`
+
+Supporting modules in `ui/app/firewall/`: `firewall-rule-table.tsx`,
+`firewall-rule-forms.tsx`, `firewall-rule-policy.ts` and
+`firewall-rule-policy-fields.tsx`, `firewall-ics-fields.tsx`,
+`firewall-rule-counters.tsx`, `firewall-rule-warnings.tsx`,
+`firewall-ruleset-status.tsx`, `firewall-dpi-config.tsx`,
+`firewall-dpi-modals.tsx` and `firewall-utils.ts`.
+
+Rule:
+- the page composes; each rule-editing concern lives in its own sibling
 
 ## Shell Boundaries
 
