@@ -15,19 +15,6 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
-// AcceptTOTP checks the code without replay tracking; replay is covered
-// against the SQLite store.
-func (m *mockUserStore) AcceptTOTP(_ context.Context, id, code string, now time.Time) error {
-	u, ok := m.users[id]
-	if !ok {
-		return users.ErrNotFound
-	}
-	if !u.MFAEnabled || !users.ValidateTOTP(u.TOTPSecret, code, now) {
-		return users.ErrInvalidTOTP
-	}
-	return nil
-}
-
 // enrollFixtureTOTP enables TOTP for the fixture admin and returns its secret.
 func enrollFixtureTOTP(t *testing.T, f accountFixture) string {
 	t.Helper()

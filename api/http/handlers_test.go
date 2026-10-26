@@ -151,6 +151,19 @@ func (m *mockUserStore) DisableTOTP(_ context.Context, id string) error {
 	return nil
 }
 
+// AcceptTOTP checks the code without replay tracking; replay is covered
+// against the SQLite store.
+func (m *mockUserStore) AcceptTOTP(_ context.Context, id, code string, now time.Time) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	if !u.MFAEnabled || !users.ValidateTOTP(u.TOTPSecret, code, now) {
+		return users.ErrInvalidTOTP
+	}
+	return nil
+}
+
 func (m *mockUserStore) SetMFARequirement(_ context.Context, id string, required bool, graceUntil *time.Time) error {
 	u, ok := m.users[id]
 	if !ok {
