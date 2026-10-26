@@ -197,3 +197,41 @@ Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
 BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to
 the general registry, not this seven-template set. Applying templates stages
 candidate changes; see [Policy Model](policy-model.md#templates-and-preview).
+
+## IEC 104 Holdback Diagnostics
+
+The Diagnostics page shows current IEC 104 held packets, held payload bytes,
+oldest pending age and active sessions beside the fixed limits. The engine holds
+incomplete APDUs until every byte is framed and allowed. Held bytes include
+retransmissions. An empty hold queue has zero packets, bytes and age.
+
+Limits are 256 held packets globally, 32 packets and 65,536 payload bytes per
+session, a one-second pending timeout, and 4,096 tracked tuple slots. Closed
+sessions and abort tombstones occupy slots; replacement handshakes reuse their
+slot. Capture shutdown makes active sessions zero, but retained tuple slots can
+remain until expiry or rebuild. The shared reset/block worker has 256 queue slots.
+There are no tuning controls.
+
+Totals distinguish denied-command aborts from timeouts, saturation, midstream
+traffic, stream/framing/transport errors, policy changes and queue closure.
+Fail-closed steering rejections and injector-unavailable admission rejections are
+also counted per occurrence, not as unique commands. Reset-worker rejections,
+inline verdict failures and failed reset-injection attempts are separate totals.
+Verdict failures cover the shared inline pipeline as well as rejected IEC
+holdback settlement requests; intentional queue-closure completions are excluded.
+Totals survive configuration rebuilds and reset only when the engine process
+restarts. These diagnostics do not change
+packet decisions or the `iec104Enforcement` health object.
+
+Authenticated clients read `GET /api/v1/diagnostics/iec104`. An unavailable engine
+returns HTTP 503, not an empty or zero snapshot.
+
+In the default `containd all` deployment (including Compose), engine and
+management run in one process and share the Prometheus registry. Scrape the
+management listener's `/metrics` for `containd_dp_iec104_*` gauges and counters;
+the engine API stays on `127.0.0.1:8081` by default. With separate `engine` and
+`mgmt` processes, scrape the engine listener's `/metrics` for dataplane pressure;
+the management process has its own registry. The engine API is unauthenticated:
+keep any split-mode listener on a trusted private network. Metric registration
+happens once per process, not once per listener. The series have no
+station/session/IP/CA/IOA labels; only the abort counter has a fixed `reason` label.

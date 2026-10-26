@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
 // Command malformer is an Apache-2.0, pure-Go IEC 60870-5-104 test client for
 // the containd truth harness. It hand-builds APDU bytes so the
 // harness can drive malformed, unsupported, split and coalesced cases that a

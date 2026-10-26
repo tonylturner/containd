@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update Next.js to 15.5.28 and PostCSS to 8.5.31, clearing the critical and
   high npm advisories in the UI build.
 
+### Added
+
+- IEC 104 holdback-pressure diagnostics: a Diagnostics panel, a read-only
+  `GET /api/v1/diagnostics/iec104` API and `containd_dp_iec104_*` Prometheus
+  series show held packets and bytes, oldest pending age and sessions against
+  the fixed limits, plus abort reasons and failure totals. They separate denied
+  commands from queue pressure.
+
 ### Changed
 
 - Commit, commit-confirmed and rollback now fail on every firewall ruleset or

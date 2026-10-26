@@ -4,6 +4,8 @@
 package metrics
 
 import (
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -123,3 +125,66 @@ var IDSRulesLoaded = promauto.NewGauge(prometheus.GaugeOpts{
 	Name:      "rules_loaded",
 	Help:      "Number of IDS rules currently loaded.",
 })
+
+// IEC104 counters contain only fixed reason labels, never session identities.
+var (
+	IEC104AbortsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "dp_iec104", Name: "aborts_total",
+		Help: "IEC104 aborts and fail-closed session admission rejections by reason.",
+	}, []string{"reason"})
+	IEC104InjectorFailuresTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "dp_iec104", Name: "injector_failures_total", Help: "Failed IEC104 TCP reset injection attempts.",
+	})
+	IEC104ResetWorkerRejectionsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "dp_iec104", Name: "reset_worker_rejections_total",
+		Help: "IEC104 reset jobs rejected by the bounded worker.",
+	})
+	IEC104VerdictFailuresTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "dp_iec104", Name: "verdict_failures_total",
+		Help: "Inline verdict submission or completion failures affecting IEC104 enforcement, excluding queue closure.",
+	})
+)
+
+// iec104PressureReader follows the live engine across configuration rebuilds.
+var iec104PressureReader atomic.Pointer[func() map[string]float64]
+
+// SetIEC104PressureReader binds the process-wide exporter without registering
+// collectors again. Combined-mode engine and management listeners share it.
+func SetIEC104PressureReader(read func() map[string]float64) {
+	iec104PressureReader.Store(&read)
+}
+
+type iec104PressureCollector struct{}
+
+func (iec104PressureCollector) Describe(ch chan<- *prometheus.Desc) {
+	for name, help := range iec104GaugeHelp {
+		ch <- prometheus.NewDesc("containd_dp_iec104_"+name, help, nil, nil)
+	}
+}
+
+func (iec104PressureCollector) Collect(ch chan<- prometheus.Metric) {
+	values := map[string]float64{}
+	if read := iec104PressureReader.Load(); read != nil {
+		values = (*read)()
+	}
+	for name, help := range iec104GaugeHelp {
+		ch <- prometheus.MustNewConstMetric(prometheus.NewDesc("containd_dp_iec104_"+name, help, nil, nil), prometheus.GaugeValue, values[name])
+	}
+}
+
+var iec104GaugeHelp = map[string]string{
+	"held_packets":                   "Packets pending IEC104 framing and decision.",
+	"held_bytes":                     "Payload bytes in held packets (including retransmissions).",
+	"oldest_pending_seconds":         "Age of the oldest held IEC104 packet, zero when empty.",
+	"sessions_active":                "Live IEC104 session incarnations, including replacement handshakes.",
+	"sessions_tracked":               "IEC104 tuple slots including closed sessions and tombstones.",
+	"sessions_limit":                 "Fixed IEC104 tuple slot cap.",
+	"held_packets_limit":             "Fixed global IEC104 held packet cap.",
+	"held_packets_per_session_limit": "Fixed IEC104 held packet cap per session.",
+	"held_bytes_per_session_limit":   "Fixed IEC104 held payload byte cap per session.",
+	"pending_seconds_limit":          "Fixed IEC104 pending packet timeout in seconds.",
+	"reset_worker_jobs_limit":        "Fixed shared reset and block worker queue capacity.",
+}
+
+// Register once per process, including when both listeners run in combined mode.
+func init() { prometheus.MustRegister(iec104PressureCollector{}) }

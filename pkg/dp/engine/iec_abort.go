@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -66,11 +67,12 @@ var targetNames = [2]string{"client", "server"}
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
 // verdict completion. A learn envelope never aborts; callers ensure that.
-func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldPacket, now time.Time) iecActions {
+func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
 	if s.state == iecAborted {
 		return acts
 	}
+	countIECAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {
 		dropped = append(dropped, cur)
@@ -102,7 +104,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldP
 		t.markAbort(s.id)
 	}
 	t.reconnect[pairKey(s.client, s.server)] = now
-	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason}, now))
+	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason.name}, now))
 	if txn.pending == 0 {
 		acts.merge(t.finishLocked(txn, now))
 	}
@@ -253,6 +255,8 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 	outcome := outcomeResetSent
 	if err != nil {
 		outcome = outcomeResetFailed
+		pressureTotals.injector.Add(1)
+		metrics.IEC104InjectorFailuresTotal.Inc()
 		extra[eventfields.KeyError] = err.Error()
 		t.health.fault(faultReset, "reset: "+err.Error())
 	}
@@ -286,6 +290,7 @@ func (t *iecTable) apply(acts iecActions) {
 		now := t.now()
 		for i, err := range errs {
 			if err != nil {
+				countIECVerdictFailure(err)
 				acts.merge(t.completeLocked(acts.drops[i].Token, err, now))
 			}
 		}
@@ -302,6 +307,8 @@ func (t *iecTable) finish(acts iecActions) {
 	}
 	for _, job := range acts.jobs {
 		if !t.jobs.submit(job) {
+			pressureTotals.worker.Add(1)
+			metrics.IEC104ResetWorkerRejectionsTotal.Inc()
 			t.health.fault(faultWorker, "reset worker queue full")
 		}
 	}
@@ -326,6 +333,7 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 // its generation went down: the kernel dropped it, so it leaves the ledger.
 func (t *iecTable) onVerdict(tok capture.Token, err error) {
 	t.mu.Lock()
+	countIECVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
 	if s := t.held[tok]; s != nil {
@@ -354,6 +362,7 @@ func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
 func (t *iecTable) onSourceDown() {
 	var acts iecActions
 	t.mu.Lock()
+	t.pressureOffline = true
 	now := t.now()
 	for _, s := range t.sessions {
 		if s.mode == "enforce" && (s.state == iecSynSent || s.state == iecEstablished) {
