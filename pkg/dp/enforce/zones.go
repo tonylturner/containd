@@ -32,8 +32,8 @@ func newZoneIndex(zoneIfaces map[string][]string) (zoneIndex, error) {
 			idx[z] = append(idx[z], lit)
 		}
 		if lits := idx[z]; len(lits) > 0 {
-			if len(z) > maxZoneName {
-				return nil, fmt.Errorf("zone %q: a zone with interfaces needs a name of at most %d bytes", z, maxZoneName)
+			if len(z) > MaxZoneNameBytes {
+				return nil, fmt.Errorf("zone %q: a zone with interfaces needs a name of at most %d bytes", z, MaxZoneNameBytes)
 			}
 			idx[z] = sortedUnique(lits)
 		}
@@ -69,9 +69,10 @@ func (idx zoneIndex) unmatched(zones []string) []string {
 
 const zoneSetPrefix = "zone_"
 
-// maxZoneName is the longest zone name, in bytes, whose set name fits the
-// kernel's 255-byte object names.
-const maxZoneName = (255 - len(zoneSetPrefix)) / 2
+// MaxZoneNameBytes is the longest zone name, in bytes, whose set name
+// (zoneSetName) fits the kernel's 255-byte object names. Configuration
+// validation refuses longer zone names with it.
+const MaxZoneNameBytes = (255 - len(zoneSetPrefix)) / 2
 
 // zoneSetName names the set of a zone's interfaces: zone_<hex name>. Hex
 // keeps any zone name a valid nft identifier and distinct, so zones whose

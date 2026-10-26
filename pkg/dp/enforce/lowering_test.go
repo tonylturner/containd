@@ -34,7 +34,7 @@ func emptyZoneSnapshot() *rules.Snapshot {
 }
 
 // longestZone is the longest zone name that can have interfaces.
-var longestZone = strings.Repeat("z", maxZoneName)
+var longestZone = strings.Repeat("z", MaxZoneNameBytes)
 
 // zoneNamesSnapshot has zones whose names differ only in case, '-', ' '
 // and '_', and the longest zone name, each with interfaces and used by

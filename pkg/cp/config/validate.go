@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -149,11 +150,6 @@ func validateManagementListenerAddress(field, addr string) error {
 	return nil
 }
 
-// MaxZoneNameLength is the longest zone name in bytes. Enforcement declares
-// a zone's interfaces as the nftables set zone_<hex name>, and nftables
-// names are at most 255 bytes.
-const MaxZoneNameLength = 125
-
 func validateZones(zones []Zone) error {
 	seen := map[string]struct{}{}
 	seenLower := map[string]struct{}{}
@@ -165,8 +161,8 @@ func validateZones(zones []Zone) error {
 		if z.Name != strings.TrimSpace(z.Name) {
 			return fmt.Errorf("zone %q has leading/trailing whitespace", z.Name)
 		}
-		if len(z.Name) > MaxZoneNameLength {
-			return fmt.Errorf("zone %q is %d bytes; zone names are at most %d bytes", z.Name, len(z.Name), MaxZoneNameLength)
+		if len(z.Name) > enforce.MaxZoneNameBytes {
+			return fmt.Errorf("zone %q is %d bytes; zone names are at most %d bytes", z.Name, len(z.Name), enforce.MaxZoneNameBytes)
 		}
 		if _, exists := seen[z.Name]; exists {
 			return fmt.Errorf("duplicate zone: %s", z.Name)

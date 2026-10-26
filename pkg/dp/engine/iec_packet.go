@@ -114,6 +114,8 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, boo
 	}
 	s, dir := t.lookupLocked(src, dst)
 	switch {
+	case synRST(pkt.TCP.Flags):
+		return t.synRSTLocked(s, src, dst)
 	case s == nil:
 		return t.newPacketLocked(pkt, src, dst, now)
 	case s.state == iecAborted:
@@ -153,6 +155,28 @@ func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 }
 
 func isSYN(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK == 0 }
+
+func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagRST != 0 }
+
+// synRSTLocked decides a segment carrying both SYN and RST, which is no
+// handshake segment: it never opens, establishes, refuses or closes an
+// incarnation, so a SYN-ACK with RST cannot establish one whose client it
+// resets. Every session of either mode drops it, as does an enforce
+// envelope; learn traffic of no session passes it untracked, like every
+// other learn packet not observed from its SYN.
+func (t *iecTable) synRSTLocked(s *iecSession, src, dst netip.AddrPort) (iecResult, bool) {
+	if s != nil {
+		return dropped(reasonIECInvalid), true
+	}
+	matched, mode := t.envelopeLocked(t.sessionCtx(orient(src, dst)))
+	if !matched {
+		return iecResult{}, false
+	}
+	if mode == "enforce" {
+		return dropped(reasonIECInvalid), true
+	}
+	return accepted(reasonIECAccept), true
+}
 
 // opens reports whether a client SYN may start a session or incarnation of
 // mode: in an enforce envelope only a SYN of a handshake that connection
@@ -290,9 +314,6 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		s.next = nil
 		return accepted(reasonIECClosed), true
 	}
-	if dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagRST != 0 {
-		return dropped(reasonIECInvalid), true // never the next incarnation's SYN-ACK
-	}
 	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
 		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
 		n.dirs[iecDirSrv] = newIECDir(pkt.TCP.Seq)
@@ -355,13 +376,11 @@ func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, now 
 // client that lost its connection and reconnects from the same port
 // sends, passes and changes nothing: the server answers it with a
 // challenge ACK, and the RST the client sends in reply closes the
-// incarnation (rstLocked). A SYN with payload or RST is dropped: a SYN-ACK
-// that also carries RST resets the client, so it must not establish the
-// incarnation.
+// incarnation (rstLocked). A SYN with payload is dropped.
 func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
-	if len(pkt.Payload) > 0 || f&capture.TCPFlagRST != 0 {
-		return dropped(reasonIECInvalid) // a SYN with RST is no handshake segment
+	if len(pkt.Payload) > 0 {
+		return dropped(reasonIECInvalid)
 	}
 	c2s := s.dirs[iecDirClient]
 	switch {

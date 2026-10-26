@@ -122,6 +122,12 @@ const (
 	ctInfoNumber  = 5
 )
 
+// IP protocol numbers of ICMP and ICMPv6.
+const (
+	protoICMP   = 1
+	protoICMPv6 = 58
+)
+
 // buildRuleHitEvent converts an nflog Attribute into a firewall.rule.hit
 // event and the connection key of the logged packet. Returns ok false if
 // the prefix doesn't match the containd format: those are foreign log
@@ -156,7 +162,7 @@ func buildRuleHitEvent(a nflog.Attribute) (events.Event, *flow.Key, bool) {
 	if a.Payload == nil || len(*a.Payload) == 0 {
 		return ev, nil, true
 	}
-	pkt, ok := decodeIP(*a.Payload)
+	pkt, ok := ruleHitTuple(*a.Payload)
 	if !ok {
 		return ev, nil, true
 	}
@@ -177,4 +183,24 @@ func buildRuleHitEvent(a nflog.Attribute) (events.Event, *flow.Key, bool) {
 	}
 	ev.FlowID = key.Hash()
 	return ev, &key, true
+}
+
+// ruleHitTuple decodes the addressing of a logged packet: the TCP or UDP
+// tuple, or for ICMP and ICMPv6, which carry no ports, the addresses and
+// protocol with Transport "icmp" or "icmpv6" and both ports zero. ok is
+// false when neither decodes.
+func ruleHitTuple(data []byte) (Packet, bool) {
+	pkt, ok := decodeIP(data)
+	if ok || pkt.Invalid != InvalidProtocol {
+		return pkt, ok
+	}
+	switch pkt.Proto {
+	case protoICMP:
+		pkt.Transport = "icmp"
+	case protoICMPv6:
+		pkt.Transport = "icmpv6"
+	default:
+		return pkt, false
+	}
+	return pkt, true
 }
