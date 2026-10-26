@@ -19,12 +19,12 @@ Official references:
 | Pledge goal | Status | Default design |
 | ----------- | ------ | -------------- |
 | 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account on web/API and SSH password login; admins can require it. An SSH key alone signs in. |
-| 2. Default passwords | Met with caveat | Forced first-login change on web/API and SSH. The bootstrap credential is universal, not per instance. |
+| 2. Default passwords | Met | Forced first-login change on web/API and SSH, for password and key logins. |
 | 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
 | 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
 | 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
 | 6. CVE transparency | Met | CSAF 2.0 advisories with CWE, served provider metadata. |
-| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding and metrics in the base product. Audit records stay on the appliance. |
+| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding of audit records and events, and metrics in the base product. Event forwarding is best-effort. |
 
 - **Met**: the design and its defaults deliver the goal.
 - **Met with caveat**: the design delivers the goal. A stated limit or trade-off
@@ -76,11 +76,11 @@ What the design delivers by default:
   lowercase letter and a digit, and must differ from the current one, so the
   bootstrap value cannot be kept.
 
-Caveat: the bootstrap credential is universal, not per instance. This is a
-deliberate trade-off: containd often runs in offline labs and classrooms that
-have no channel to distribute a per-instance secret. The forced change limits
-the credential's life to the first login, on every path, but whoever logs in
-first sets the new password.
+Design note: the bootstrap credential is the same on every instance, and the
+forced change at first login is what retires it, as the pledge describes.
+containd often runs in offline labs and classrooms that have no channel to
+distribute a per-instance secret. Bind management to a trusted network until
+the first login; see [Deployment hardening](#deployment-hardening).
 
 #### Lab-mode credential pinning
 
@@ -185,15 +185,19 @@ What the design delivers by default:
 - `GET /api/v1/events` exposes firewall, DPI, IDS, AV, proxy and service events.
   Separate bounded banks keep firewall denies and IEC 104 incident evidence,
   so routine traffic does not evict them.
-- The service syslog forwarder sends engine and service events over UDP or TCP,
-  as JSON or RFC 5424. Application logs can go to a remote syslog sink.
+- The service syslog forwarder sends engine and service events and audit
+  records over UDP or TCP, as JSON or RFC 5424. Application logs can go to a
+  remote syslog sink.
+- Audit records are forwarded at least once over TCP: each forwarder keeps a
+  cursor in the audit database, so records written during a collector outage
+  or before a restart are sent later. The services status reports the backlog
+  and the last error per forwarder.
 - `/metrics` exposes Prometheus metrics.
 
 Caveats:
 
-- Audit records stay in the local database. The syslog forwarder does not carry
-  them.
-- Event history is bounded and in memory, and syslog forwarding is best-effort.
+- Event history is bounded and in memory, and event forwarding over syslog is
+  best-effort: events produced during a collector outage are not resent.
 - The top-level `export` setting is not used at runtime. Use the syslog
   forwarder.
 
@@ -220,8 +224,8 @@ These steps adapt a deployment to its network. They are guidance, not gaps.
   private management network.
 - Commit only the allow rules you need. Make sure the network routes protected
   traffic through the appliance.
-- Configure a syslog forwarder, verify delivery, and collect audit records
-  off-box.
+- Configure a syslog forwarder, preferably over TCP, and verify that events
+  and audit records arrive off-box.
 - Install supported security updates; see [Update Policy](update-policy.md).
 
 ## Additional CA bundle

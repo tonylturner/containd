@@ -44,10 +44,10 @@ untrusted networks. See [deployment guidance](docs/mkdocs/docker-compose.md).
 | HTTPS | `https://localhost:8443` |
 | SSH console | Port `2222`, user `containd` |
 
-The bootstrap login is **`containd` / `containd`**. Change the password immediately
-through the web UI or management API; leave lab mode disabled for normal use.
-SSH does **not** enforce MFA or a forced password change, and its PTY can reach
-the appliance's Linux shell. Read the [authentication limits](SECURITY.md#authentication-limits).
+The bootstrap login is **`containd` / `containd`**. Outside lab mode, the first
+web or SSH login must change it; leave lab mode disabled for normal use. SSH
+password login asks for a TOTP code on MFA accounts, and its PTY can reach the
+appliance's Linux shell. Read the [authentication limits](SECURITY.md#authentication-limits).
 
 HTTPS uses a generated self-signed certificate unless you supply a replacement.
 See [hardening guidance](docs/mkdocs/secure-by-design.md#deployment-hardening) before remote access.

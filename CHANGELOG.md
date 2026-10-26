@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Outside lab mode, SSH applies the web login's account checks. The bootstrap
+  admin must change its password at SSH login, for password and key logins,
+  before the CLI, menu or shell opens. Password login of an account with TOTP
+  MFA asks for the code through keyboard-interactive authentication, and an
+  account past its MFA enrollment grace period cannot log in over SSH. Clients
+  limited to the `password` method, such as `sshpass`, cannot complete these
+  steps. Lab-mode SSH is unchanged.
+- A password or MFA change from the web UI, the API or the SSH console ends the
+  account's other sessions and closes their SSH connections. Deleting an
+  account closes its SSH connections. A new password must differ from the
+  current one.
+- SSH login rate limiting counts attempts per client address and account;
+  previously every connection started a new count.
+- User creation, change and deletion, profile changes, password changes,
+  management TLS certificate replacement, SSH key enrollment and refused SSH
+  logins now write audit records. SSH console password changes are recorded as
+  `auth.password.change` (was `user.password.set`).
 - While enforcing, the unauthenticated engine API is admitted only from
   loopback and, when `CONTAIND_ENGINE_ADDR` names one address, on that
   address's interface. TCP 8081 is no longer accepted on every interface.
@@ -150,8 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot and its error, rule counters keep working, and health reports
   `enforcement.state: degraded`.
 - The Secure by Design page maps all seven CISA pledge goals again and credits
-  the default design. Operator steps are deployment guidance. Its one known gap:
-  SSH accepts the bootstrap password before the forced first-login change.
+  the default design. Operator steps are deployment guidance. No goal has a
+  design gap.
 - `containd engine` has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
   engine's address on the management network; loopback and wildcard
   listeners are refused at start, except loopback with a reserved management
