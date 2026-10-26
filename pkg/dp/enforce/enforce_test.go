@@ -4,6 +4,7 @@
 package enforce
 
 import (
+	"context"
 	"net"
 	"strings"
 	"testing"
@@ -404,10 +405,46 @@ func TestNftUpdaterArgsFormatting(t *testing.T) {
 
 	src := net.ParseIP("10.0.0.1")
 	dst := net.ParseIP("10.0.0.2")
-	fargs := u.buildBlockFlowArgs(src, dst, "502", 0)
+	fargs := u.buildBlockFlowArgs(src, dst, "tcp", "502", 0)
 	fjoined := strings.Join(fargs, " ")
-	if !strings.Contains(fjoined, "block_flows") || !strings.Contains(fjoined, "10.0.0.1 . 10.0.0.2 . 502") {
+	if !strings.Contains(fjoined, "block_flows") || !strings.Contains(fjoined, "10.0.0.1 . 10.0.0.2 . tcp . 502") {
 		t.Fatalf("unexpected flow args: %s", fjoined)
+	}
+}
+
+func TestFlowBlockKeysIncludeProtocol(t *testing.T) {
+	u := NewNftUpdater("containd")
+	src, dst := net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")
+	tcp := strings.Join(u.buildBlockFlowArgs(src, dst, "tcp", "502", 5*time.Second), " ")
+	udp := strings.Join(u.buildBlockFlowArgs(src, dst, "udp", "502", 5*time.Second), " ")
+	if tcp == udp || !strings.Contains(tcp, ". tcp . 502 timeout 5s") || !strings.Contains(udp, ". udp . 502 timeout 5s") {
+		t.Fatalf("protocol collision: tcp=%q udp=%q", tcp, udp)
+	}
+	text, err := NewCompiler().CompileFirewall(&rules.Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "type ipv4_addr . ipv4_addr . inet_proto . inet_service;") {
+		t.Fatalf("set type omits protocol:\n%s", text)
+	}
+	lookup := "ip saddr . ip daddr . meta l4proto . th dport @block_flows drop"
+	start := strings.Index(text, "chain forward")
+	forward := text[start:]
+	block, established := strings.Index(forward, lookup), strings.Index(forward, "ct state { established, related } accept")
+	if block < 0 || established < 0 || block > established {
+		t.Fatalf("protocol-aware block must precede established accept:\n%s", forward)
+	}
+}
+
+func TestFlowBlockRejectsInvalidPort(t *testing.T) {
+	u := NewNftUpdater("containd")
+	// An invalid input must fail validation, without attempting to run nft.
+	u.Path = "/nonexistent/nft"
+	for _, port := range []string{"0", "-1", "65536", "not-a-port", "502; accept"} {
+		err := u.BlockFlowTemp(context.Background(), net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"), "tcp", port, time.Second)
+		if err == nil || !strings.Contains(err.Error(), "invalid dport") {
+			t.Fatalf("port %q: %v", port, err)
+		}
 	}
 }
 

@@ -120,7 +120,7 @@ func (c *Compiler) writeDynamicSets(buf *bytes.Buffer) {
 	buf.WriteString("    flags timeout;\n")
 	buf.WriteString("  }\n")
 	buf.WriteString("  set block_flows {\n")
-	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_service;\n")
+	buf.WriteString("    type ipv4_addr . ipv4_addr . inet_proto . inet_service;\n")
 	buf.WriteString("    flags timeout;\n")
 	buf.WriteString("  }\n")
 }
@@ -174,7 +174,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	// circuit and the block_flows entry would only catch new flows.
 	buf.WriteString("    ip saddr @block_hosts drop;\n")
 	buf.WriteString("    ip daddr @block_hosts drop;\n")
-	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . th dport @block_flows drop;\n")
+	buf.WriteString("    meta l4proto { tcp, udp } ip saddr . ip daddr . meta l4proto . th dport @block_flows drop;\n")
 
 	entries := append([]rules.Entry(nil), snap.Firewall...)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -580,10 +580,10 @@ func (u *NftUpdater) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, pro
 	if dport == "" {
 		return errors.New("dport required")
 	}
-	if _, err := strconv.Atoi(dport); err != nil {
+	if port, err := strconv.Atoi(dport); err != nil || port < 1 || port > 65535 {
 		return fmt.Errorf("invalid dport %q", dport)
 	}
-	args := u.buildBlockFlowArgs(srcIP, dstIP, dport, ttl)
+	args := u.buildBlockFlowArgs(srcIP, dstIP, proto, dport, ttl)
 	return u.run(ctx, args)
 }
 
@@ -597,9 +597,9 @@ func (u *NftUpdater) buildBlockHostArgs(ip net.IP, ttl time.Duration) []string {
 	return []string{"add", "element", "inet", u.TableName, setName, "{", elem, "}"}
 }
 
-func (u *NftUpdater) buildBlockFlowArgs(srcIP, dstIP net.IP, dport string, ttl time.Duration) []string {
+func (u *NftUpdater) buildBlockFlowArgs(srcIP, dstIP net.IP, proto, dport string, ttl time.Duration) []string {
 	setName := "block_flows"
-	key := fmt.Sprintf("%s . %s . %s", srcIP.To4().String(), dstIP.To4().String(), dport)
+	key := fmt.Sprintf("%s . %s . %s . %s", srcIP.To4().String(), dstIP.To4().String(), proto, dport)
 	elem := key
 	if ttl > 0 {
 		elem = fmt.Sprintf("%s timeout %ds", key, int(ttl.Seconds()))

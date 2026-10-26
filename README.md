@@ -64,6 +64,8 @@ commit-confirmed and rollback.
 - Candidate/running configuration with commit-confirmed and rollback: [config format](docs/mkdocs/config-format.md).
 - Web, SSH and REST management with embedded network services: [services](docs/mkdocs/services.md).
 
+Connection-list errors retain engine failure details for troubleshooting.
+
 See [architecture](docs/mkdocs/architecture.md) for the management, control and data planes.
 
 ## Documentation

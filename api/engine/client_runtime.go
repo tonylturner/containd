@@ -210,7 +210,7 @@ func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("engine conntrack status %d", resp.StatusCode)
+		return nil, engineStatusError(resp, "engine conntrack status")
 	}
 	var out struct {
 		Entries []conntrack.Entry `json:"entries"`
