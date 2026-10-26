@@ -123,6 +123,16 @@ func TestInlineImmediateAcceptHasNoCompletion(t *testing.T) {
 	}
 }
 
+func TestInlineImmediateAcceptNotificationExactlyOnce(t *testing.T) {
+	fx := newInlineFixture(t)
+	tok := fx.deliver(7, func(Packet) Decision { return Decision{Action: Accept, Notify: true} })
+	fx.gen.close(nil)
+	got := fx.completions()
+	if len(got) != 2 || got[0] != verdictOf(tok, VerdictAccept) || got[1].source == nil {
+		t.Fatalf("expected one successful Accept followed by source down: %+v", got)
+	}
+}
+
 func TestInlineDropAndHoldSettleExactlyOnce(t *testing.T) {
 	fx := newInlineFixture(t)
 	dropped := fx.deliver(1, func(Packet) Decision { return Decision{Action: Drop} })

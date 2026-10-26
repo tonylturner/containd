@@ -83,6 +83,7 @@ type iecSession struct {
 	reset      *iecReset
 	next       *iecSession         // new incarnation whose handshake is pending
 	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
+	inventory  *iecInventoryLedger
 }
 
 // iecDir is one direction of a session (client→server or server→client).
@@ -137,6 +138,9 @@ type iecTable struct {
 	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
 	globalMode string
 
+	inventory       iecInventoryInput
+	inventoryTokens map[capture.Token]*iecSession
+
 	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
 	pressureOffline bool
 
@@ -163,6 +167,8 @@ func newIECTable(globalMode string) *iecTable {
 		held:       make(map[capture.Token]*iecSession),
 		aborts:     make(map[capture.Token]*abortTxn),
 		reconnect:  make(map[string]time.Time),
+
+		inventoryTokens: make(map[capture.Token]*iecSession),
 	}
 }
 
@@ -255,7 +261,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		default:
 			// A learn session left every envelope: stop tracking it.
 			t.dpi.EndStream(s.id)
-			t.deleteLocked(key, s)
+			acts.merge(t.deleteLocked(key, s))
 		}
 	}
 	t.mu.Unlock()
@@ -276,19 +282,20 @@ func (t *iecTable) expire() {
 		switch s.state {
 		case iecAborted:
 			if now.Sub(s.endedAt) > iecTombstoneTTL {
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		case iecClosed:
 			if now.Sub(s.endedAt) > iecClosedTTL {
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		default:
 			s.expireAPCILocked(&acts, now)
+			t.expireInventoryLocked(s, &acts, now)
 			if len(s.held) > 0 && now.Sub(s.held[0].since) > iecPendingTimeout {
 				acts.merge(t.abortLocked(s, abortTimeout, "", nil, now))
 			} else if now.Sub(s.lastSeen) > iecIdleTTL {
 				t.dpi.EndStream(s.id)
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		}
 	}
@@ -301,12 +308,14 @@ func (t *iecTable) expire() {
 	t.apply(acts)
 }
 
-func (t *iecTable) deleteLocked(key iecKey, s *iecSession) {
+func (t *iecTable) deleteLocked(key iecKey, s *iecSession) iecActions {
+	acts := t.endInventoryLocked(s)
 	s.apci = nil
 	if s.state == iecAborted {
 		t.tombstones--
 	}
 	delete(t.sessions, key)
+	return acts
 }
 
 // evictTombstoneLocked removes the oldest tombstone when the bound is hit.
@@ -330,6 +339,7 @@ func (t *iecTable) evictTombstoneLocked() {
 // run drives the timers until stop is closed.
 func (t *iecTable) run(stop <-chan struct{}) {
 	defer func() {
+		t.stopInventory()
 		t.mu.Lock()
 		t.pressureOffline = true
 		t.mu.Unlock()

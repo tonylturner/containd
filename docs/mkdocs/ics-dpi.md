@@ -249,11 +249,16 @@ first/last observation times. Pair and CA command counters distinguish decoded
 client command attempts from accepted commands. Accepted means the IEC decision
 allowed the APDU **and every packet carrying its bytes completed an Accept
 verdict without error**; an allow decision alone is not delivery evidence.
+Acceptance is recorded only in inline enforce envelopes. Learn/monitor and
+non-inline capture record attempts and points, but never claim delivery.
 Server echoes and monitoring ASDUs do not count as command attempts.
 
-The inventory model and read API are available, but the engine observation feed
-is not connected yet. An available engine therefore returns an empty IEC 104
-section until observations are supplied. Inventory never feeds the learner,
+The live feed observes ordered, TCP-deduplicated ASDUs in sessions tracked from
+their SYN within IEC 104 envelopes. Untracked, midstream and uninspected traffic
+does not populate it. Retransmissions are not new attempts; retransmissions
+received while delivery is pending also need successful Accept verdicts.
+Acceptance is not a station acknowledgement or proof of physical execution.
+Inventory never feeds the learner,
 auto-ALLOW, or enforcement decisions. Engine unavailability displays an explicit
 unavailable state, not an empty inventory or zero counters; **Refresh** retries.
 
@@ -265,7 +270,12 @@ extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 asset
 Overflow counters show capacity evictions, truncated metadata observations and
 late command outcomes whose observation has expired or been evicted. Input calls
 never wait for the inventory lock: observations or outcomes dropped on contention
-have visible overflow counters. Oversized
+have visible overflow counters. Per-session delivery evidence is capped at 128
+commands and 128 carrying packet tokens. Ledger overflow records a not-accepted
+outcome and increments **Lost outcomes**. Pending evidence expires after one
+second, and is freed on session end, abort, queue close, policy removal,
+reconfiguration or stop; incomplete evidence never credits acceptance. Counts
+are therefore conservative when evidence is unavailable. Oversized
 ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
 overflow. Counts are retained-history totals, not lifetime traffic or unique
 missing-device counts. Clearing inventory or restarting the engine resets data

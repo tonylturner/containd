@@ -26,15 +26,21 @@ var (
 // iecActions is the work an IEC104 state change produces. It is collected
 // under the session lock and carried out after the lock is released.
 type iecActions struct {
-	drops  []capture.Resolution // held tokens to drop
-	events []events.Event
-	jobs   []func()
+	drops             []capture.Resolution // held tokens to drop
+	events            []events.Event
+	jobs              []func()
+	inventoryObserve  []*iecInventoryCommand
+	inventoryOutcome  []*iecInventoryCommand
+	inventoryOverflow uint64
 }
 
 func (a *iecActions) merge(b iecActions) {
 	a.drops = append(a.drops, b.drops...)
 	a.events = append(a.events, b.events...)
 	a.jobs = append(a.jobs, b.jobs...)
+	a.inventoryObserve = append(a.inventoryObserve, b.inventoryObserve...)
+	a.inventoryOutcome = append(a.inventoryOutcome, b.inventoryOutcome...)
+	a.inventoryOverflow += b.inventoryOverflow
 }
 
 // abortTxn waits for the verdict completions of an aborted session's
@@ -72,6 +78,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 	if s.state == iecAborted {
 		return acts
 	}
+	acts.merge(t.endInventoryLocked(s))
 	countIECAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {
@@ -302,6 +309,7 @@ func (t *iecTable) apply(acts iecActions) {
 
 // finish emits events and queues jobs; drops were resolved by the caller.
 func (t *iecTable) finish(acts iecActions) {
+	t.finishInventory(acts)
 	if len(acts.events) > 0 {
 		t.emit(acts.events)
 	}
@@ -331,11 +339,12 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 
 // onVerdict records a verdict completion. A held token completes only when
 // its generation went down: the kernel dropped it, so it leaves the ledger.
-func (t *iecTable) onVerdict(tok capture.Token, err error) {
+func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
 	countIECVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
+	t.inventoryVerdictLocked(tok, v, err, &acts)
 	if s := t.held[tok]; s != nil {
 		t.unholdLocked(s, tok)
 	}
