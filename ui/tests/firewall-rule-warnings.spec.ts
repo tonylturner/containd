@@ -1,14 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
-const scheduled = {
-  id: "maint-allow", action: "ALLOW", sourceZones: ["it"], destZones: ["ot"],
-  protocols: [{ name: "tcp", port: "22" }],
-  schedule: { daysOfWeek: ["Saturday"], startTime: "02:00", endTime: "06:00" },
+const contractor = {
+  id: "contractor-ssh", action: "ALLOW", sourceZones: ["it"], destZones: ["ot"],
+  protocols: [{ name: "tcp", port: "22" }], identities: ["contractor"],
 };
-const warning = {
-  ruleId: "maint-allow", predicate: "schedule", action: "ALLOW",
-  message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive",
+const blockSSH = { id: "block-ssh", action: "RESET", protocols: [{ name: "tcp", port: "22" }] };
+const unbound = {
+  ruleId: "contractor-ssh", predicate: "identity", action: "ALLOW",
+  message: "no bound address can match identities [contractor]; the rule matches nothing until one is bound",
+};
+const shadowed = {
+  ruleId: "block-ssh", shadowedBy: "allow-all-ssh", action: "RESET",
+  message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
 };
 
 async function openFirewall(page: Page, previews: unknown[]) {
@@ -21,16 +25,16 @@ async function openFirewall(page: Page, previews: unknown[]) {
     const path = new URL(request.url()).pathname;
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
-    if (path === "/api/v1/firewall/rules") body = [scheduled];
+    if (path === "/api/v1/firewall/rules") body = [contractor, blockSSH];
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
     if (path === "/api/v1/dataplane/ruleset") {
-      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [warning] };
+      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [unbound, shadowed] };
     }
     if (path === "/api/v1/firewall/rules/preview") {
       previews.push(request.postDataJSON());
-      body = { match_count: 0, sample_matches: [], time_range: null, total_events: 12, warnings: [warning] };
+      body = { match_count: 0, sample_matches: [], time_range: null, total_events: 12, warnings: [unbound] };
     }
     await route.fulfill({ json: body });
   });
@@ -39,21 +43,30 @@ async function openFirewall(page: Page, previews: unknown[]) {
   await loaded;
 }
 
-test("rule impact preview explains an inactive scheduled ALLOW", async ({ page }) => {
+test("rule impact preview explains an identity rule that matches nothing", async ({ page }) => {
   const previews: unknown[] = [];
   await openFirewall(page, previews);
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("row").filter({ hasText: "contractor-ssh" }).getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Preview impact" }).click();
   const summary = page.getByLabel("Rule impact preview");
   await expect(summary).toContainText("0 of 12 recent events match this rule on its own.");
-  await expect(summary.getByRole("status")).toContainText("maint-allow: schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive");
-  // The preview carries the schedule the form does not edit.
+  const warning = summary.getByRole("status");
+  await expect(warning).toContainText("Rules that do not act as written");
+  await expect(warning).toContainText(`unbound identity`);
+  await expect(warning).toContainText(`contractor-ssh: ${unbound.message}`);
   expect(previews).toHaveLength(1);
-  expect(previews[0]).toMatchObject({ id: "maint-allow", action: "ALLOW", schedule: scheduled.schedule });
+  expect(previews[0]).toMatchObject({ id: "contractor-ssh", action: "ALLOW", identities: ["contractor"] });
 });
 
-test("ruleset preview lists candidate warnings", async ({ page }) => {
+test("ruleset preview lists unbound identities and shadowed rules", async ({ page }) => {
   await openFirewall(page, []);
   await page.getByRole("button", { name: "Preview", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Rule predicates resolved toward denial" })).toContainText("maint-allow: schedules are enforced");
+  const list = page.getByRole("status").filter({ hasText: "Rules that do not act as written" });
+  const items = list.getByRole("listitem");
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(0)).toContainText("unbound identity");
+  await expect(items.nth(0)).toContainText(`contractor-ssh: ${unbound.message}`);
+  await expect(items.nth(1)).toContainText("shadowed");
+  await expect(items.nth(1)).toContainText(`block-ssh: ${shadowed.message}`);
+  await expect(page.getByText("resolved toward denial")).toHaveCount(0);
 });

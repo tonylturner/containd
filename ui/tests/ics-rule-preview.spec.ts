@@ -11,14 +11,15 @@ const rule = {
   sourceZones: ["it"],
   destZones: ["ot"],
   protocols: [{ name: "tcp", port: "502" }],
+  identities: ["historian"],
   schedule: { daysOfWeek: ["Saturday"], startTime: "02:00", endTime: "06:00" },
   ics: { protocol: "modbus", functionCode: [3], readOnly: true, mode: "enforce" },
 };
 const warning = {
   ruleId: "plc-read",
-  predicate: "schedule",
+  predicate: "identity",
   action: "ALLOW",
-  message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive",
+  message: "no bound address can match identities [historian]; the rule matches nothing until one is bound",
 };
 const preview = {
   match_count: 1234,
@@ -96,12 +97,13 @@ test("ICS rule preview shows the impact and predicate warnings of the edited rul
   // The unauthenticated attempt is retried with the session token.
   expect(previews).toHaveLength(2);
   expect(previews[1].headers()["authorization"]).toBe(`Bearer ${sessionToken}`);
-  // The preview keeps the zones and schedule the editor does not change.
+  // The preview keeps the zones, identities and schedule the editor does not change.
   expect(previews[1].postDataJSON()).toMatchObject({
     id: "plc-read",
     action: "ALLOW",
     sourceZones: ["it"],
     destZones: ["ot"],
+    identities: rule.identities,
     schedule: rule.schedule,
     ics: { protocol: "modbus", functionCode: [3, 4], readOnly: true, mode: "enforce" },
   });
