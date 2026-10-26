@@ -91,18 +91,14 @@ func (idx identityIndex) identitySets(e rules.Entry) []identitySet {
 	return out
 }
 
-// identityAlternatives returns the opener clauses of e's identity
-// predicate, one per set; ct selects the established-connection form.
-func (idx identityIndex) identityAlternatives(e rules.Entry, ct bool) []string {
-	var out []string
-	for _, set := range idx.identitySets(e) {
-		saddr := identityFamilies[set.family].saddr
-		if ct {
-			saddr = identityFamilies[set.family].ctSaddr
-		}
-		out = append(out, saddr+" @"+set.name())
+// match is the opener clause of the set; ct selects the
+// established-connection form.
+func (s identitySet) match(ct bool) string {
+	saddr := identityFamilies[s.family].saddr
+	if ct {
+		saddr = identityFamilies[s.family].ctSaddr
 	}
-	return out
+	return saddr + " @" + s.name()
 }
 
 // writeIdentitySet declares one identity set.
@@ -116,7 +112,7 @@ func (idx identityIndex) writeIdentitySet(buf *bytes.Buffer, set identitySet) {
 func identityWarnings(snap *rules.Snapshot, idx identityIndex) []RuleWarning {
 	var out []RuleWarning
 	for _, e := range snap.Firewall {
-		if !e.HasIdentityPredicate() || len(idx.identityAlternatives(e, false)) > 0 {
+		if !e.HasIdentityPredicate() || len(idx.identitySets(e)) > 0 {
 			continue
 		}
 		out = append(out, RuleWarning{RuleID: e.ID, Predicate: PredicateIdentity, Action: e.Action,

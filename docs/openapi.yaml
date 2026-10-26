@@ -202,6 +202,19 @@ components:
           properties:
             state: {type: string, enum: [configured, unbound-appliance, unknown]}
             recoveryPorts: {type: array, items: {type: integer}}
+        managementRecovery:
+          type: object
+          required: [state, reason]
+          description: >
+            Boot recovery after the stored running configuration was refused at
+            boot, with or without a management reservation. Active means the
+            engine applied the fail-closed recovery ruleset (new transit dropped);
+            pending and failed mean it is not applied. The reason is generic: the
+            refusal itself is in GET /system/management-reservation. While
+            recovery holds, enforcement reports unavailable.
+          properties:
+            state: {type: string, enum: [inactive, active, pending, failed, unknown]}
+            reason: {type: string, description: Generic summary; empty when inactive}
 
     IEC104Enforcement:
       type: object
@@ -361,7 +374,12 @@ components:
         flowId: {type: string}
         proto: {type: string}
         kind: {type: string}
-        attributes: {type: object, additionalProperties: true}
+        attributes:
+          type: object
+          additionalProperties: true
+          description: >-
+            Event-specific attributes. Events of a flow that TAG rules label carry the labels
+            as tags, a sorted array of strings.
         timestamp: {type: string, format: date-time}
         srcIp: {type: string}
         dstIp: {type: string}
@@ -440,8 +458,30 @@ components:
           allOf:
           - $ref: "#/components/schemas/ICSPredicate"
           description: Always present in serialized rules; `{}` denotes no ICS predicate.
-        action: {type: string, enum: [ALLOW, DENY]}
-        log: {type: boolean}
+        action:
+          type: string
+          enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]
+          description: >-
+            ALLOW, DENY and RESET decide: a packet is allowed if any matching ALLOW exists,
+            otherwise the first matching DENY or RESET by rule ID decides, otherwise
+            firewall.defaultAction. RESET rejects back to the sender (TCP reset for TCP,
+            ICMP or ICMPv6 administratively prohibited otherwise). RATE_LIMIT and TAG are
+            effects that never admit traffic. RESET, RATE_LIMIT and TAG take no ICS protocol.
+        rateLimit:
+          allOf:
+          - $ref: '#/components/schemas/RateLimit'
+          description: Required for RATE_LIMIT, forbidden otherwise.
+        tag:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_.-]{0,31}$'
+          description: >-
+            Required for TAG, forbidden otherwise. A config uses at most 32 distinct labels.
+            A TAG rule takes no schedule.
+        log:
+          type: boolean
+          description: >-
+            Log matching traffic as firewall.rule.hit events. A RATE_LIMIT rule logs the
+            packets it drops over the limit; a TAG rule logs the connections it labels.
         schedule:
           allOf:
           - $ref: '#/components/schemas/ScheduleConfig'
@@ -766,6 +806,10 @@ components:
         src: {type: string}
         state: {type: string}
         timeoutSecs: {type: integer}
+        tags:
+          type: array
+          items: {type: string}
+          description: Labels of the TAG rules that match the connection's original tuple under the running ruleset; omitted when none.
       type: object
     ContentMatch:
       properties:
@@ -1734,7 +1778,13 @@ components:
           - {$ref: '#/components/schemas/ICSPredicate'}
           nullable: true
           description: Null clears the ICS predicate.
-        action: {type: string, enum: [ALLOW, DENY]}
+        action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
+        rateLimit:
+          allOf:
+          - $ref: '#/components/schemas/RateLimit'
+          nullable: true
+          description: Null clears the rate limit.
+        tag: {type: string}
         log: {type: boolean}
         schedule: {$ref: '#/components/schemas/ScheduleConfig'}
     EngineRulesetStatus:
@@ -1752,7 +1802,7 @@ components:
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
-          description: Rules of the applied ruleset that match nothing; omitted when there are none or the apply failed.
+          description: Rules of the applied ruleset that match nothing or that an ALLOW shadows; omitted when there are none or the apply failed.
       type: object
     ICSCoverageRule:
       type: object
@@ -1792,17 +1842,55 @@ components:
         monitoring: {type: integer}
     RuleWarning:
       type: object
-      required: [ruleId, predicate, action, message]
+      required: [ruleId, action, message]
       description: >-
-        A firewall rule that matches nothing as configured: no bound address satisfies
-        its identities.
+        A firewall rule that does not act as written. Either a rule whose identities no bound
+        address satisfies (predicate), so it matches nothing. Or a DENY or RESET rule that an
+        ALLOW shadows (shadowedBy): the ALLOW matches all of its traffic, so it never decides
+        anything.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
           enum: [identity]
-        action: {type: string, enum: [ALLOW, DENY]}
+        shadowedBy: {type: string, description: ID of the ALLOW rule that shadows this DENY or RESET rule.}
+        action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
         message: {type: string}
+    RateLimit:
+      type: object
+      required: [packetsPerSecond]
+      description: >-
+        Packet policer for each directional 5-tuple (source, destination, layer-4 protocol,
+        source and destination port; the protocol without ports for anything but TCP and UDP),
+        on IPv4 and IPv6. Packets over the limit are dropped; nothing is queued or shaped.
+      properties:
+        packetsPerSecond: {type: integer, minimum: 1, maximum: 1000000}
+        burst: {type: integer, minimum: 0, maximum: 1000000, description: Bucket depth in packets; 0 means packetsPerSecond.}
+    RuleCounters:
+      type: object
+      required: [snapshotVersion, since, rules]
+      properties:
+        snapshotVersion: {type: string, description: Version of the applied snapshot.}
+        since: {type: string, format: date-time, description: When the ruleset was applied; every apply restarts the counters at zero.}
+        rules:
+          type: array
+          items: {$ref: '#/components/schemas/RuleCount'}
+          description: One entry per firewall rule, in configuration order.
+    RuleCount:
+      type: object
+      required: [ruleId, action, packets, bytes]
+      properties:
+        ruleId: {type: string}
+        action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
+        packets:
+          type: integer
+          format: uint64
+          description: >-
+            Packets the rule's nftables lines matched. A RATE_LIMIT rule counts every packet it
+            meters; a TAG rule counts the connection openers it labels; a queued ICS rule counts
+            the packets it sends to the engine.
+        bytes: {type: integer, format: uint64}
+        excessDrops: {type: integer, format: uint64, description: RATE_LIMIT only; packets dropped over the limit.}
     NetcfgManagementFault:
       properties:
         address: {type: string}
@@ -2227,7 +2315,9 @@ paths:
       tags: [System]
       responses:
         "200":
-          description: Reservation view; exactly {"active":false} when unset
+          description: >
+            Reservation view. Without a reservation it is {"active":false}, plus
+            bootFault and recovery while a boot fault holds.
           content:
             application/json:
               schema:
@@ -2242,9 +2332,12 @@ paths:
                   bootFault:
                     type: string
                     description: >
-                      Residual stored-config conflict after boot normalization; empty
-                      when clear. Blocks stored service/config replay and installs a
-                      minimal enforcement-on default-deny recovery ruleset instead.
+                      Why the stored running configuration was refused at boot:
+                      its validation error, or a residual reservation conflict after
+                      boot normalization; empty when clear. Blocks stored
+                      service/config replay and installs a minimal enforcement-on
+                      default-deny recovery ruleset instead. Without a reservation
+                      that ruleset keeps the stored management listener access.
                       A safe commit, rollback or factory reset clears it.
                   recovery:
                     type: string
@@ -2846,8 +2939,8 @@ paths:
       description: |
         Returns an evidence-aware page, not the globally newest events.
         Each runtime store independently retains its latest 1024 logged
-        firewall.rule.hit events with attributes.action equal to DENY,
-        in addition to its general event ring. Only later DENYs evict this
+        firewall.rule.hit events with attributes.action equal to DENY or
+        RESET, in addition to its general event ring. Only later DENYs evict this
         bank; there is no age expiry. It survives configuration rebuilds,
         but not process restarts.
 
@@ -4330,6 +4423,26 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TlsInfoResponse'}
+  /firewall/counters:
+    get:
+      summary: Per-rule counters of the applied ruleset
+      description: >-
+        Kernel packet and byte counters of every firewall rule, plus the packets each
+        RATE_LIMIT rule dropped over its limit. Logging need not be on. Each apply replaces
+        the ruleset and restarts the counters at zero; since says when.
+      tags: [Firewall]
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RuleCounters'}
+        '502':
+          description: >-
+            The engine could not report counters: enforcement is off, no ruleset is applied,
+            the last apply failed, or nftables could not be read. The body carries the reason.
+        '503':
+          description: Engine unavailable
   /conntrack:
     get:
       summary: List kernel connections (IPv4 and IPv6)
@@ -4547,7 +4660,7 @@ paths:
                   warnings:
                     type: array
                     items: {$ref: '#/components/schemas/RuleWarning'}
-                    description: Candidate rules that match nothing, in rule ID order; omitted when there are none.
+                    description: Candidate rules that match nothing or that an ALLOW shadows, in rule ID order; omitted when there are none.
                   icsCoverage:
                     type: array
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}

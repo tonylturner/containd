@@ -71,7 +71,8 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			// but not applied: the rule is in learn mode.
 			continue
 		}
-		if v.Action == verdict.DenyDrop {
+		if v.Denies() {
+			// A queued packet cannot be rejected: RESET drops here.
 			v.Action = verdict.BlockFlowTemp
 			if v.TTL <= 0 {
 				v.TTL = dpiEnforceBlockTTL
@@ -135,14 +136,25 @@ func interfaceAddrs(name string) ([]net.Addr, error) {
 }
 
 func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor func(string) ([]net.Addr, error)) (string, string) {
+	zones := newZoneIndex(snap, addrsFor)
+	return zones.zoneFor(srcIP), zones.zoneFor(dstIP)
+}
+
+// zoneIndex maps addresses to the zone whose interface networks hold them.
+type zoneIndex []zoneNets
+
+type zoneNets struct {
+	name string
+	nets []*net.IPNet
+}
+
+// newZoneIndex reads the networks of snap's zone interfaces once, for any
+// number of lookups.
+func newZoneIndex(snap *rules.Snapshot, addrsFor func(string) ([]net.Addr, error)) zoneIndex {
 	if snap == nil || len(snap.ZoneIfaces) == 0 {
-		return "", ""
+		return nil
 	}
-	type zoneNets struct {
-		name string
-		nets []*net.IPNet
-	}
-	var zones []zoneNets
+	var zones zoneIndex
 	for zone, ifaces := range snap.ZoneIfaces {
 		zn := zoneNets{name: zone}
 		for _, ifaceName := range ifaces {
@@ -167,20 +179,22 @@ func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor f
 			zones = append(zones, zn)
 		}
 	}
-	zoneForIP := func(ip net.IP) string {
-		if ip == nil {
-			return ""
-		}
-		for _, zone := range zones {
-			for _, network := range zone.nets {
-				if network.Contains(ip) {
-					return zone.name
-				}
-			}
-		}
+	return zones
+}
+
+// zoneFor returns the zone of ip, or "".
+func (z zoneIndex) zoneFor(ip net.IP) string {
+	if ip == nil {
 		return ""
 	}
-	return zoneForIP(srcIP), zoneForIP(dstIP)
+	for _, zone := range z {
+		for _, network := range zone.nets {
+			if network.Contains(ip) {
+				return zone.name
+			}
+		}
+	}
+	return ""
 }
 
 func isRuleEvaluableICSEvent(proto string) bool {

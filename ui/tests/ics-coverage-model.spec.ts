@@ -2,12 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import {
   normalizeICSCoverageList,
+  normalizeICSCoverageReport,
   normalizeICSCoverageRule,
   normalizeICSEnforcementHealth,
   sameICSCoverage,
+  staticICSCoverage,
 } from "../lib/api-ics-coverage";
 import {
-  coverageViewFromPreview,
+  coverageViewFromReport,
   describeRuleCoverage,
   formatReason,
   icsEnforcementIndicator,
@@ -20,13 +22,16 @@ import { formatICSMode } from "../app/ics/ics-shared";
 const enforcing = { ruleId: "r1", protocol: "modbus", mode: "enforce", state: "enforcing" as const, reasons: [] };
 const exclusion = { code: "exclusion-overlap", message: "exclusion 10.0.0.0/24 meets the rule scope", value: "10.0.0.0/24" };
 
-function loaded(candidate: unknown[], applied: unknown[] | null): ICSCoverageView {
-  return coverageViewFromPreview({
-    runtime: { iec104EnvelopeOpen: false, reason: "" },
-    icsCoverage: normalizeICSCoverageList(candidate),
-    engineStatus: applied ? { icsCoverage: normalizeICSCoverageList(applied) } : undefined,
-    engineStatusError: applied ? undefined : "engine unreachable",
-  });
+const queue = { code: "queue-unavailable", message: "queue 101 is not bound by this engine", runtime: true };
+const decoder = { code: "decoder-disabled", message: "the modbus decoder is off" };
+
+function loaded(candidate: unknown[] | null, applied: unknown[] | null): ICSCoverageView {
+  return coverageViewFromReport(
+    normalizeICSCoverageReport({
+      ...(candidate ? { candidate } : { candidateError: "candidate invalid" }),
+      ...(applied ? { applied } : { engineStatusError: "engine unreachable" }),
+    }),
+  );
 }
 
 test("partial and malformed coverage normalises without inventing protection", () => {
@@ -60,6 +65,41 @@ test("partial and malformed coverage normalises without inventing protection", (
   });
 });
 
+test("the coverage report keeps each side independent and unknown when unexplained", () => {
+  expect(normalizeICSCoverageReport(null)).toEqual({});
+  expect(normalizeICSCoverageReport({ candidate: "x", applied: [], appliedAt: "2026-10-26T09:00:00Z", applyError: "nft failed" }))
+    .toEqual({ applied: [], appliedAt: "2026-10-26T09:00:00Z", applyError: "nft failed" });
+  // An error wins over a list sent beside it.
+  expect(normalizeICSCoverageReport({ candidateError: "bad", candidate: [enforcing], engineStatusError: "down", applied: [enforcing] }))
+    .toEqual({ candidateError: "bad", engineStatusError: "down" });
+  expect(normalizeICSCoverageRule({ ...enforcing, reasons: [{ ...queue, runtime: "yes" }] })?.reasons).toEqual([
+    { code: "queue-unavailable", message: queue.message },
+  ]);
+
+  const unknownBoth = coverageViewFromReport({});
+  expect(unknownBoth).toMatchObject({
+    status: "loaded",
+    candidate: null,
+    candidateError: "not reported by the server",
+    applied: null,
+    appliedError: "not reported by the server",
+  });
+  expect(describeRuleCoverage(unknownBoth, "r1").map((l) => l.label)).toEqual(["applied: unknown", "candidate: unavailable"]);
+});
+
+test("static coverage drops runtime reasons and recomputes the state", () => {
+  const live = { ...enforcing, state: "not_enforcing" as const, reasons: [queue, { ...exclusion, matches: 9 }] };
+  expect(staticICSCoverage(live)).toEqual({ ...enforcing, state: "partial", reasons: [exclusion] });
+  expect(staticICSCoverage({ ...live, reasons: [queue] }).state).toBe("enforcing");
+  expect(staticICSCoverage({ ...live, reasons: [queue, exclusion, decoder] }).state).toBe("not_enforcing");
+  expect(staticICSCoverage({ ...live, mode: "learn", reasons: [decoder] })).toEqual({
+    ...enforcing,
+    mode: "learn",
+    state: "monitoring",
+    reasons: [decoder],
+  });
+});
+
 test("runtime match counts do not make the candidate differ from the applied rule", () => {
   const candidate = { ...enforcing, state: "partial" as const, reasons: [exclusion] };
   const applied = { ...candidate, reasons: [{ ...exclusion, matches: 4 }] };
@@ -84,10 +124,15 @@ test("candidate coverage is shown only where it differs from the applied rule", 
   const same = loaded([enforcing], [enforcing]);
   expect(describeRuleCoverage(same, "r1").map((l) => l.label)).toEqual(["applied: enforcing"]);
 
-  const queue = { code: "queue-unavailable", message: "queue 101 is not bound by this engine" };
-  const differs = loaded([enforcing], [{ ...enforcing, state: "not_enforcing", reasons: [queue] }]);
-  expect(describeRuleCoverage(differs, "r1")).toEqual([
+  // A runtime fault is an applied fact, not drift.
+  const runtimeOnly = loaded([enforcing], [{ ...enforcing, state: "not_enforcing", reasons: [queue] }]);
+  expect(describeRuleCoverage(runtimeOnly, "r1")).toEqual([
     { label: "applied: not enforcing", variant: "error", reasons: [queue] },
+  ]);
+
+  const differs = loaded([enforcing], [{ ...enforcing, state: "not_enforcing", reasons: [queue, decoder] }]);
+  expect(describeRuleCoverage(differs, "r1")).toEqual([
+    { label: "applied: not enforcing", variant: "error", reasons: [queue, decoder] },
     { label: "candidate: enforcing", variant: "success", reasons: [] },
   ]);
 
@@ -97,12 +142,15 @@ test("candidate coverage is shown only where it differs from the applied rule", 
   const engineDown = loaded([enforcing], null);
   expect(engineDown.status === "loaded" && engineDown.appliedError).toBe("engine unreachable");
   expect(describeRuleCoverage(engineDown, "r1").map((l) => l.label)).toEqual(["applied: unknown", "candidate: enforcing"]);
+
+  const candidateBad = loaded(null, [enforcing]);
+  expect(candidateBad.status === "loaded" && candidateBad.candidateError).toBe("candidate invalid");
+  expect(describeRuleCoverage(candidateBad, "r1").map((l) => l.label)).toEqual(["applied: enforcing", "candidate: unavailable"]);
 });
 
 test("coverage without data never reads as enforcement", () => {
   for (const view of [
     { status: "loading" },
-    { status: "restricted" },
     { status: "unavailable", error: "x" },
   ] as ICSCoverageView[]) {
     const lines = describeRuleCoverage(view, "r1");
@@ -111,12 +159,16 @@ test("coverage without data never reads as enforcement", () => {
   }
 });
 
-test("reasons name the exclusion and its runtime matches", () => {
+test("reasons name the exclusion, its matches and runtime faults", () => {
   expect(formatReason({ code: "dpi-disabled", message: "DPI is switched off" })).toBe("DPI is switched off");
   expect(formatReason({ code: "domain-exclusion", message: "a domain exclusion can bypass inspection", value: "plc.example", matches: 1 }))
-    .toBe("a domain exclusion can bypass inspection (plc.example) — 1 flow bypassed inspection since apply");
+    .toBe("a domain exclusion can bypass inspection (plc.example) \u2014 1 connection exempted since the last apply");
   expect(formatReason({ ...exclusion, matches: 3 }))
-    .toBe("exclusion 10.0.0.0/24 meets the rule scope — 3 flows bypassed inspection since apply");
+    .toBe("exclusion 10.0.0.0/24 meets the rule scope \u2014 3 connections exempted since the last apply");
+  expect(formatReason(exclusion)).toBe("exclusion 10.0.0.0/24 meets the rule scope");
+  // Matches belong to exclusions only.
+  expect(formatReason({ ...decoder, matches: 2 })).toBe(decoder.message);
+  expect(formatReason(queue)).toBe(`Running engine: ${queue.message}`);
 });
 
 test("the health aggregate maps each state to its indicator", () => {

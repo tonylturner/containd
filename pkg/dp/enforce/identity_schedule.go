@@ -14,8 +14,9 @@ import (
 
 // Identity and schedule predicates are conditional: what they admit changes
 // without a new connection, when a binding is removed or a window opens or
-// ends. nftables decides them on every rule it decides itself; rules queued
-// to the engine keep their unconditional queue line and the engine decides
+// ends. nftables evaluates them on every line of the rules it handles
+// itself, effects included (RATE_LIMIT meters, TAG counts); rules queued to
+// the engine keep their unconditional queue line and the engine decides
 // their predicates per message.
 //
 // The conntrack fast path would otherwise keep an established connection
@@ -24,7 +25,9 @@ import (
 // before that accept (conditionalScopeChain): the connection keeps passing
 // while the current policy admits its original tuple, and stops when it does
 // not. A connection that an unconditional ALLOW also admits keeps passing;
-// one that a conditional DENY's opened window covers stops.
+// one that a conditional DENY's opened window covers stops. Only deciding
+// rules (rules.DecisionOrder) take part: effects never admit or stop a
+// connection.
 
 const (
 	conditionalScopeChain  = "conditional_scope"
@@ -50,20 +53,24 @@ func conditional(e rules.Entry) bool {
 	return e.HasIdentityPredicate() || e.HasSchedulePredicate()
 }
 
-func terminal(a rules.Action) bool {
-	return a == rules.ActionAllow || a == rules.ActionDeny || a == rules.ActionReset
-}
-
-// kernelDecided reports whether nftables decides e: a terminal rule that is
+// kernelDecided reports whether nftables decides e: a deciding rule that is
 // not queued to the engine.
 func (p *predicates) kernelDecided(e rules.Entry) bool {
-	return terminal(e.Action) && !queuedToEngine(e, p.queueID)
+	return e.Action.Decides() && !queuedToEngine(e, p.queueID)
+}
+
+// alternative is one predicate clause; family is the address family its
+// identity set requires (0: IPv4, 1: IPv6), -1 for none.
+type alternative struct {
+	family int
+	clause string
 }
 
 // alternatives returns the predicate clauses of e, any one of which must
-// hold: [""] for an unconditional rule, none for an identity predicate no
-// bound address satisfies. ct selects the established-connection form.
-func (p *predicates) alternatives(e rules.Entry, ct bool) ([]string, error) {
+// hold: one empty clause for an unconditional rule, none for an identity
+// predicate no bound address satisfies. ct selects the
+// established-connection form.
+func (p *predicates) alternatives(e rules.Entry, ct bool) ([]alternative, error) {
 	schedule := ""
 	if e.HasSchedulePredicate() {
 		set, err := scheduleSetOf(e)
@@ -73,41 +80,71 @@ func (p *predicates) alternatives(e rules.Entry, ct bool) ([]string, error) {
 		schedule = "meta time @" + set.name
 	}
 	if !e.HasIdentityPredicate() {
-		return []string{schedule}, nil
+		return []alternative{{family: -1, clause: schedule}}, nil
 	}
-	var out []string
-	for _, id := range p.identities.identityAlternatives(e, ct) {
-		out = append(out, strings.TrimSpace(id+" "+schedule))
+	var out []alternative
+	for _, set := range p.identities.identitySets(e) {
+		out = append(out, alternative{family: set.family, clause: strings.TrimSpace(set.match(ct) + " " + schedule)})
 	}
 	return out, nil
 }
 
-// guard adds e's predicates to the lines compileEntry emitted for it. A
-// queued rule's lines are unchanged; a predicate nothing satisfies leaves
-// no line.
+// clauses returns the clauses of alts.
+func clauses(alts []alternative) []string {
+	out := make([]string, 0, len(alts))
+	for _, a := range alts {
+		out = append(out, a.clause)
+	}
+	return out
+}
+
+// lineFamily returns the address family a compiled line is restricted to
+// by meta nfproto (RATE_LIMIT meter lines, see meterForms), -1 for none.
+func lineFamily(line string) int {
+	switch {
+	case strings.HasPrefix(line, "meta nfproto ipv4 "):
+		return 0
+	case strings.HasPrefix(line, "meta nfproto ipv6 "):
+		return 1
+	default:
+		return -1
+	}
+}
+
+// guard adds e's predicates to the lines compileEntry emitted for it, for
+// every action. A queued rule's lines are unchanged. RATE_LIMIT lines meter
+// both directions of established flows, so they match the connection's
+// opener from conntrack; every other line sees only a connection's first
+// packets, sent by the opener. A line restricted to one address family
+// takes only that family's identity clauses, and a predicate nothing
+// satisfies leaves no line.
 func (p *predicates) guard(e rules.Entry, lines []string) ([]string, error) {
 	if queuedToEngine(e, p.queueID) || !conditional(e) {
 		return lines, nil
 	}
-	alts, err := p.alternatives(e, false)
+	alts, err := p.alternatives(e, e.Action == rules.ActionRateLimit)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(lines)*len(alts))
 	for _, line := range lines {
+		fam := lineFamily(line)
 		for _, alt := range alts {
-			out = append(out, alt+" "+line)
+			if fam >= 0 && alt.family >= 0 && alt.family != fam {
+				continue
+			}
+			out = append(out, strings.TrimSpace(alt.clause+" "+line))
 		}
 	}
 	return out, nil
 }
 
-// scheduleSets returns the time sets the kernel-decided rules reference,
+// scheduleSets returns the time sets the rules nftables guards reference,
 // by name.
 func (p *predicates) scheduleSets() []scheduleSet {
 	byName := map[string]scheduleSet{}
 	for _, e := range p.snap.Firewall {
-		if !p.kernelDecided(e) || !e.HasSchedulePredicate() {
+		if queuedToEngine(e, p.queueID) || !e.HasSchedulePredicate() {
 			continue
 		}
 		// An invalid schedule fails CompileFirewall in alternatives.
@@ -123,13 +160,13 @@ func (p *predicates) scheduleSets() []scheduleSet {
 	return out
 }
 
-// writeSets declares the identity and schedule sets the kernel-decided rules
-// reference, with c's schedule horizon.
+// writeSets declares the identity and schedule sets the rules nftables
+// guards reference, with c's schedule horizon.
 func (p *predicates) writeSets(buf *bytes.Buffer, c *Compiler) error {
 	var ids []identitySet
 	seen := map[identitySet]bool{}
 	for _, e := range p.snap.Firewall {
-		if !p.kernelDecided(e) {
+		if queuedToEngine(e, p.queueID) {
 			continue
 		}
 		for _, set := range p.identities.identitySets(e) {
@@ -175,7 +212,10 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 	if !p.rechecks() {
 		return nil
 	}
-	entries := kernelOrder(p.snap.Firewall)
+	var entries []rules.Entry
+	for _, i := range rules.DecisionOrder(p.snap.Firewall) {
+		entries = append(entries, p.snap.Firewall[i])
+	}
 	var scope, policy []string
 	add := func(dst *[]string, lines []string) {
 		for _, l := range lines {
@@ -212,7 +252,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		if err != nil {
 			return err
 		}
-		lines, err := p.ctLines(e, alts, recheckVerdict(e.Action))
+		lines, err := p.ctLines(e, clauses(alts), recheckVerdict(e.Action))
 		if err != nil {
 			return err
 		}
@@ -234,21 +274,6 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		buf.WriteString("  }\n")
 	}
 	return nil
-}
-
-// kernelOrder returns firewall entries in the order nftables decides them:
-// every ALLOW first, then the other rules, each group by rule ID, so any
-// matching ALLOW takes precedence.
-func kernelOrder(firewall []rules.Entry) []rules.Entry {
-	entries := append([]rules.Entry(nil), firewall...)
-	sort.SliceStable(entries, func(i, j int) bool {
-		ai, aj := entries[i].Action, entries[j].Action
-		if ai != aj {
-			return ai == rules.ActionAllow
-		}
-		return entries[i].ID < entries[j].ID
-	})
-	return entries
 }
 
 // recheckVerdict is the recheck form of a terminal action: an ALLOW returns
@@ -310,20 +335,20 @@ func (p *predicates) ctLines(e rules.Entry, alts []string, verdict string) ([]st
 }
 
 // verdictsFor returns the verdict clauses of one protocol line: a reject is
-// a TCP reset for TCP and ICMP administratively prohibited otherwise, so an
-// any-protocol line splits into a TCP line and one for the rest.
+// RESET's (actions.go), a TCP reset for TCP and ICMP administratively
+// prohibited otherwise, so an any-protocol line splits into a TCP line and
+// one for the rest.
 func verdictsFor(verdict string, proto rules.Protocol) [][]string {
 	if verdict != "reject" {
 		return [][]string{{verdict}}
 	}
-	const tcpReset, prohibited = "reject with tcp reset", "reject with icmpx type admin-prohibited"
-	switch strings.ToLower(strings.TrimSpace(proto.Name)) {
+	switch protocolName(proto) {
 	case "tcp":
-		return [][]string{{tcpReset}}
+		return [][]string{{rejectTCP}}
 	case "":
-		return [][]string{{"meta l4proto tcp", tcpReset}, {prohibited}}
+		return [][]string{{"meta l4proto tcp", rejectTCP}, {rejectOther}}
 	default:
-		return [][]string{{prohibited}}
+		return [][]string{{rejectOther}}
 	}
 }
 

@@ -298,6 +298,9 @@ func TestRulePrefixREAcceptsTypicalForms(t *testing.T) {
 		{"containd:deny-enterprise-to-field:DENY ", "deny-enterprise-to-field", "DENY"},
 		{"containd:rtac-to-field-modbus:ALLOW", "rtac-to-field-modbus", "ALLOW"},
 		{"containd:underscores_ok_too:ALLOW ", "underscores_ok_too", "ALLOW"},
+		{"containd:reject-telnet:RESET ", "reject-telnet", "RESET"},
+		{"containd:police-udp:RATE_LIMIT ", "police-udp", "RATE_LIMIT"},
+		{"containd:label-plc:TAG ", "label-plc", "TAG"},
 	}
 	for _, c := range cases {
 		c := c

@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -234,7 +235,7 @@ func TestUSRulesetUnchangedByEnvelopeState(t *testing.T) {
 	if got := nft.scripts[len(nft.scripts)-1]; got != before || len(nft.scripts) != 2 {
 		t.Fatalf("a US-only ruleset changed with the queue state (%d scripts):\n%s", len(nft.scripts), got)
 	}
-	if !strings.Contains(before, "tcp dport 502 queue num 101") {
+	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 101;`).MatchString(before) {
 		t.Fatalf("US Modbus steering missing:\n%s", before)
 	}
 }

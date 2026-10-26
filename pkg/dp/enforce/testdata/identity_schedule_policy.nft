@@ -7,6 +7,27 @@ table inet containd_policy {
     type ifname;
     elements = { "eth3" }
   }
+  counter rule_e46809cebc7cc53f { }
+  counter rule_1c9c3b11547dfb5f { }
+  counter rule_67fe7e32fdfbb751 { }
+  counter rule_4b5e57f6eb2f42b9 { }
+  counter rule_f07ca10904fa3309 { }
+  counter rule_0fcbbe08bd166a2d { }
+  counter rule_c49334305af8aacf { }
+  counter rule_c49334305af8aacf_excess { }
+  set rule_c49334305af8aacf_m4p {
+    type ipv4_addr . ipv4_addr . inet_proto . inet_service . inet_service;
+    size 65536;
+    flags dynamic,timeout;
+    timeout 10s;
+  }
+  set rule_c49334305af8aacf_m6p {
+    type ipv6_addr . ipv6_addr . inet_proto . inet_service . inet_service;
+    size 65536;
+    flags dynamic,timeout;
+    timeout 10s;
+  }
+  counter rule_7fc5d744a9911745 { }
   set identity4_636f6e74726163746f72 {
     type ipv4_addr;
     elements = { 10.3.0.9 }
@@ -35,6 +56,7 @@ table inet containd_policy {
     ct direction reply iifname { "eth1" } oifname { "eth3" } goto conditional_policy;
     ct direction original iifname { "eth3" } goto conditional_policy;
     ct direction reply oifname { "eth3" } goto conditional_policy;
+    meta l4proto tcp ct reply proto-src 23 goto conditional_policy;
   }
   chain conditional_policy {
     ct status dnat return;
@@ -46,6 +68,7 @@ table inet containd_policy {
     meta l4proto tcp ct reply proto-src 443 return;
     ct direction original iifname { "eth3" } ct original ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b drop;
     ct direction reply oifname { "eth3" } ct original ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b drop;
+    meta l4proto tcp ct reply proto-src 23 ct original ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b reject with tcp reset;
     drop;
   }
   chain input {
@@ -60,13 +83,18 @@ table inet containd_policy {
   chain forward {
     type filter hook forward priority 0;
     policy drop;
-    tcp dport 502 ip daddr { 10.1.0.0/24 } queue num 100;
+    ct original ip saddr @identity4_656e67696e656572 meta nfproto ipv4 udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    ct original ip6 saddr @identity6_656e67696e656572 meta nfproto ipv6 udp dport 161 counter name "rule_c49334305af8aacf" update @rule_c49334305af8aacf_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 10/second burst 10 packets } counter name "rule_c49334305af8aacf_excess" drop;
+    tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_f07ca10904fa3309" queue num 100;
     ct state established jump conditional_scope;
     ct state { established, related } accept;
-    ip saddr @identity4_656e67696e656572 tcp dport 22 accept;
-    ip6 saddr @identity6_656e67696e656572 tcp dport 22 accept;
-    meta time @schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b iifname { "eth3" } oifname { "eth1" } accept;
-    tcp dport 443 accept;
-    ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b iifname { "eth3" } drop;
+    ip saddr @identity4_656e67696e656572 counter name "rule_7fc5d744a9911745";
+    ip6 saddr @identity6_656e67696e656572 counter name "rule_7fc5d744a9911745";
+    ip saddr @identity4_656e67696e656572 tcp dport 22 counter name "rule_1c9c3b11547dfb5f" accept;
+    ip6 saddr @identity6_656e67696e656572 tcp dport 22 counter name "rule_1c9c3b11547dfb5f" accept;
+    meta time @schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b iifname { "eth3" } oifname { "eth1" } counter name "rule_e46809cebc7cc53f" accept;
+    tcp dport 443 counter name "rule_4b5e57f6eb2f42b9" accept;
+    ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b iifname { "eth3" } counter name "rule_67fe7e32fdfbb751" drop;
+    ip saddr @identity4_636f6e74726163746f72 meta time @schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b tcp dport 23 counter name "rule_0fcbbe08bd166a2d" reject with tcp reset;
   }
 }

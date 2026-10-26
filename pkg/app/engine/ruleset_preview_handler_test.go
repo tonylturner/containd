@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func TestRulesetPreviewHandler(t *testing.T) {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
 	if !strings.Contains(preview.Ruleset, "group 205") || !strings.Contains(preview.Ruleset, "table inet candidate") ||
-		!strings.Contains(preview.Ruleset, "tcp dport 502 queue num 209") ||
+		!regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 209;`).MatchString(preview.Ruleset) ||
 		!strings.Contains(preview.Runtime.Reason, "not owned") || dp.CurrentRules() != nil {
 		t.Fatalf("candidate preview = %+v", preview)
 	}

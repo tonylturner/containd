@@ -20,7 +20,7 @@ func TestMaintenanceTemplateWindow(t *testing.T) {
 			at     time.Time
 			active bool
 		}{
-			{time.Date(2026, 10, 31, 6, 0, 0, 0, time.UTC), true},  // Saturday 02:00 EDT
+			{time.Date(2026, 10, 31, 6, 0, 0, 0, time.UTC), true},   // Saturday 02:00 EDT
 			{time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC), false}, // Saturday 06:00 EDT
 			{time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), false},  // Sunday 01:30 EST
 			{time.Date(2026, 11, 1, 7, 0, 0, 0, time.UTC), true},    // Sunday 02:00 EST

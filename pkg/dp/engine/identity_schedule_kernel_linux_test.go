@@ -11,6 +11,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -227,10 +228,11 @@ func tcpPorts(lo, hi int) []rules.Protocol {
 }
 
 // TestKernelIdentityBindings: only a bound opener with a listed label is
-// admitted, and removing its binding stops its established connection in
-// both directions, except one that an unconditional ALLOW also admits.
+// admitted, a RESET with identities rejects only its bound openers, and
+// removing a binding stops its established connection in both directions,
+// except one that an unconditional ALLOW also admits.
 func TestKernelIdentityBindings(t *testing.T) {
-	l := newKSLab(t, 0, 7000, 7001)
+	l := newKSLab(t, 0, 7000, 7001, 7006)
 	ops, guest, unbound := "198.18.50.11", "198.18.50.12", "198.18.50.13"
 	snap := rules.Snapshot{
 		Default: rules.ActionDeny,
@@ -241,6 +243,7 @@ func TestKernelIdentityBindings(t *testing.T) {
 		Firewall: []rules.Entry{
 			{ID: "operators", Identities: []string{"operator"}, Protocols: tcpPorts(7000, 7001), Action: rules.ActionAllow},
 			{ID: "open-7001", Protocols: []rules.Protocol{{Name: "tcp", Port: "7001"}}, Action: rules.ActionAllow},
+			{ID: "reset-guests", Identities: []string{"guest"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "7006"}}, Action: rules.ActionReset},
 		},
 	}
 	l.apply(snap)
@@ -248,6 +251,14 @@ func TestKernelIdentityBindings(t *testing.T) {
 	alsoOpen := l.connect(ops, 7001)
 	l.refused(unbound, 7000)
 	l.refused(guest, 7000)
+	// The guest's SYN is reset at once; the unbound opener's is dropped by
+	// the default and times out.
+	if _, err := l.dial(guest, 7006); !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Fatalf("guest -> 7006: %v, want a reset", err)
+	}
+	if _, err := l.dial(unbound, 7006); err == nil || errors.Is(err, syscall.ECONNREFUSED) {
+		t.Fatalf("unbound -> 7006: %v, want a silent drop", err)
+	}
 
 	snap.IdentityBindings = snap.IdentityBindings[1:]
 	l.apply(snap)

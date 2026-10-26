@@ -19,7 +19,8 @@ var maintenanceWindow = rules.SchedulePredicate{DaysOfWeek: []string{"Saturday",
 
 // goldenSnapshot is a maintenance-window policy with identities: a scheduled
 // zone ALLOW, an identity ALLOW, a scheduled identity DENY, an unconditional
-// ALLOW and a queued Modbus rule with an identity.
+// ALLOW, a queued Modbus rule with an identity, and RESET, RATE_LIMIT and
+// TAG rules with identities.
 func goldenSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
 		Default:    rules.ActionDeny,
@@ -36,6 +37,10 @@ func goldenSnapshot() *rules.Snapshot {
 			{ID: "web", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Action: rules.ActionAllow},
 			{ID: "modbus", Destinations: []string{"10.1.0.0/24"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
 				ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}}, Identities: []string{"engineer"}, Action: rules.ActionAllow},
+			{ID: "reset-telnet", Identities: []string{"contractor"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}, Action: rules.ActionReset, Schedule: maintenanceWindow},
+			{ID: "snmp-meter", Identities: []string{"engineer"}, Protocols: []rules.Protocol{{Name: "udp", Port: "161"}},
+				Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10}},
+			{ID: "tag-engineers", Identities: []string{"engineer"}, Action: rules.ActionTag, Tag: "engineering"},
 		},
 	}
 }
@@ -215,7 +220,7 @@ func TestIdentityLowering(t *testing.T) {
 			{ID: "e-both", Identities: []string{"ops", "ops"}, Protocols: []rules.Protocol{{Name: "udp", Port: "161"}}, Action: rules.ActionDeny},
 		},
 	}
-	out, err := NewCompiler().CompileFirewall(snap)
+	out, err := compileWithoutCounters(NewCompiler(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +257,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 		ICS: rules.ICSPredicate{Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow, Schedule: maintenanceWindow}
 	snap := &rules.Snapshot{Firewall: []rules.Entry{entry}, IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}}}
 	c := goldenCompiler()
-	queued, err := c.CompileFirewall(snap)
+	queued, err := compileWithoutCounters(c, snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +266,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 		t.Fatalf("queued rule was guarded:\n%s", queued)
 	}
 	c.QueueID = 0
-	plain, err := c.CompileFirewall(snap)
+	plain, err := compileWithoutCounters(c, snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,8 +302,8 @@ func TestRecheckVerdicts(t *testing.T) {
 	want := "  chain conditional_scope {\n    goto conditional_policy;\n  }\n" +
 		"  chain conditional_policy {\n    ct status dnat return;\n" +
 		"    meta time " + set + " meta l4proto tcp reject with tcp reset;\n" +
-		"    meta time " + set + " reject with icmpx type admin-prohibited;\n" +
-		"    meta l4proto udp ct reply proto-src 53 reject with icmpx type admin-prohibited;\n" +
+		"    meta time " + set + " reject with icmpx admin-prohibited;\n" +
+		"    meta l4proto udp ct reply proto-src 53 reject with icmpx admin-prohibited;\n" +
 		"    return;\n  }\n"
 	if b.String() != want {
 		t.Fatalf("recheck chains:\n%s\nwant:\n%s", b.String(), want)
@@ -344,5 +349,58 @@ func TestTemplatesCompileToTimeSets(t *testing.T) {
 				parseIntervals(t, strings.Split(m[1], ", "))
 			}
 		}
+	}
+}
+
+// TestPredicatesOnEveryAction: RESET, RATE_LIMIT and TAG lines carry the
+// rule's identity and schedule clauses like ALLOW and DENY lines. A meter
+// line matches the opener from conntrack, since it meters both directions,
+// takes only its address family's identity sets, and an identity nothing
+// binds leaves no line, whatever the action.
+func TestPredicatesOnEveryAction(t *testing.T) {
+	bindings := []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}, {IP: "2001:db8::6", Identities: []string{"ops"}}}
+	ops := "ip saddr @identity4_6f7073"
+	ops6 := "ip6 saddr @identity6_6f7073"
+	set := "meta time @schedule_deny_40_0120_0360_555443"
+	window := rules.SchedulePredicate{DaysOfWeek: []string{"Saturday"}, StartTime: "02:00", EndTime: "06:00"}
+	for _, tc := range []struct {
+		name  string
+		entry rules.Entry
+		want  []string
+	}{
+		{"reset", rules.Entry{ID: "r", Action: rules.ActionReset, Identities: []string{"ops"}, Schedule: window,
+			Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}},
+			[]string{ops + " " + set + " tcp dport 23 reject with tcp reset", ops6 + " " + set + " tcp dport 23 reject with tcp reset"}},
+		{"tag", rules.Entry{ID: "t", Action: rules.ActionTag, Tag: "ops", Identities: []string{"ops"},
+			Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}},
+			[]string{ops + " tcp dport 23", ops6 + " tcp dport 23"}},
+		{"rate limit", rules.Entry{ID: "m", Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10},
+			Identities: []string{"ops"}, Protocols: []rules.Protocol{{Name: "udp", Port: "161"}}},
+			[]string{"ct original " + ops + " meta nfproto ipv4 udp dport 161", "ct original " + ops6 + " meta nfproto ipv6 udp dport 161"}},
+		{"unbound tag", rules.Entry{ID: "u", Action: rules.ActionTag, Tag: "x", Identities: []string{"nobody"}}, nil},
+		{"unbound rate limit", rules.Entry{ID: "v", Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10},
+			Identities: []string{"nobody"}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := newPredicates(&rules.Snapshot{IdentityBindings: bindings, Firewall: []rules.Entry{tc.entry}}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, err := compileEntryWithoutCounters(tc.entry, nil, 0, 0)
+			if err == nil {
+				lines, err = p.guard(tc.entry, lines)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(lines) != len(tc.want) {
+				t.Fatalf("lines = %q, want prefixes %q", lines, tc.want)
+			}
+			for i, want := range tc.want {
+				if !strings.HasPrefix(lines[i], want) {
+					t.Fatalf("line %d = %q, want prefix %q", i, lines[i], want)
+				}
+			}
+		})
 	}
 }

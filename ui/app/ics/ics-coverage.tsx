@@ -38,27 +38,41 @@ export function ICSCoverageCell({ view, ruleId }: { view: ICSCoverageView; ruleI
   );
 }
 
-/** Why per-rule coverage is missing or incomplete; nothing when it is complete. */
+function formatTime(value: string): string {
+  const t = new Date(value);
+  return Number.isNaN(t.getTime()) ? value : t.toLocaleString();
+}
+
+const MODE_ALONE = "A configured mode alone does not show that a rule is enforced.";
+
+/** Why coverage is missing or stale; nothing when both sides are known. */
 export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
-  let message: string | null = null;
-  if (view.status === "restricted") {
-    message = "Per-rule ICS coverage requires admin access. A configured mode alone does not show that a rule is enforced.";
-  } else if (view.status === "unavailable") {
-    message = `ICS coverage unavailable: ${view.error}. A configured mode alone does not show that a rule is enforced.`;
-  } else if (view.status === "loaded" && view.appliedError) {
-    message = `Applied ICS coverage unavailable: ${view.appliedError}. Candidate coverage is shown where known.`;
+  const warnings: string[] = [];
+  if (view.status === "unavailable") {
+    warnings.push(`ICS coverage unavailable: ${view.error}. ${MODE_ALONE}`);
+  } else if (view.status === "loaded") {
+    if (view.candidateError) {
+      warnings.push(`Candidate ICS coverage unavailable: ${view.candidateError}`);
+    }
+    if (view.appliedError) {
+      warnings.push(`Applied ICS coverage unknown: ${view.appliedError}. ${MODE_ALONE}`);
+    }
   }
+  const loaded = view.status === "loaded" ? view : null;
   return (
     <>
-      {message && (
-        <div role="status" className="mb-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
-          {message}
+      {warnings.map((w) => (
+        <div key={w} role="status" className="mb-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
+          {w}
+        </div>
+      ))}
+      {loaded?.applyError && (
+        <div role="status" className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
+          The last apply failed: {loaded.applyError}. Applied coverage describes the rules still in force from before it.
         </div>
       )}
-      {view.status === "loaded" && view.applyError && (
-        <div role="status" className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
-          The engine reported an apply error: {view.applyError}
-        </div>
+      {loaded?.appliedAt && (
+        <p className="mb-3 text-xs text-(--text-muted)">Last apply attempt: {formatTime(loaded.appliedAt)}</p>
       )}
     </>
   );

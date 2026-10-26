@@ -389,6 +389,7 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 		return err
 	}
 	ruleIDs := map[string]struct{}{}
+	tagLabels := map[string]struct{}{}
 	for _, r := range f.Rules {
 		if r.ID == "" {
 			return errors.New("firewall rule ID cannot be empty")
@@ -397,11 +398,8 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 			return fmt.Errorf("duplicate firewall rule ID: %s", r.ID)
 		}
 		ruleIDs[r.ID] = struct{}{}
-		if r.Action != ActionAllow && r.Action != ActionDeny {
-			return fmt.Errorf("rule %s has invalid action %q", r.ID, r.Action)
-		}
-		if r.RateLimit != nil || r.Tag != "" {
-			return fmt.Errorf("rule %s: rateLimit and tag need the RATE_LIMIT and TAG actions, which are not supported yet", r.ID)
+		if err := validateRuleAction(r, tagLabels); err != nil {
+			return err
 		}
 		for _, z := range append(r.SourceZones, r.DestZones...) {
 			if z == "" {

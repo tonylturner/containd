@@ -64,6 +64,8 @@ type compiledEntry struct {
 type Evaluator struct {
 	snapshot *Snapshot
 	compiled []compiledEntry
+	decide   []int // deciding entries in DecisionOrder
+	tags     []int // TAG entries
 }
 
 func NewEvaluator(snap *Snapshot) *Evaluator {
@@ -81,6 +83,8 @@ func (e *Evaluator) compile() {
 	for i, entry := range e.snapshot.Firewall {
 		e.compiled[i] = CompileEntry(entry)
 	}
+	e.decide = DecisionOrder(e.snapshot.Firewall)
+	e.tags = tagIndexes(e.snapshot.Firewall)
 }
 
 // CompileEntry pre-parses a single Entry for preview matching.
@@ -145,14 +149,16 @@ func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 	return action
 }
 
-// EvaluateMatch returns the action and the matched Entry (or nil if no rule matched).
+// EvaluateMatch returns the decision for ctx and the deciding Entry, or nil
+// when the default decides. Any matching ALLOW wins; otherwise the first
+// matching DENY or RESET by rule ID decides (DecisionOrder). RATE_LIMIT and
+// TAG entries never decide.
 func (e *Evaluator) EvaluateMatch(ctx EvalContext) (Action, *Entry) {
 	if e.snapshot == nil {
 		return ActionDeny, nil
 	}
-	for i := range e.compiled {
-		ce := &e.compiled[i]
-		if matchZones(ce.Entry, ctx) && matchCIDRs(ce.Entry, ctx) && matchProtoCompiled(ce, ctx) && matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce.Entry, ctx) {
+	for _, i := range e.decide {
+		if ce := &e.compiled[i]; ce.matches(ctx) {
 			return ce.Action, &ce.Entry
 		}
 	}

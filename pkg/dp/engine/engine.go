@@ -672,6 +672,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 	}
 	state := flow.NewState(key, now)
 	state.IdleTimeout = 5 * time.Minute
+	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
 	metrics.FlowsActive.Inc()
 	return state

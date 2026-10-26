@@ -9,7 +9,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func compileMgmtLocalInput(cfg *config.Config) []rules.LocalServiceRule {
+// ManagementLocalInput derives the management listener INPUT allows from the
+// stored interface access grants. It is shared by the compiled policy and by
+// management recovery, which keeps exactly this access when it drops transit.
+func ManagementLocalInput(cfg *config.Config) []rules.LocalServiceRule {
 	httpAddr := cfg.System.Mgmt.HTTPListenAddr
 	if strings.TrimSpace(httpAddr) == "" {
 		httpAddr = cfg.System.Mgmt.ListenAddr
@@ -72,7 +75,7 @@ func UnboundManagementPorts(cfg *config.Config, live []string) []int {
 	if cfg == nil {
 		return ports
 	}
-	for _, rule := range compileMgmtLocalInput(cfg) {
+	for _, rule := range ManagementLocalInput(cfg) {
 		if _, recovery := mgmtpath.ResolveBindings(rule.Ifaces, rule.DeniedIfaces, live); recovery {
 			ports = append(ports, rule.Port)
 		}

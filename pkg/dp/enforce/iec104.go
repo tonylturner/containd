@@ -109,9 +109,9 @@ func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
 }
 
 // compileIEC104Steering returns the client-to-server and server-to-client
-// steering lines for one IEC104 rule.
+// steering lines for one IEC104 rule, which count into the rule's counter.
 func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string) []string {
-	verdict := "jump " + IEC104EnvelopeChain
+	verdict := counterStmt(e.ID) + " jump " + IEC104EnvelopeChain
 	steer := func(inZones, outZones []string, port string, src, dst []string) string {
 		parts := []string{}
 		if c := zoneClause("iifname", inZones, zoneIfaces); c != "" {

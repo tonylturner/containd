@@ -232,7 +232,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
-	event, err := recordReservationBootDecision(logger, stores, cfg, r)
+	event, err := recordBootDecision(logger, stores, cfg, r)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()

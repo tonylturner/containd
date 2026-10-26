@@ -84,7 +84,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		if entry.ICS.Protocol == rules.ProtocolIEC104 {
 			_, matched = evaluator.EvaluateIEC104(ctx)
 		} else {
-			_, matched = evaluator.EvaluateMatch(ctx)
+			matched = evaluator.AnyMatch(ctx)
 		}
 		if matched == nil {
 			continue

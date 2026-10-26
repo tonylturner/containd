@@ -14,19 +14,16 @@ import (
 
 // getICSCoverageHandler reports the coverage of the candidate's and the
 // applied ICS rules to any authenticated user, without the ruleset. Each
-// side is reported independently: an invalid candidate sets candidateError
-// and omits candidate, an unreadable engine sets engineStatusError and
+// side is reported independently: an unreadable or invalid candidate sets
+// candidateError and omits candidate, an unreadable engine sets engineStatusError and
 // omits applied, and neither hides the other.
 func getICSCoverageHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		cfg, err := store.LoadCandidate(ctx)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
 		resp := gin.H{}
-		if candidate, err := candidateCoverage(store, cfg); err != nil {
+		if cfg, err := store.LoadCandidate(ctx); err != nil {
+			resp["candidateError"] = "candidate config unavailable"
+		} else if candidate, err := candidateCoverage(store, cfg); err != nil {
 			resp["candidateError"] = err.Error()
 		} else {
 			resp["candidate"] = candidate

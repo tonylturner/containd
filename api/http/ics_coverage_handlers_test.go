@@ -102,6 +102,22 @@ func TestICSCoverageWithInvalidCandidate(t *testing.T) {
 	}
 }
 
+func TestICSCoverageWithUnreadableCandidate(t *testing.T) {
+	store := &mockStore{load: func() (*config.Config, error) { return nil, errors.New("disk gone") }}
+	applied := []coverage.Rule{{RuleID: "modbus-read", Protocol: "modbus", Mode: "learn", State: coverage.Monitoring}}
+	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: dpengine.RulesetStatus{AppliedAt: time.Now(), ICSCoverage: applied}}}
+	body := getICSCoverage(t, store, engine)
+	if _, ok := body["candidate"]; ok {
+		t.Fatalf("unreadable candidate evaluated: %s", body["candidate"])
+	}
+	if got := string(body["candidateError"]); got != `"candidate config unavailable"` {
+		t.Fatalf("candidateError = %s", got)
+	}
+	if got := decodeRules(t, body["applied"]); !reflect.DeepEqual(got, applied) {
+		t.Fatalf("applied = %+v", got)
+	}
+}
+
 func TestICSCoverageWithoutEngine(t *testing.T) {
 	for name, engine := range map[string]EngineClient{
 		"no engine":    nil,

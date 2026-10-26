@@ -280,7 +280,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 				t.Fatalf("conntrack limit = %q", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"entries": []conntrack.Entry{{Proto: "tcp", State: "ESTABLISHED", Src: "192.0.2.10", Dst: "192.0.2.20"}},
+				"entries": []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", State: "ESTABLISHED", Src: "192.0.2.10", Dst: "192.0.2.20"}, Tags: []string{"plc"}}},
 			})
 		case http.MethodPost:
 			var req conntrack.KillRequest
@@ -396,7 +396,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("ClearInventory: %v", err)
 	}
 	entries, err := c.ListConntrack(ctx, 2)
-	if err != nil || len(entries) != 1 || entries[0].State != "ESTABLISHED" {
+	if err != nil || len(entries) != 1 || entries[0].State != "ESTABLISHED" || len(entries[0].Tags) != 1 || entries[0].Tags[0] != "plc" {
 		t.Fatalf("ListConntrack = %#v, %v", entries, err)
 	}
 	if result, err := c.DeleteConntrack(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: "tcp", Src: "192.0.2.10", Dst: "192.0.2.20", Sport: 1234, Dport: 443}}); err != nil || !result.RevocationInstalled {
