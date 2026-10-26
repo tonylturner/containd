@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"reflect"
 	"regexp"
 	"strings"
@@ -15,10 +16,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -36,19 +39,14 @@ func TestRulesetPreviewHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	previewRulesetHandler(dp).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/ruleset/preview", bytes.NewReader(body)))
-	var preview engine.RulesetPreview
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
 	snap, err := compile.CompileSnapshot(cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	rec := postRulesetPreview(t, dp, cfg, snap)
+	var preview engine.RulesetPreview
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	want, err := enforce.NewCompilerWithSettings(compilerSettings(cfg.DataPlane), nil).CompileFirewall(&snap)
 	if err != nil || preview.Ruleset != want || preview.Runtime.IEC104EnvelopeOpen {
@@ -92,13 +90,12 @@ func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 			}
 			cfg := config.DefaultConfig()
 			cfg.DataPlane = config.DataPlaneConfig{Enforcement: false, EnforceTable: "never_applied", NFLogGroup: 205, NFQueueGroup: 209}
-			body, err := json.Marshal(cfg)
+			snap, err := compile.CompileSnapshot(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
 			before := dp.RulesetStatus()
-			rec := httptest.NewRecorder()
-			previewRulesetHandler(dp).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/ruleset/preview", bytes.NewReader(body)))
+			rec := postRulesetPreview(t, dp, cfg, snap)
 			var got map[string]json.RawMessage
 			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -128,7 +125,8 @@ func TestRulesetPreviewHandlerErrors(t *testing.T) {
 		{"method", http.MethodGet, "", dp, http.StatusMethodNotAllowed},
 		{"offline", http.MethodPost, "{}", nil, http.StatusServiceUnavailable},
 		{"JSON", http.MethodPost, "{", dp, http.StatusBadRequest},
-		{"candidate", http.MethodPost, `{"firewall":{"rules":[{"id":"bad","action":"INVALID"}]}}`, dp, http.StatusBadRequest},
+		{"no config", http.MethodPost, `{"snapshot":{}}`, dp, http.StatusBadRequest},
+		{"snapshot", http.MethodPost, `{"config":{"dataplane":{"enforcement":true}},"snapshot":{"ZoneIfaces":{"lan":["interface-name-too-long"]}}}`, dp, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -138,4 +136,51 @@ func TestRulesetPreviewHandlerErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The engine previews the snapshot management sent, so its management INPUT
+// is management's: a separate engine process neither re-resolves the
+// listeners under its own environment nor drops management's bound ones.
+func TestRulesetPreviewHandlerUsesManagementSnapshot(t *testing.T) {
+	dp := newCountingDP(t).Engine
+	cfg := config.DefaultConfig()
+	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true}
+	snap, err := compile.CompileSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.LocalInput = append(snap.LocalInput, rules.LocalServiceRule{ID: "auto-allow-mgmt-http-bound", Proto: "tcp", Port: 18080, RecoverUnbound: true})
+	rec := postRulesetPreview(t, dp, cfg, snap)
+	var preview engine.RulesetPreview
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !reflect.DeepEqual(preview.Snapshot.LocalInput, snap.LocalInput) || !strings.Contains(preview.Ruleset, "tcp dport 18080") {
+		t.Fatalf("preview dropped management's INPUT: %+v\n%s", preview.Snapshot.LocalInput, preview.Ruleset)
+	}
+}
+
+func TestRulesetPreviewHandlerRejectsReservationConflict(t *testing.T) {
+	r := &mgmtpath.Reservation{Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
+	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: true, ManagementReservation: r}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.DataPlane = config.DataPlaneConfig{Enforcement: false}
+	rec := postRulesetPreview(t, dp, cfg, rules.Snapshot{})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "reserved management path") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func postRulesetPreview(t *testing.T, dp *engine.Engine, cfg *config.Config, snap rules.Snapshot) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(rulesetPreviewRequest{Config: cfg, Snapshot: snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	previewRulesetHandler(dp).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/ruleset/preview", bytes.NewReader(body)))
+	return rec
 }

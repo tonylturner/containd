@@ -218,11 +218,9 @@ default (HTTP `:8080`, HTTPS `:8443`, SSH `:2222`). HTTP and HTTPS are served
 unless `enableHTTP` or `enableHTTPS` is false. Until a restart binds a
 committed listener change, INPUT also keeps admitting the listeners
 management has bound, so the commit cannot lock management out of the
-sockets that still serve. In split mode the engine compiles ruleset previews
-with its own environment and without the management process's bound
-listeners: give both processes the same listener variables, and expect a
-preview to omit the bound listeners while a listener change waits for a
-restart.
+sockets that still serve. Management compiles this INPUT for both apply and
+the ruleset preview, so a split-mode engine previews the same listener
+allows that management applies.
 
 ## Faults and visibility
 

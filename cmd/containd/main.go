@@ -99,18 +99,25 @@ func main() {
 	}
 }
 
-func runHealthcheck() error {
-	addr := common.Env("CONTAIND_MGMT_ADDR", "")
-	if addr == "" {
-		addr = ":8080"
+// loopbackManagementURL is the loopback base URL of the management HTTP
+// listener this process's environment selects: CONTAIND_MGMT_ADDR, else
+// the default. Management serves its HTTP port on 127.0.0.1 too.
+func loopbackManagementURL() (string, error) {
+	l := config.ResolveManagementListeners(nil, config.ProcessEnv).HTTP
+	port := l.Port()
+	if port == 0 {
+		return "", fmt.Errorf("management HTTP address %q names no port", l.Addr)
 	}
-	// Strip bind address, keep port.
-	port := addr
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		port = addr[idx+1:]
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+}
+
+func runHealthcheck() error {
+	baseURL, err := loopbackManagementURL()
+	if err != nil {
+		return err
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/api/v1/health", port))
+	resp, err := client.Get(baseURL + "/api/v1/health")
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -122,15 +129,10 @@ func runHealthcheck() error {
 }
 
 func runCLI(ctx context.Context) error {
-	addr := common.Env("CONTAIND_MGMT_ADDR", "")
-	if addr == "" {
-		addr = ":8080"
+	baseURL, err := loopbackManagementURL()
+	if err != nil {
+		return err
 	}
-	port := addr
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		port = addr[idx+1:]
-	}
-	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 
 	token, err := cliLogin(baseURL)
 	if err != nil {
