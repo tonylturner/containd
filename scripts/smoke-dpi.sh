@@ -33,7 +33,6 @@ WAN_NET=${SMOKE_WAN_NET:-172.30.0}
 LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
-ENGINE=${ENGINE:-http://localhost:18081}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 CURL="curl -sf --max-time 10 --connect-timeout 5"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
@@ -68,6 +67,9 @@ check_fail() { FAILURES+=("$*"); log "FAIL: $*"; }
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
+
+# shellcheck source=scripts/smoke-engine-api.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 
 # COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
 # override file can follow the base harness file.
@@ -120,7 +122,7 @@ wait_for_jq() {
 }
 
 apply_snapshot() {
-  local ruleset_file snap ruleset_head tmp_cfg code tmp_apply_resp
+  local ruleset_file snap ruleset_head code tmp_apply_resp
   ruleset_file=$(mktemp)
   if ! $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset_file"; then
     log "failed to fetch ruleset preview"
@@ -134,10 +136,7 @@ apply_snapshot() {
   rm -f "$ruleset_file"
 
   log "Applying dataplane configuration to engine..."
-  tmp_cfg=$(mktemp)
-  printf '%s' "$DATAPLANE_CFG" >"$tmp_cfg"
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data-binary @"$tmp_cfg" -o "$WORK_DIR/smoke-dpi-engine-config.out" || true)
-  rm -f "$tmp_cfg"
+  code=$(engine_post engine /internal/config "$WORK_DIR/smoke-dpi-engine-config.out" <<<"$DATAPLANE_CFG")
   if [[ "$code" != "200" ]]; then
     log "engine config failed (HTTP $code): $(cat "$WORK_DIR/smoke-dpi-engine-config.out")"
     exit 1
@@ -145,7 +144,7 @@ apply_snapshot() {
 
   log "Applying snapshot to engine..."
   tmp_apply_resp=$(mktemp)
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/apply_rules" --data "$snap" -o "$tmp_apply_resp" || true)
+  code=$(engine_post engine /internal/apply_rules "$tmp_apply_resp" <<<"$snap")
   if [[ "$code" != "200" ]]; then
     log "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"
     rm -f "$tmp_apply_resp"

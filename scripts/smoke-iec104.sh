@@ -89,7 +89,6 @@ GATE_FAIL_COUNT=0
 NOT_IMPL_COUNT=0
 ABORTED=0
 BASE=""
-ENGINE=""
 CC_LAST_POLICY_COT3=0
 
 export IEC104_FIREWALL_IMAGE="$FIREWALL_IMAGE"
@@ -98,6 +97,8 @@ export IEC104_ENDPOINT_IMAGE="$ENDPOINT_IMAGE"
 compose() {
   docker compose --project-name "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
+# shellcheck source=scripts/smoke-engine-api.sh
+source "$ROOT/scripts/smoke-engine-api.sh"
 
 timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { echo "[$(timestamp)] $*"; }
@@ -263,8 +264,7 @@ compose cp "$WORK_DIR/malformer" cc:/usr/local/bin/malformer >/dev/null 2>&1 ||
   log "WARNING: could not install the malformer in the cc container"
 
 BASE="http://127.0.0.1:$(compose port firewall 18080 | awk -F: '{print $NF}')/api/v1"
-ENGINE="http://127.0.0.1:$(compose port firewall 8081 | awk -F: '{print $NF}')"
-log "Management on $BASE, engine on $ENGINE (loopback only)"
+log "Management on $BASE (loopback only); engine API through compose exec"
 
 wait_http "${BASE}/health" || fatal "management plane did not become ready"
 
@@ -336,12 +336,10 @@ apply_config() {
   ruleset="$WORK_DIR/ruleset.json"
   $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
   snap=$(jq -c '.snapshot' "$ruleset")
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" \
-    --data "$(echo "$cfg" | jq -c '.dataPlane')" -o /dev/null 2>/dev/null || true)
-  [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code)"; return 1; }
-  code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/apply_rules" \
-    --data "$snap" -o /dev/null 2>/dev/null || true)
-  [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code)"; return 1; }
+  code=$(echo "$cfg" | jq -c '.dataPlane' | engine_post firewall /internal/config "$resp")
+  [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
+  code=$(engine_post firewall /internal/apply_rules "$resp" <<<"$snap")
+  [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
   CC_LAST_POLICY_COT3=$(cc_count 'cot=3 ' cc.log)
   return 0
 }

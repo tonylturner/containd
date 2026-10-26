@@ -9,8 +9,9 @@ services:
       - NET_ADMIN
       - NET_RAW
       - NET_BIND_SERVICE
+    # The engine API keeps the all-mode loopback default; the smoke scripts
+    # reach it with `docker compose exec`.
     environment:
-      - CONTAIND_ENGINE_ADDR=:8081
       - CONTAIND_MGMT_ADDR=:18080
       - CONTAIND_MGMT_HTTPS_ADDR=:18443
       - CONTAIND_ENGINE_URL=http://127.0.0.1:8081
@@ -30,7 +31,6 @@ services:
         ipv4_address: 172.31.0.2
     command: ["all"]
     ports:
-      - "18081:8081"
       - "18080:18080"
       - "18443:18443"
       - "12222:2222"

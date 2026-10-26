@@ -40,7 +40,6 @@ SMOKE_PROJECT=${SMOKE_PROJECT:-deploy}
 WAN_NET=${SMOKE_WAN_NET:-172.30.0}
 LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
-ENGINE=${ENGINE:-http://localhost:18081}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 CURL="curl -sf --max-time 10 --connect-timeout 5"
@@ -90,6 +89,9 @@ on_exit() {
   fi
 }
 trap on_exit EXIT
+
+# shellcheck source=scripts/smoke-engine-api.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 
 case "$SMOKE_MUTATION" in
   "" | permissive | no-masquerade) ;;
@@ -330,11 +332,15 @@ fi
 SNAP=$(jq -c '.snapshot' "$tmp_ruleset")
 
 log "Enabling enforcement on engine..."
-$CURL -H "Content-Type: application/json" -X POST "${ENGINE}/internal/config" --data '{"enforcement":true,"enforceTable":"containd"}' >/dev/null
+tmp_engine_cfg_resp="$WORK_DIR/tmp_engine_cfg_resp"
+code=$(engine_post engine /internal/config "$tmp_engine_cfg_resp" <<<'{"enforcement":true,"enforceTable":"containd"}')
+if [[ "$code" != "200" ]]; then
+  harness_error "engine config failed (HTTP $code): $(cat "$tmp_engine_cfg_resp")"
+fi
 
 log "Applying snapshot to engine..."
 tmp_apply_resp="$WORK_DIR/tmp_apply_resp"
-code=$($CURL -w "%{http_code}" -H "Content-Type: application/json" -X POST "${ENGINE}/internal/apply_rules" --data "$SNAP" -o "$tmp_apply_resp" || true)
+code=$(engine_post engine /internal/apply_rules "$tmp_apply_resp" <<<"$SNAP")
 if [[ "$code" != "200" ]]; then
   harness_error "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"
 fi
