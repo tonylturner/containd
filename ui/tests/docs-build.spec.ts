@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-test("docs build writes into the UI export and rebuilds a missing site", () => {
+test("docs build writes into the UI export and regenerates on every build", () => {
   const repo = test.info().outputPath("repo");
   const ui = path.join(repo, "ui");
   const bin = path.join(repo, "bin");
@@ -41,9 +41,11 @@ fs.appendFileSync(${JSON.stringify(calls)}, "built\\n");
   expect(existsSync(site)).toBe(true);
   expect(existsSync(path.join(repo, "docs", "public"))).toBe(false);
   expect(readFileSync(calls, "utf8")).toBe("built\n");
-  build();
-  expect(readFileSync(calls, "utf8")).toBe("built\n");
-  unlinkSync(site);
+  // Existing output never short-circuits generation.
   build();
   expect(readFileSync(calls, "utf8")).toBe("built\nbuilt\n");
+  unlinkSync(site);
+  build();
+  expect(existsSync(site)).toBe(true);
+  expect(readFileSync(calls, "utf8")).toBe("built\nbuilt\nbuilt\n");
 });
