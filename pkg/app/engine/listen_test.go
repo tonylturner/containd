@@ -6,6 +6,7 @@ package engineapp
 import (
 	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -20,7 +21,7 @@ func TestListenAddr(t *testing.T) {
 		want     string
 	}{
 		{"combined default", true, "", "127.0.0.1:8081"},
-		{"split default", false, "", ":8081"},
+		{"split has no default", false, "", ""},
 		{"combined override", true, ":9091", ":9091"},
 		{"split override", false, "127.0.0.1:9091", "127.0.0.1:9091"},
 	} {
@@ -82,6 +83,47 @@ func TestEngineAPIPath(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("engineAPIPath(%q) = %+v, want %+v", tc.addr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEngineListener(t *testing.T) {
+	nics := map[string][]netip.Addr{
+		"lo":   {netip.MustParseAddr("127.0.0.1")},
+		"eth1": {netip.MustParseAddr("198.51.100.2")},
+	}
+	reserved := &mgmtpath.Reservation{Device: "eth9", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
+	bound := &enforce.EngineAPIPath{Device: "eth1", Addr: netip.MustParseAddr("198.51.100.2"), Port: 8081}
+	for _, tc := range []struct {
+		name        string
+		addr        string
+		combined    bool
+		reservation *mgmtpath.Reservation
+		want        *enforce.EngineAPIPath
+		err         string
+	}{
+		{name: "combined loopback", addr: "127.0.0.1:8081", combined: true},
+		{name: "combined wildcard", addr: ":8081", combined: true},
+		{name: "combined bound", addr: "198.51.100.2:8081", combined: true, want: bound},
+		{name: "split bound", addr: "198.51.100.2:8081", want: bound},
+		{name: "split unset", err: "set CONTAIND_ENGINE_ADDR"},
+		{name: "split wildcard", addr: ":8081", err: "set CONTAIND_ENGINE_ADDR"},
+		{name: "split ipv6 wildcard", addr: "[::]:8081", err: "set CONTAIND_ENGINE_ADDR"},
+		{name: "split loopback", addr: "127.0.0.1:8081", err: "set CONTAIND_ENGINE_ADDR"},
+		{name: "split localhost", addr: "localhost:8081", err: "set CONTAIND_ENGINE_ADDR"},
+		{name: "split address not held", addr: "192.0.2.9:8081", err: "want one interface"},
+		{name: "split reserved loopback", addr: "127.0.0.1:8081", reservation: reserved},
+		{name: "split reserved bound", addr: "198.51.100.2:8081", reservation: reserved, err: "reserved management path"},
+		{name: "combined reserved wildcard", addr: ":8081", combined: true, reservation: reserved, err: "reserved management path"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := engineListener(tc.addr, tc.combined, tc.reservation, nics)
+			if tc.err == "" && err != nil || tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Fatalf("engineListener(%q) error = %v, want %q", tc.addr, err, tc.err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("engineListener(%q) = %+v, want %+v", tc.addr, got, tc.want)
 			}
 		})
 	}

@@ -82,14 +82,11 @@ func Run(ctx context.Context, opts Options) error {
 	if addr == "" {
 		addr = ListenAddr(opts.Combined)
 	}
-	if err := opts.Reservation.ValidateEngineBind(addr); err != nil {
-		return err
-	}
 	nics, err := interfaceAddrs()
 	if err != nil {
 		return fmt.Errorf("engine listener: %w", err)
 	}
-	apiPath, err := engineAPIPath(addr, nics)
+	apiPath, err := engineListener(addr, opts.Combined, opts.Reservation, nics)
 	if err != nil {
 		return err
 	}
