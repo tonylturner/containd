@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- In IEC 104 envelopes a SYN-ACK that also carries RST is dropped and no longer establishes the session, including the next session after a reset one.
 - The web console and SSH CLI sessions call a management listener on 127.0.0.1 only through a socket management itself bound. A failed loopback or HTTPS bind, or a reserved-endpoint fallback after a failed wildcard bind, no longer sends bearer tokens to another process holding that port. With no bound listener reachable on 127.0.0.1 the console reports it and SSH stays off with a listener fault.
 - In IEC 104 envelopes a RST without payload closes a session only at the
   sequence number its receiver expects next. A forged or stale RST no longer
