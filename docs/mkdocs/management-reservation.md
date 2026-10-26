@@ -26,7 +26,8 @@ This is process authority, never an editable Config or snapshot field.
 ## Partial appliances and default binding
 
 Default interfaces bind independently to a unique **up** NIC matching their
-`CONTAIND_AUTO_<NAME>_SUBNET`. Missing or ambiguous explicit subnet matches stay
+`CONTAIND_AUTO_<NAME>_SUBNET`, or `CONTAIND_<NAME>_SUBNET` when the AUTO hint is
+unset. Missing or ambiguous explicit subnet matches stay
 unbound; names, the default route and index order cannot override that authority.
 Five- and seven-NIC appliances do not need eight NICs to initialize a reservation.
 Default bindings are rediscovered by subnet on restart, including NIC renumbering.
@@ -78,8 +79,7 @@ visible even when the last successful repair has cleared its immediate error.
 
 ## Substrate checks
 
-The pure `config.ValidateManagementReservation` and exported component predicates
-reject changes that undermine the substrate:
+Configuration validation rejects changes that undermine the reserved path:
 
 - Anything other than exactly one unaddressed physical logical binding of the
   reserved device; DHCP/static addressing, another binding, virtual parents or
@@ -102,38 +102,22 @@ false**. Default deny, ordinary rules, routes, later/disjoint policy rules and
 managed/external OpenVPN profiles remain allowed. Profiles are not read by the
 validator; pushed addresses are handled by the runtime guard.
 
-The full validator is installed at persistence/replay boundaries; component guards
-also protect the engine's partial interfaces, routing, services and configuration
-APIs. DNAT snapshots are checked before any kernel application or state swap.
-
 ## Persistence, boot and operator visibility
 
 Starter and dev Compose pass `CONTAIND_MGMT_RESERVATION` through. In reserved
 mode, also set the loopback engine bind and enforcement variables shown above.
 
-The store captures immutable validation context at construction. Save, staging,
-promotion, confirmation and rollback use it. Store open upgrades snapshots and
-handles pending expiry without rejecting a conflicting stored running config.
-Boot then creates defaults only when empty, normalizes default NIC bindings in a
-candidate-preserving `Repair` transaction, and checks the repaired running config.
-Repair validates ordinary structure, not reservation compliance: a legacy conflict
-must not prevent management recovery. Non-reservation repair failures warn and
-continue. Custom rows and unrelated candidate edits/IDS banks remain intact.
+Saving, importing, committing, confirming and rolling back must preserve the
+reservation. Default NIC bindings are rediscovered by subnet on restart, while
+custom bindings and unrelated candidate edits remain intact. A valid unaddressed
+reserved binding stays pinned. Custom rows are not silently renamed, unbound,
+or stripped of addresses; correct stale custom bindings explicitly.
 
-A valid unaddressed reserved binding is pinned during normalization. A default
-row merely having the current device name is **not** ownership when the NICs have
-renumbered: stale addressed default rows are reassigned by live subnet discovery.
-Custom rows are not silently renamed, unbound or stripped of addresses.
-Runtime replay never moves a reserved binding.
-
-First boot and factory reset share one appliance-defaults builder, including
-bootstrap environment defaults, SSH fields and reserved autobinding. Set the
-normal `CONTAIND_AUTO_*_SUBNET` variables for the deployment's eight default NICs.
-Reserved defaults enable enforcement and use the reserved HTTP port. Factory
-reset validates the exact autobound replacement **before** revoking sessions or
-wiping any database. A valid deployment can reset while reserved; ambiguous or
-incomplete NIC discovery can still produce a genuine pre-wipe refusal. Reset
-clears the boot fault and applies the defaults to services and engine.
+First boot and factory reset use deployment defaults, including the reservation,
+enforcement and reserved HTTP port. Set subnet hints for the default roles that
+exist in your deployment. Factory reset checks the replacement configuration
+**before** revoking sessions or wiping data; ambiguous or incomplete discovery
+can refuse the reset. A successful reset clears the boot fault and applies defaults.
 
 ### Boot fault mode
 
@@ -149,11 +133,10 @@ Initial stored service rendering and normal engine replay are blocked while the
 boot fault holds. Instead, management pushes one minimal recovery dataplane
 configuration through the engine API: enforcement on, no capture interfaces, DPI,
 stored interfaces, routing, zones, rules, NAT or services, and default deny.
-Recovery is replayed once per engine boot; failures retry with capped backoff and
-unchanged errors are not repeatedly logged. Staging is not recovery:
-a validated commit or rollback clears the fault transactionally and resumes
-normal apply; factory reset also recovers. A later boot whose normalization
-resolves the conflict clears the persisted fault as well.
+Recovery retries if the engine is unavailable. Staging alone does not clear the
+fault: a validated commit or rollback resumes normal apply; factory reset also
+recovers. A later boot whose binding rediscovery resolves the conflict clears
+the persisted fault as well.
 
 **Recovery: new transit dropped.** Once the engine reports the recovery ruleset
 applied, all new forwarded connections are denied. Existing/related connections
@@ -165,11 +148,10 @@ apply rules. No stored runtime configuration is replayed. Existing interfaces,
 routes or services in a still-running split engine are not torn down: recovery
 replaces enforcement, not the underlying network/service ownership state.
 
-The reservation API's `recovery` status is verified against the engine's actual
-ruleset, apply timestamp and error, not inferred from guard health or a successful
-POST. It reports pending/failed truthfully when unreachable, not yet applied, or
-rejected. Interfaces shows the same status. A safe promotion replaces recovery
-with the normal running configuration through the serialized apply path.
+The reservation API and Interfaces view report whether recovery enforcement is
+actually applied, pending or failed. Guard health or a successful recovery request
+alone does not establish that transit is blocked. A safe commit or rollback
+replaces recovery enforcement with the normal running configuration.
 
 With a reservation, only HTTP serving the reserved local address/port is
 mandatory. Failed optional HTTPS, SSH and convenience loopback listeners are
@@ -210,28 +192,12 @@ service, process failure or revoked credentials. An uploaded OpenVPN profile's
 script hooks are root code execution and outside this boundary. A script-free
 profile or remote VPN server assigning a reserved source loses it to the guard.
 
-## Linux acceptance
+## Verification and limitations
 
-From the repository root, with Docker Desktop running:
+Guard history is process-local; the last refused rollback survives a restart.
+The guard repairs address takeovers after they occur, so brief interruptions are
+possible. A reservation does not replace backups, authentication, or isolation
+of the unauthenticated engine API.
 
-```sh
-bash pkg/dp/netcfg/management-kernel.sh
-```
-
-The disposable container has NET_ADMIN/SYS_ADMIN (for its second network namespace)
-and TUN access. It publishes no ports, changes no host network and removes itself.
-It makes real TCP connections over veth with strict reverse-path filtering,
-competing rules at 2/9000/10000, competing routes, REPLACE/reconcile, local-table
-takeover and an actual OpenVPN source assignment. Recovery and visible faults are
-required within five seconds. Ordinary test runs skip this opt-in kernel matrix.
-
-## Isolated management smoke
-
-Run `bash scripts/smoke-mgmt-reservation.sh` from the worktree root; see
-`test/mgmt-reservation/README.md`. This separate Compose project publishes no
-ports and proves health/login, an all-access-off commit, exact-source-only
-reachability, substrate rejection, deterministic NIC renumbering, residual-conflict
-boot/fail-closed transit enforcement, safe commit/factory-reset recovery, and
-non-fatal optional HTTPS bind failure. It never connects to
-or changes the RangerDanger stack. Guard history is process-local; the last
-refused rollback survives store reopen.
+For opt-in Linux kernel and isolated Compose verification, see
+[test/mgmt-reservation/README.md](https://github.com/tonylturner/containd/blob/main/test/mgmt-reservation/README.md).

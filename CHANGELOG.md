@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct Compose onboarding, secret initialization, data locations, interface
+  binding and engine API exposure guidance; consolidate lab and WSL setup links.
+- Correct CLI lab authentication and IEC 104 monitoring examples, service runtime
+  ownership, and the importable configuration example; test its schema and validation.
+
+### Changed
+
+- Focus update and reserved-management documentation on operator behavior and
+  limitations; consolidate VPN guidance under System Services.
+
+### Removed
+
+- Remove the incomplete host/systemd deployment guide; Docker Compose remains
+  the documented appliance installation path.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security
