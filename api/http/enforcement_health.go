@@ -26,40 +26,45 @@ func recordRuntimeApplyResult(ctx context.Context, store config.Store, applyErr 
 	return errors.Join(applyErr, runtimeStore.SetRuntimeApplyFault(healthCtx, fault))
 }
 
-// Extend the existing enforcement object, keeping IEC104 queue/reset health
-// independent of general ruleset availability. Never infer availability merely
-// from a successful HTTP response or an inactive IEC104 policy.
-func rulesetHealth(ctx context.Context, store config.Store, engine EngineClient) gin.H {
-	health := gin.H{"rulesetAvailable": false, "rulesetReason": "engine unavailable", "configApplyError": ""}
-	if engine != nil {
-		status, err := engine.RulesetStatus(ctx)
-		switch {
-		case err != nil:
-			health["rulesetReason"] = "engine ruleset status unavailable"
-		case status.Error != "":
-			health["rulesetReason"] = "ruleset apply failed"
-		case status.AppliedAt.IsZero() || status.Ruleset == "":
-			health["rulesetReason"] = "no enforced ruleset applied"
-		default:
-			health["rulesetAvailable"] = true
-			health["rulesetReason"] = ""
-		}
+// enforcementHealth reports general firewall state separately from IEC104.
+// Snapshot faults take precedence over configured mode: failed compensation or
+// replay makes the live state uncertain, including a failed disable request.
+func enforcementHealth(ctx context.Context, snapshot config.HealthSnapshot, snapshotErr error, engine EngineClient) gin.H {
+	health := gin.H{"state": "unknown", "reason": "configuration health unavailable"}
+	if snapshotErr != nil {
+		return health
 	}
-	if runtimeStore, ok := store.(config.RuntimeStore); ok {
-		fault, err := runtimeStore.RuntimeApplyFault(ctx)
-		if err != nil {
-			fault = "configuration apply health unavailable"
-		}
-		// Health is unauthenticated. Nft diagnostics can contain the complete
-		// policy, so only authenticated commit responses expose their detail.
-		if err == nil && fault != "" {
-			fault = "configuration replay or recovery failed; runtime synchronization is uncertain"
-		}
-		health["configApplyError"] = fault
-		if fault != "" {
-			health["rulesetAvailable"] = false
-			health["rulesetReason"] = fault
-		}
+	if snapshot.ApplyFault != "" {
+		// Health is unauthenticated; nft diagnostics can contain the full policy.
+		health["state"] = "unavailable"
+		health["reason"] = "configuration replay or recovery failed; runtime synchronization is uncertain"
+		return health
+	}
+	if snapshot.Config == nil {
+		return health
+	}
+	if !snapshot.Config.DataPlane.Enforcement {
+		health["state"] = "disabled"
+		health["reason"] = ""
+		return health
+	}
+	if engine == nil {
+		health["reason"] = "engine ruleset status unavailable"
+		return health
+	}
+	status, err := engine.RulesetStatus(ctx)
+	switch {
+	case err != nil || ctx.Err() != nil:
+		health["reason"] = "engine ruleset status unavailable"
+	case status.Error != "":
+		health["state"] = "unavailable"
+		health["reason"] = "ruleset apply failed"
+	case status.AppliedAt.IsZero() || status.Ruleset == "":
+		health["state"] = "unavailable"
+		health["reason"] = "no enforced ruleset applied"
+	default:
+		health["state"] = "enforcing"
+		health["reason"] = ""
 	}
 	return health
 }

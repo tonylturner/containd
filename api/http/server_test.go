@@ -73,6 +73,17 @@ func (m *mockStore) Load(ctx context.Context) (*config.Config, error) {
 	return m.cfg, nil
 }
 
+func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return config.HealthSnapshot{}, err
+	}
+	cfg, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return config.HealthSnapshot{}, err
+	}
+	return config.HealthSnapshot{Config: cfg}, nil
+}
+
 func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
 	cfg, err := m.LoadCandidate(ctx)
 	if err != nil && err != config.ErrNotFound {

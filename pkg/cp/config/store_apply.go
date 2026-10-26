@@ -165,6 +165,10 @@ func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, saved []saved
 func (s *SQLiteStore) RuntimeApplyFault(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.runtimeApplyFaultLocked(ctx)
+}
+
+func (s *SQLiteStore) runtimeApplyFaultLocked(ctx context.Context) (string, error) {
 	var fault string
 	err := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, runtimeApplyFaultKey).Scan(&fault)
 	if errors.Is(err, sql.ErrNoRows) {

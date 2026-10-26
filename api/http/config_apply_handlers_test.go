@@ -53,6 +53,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 					t.Fatal(err)
 				}
 				running.System.Hostname = "pre-request"
+				running.DataPlane.Enforcement = true
 				running.Firewall.DefaultAction = config.ActionAllow
 				running.IDS.Rules = config.DefaultIDSConfig().Rules[1:2]
 				if err := store.Save(ctx, running); err != nil {
@@ -106,14 +107,18 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				rec = requestStage(t, server, "GET", "/health", nil)
 				var health struct {
 					Enforcement struct {
-						Available bool   `json:"rulesetAvailable"`
-						Error     string `json:"configApplyError"`
-					} `json:"iec104Enforcement"`
+						State  string `json:"state"`
+						Reason string `json:"reason"`
+					} `json:"enforcement"`
 				}
 				if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
 					t.Fatal(err)
 				}
-				if health.Enforcement.Available == failRestore || (health.Enforcement.Error != "") != failRestore {
+				wantState := "enforcing"
+				if failRestore {
+					wantState = "unavailable"
+				}
+				if health.Enforcement.State != wantState || (health.Enforcement.Reason != "") != failRestore {
 					t.Fatalf("health: %s", rec.Body)
 				}
 				if failRestore {
