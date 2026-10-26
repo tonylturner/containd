@@ -18,29 +18,34 @@ type EngineAPIPath struct {
 	Port   uint16
 }
 
-// match is the nft match for requests on the path.
-func (p *EngineAPIPath) match() string {
-	family := "ip"
-	if p.Addr.Is6() {
-		family = "ip6"
+// matches are the nft matches for requests on the path and for the
+// engine's replies.
+func (p *EngineAPIPath) matches() (request, reply string, err error) {
+	dev, err := ifnameLiteral(p.Device)
+	if err != nil {
+		return "", "", fmt.Errorf("engine API path: %w", err)
 	}
-	return fmt.Sprintf("iifname %q %s daddr %s tcp dport %d", p.Device, family, p.Addr, p.Port)
-}
-
-// replyMatch is the nft match for the engine's replies on the path.
-func (p *EngineAPIPath) replyMatch() string {
-	family := "ip"
+	ip := familyKeyword[0]
 	if p.Addr.Is6() {
-		family = "ip6"
+		ip = familyKeyword[1]
 	}
-	return fmt.Sprintf("oifname %q %s saddr %s tcp sport %d", p.Device, family, p.Addr, p.Port)
+	request = fmt.Sprintf("iifname %s %s daddr %s tcp dport %d", dev, ip, p.Addr, p.Port)
+	reply = fmt.Sprintf("oifname %s %s saddr %s tcp sport %d", dev, ip, p.Addr, p.Port)
+	return request, reply, nil
 }
 
 // writeEngineAPIInput admits the engine API path. Loopback needs no rule of
 // its own, and an API listening on loopback or on every address gets none:
 // only an address the operator bound it to marks a trusted path.
-func (c *Compiler) writeEngineAPIInput(b *bytes.Buffer) {
-	if p := c.EngineAPI; p != nil {
-		fmt.Fprintf(b, "    %s accept;\n", p.match())
+func (c *Compiler) writeEngineAPIInput(b *bytes.Buffer) error {
+	p := c.EngineAPI
+	if p == nil {
+		return nil
 	}
+	request, _, err := p.matches()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "    %s accept;\n", request)
+	return nil
 }

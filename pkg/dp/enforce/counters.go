@@ -53,7 +53,9 @@ func writeRuleObjects(buf *bytes.Buffer, snap *rules.Snapshot) error {
 			continue
 		}
 		fmt.Fprintf(buf, "  counter %s { }\n", excessCounterName(e.ID))
-		writeMeterSets(buf, e)
+		if err := writeMeterSets(buf, e); err != nil {
+			return err
+		}
 	}
 	return nil
 }

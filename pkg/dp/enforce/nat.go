@@ -101,8 +101,8 @@ func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot
 		if len(snap.ZoneIfaces[z]) == 0 || len(snap.ZoneIfaces[egress]) == 0 {
 			continue
 		}
-		srcSet := "zone_" + sanitizeIdent(z) + "_ifaces"
-		egSet := "zone_" + sanitizeIdent(egress) + "_ifaces"
+		srcSet := zoneSetName(z)
+		egSet := zoneSetName(egress)
 		buf.WriteString(fmt.Sprintf("    iifname @%s oifname @%s masquerade;\n", srcSet, egSet))
 	}
 	buf.WriteString("  }\n")
@@ -142,7 +142,7 @@ func compileDNATMatch(pf rules.PortForward) (string, error) {
 	if dstPort < 1 || dstPort > 65535 {
 		return "", nil
 	}
-	ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+	ingSet := zoneSetName(ingress)
 	parts := []string{
 		fmt.Sprintf("iifname @%s", ingSet),
 		"ct status dnat",
@@ -184,7 +184,7 @@ func compilePreroutingDNAT(pf rules.PortForward) (string, error) {
 	if dstPort < 1 || dstPort > 65535 {
 		return "", nil
 	}
-	ingSet := "zone_" + sanitizeIdent(ingress) + "_ifaces"
+	ingSet := zoneSetName(ingress)
 	parts := []string{fmt.Sprintf("iifname @%s", ingSet)}
 	if len(pf.AllowedSources) > 0 {
 		validated, err := validateCIDRList(pf.AllowedSources)

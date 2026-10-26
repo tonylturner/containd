@@ -499,7 +499,7 @@ func TestCompileLocalInputRule(t *testing.T) {
 		Zone:  "mgmt",
 		Proto: "tcp",
 		Port:  22,
-	}, map[string][]string{"mgmt": {"eth7"}})
+	}, zoneIndex{"mgmt": {`"eth7"`}})
 	if err != nil {
 		t.Fatalf("compileLocalInputRule(valid): %v", err)
 	}
