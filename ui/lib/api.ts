@@ -47,6 +47,7 @@ export {
   tagPcap,
   uploadPcap,
 } from "./api-dataplane";
+export type { RulesetPreview, RuleWarning } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
 export type { FirewallRulePatch, RulePreview } from "./api-network";
@@ -886,27 +887,6 @@ export type IDSRuleSource = {
   format: string;
   license: string;
   licenseNote?: string;
-};
-
-// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
-// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
-export type RuleWarning = {
-  ruleId: string;
-  predicate: "identity" | "schedule";
-  action: "ALLOW" | "DENY";
-  message: string;
-};
-
-export type RulesetPreview = {
-  ruleset?: string;
-  snapshot?: unknown;
-  runtime: {
-    iec104EnvelopeOpen: boolean;
-    reason: string;
-  };
-  warnings?: RuleWarning[];
-  engineStatus?: unknown;
-  engineStatusError?: string;
 };
 
 export type CLIExecuteResponse = {

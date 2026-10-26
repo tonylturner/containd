@@ -22,8 +22,28 @@ import type {
   PcapReplayRequest,
   PcapStatus,
   PcapTagRequest,
-  RulesetPreview,
 } from "./api";
+
+// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
+// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
+export type RuleWarning = {
+  ruleId: string;
+  predicate: "identity" | "schedule";
+  action: "ALLOW" | "DENY";
+  message: string;
+};
+
+export type RulesetPreview = {
+  ruleset?: string;
+  snapshot?: unknown;
+  runtime: {
+    iec104EnvelopeOpen: boolean;
+    reason: string;
+  };
+  warnings?: RuleWarning[];
+  engineStatus?: unknown;
+  engineStatusError?: string;
+};
 
 export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
   try {
