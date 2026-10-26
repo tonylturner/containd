@@ -8,6 +8,8 @@ import (
 	"net"
 	"slices"
 	"strings"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // IEC 60870-5-104 predicate limits.
@@ -116,18 +118,6 @@ func validateIEC104IOA(ranges []IOARange, ruleID string) error {
 	return nil
 }
 
-// effectiveICSMode resolves a rule's ICS mode the way the engine does:
-// rule mode > global dpiMode > learn.
-func effectiveICSMode(ruleMode, globalMode string) string {
-	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
-		return m
-	}
-	if m := strings.ToLower(strings.TrimSpace(globalMode)); m != "" {
-		return m
-	}
-	return "learn"
-}
-
 // validateIEC104Policy checks what needs the whole config: which types an
 // ALLOW rule may name, and the static causes that keep an IEC104 enforce
 // envelope from activating. Commit, candidate and import all
@@ -138,7 +128,7 @@ func validateIEC104Policy(c *Config) error {
 		if r.ICS.Protocol != ICSProtocolIEC104 {
 			continue
 		}
-		mode := effectiveICSMode(r.ICS.Mode, c.DataPlane.DPIMode)
+		mode := rules.EffectiveMode(r.ICS.Mode, c.DataPlane.DPIMode)
 		if r.Action == ActionAllow && mode != "learn" {
 			if err := validateIEC104AllowTypes(r); err != nil {
 				return err
