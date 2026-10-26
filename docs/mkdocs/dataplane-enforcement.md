@@ -72,9 +72,18 @@ see [Config Format](config-format.md).
 With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
 closed when its stream cannot be inspected: a conflicting overlap, a
 retransmission that differs from or predates the bytes the engine kept,
-malformed framing, reassembly limits, or a decoder fault. The packet is dropped
-and the connection blocked like a decoded denial, without restarting
-inspection. Learn-mode flows and packets without an inline verdict still pass.
+malformed framing, reassembly limits, a decoder fault, or a SYN with a new
+sequence number on the open connection (reason `stream_resync`). The packet is
+dropped and the connection blocked like a decoded denial, without restarting
+inspection. Only a FIN or RST that the receiver accepts in window ends the
+connection's stream early.
+
+A connection the engine did not see from its SYN is dropped until it ends
+(reason `stream_midstream`). This covers connections open across an engine
+restart or a data-plane configuration change, and connections idle longer than
+the engine's 5-minute flow timeout. No flow block is installed, so the client's
+next connection is inspected from its first byte. The old connection is not
+reset. Learn-mode flows and packets without an inline verdict still pass.
 
 ## ICS rule coverage
 

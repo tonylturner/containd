@@ -48,12 +48,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   destination that resolves to no address now matches nothing, so the rule has
   no effect until the VPN is configured.
 - With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule is
-  dropped and blocked for 10 minutes when its TCP stream cannot be inspected:
+  dropped and its flow blocked when its TCP stream cannot be inspected:
   conflicting or rewritten retransmitted bytes, framing the decoder rejects,
   reassembly limits, or a decoder fault. Before, inspection restarted at a
   later segment and a prohibited command could pass. An `ics.decision` event
   with reason `stream_error` or `decoder_panic` names the rule. Learn mode and
   IEC 104 are unchanged.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule no
+  longer restarts inspection at a FIN or RST that its receiver ignores. A FIN
+  or RST ends the stream only when it is in window, and never on a connection
+  already denied. A SYN with a new sequence number on a live connection now
+  drops and blocks it with reason `stream_resync`. After a decoder fault, the
+  bytes held before it are not inspected again. Before, a crafted RST, FIN or
+  SYN could make a later prohibited command be framed from the middle of a
+  message, so it passed.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule
+  that the engine did not see from its SYN is dropped, as IEC 104 sessions
+  already are. This covers connections open across an engine restart or a
+  data-plane configuration change, and connections idle longer than the
+  engine's 5-minute flow timeout. Inspection used to start at the first segment
+  it saw, which could fall inside a message. An `ics.decision` event with
+  reason `stream_midstream` names the rule. No flow block is installed: the
+  client's next connection is inspected from its first byte. Learn mode is
+  unchanged.
 - Validation refuses a firewall rule that names an ICS protocol and is in
   effective enforce mode while `dataplane.nfqueueGroup` is 0. Without an
   inline path the first prohibited command reached the device while the UI
