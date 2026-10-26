@@ -188,11 +188,9 @@ func TestStartEngineSyncReplaysStoredRunningConfig(t *testing.T) {
 	}
 	paths := make(chan string, 32)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths <- r.URL.Path
-		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"bootId":"boot-1","iec104Enforcement":{"healthy":true}}`))
-			return
-		}
+		// Record the path only after the body is read: the test stops the
+		// sync loop as soon as it sees the last path, which cancels any
+		// request still in flight.
 		if r.URL.Path == "/internal/apply_rules" {
 			var snap rules.Snapshot
 			if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
@@ -200,6 +198,11 @@ func TestStartEngineSyncReplaysStoredRunningConfig(t *testing.T) {
 			} else if snap.Default != rules.ActionAllow {
 				t.Errorf("replayed rule default=%q, want stored ALLOW", snap.Default)
 			}
+		}
+		paths <- r.URL.Path
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"bootId":"boot-1","iec104Enforcement":{"healthy":true}}`))
+			return
 		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
