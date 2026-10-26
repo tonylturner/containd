@@ -10,6 +10,8 @@ assignees: ''
 
 What problem does this feature solve? What use case does it address?
 
+For larger changes, see [CONTRIBUTING.md](https://github.com/tonylturner/containd/blob/main/CONTRIBUTING.md) before starting implementation.
+
 ## Proposed Solution
 
 Describe what you'd like to happen.

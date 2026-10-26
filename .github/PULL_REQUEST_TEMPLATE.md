@@ -6,12 +6,19 @@ Brief description of the change.
 
 -
 
-## Test Plan
+## Verification and impact
 
-- [ ] Unit tests pass (`go test ./...`)
-- [ ] UI lint passes (`cd ui && npm run lint`)
-- [ ] Docker image builds (`docker build -f build/Dockerfile.mgmt -t containd/containd:dev .`)
-- [ ] Manual verification (describe steps):
+Use the [contributor verification guide](https://github.com/tonylturner/containd/blob/main/CONTRIBUTING.md#verification).
+Record exact commands and results, or N/A with a reason for unaffected components.
+
+- Go (including race tests and module tidiness):
+- UI (lint/build):
+- Documentation (MkDocs build):
+- Security checks (including Semgrep) and appliance build/smoke:
+- Manual verification, if applicable:
+
+- [ ] User-facing documentation updated, or N/A explained.
+- [ ] Security impact considered (auth, trust boundaries, secrets, network exposure); describe it or explain N/A:
 
 ## Related Issues
 
