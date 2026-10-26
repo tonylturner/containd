@@ -211,3 +211,63 @@ func TestServiceFormattingHelpers(t *testing.T) {
 		t.Fatalf("expected empty path detail, got %q", got)
 	}
 }
+
+func TestShowSyslogStatusAuditForwarding(t *testing.T) {
+	t.Parallel()
+
+	status := map[string]any{
+		"configured_forwarders": 2, "format": "rfc5424", "protos": []string{"udp", "tcp"},
+		"sent_total": 7, "failed_total": 0, "last_batch": 3, "batch_limit": 500,
+		"audit": map[string]any{
+			"enabled": true, "sent_total": 40, "failed_total": 2, "last_error": "dial tcp 192.0.2.9:514: connection refused",
+			"last_flush": "2026-10-26T12:00:00Z", "backlog": 5,
+			"forwarders": []map[string]any{
+				{"forwarder": "udp://192.0.2.8:514", "last_id": 41, "backlog": 0, "last_error": "", "last_sent": "2026-10-26T12:00:00Z"},
+				{"forwarder": "tcp://192.0.2.9:514", "last_id": 36, "backlog": 5, "last_error": "dial tcp 192.0.2.9:514: connection refused", "last_sent": ""},
+			},
+		},
+	}
+	client := &dispatchHTTPClient{
+		t: t,
+		handlers: map[string]func(*http.Request) (*http.Response, error){
+			"GET /api/v1/services/status": func(req *http.Request) (*http.Response, error) {
+				return jsonHTTPResponse(http.StatusOK, map[string]any{"syslog": status}, nil), nil
+			},
+		},
+	}
+	api := &API{BaseURL: "http://localhost:8080", Client: client}
+
+	var buf bytes.Buffer
+	if err := showSyslogStatus(api)(context.Background(), &buf, nil); err != nil {
+		t.Fatalf("showSyslogStatus: %v", err)
+	}
+	want := `Syslog status
+  forwarders: 2
+  format: rfc5424
+  protos: udp,tcp
+  sent_total: 7
+  failed_total: 0
+  last_batch: 3 (limit 500)
+  audit: enabled
+    sent_total: 40
+    failed_total: 2
+    backlog: 5
+    last_flush: 2026-10-26T12:00:00Z
+    last_error: dial tcp 192.0.2.9:514: connection refused
+    1) udp://192.0.2.8:514 last_id=41 backlog=0 last_sent=2026-10-26T12:00:00Z
+    2) tcp://192.0.2.9:514 last_id=36 backlog=5 last_sent=never
+       last_error: dial tcp 192.0.2.9:514: connection refused
+`
+	if buf.String() != want {
+		t.Fatalf("syslog status output:\n%s\nwant:\n%s", buf.String(), want)
+	}
+
+	status["audit"] = map[string]any{"enabled": false, "backlog": 0, "forwarders": []map[string]any{}}
+	buf.Reset()
+	if err := showSyslogStatus(api)(context.Background(), &buf, nil); err != nil {
+		t.Fatalf("showSyslogStatus: %v", err)
+	}
+	if !strings.HasSuffix(buf.String(), "  audit: disabled\n") {
+		t.Fatalf("syslog status without an audit log:\n%s", buf.String())
+	}
+}
