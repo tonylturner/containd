@@ -121,7 +121,7 @@ func validateManagementListenerAddress(field, addr string) error {
 	}
 	host, port, err := net.SplitHostPort(addr)
 	n, portErr := strconv.Atoi(port)
-	validHost := true
+	var validHost bool
 	if strings.Contains(host, ":") {
 		_, parseErr := netip.ParseAddr(host)
 		validHost = parseErr == nil

@@ -112,22 +112,20 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Warnf("failed to apply initial service config: %v", applyErr)
 		}
 	}
-	if serviceManager != nil {
-		serviceManager.SetEventLister(func(limit int) []dpevents.Event {
-			var out []dpevents.Event
-			type eventLister interface {
-				ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+	serviceManager.SetEventLister(func(limit int) []dpevents.Event {
+		var out []dpevents.Event
+		type eventLister interface {
+			ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
+		}
+		if ec, ok := engineClient.(eventLister); ok && ec != nil {
+			if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
+				out = append(out, evs...)
 			}
-			if ec, ok := engineClient.(eventLister); ok && ec != nil {
-				if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
-					out = append(out, evs...)
-				}
-			}
-			out = append(out, serviceManager.ListTelemetryEvents(limit)...)
-			return out
-		})
-		serviceManager.StartAVWorker(context.Background())
-	}
+		}
+		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+		return out
+	})
+	serviceManager.StartAVWorker(context.Background())
 	serveStaticUI(router)
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()
