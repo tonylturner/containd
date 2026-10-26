@@ -130,6 +130,12 @@ func TestICSMatch(t *testing.T) {
 	}
 }
 
+// matchAddress reports whether the compiled specifications hold the ICS
+// address contextAddr.
+func matchAddress(specs []string, contextAddr string) bool {
+	return matchICSAddresses(compileAddrs(specs), EvalContext{ICS: &ICSContext{Address: contextAddr}})
+}
+
 func TestMatchAddressSingleDecimal(t *testing.T) {
 	if !matchAddress([]string{"256"}, "256") {
 		t.Fatal("expected decimal single address to match")

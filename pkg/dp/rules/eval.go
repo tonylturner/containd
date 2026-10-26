@@ -128,23 +128,7 @@ func compileEntry(entry Entry) compiledEntry {
 		ce.iec = compileIEC104(entry.ICS)
 	}
 
-	// Pre-parse ICS addresses.
-	if len(entry.ICS.Addresses) > 0 {
-		ce.addresses = make([]compiledAddr, 0, len(entry.ICS.Addresses))
-		for _, spec := range entry.ICS.Addresses {
-			if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
-				low, okLow := parseAddr(parts[0])
-				high, okHigh := parseAddr(parts[1])
-				if okLow && okHigh {
-					ce.addresses = append(ce.addresses, compiledAddr{low: low, high: high})
-					continue
-				}
-			}
-			if val, ok := parseAddr(spec); ok {
-				ce.addresses = append(ce.addresses, compiledAddr{low: val, high: val})
-			}
-		}
-	}
+	ce.addresses = compileAddrs(entry.ICS.Addresses)
 
 	// Pre-parse protocol port ranges.
 	ce.ports = make([]compiledPort, len(entry.Protocols))
@@ -162,6 +146,31 @@ func compileEntry(entry Entry) compiledEntry {
 	}
 
 	return ce
+}
+
+// compileAddrs parses ICS address specifications: a single value ("0x0100",
+// "256") or a dash-separated range ("0x0100-0x01FF", "100-511"), hex (0x
+// prefix) or decimal, mixed freely. Specifications that parse as neither
+// are skipped.
+func compileAddrs(specs []string) []compiledAddr {
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make([]compiledAddr, 0, len(specs))
+	for _, spec := range specs {
+		if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
+			low, okLow := parseAddr(parts[0])
+			high, okHigh := parseAddr(parts[1])
+			if okLow && okHigh {
+				out = append(out, compiledAddr{low: low, high: high})
+				continue
+			}
+		}
+		if val, ok := parseAddr(spec); ok {
+			out = append(out, compiledAddr{low: val, high: val})
+		}
+	}
+	return out
 }
 
 // PreviewMatch tests a single rule against an EvalContext to determine if it
@@ -362,39 +371,4 @@ func parseAddr(s string) (int64, bool) {
 	}
 	v, err := strconv.ParseInt(s, 10, 64)
 	return v, err == nil
-}
-
-// matchAddress checks whether contextAddr falls within any of the entry address
-// specifications. Each entry may be a single value ("0x0100", "256") or a
-// dash-separated range ("0x0100-0x01FF", "100-511"). Both hex (0x prefix) and
-// decimal formats are supported, and they may be mixed.
-func matchAddress(entryAddrs []string, contextAddr string) bool {
-	ctxVal, ok := parseAddr(contextAddr)
-	if !ok {
-		return false
-	}
-	for _, spec := range entryAddrs {
-		if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
-			// Disambiguate: if the first part starts with "0x"/"0X" and the
-			// second part also starts with "0x"/"0X", treat as range. Also
-			// handle the case where neither part has a prefix (pure decimal
-			// range). For a hex prefix on part1 but not part2, it could be
-			// ambiguous (e.g. "0x10-20"); we handle it by checking if
-			// part2 parses as a standalone value.
-			low, okLow := parseAddr(parts[0])
-			high, okHigh := parseAddr(parts[1])
-			if okLow && okHigh {
-				if ctxVal >= low && ctxVal <= high {
-					return true
-				}
-				continue
-			}
-		}
-		// Single value.
-		val, ok := parseAddr(spec)
-		if ok && val == ctxVal {
-			return true
-		}
-	}
-	return false
 }
