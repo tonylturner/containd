@@ -149,7 +149,7 @@ function InternetNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
+function GatewayNode({ data }: NodeProps<TopoNodeData>) {
   const sc = STATUS_COLORS[data.status || "ok"];
   return (
     <div
@@ -172,7 +172,7 @@ function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
+function FirewallNode({ data }: NodeProps<TopoNodeData>) {
   return (
     <div
       className={`${s.nodeCard} ${s.accentAmber} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -196,7 +196,7 @@ function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
+function ZoneNode({ data }: NodeProps<TopoNodeData>) {
   const st = data.status || "ok";
   const sc = STATUS_COLORS[st];
   const accentCls =

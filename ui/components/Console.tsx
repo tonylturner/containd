@@ -88,15 +88,6 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         cursorRef.current = 0;
       }
 
-      function writeOutput(text: string) {
-        if (!text || !term) return;
-        const normalized = text.replace(/\r?\n/g, "\r\n");
-        term.write(normalized);
-        if (!normalized.endsWith("\r\n")) {
-          term.write("\r\n");
-        }
-      }
-
       function writeError(text: string) {
         if (!text || !term) return;
         term.write(`\x1b[33m${text}\x1b[0m\r\n`);

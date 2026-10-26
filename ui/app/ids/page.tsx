@@ -11,7 +11,6 @@ import {
   type IDSConfig,
   type IDSRule,
   type IDSRuleSource,
-  type RuleGroup,
 } from "../../lib/api";
 import {
   ConfirmDialog,

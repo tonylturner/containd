@@ -34,7 +34,6 @@ import {
 } from "./pcap-settings";
 import { normalizeConfig } from "./pcap-utils";
 
-type CaptureMode = "once" | "rolling";
 type SaveState = "idle" | "starting" | "stopping";
 
 type PcapForwardRow = PcapForwardTarget & { interface: string };

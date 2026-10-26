@@ -13,8 +13,6 @@ import { IEC104EvidencePanel } from "./iec104-alert-panel";
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
-const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-
 /** Alerts are IDS alerts plus IEC 104 enforcement evidence other than allows. */
 function alertView(ev: TelemetryEvent): { severity: string; message: string; ruleId: string } | null {
   if (ev.proto === "ids" && ev.kind === "alert") {
