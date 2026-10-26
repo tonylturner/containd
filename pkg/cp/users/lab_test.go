@@ -11,15 +11,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func TestLabMode(t *testing.T) {
+func TestCheckPasswordChange(t *testing.T) {
 	for value, want := range map[string]bool{
 		"": false, "0": false, "false": false, "yes": false,
 		"1": true, "true": true, "TRUE": true, "True": true,
 	} {
 		t.Setenv("CONTAIND_LAB_MODE", value)
-		if got := LabMode(); got != want {
-			t.Errorf("LabMode() with CONTAIND_LAB_MODE=%q = %v, want %v", value, got, want)
-		}
 		wantErr := error(nil)
 		if want {
 			wantErr = ErrPasswordChangeLabMode

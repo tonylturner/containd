@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -138,7 +139,7 @@ func logoutHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 func meHandler(userStore users.Store) gin.HandlerFunc {
-	lab := users.LabMode()
+	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		if userStore == nil {
 			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey), "labMode": lab})

@@ -16,6 +16,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/tonylturner/containd/pkg/common/labmode"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -237,7 +239,7 @@ func ensureDefaultAdmin(ctx context.Context, db userDB) error {
 		LastName:           "Admin",
 		Role:               "admin",
 		Email:              "",
-		MustChangePassword: password == "containd" && !LabMode(),
+		MustChangePassword: password == "containd" && !labmode.Enabled(),
 	}, password, true)
 	return err
 }
