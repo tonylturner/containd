@@ -139,37 +139,6 @@ export function protoMeta(name: string): ProtocolMeta {
   );
 }
 
-export function buildICSRulePreview(
-  rule: { id: string },
-  enabled: boolean,
-  protocol: string,
-  functionCodes: string,
-  addresses: string,
-  readOnly: boolean,
-  writeOnly: boolean,
-  mode: ICSModeSelection,
-): Record<string, unknown> {
-  return {
-    id: rule.id,
-    ics: enabled
-      ? {
-          protocol,
-          functionCode: functionCodes
-            .split(",")
-            .map((v) => Number(v.trim()))
-            .filter((n) => Number.isFinite(n) && n >= 0),
-          addresses: addresses
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          readOnly,
-          writeOnly,
-          ...(mode ? { mode } : {}),
-        }
-      : undefined,
-  };
-}
-
 export function buildICSRuleUpdate(
   protocol: string,
   functionCodes: string,

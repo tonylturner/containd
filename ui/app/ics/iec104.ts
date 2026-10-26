@@ -263,18 +263,6 @@ export function buildIEC104RuleICS(
   };
 }
 
-/** Rule body for the impact preview; an invalid draft previews without ICS. */
-export function buildIEC104RulePreview(
-  rule: Pick<FirewallRule, "id" | "action">,
-  enabled: boolean,
-  draft: IEC104Draft,
-  mode: ICSModeSelection,
-  globalMode?: ICSMode,
-): Record<string, unknown> {
-  const built = buildIEC104Predicate(draft, mode, rule.action, globalMode);
-  return { id: rule.id, ics: enabled && built.ok ? built.ics : undefined };
-}
-
 /** Short summaries for rule tables. */
 export function summarizeIEC104(ics: ICSPredicate): {
   types: string;
