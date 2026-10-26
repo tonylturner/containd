@@ -2,16 +2,33 @@
 
 // Octets without leading zeros: the server's net.ParseIP refuses "010.0.0.1".
 const ipv4Re = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-const ipv6Re = /^[0-9a-fA-F:]+$/;
+const hexGroupRe = /^[0-9a-fA-F]{1,4}$/;
 
 /** Returns true if s looks like a valid IPv4 address. */
 export function isIPv4(s: string): boolean {
   return ipv4Re.test(s);
 }
 
-/** Returns true if s looks like a valid IPv6 address (loose check). */
+/**
+ * Returns true if s is an IPv6 address as Go's netip.ParseAddr reads one,
+ * without a zone: eight groups of 1-4 hex digits, or fewer around one "::"
+ * that stands for at least one zero group. A dotted IPv4 address may end it
+ * in place of the last two groups (::ffff:192.0.2.1).
+ */
 export function isIPv6(s: string): boolean {
-  return ipv6Re.test(s) && s.includes(":");
+  const halves = s.split("::");
+  if (halves.length > 2) return false;
+  const groups = (part: string) => (part === "" ? [] : part.split(":"));
+  const head = groups(halves[0]);
+  const tail = halves.length === 2 ? groups(halves[1]) : [];
+  const last = halves.length === 2 ? tail : head;
+  let count = head.length + tail.length;
+  if (last.length > 0 && last[last.length - 1].includes(".")) {
+    if (!isIPv4(last.pop() as string)) return false;
+    count++; // The IPv4 address fills two groups.
+  }
+  if (![...head, ...tail].every((g) => hexGroupRe.test(g))) return false;
+  return halves.length === 2 ? count <= 7 : count === 8;
 }
 
 /** Returns true if s is a valid IP address (v4 or v6). */
@@ -24,9 +41,10 @@ export function isCIDR(s: string): boolean {
   const slash = s.lastIndexOf("/");
   if (slash < 0) return false;
   const ip = s.slice(0, slash);
-  const prefix = Number(s.slice(slash + 1));
-  if (!isIP(ip) || !Number.isInteger(prefix) || prefix < 0) return false;
-  return isIPv4(ip) ? prefix <= 32 : prefix <= 128;
+  const bits = s.slice(slash + 1);
+  // Decimal prefix lengths only, without leading zeros, as netip.ParsePrefix reads them.
+  if (!isIP(ip) || !/^(0|[1-9]\d{0,2})$/.test(bits)) return false;
+  return Number(bits) <= (isIPv4(ip) ? 32 : 128);
 }
 
 /** Returns true if s is a valid IP or CIDR. */
@@ -86,12 +104,15 @@ export function validateIPv4(input: string): string | null {
   return null;
 }
 
-/** Validates a port number (1-65535). Returns null if valid or empty. */
+/**
+ * Validates a port number (1-65535) written in decimal digits, so "1e3" and
+ * "0x50" are refused. Returns null if valid or empty.
+ */
 export function validatePort(input: string): string | null {
   const s = input.trim();
   if (!s) return null;
   const n = Number(s);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+  if (!/^\d+$/.test(s) || n < 1 || n > 65535) {
     return `"${s}" is not a valid port (1-65535)`;
   }
   return null;

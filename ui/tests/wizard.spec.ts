@@ -72,7 +72,7 @@ test("the publish-service wizard rejects an out-of-range port at the server step
   const port = page.getByPlaceholder("e.g. 443");
   const next = page.getByRole("button", { name: "Next", exact: true });
 
-  for (const bad of ["0", "65536", "1.5"]) {
+  for (const bad of ["0", "65536", "1.5", "1e3"]) {
     await port.fill(bad);
     await expect(page.getByRole("alert").filter({ hasText: `"${bad}" is not a valid port (1-65535)` })).toBeVisible();
     await expect(port).toHaveAttribute("aria-invalid", "true");

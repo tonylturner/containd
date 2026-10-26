@@ -26,7 +26,7 @@ async function openNAT(page: Page) {
   await expect(page.getByText("No port forwards configured.", { exact: false })).toBeVisible();
 }
 
-test("adding a port forward rejects ports outside 1-65535 and fractional ports", async ({ page }) => {
+test("adding a port forward rejects ports outside 1-65535 and ports not in decimal digits", async ({ page }) => {
   await openNAT(page);
   const listen = page.getByPlaceholder("listen port");
   const destIp = page.getByPlaceholder("dest ip");
@@ -37,14 +37,14 @@ test("adding a port forward rejects ports outside 1-65535 and fractional ports",
   await add.click();
   await expect(page.getByText("Listen port is required.", { exact: true })).toBeVisible();
 
-  for (const bad of ["0", "65536", "1.5"]) {
+  for (const bad of ["0", "65536", "1.5", "1e3", "0x50"]) {
     await listen.fill(bad);
     await add.click();
     await expect(page.getByText(`Listen port: "${bad}" is not a valid port (1-65535).`, { exact: true })).toBeVisible();
   }
 
   await listen.fill("8443");
-  for (const bad of ["0", "70000", "443.5"]) {
+  for (const bad of ["0", "70000", "443.5", "1e3", "0x50"]) {
     await destPort.fill(bad);
     await add.click();
     await expect(page.getByText(`Destination port: "${bad}" is not a valid port (1-65535).`, { exact: true })).toBeVisible();
