@@ -929,7 +929,7 @@ components:
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
-        acceptedCommands: {type: integer, minimum: 0, description: Allowed commands with successful Accept verdicts for all carrying packets.}
+        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in learn and monitor modes.}
         points:
           type: array
           maxItems: 256
@@ -979,7 +979,7 @@ components:
             assets: {type: integer, minimum: 0}
             peers: {type: integer, minimum: 0}
             stationAddresses: {type: integer, minimum: 0}
-            outcomes: {type: integer, minimum: 0, description: Final outcomes dropped because the mutex was busy or their observation retention generation is no longer present.}
+            outcomes: {type: integer, minimum: 0, description: Command outcomes not credited because the inventory was busy, the pair or CA was evicted, or the per-session delivery ledger was full.}
     InventoryDiscoveredAsset:
       properties:
         firstSeen: {format: date-time, type: string}
@@ -3087,7 +3087,7 @@ paths:
   /inventory/iec104:
     get:
       summary: Read passive IEC 104 station pairs, CAs, points and command counts
-      description: Observational only; never generates learned rules. Entries use observation-recency LRU and 24-hour idle expiry. Counts cover retained history, not lifetime traffic. The engine observation feed is not connected yet.
+      description: Observational only; never generates learned rules. Entries use observation-recency LRU and 24-hour idle expiry. Counts cover retained history, not lifetime traffic. Fed from decoded traffic; acceptance is credited only in inline enforce mode.
       tags: [Inventory]
       responses:
         '200':

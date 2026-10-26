@@ -26,8 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Passive IEC 104 inventory: a read-only section on the Assets page and
   `GET /api/v1/inventory/iec104` list controlling and controlled station pairs,
   their common addresses, IOAs and type IDs, first and last seen, and command
-  attempt and acceptance counts. Fixed caps, LRU eviction, 24-hour idle expiry
-  and overflow counters bound it. It never feeds the learner or auto-ALLOW.
+  attempt and acceptance counts, fed from decoded traffic. A command counts as
+  accepted only in inline enforce mode, after it was allowed and every packet
+  carrying it completed an Accept verdict. Fixed caps, LRU eviction, 24-hour
+  idle expiry and overflow counters bound it. It never feeds the learner or
+  auto-ALLOW.
 - Observational IEC 104 APCI alerts: I-frames outside STARTDT/STOPDT (one per
   stopped period), N(S)/N(R) gaps, backward steps or ACKs of unsent frames,
   and TESTFR act without con within t1. Alerts carry the session ID and show
