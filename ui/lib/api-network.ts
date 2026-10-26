@@ -15,8 +15,18 @@ import type {
   NATConfig,
   OSRoutingSnapshot,
   RoutingConfig,
+  RuleWarning,
   Zone,
 } from "./api";
+
+/** Rule impact preview: the rule matched in isolation against recent events. */
+export type RulePreview = {
+  match_count: number;
+  sample_matches: unknown[];
+  time_range: { start: string; end: string } | null;
+  total_events: number;
+  warnings?: RuleWarning[];
+};
 
 export const networkAPI = {
   listZones: (signal?: AbortSignal) => getJSON<Zone[]>("/api/v1/zones", signal),
@@ -88,6 +98,9 @@ export const networkAPI = {
     if (!result.ok) return result;
     return { ...result, data: normalizeFirewallRule(result.data) };
   },
+  // Matches the rule in isolation against recent events; stages nothing.
+  previewFirewallRule: (r: FirewallRule) =>
+    postJSONResult<RulePreview>("/api/v1/firewall/rules/preview", r),
   deleteFirewallRule: (id: string) =>
     deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),

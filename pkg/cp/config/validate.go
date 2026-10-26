@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -869,16 +870,22 @@ func validateDataPlane(dp DataPlaneConfig) error {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")
 		}
 	}
-	if dp.EnforceTable == "" {
-		return nil
+	// The engine owns inet <t> (dynamic sets) and inet <t>_policy; neither
+	// may be the DHCP redirect table.
+	t := dp.EnforceTable
+	if t != "" && !enforceTableName.MatchString(t) {
+		return fmt.Errorf("dataplane.enforceTable %q must start with a letter or '_', continue with letters, digits, '_' or '-', and have at most 248 characters", t)
 	}
-	for _, r := range dp.EnforceTable {
-		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return fmt.Errorf("dataplane.enforceTable has invalid char %q", r)
-		}
+	if t == "containd_dhcp" || t+"_policy" == "containd_dhcp" {
+		return errors.New("dataplane.enforceTable must not name the DHCP redirect table containd_dhcp")
 	}
 	return nil
 }
+
+// enforceTableName is the engine's table name rule: nft cannot address a
+// name that starts with a digit or '-', even quoted, and <t>_policy must fit
+// the kernel's 255-byte object names.
+var enforceTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,247}$`)
 
 func validatePCAP(p PCAPConfig) error {
 	if err := validatePCAPInterfaces(p); err != nil {

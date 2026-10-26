@@ -4,6 +4,7 @@ import type {
   IEC104Class,
   IOARange,
   Protocol,
+  RuleSchedule,
 } from "./api";
 
 function asList(value: unknown): unknown[] {
@@ -167,6 +168,10 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
     normalized.description = record.description;
   }
   if (typeof record.log === "boolean") normalized.log = record.log;
+  const identities = toStringList(record.identities);
+  if (identities.length > 0) normalized.identities = identities;
+  const schedule = normalizeSchedule(record.schedule);
+  if (schedule) normalized.schedule = schedule;
 
   if ((normalized.sourceZones?.length ?? 0) === 0) delete normalized.sourceZones;
   if ((normalized.destZones?.length ?? 0) === 0) delete normalized.destZones;
@@ -176,6 +181,19 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
   if (!normalized.ics) delete normalized.ics;
 
   return normalized;
+}
+
+function normalizeSchedule(value: unknown): RuleSchedule | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const schedule: RuleSchedule = {};
+  const days = toStringList(record.daysOfWeek);
+  if (days.length > 0) schedule.daysOfWeek = days;
+  for (const key of ["startTime", "endTime", "timezone"] as const) {
+    const v = record[key];
+    if (typeof v === "string" && v !== "") schedule[key] = v;
+  }
+  return Object.keys(schedule).length > 0 ? schedule : undefined;
 }
 
 export function normalizeFirewallRules(value: unknown): FirewallRule[] {

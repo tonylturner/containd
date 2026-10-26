@@ -21,6 +21,7 @@ export default function SystemSettingsPage() {
   const [caFile, setCAFile] = useState<File | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [showTips, setShowTipsState] = useState(true);
   const [persistHistory, setPersistHistory] = useState(false);
 
@@ -51,6 +52,7 @@ export default function SystemSettingsPage() {
   async function uploadCert() {
     if (!canEdit) return;
     setError(null);
+    setWarning(null);
     setStatus(null);
     if (!certFile || !keyFile) {
       setError("Select both certificate and private key PEM files.");
@@ -69,6 +71,7 @@ export default function SystemSettingsPage() {
   async function uploadCA() {
     if (!canEdit) return;
     setError(null);
+    setWarning(null);
     setStatus(null);
     if (!caFile) {
       setError("Select a PEM bundle file.");
@@ -76,11 +79,13 @@ export default function SystemSettingsPage() {
     }
     const pem = await readFileText(caFile);
     const res = await api.setTrustedCA(pem);
-    if (!res.ok) {
+    if (res.state === "failed") {
       setError(res.error || "Failed to upload trusted CA bundle.");
-      return;
+    } else if (res.state === "stored") {
+      setWarning(`Trusted CA bundle stored, but the engine could not apply it: ${res.detail}. The next commit retries it.`);
+    } else {
+      setStatus(`Trusted CA bundle applied by the engine (revision ${res.revision}).`);
     }
-    setStatus(res.warning ? `Trusted CA bundle saved with warning: ${res.warning}` : "Trusted CA bundle saved.");
   }
 
   return (
@@ -93,6 +98,11 @@ export default function SystemSettingsPage() {
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
+        </div>
+      )}
+      {warning && (
+        <div role="status" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          {warning}
         </div>
       )}
       {status && (

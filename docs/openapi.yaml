@@ -638,6 +638,12 @@ components:
             start: {type: string, format: date-time}
             end: {type: string, format: date-time}
         total_events: {type: integer, description: Total events evaluated}
+        warnings:
+          type: array
+          items: {$ref: '#/components/schemas/RuleWarning'}
+          description: >-
+            Predicates of the rule that resolve toward denial under the running enforcement;
+            an inactive ALLOW rule matches nothing. Omitted when there are none.
     AVConfig:
       properties:
         blockTtlSeconds: {type: integer}
@@ -649,9 +655,9 @@ components:
         httpDownload: {type: boolean}
         httpUpload: {type: boolean}
         icap: {$ref: '#/components/schemas/ICAPConfig'}
-        maxSizeBytes: {type: integer}
+        maxSizeBytes: {type: integer, minimum: 0, maximum: 104857600, description: Largest payload sent to the scanner; 0 means no limit}
         mode: {type: string}
-        timeoutSec: {type: integer}
+        timeoutSec: {type: integer, minimum: 0, maximum: 300, description: Per-scan and per-probe deadline in seconds; 0 selects 5}
       type: object
     Anomaly:
       properties:
@@ -682,8 +688,8 @@ components:
       properties:
         customDefsPath: {type: string}
         freshclamEnabled: {type: boolean}
-        socketPath: {type: string}
-        updateSchedule: {type: string}
+        socketPath: {type: string, description: clamd socket; empty selects /run/clamav/clamd.sock}
+        updateSchedule: {type: string, description: 'FreshClam interval as a positive Go duration such as 4h; empty selects 6h. Cron syntax is rejected.'}
       type: object
     Config:
       properties:
@@ -809,7 +815,13 @@ components:
         dpiMock: {type: boolean}
         dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
-        enforceTable: {type: string}
+        enforceTable:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,247}$'
+          description: >-
+            nftables table name (inet family). The engine owns inet <enforceTable> for temporary blocks and
+            connection revocations and inet <enforceTable>_policy for the firewall policy. Empty selects
+            containd; containd_dhcp is reserved for the DHCP redirect table.
         enforcement: {type: boolean}
         nflogGroup: {type: integer}
         nfqueueGroup: {type: integer}
@@ -2201,7 +2213,9 @@ paths:
         stores. Configuration replacement uses atomic restore/reapply recovery.
         On runtime apply failure users, sessions and existing audit history are not
         wiped; successful recovery restores running, candidate, previous, pending
-        rollback and the IDS bank. After runtime apply succeeds, replacing users and
+        rollback and the IDS bank. After runtime apply succeeds, the engine's
+        temporary blocks and connection revocations are cleared; a failed clear is
+        reported as a "dynamic blocks:" warning. Replacing users and
         sessions with the default admin is atomic within the users database; a
         user-reset failure preserves the prior users and sessions. Configuration
         and users are separate databases, so that failure does not undo the
@@ -3112,6 +3126,8 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RulePreviewResponse"}
         "400": {description: Invalid rule payload, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "502": {description: The engine failed to evaluate the preview, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "503": {description: No engine rule preview is available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Learn Mode ──────────────────────────────────────────────────
   /learn/profiles:

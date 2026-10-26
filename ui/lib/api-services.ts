@@ -25,6 +25,21 @@ import type {
   WireGuardStatus,
 } from "./api";
 
+/** A custom ClamAV database stored on the engine. */
+export type AVDefinition = {
+  name: string;
+  size: number;
+  modified: string;
+  /** A running clamd is loading the definition. */
+  active: boolean;
+};
+
+export type AVDefinitionList = {
+  path: string;
+  files: string[];
+  definitions: AVDefinition[];
+};
+
 export const servicesAPI = {
   getServicesStatus: (signal?: AbortSignal) =>
     getJSON<ServicesStatus>("/api/v1/services/status", signal),
@@ -40,11 +55,10 @@ export const servicesAPI = {
     postJSONResult<AVConfig>("/api/v1/services/av", cfg),
   runAVUpdate: () =>
     postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
-  listAVDefs: () =>
-    getJSON<{ files: string[]; path?: string }>("/api/v1/services/av/defs"),
+  listAVDefs: () => getJSON<AVDefinitionList>("/api/v1/services/av/defs"),
   uploadAVDef: async (
     file: File,
-  ): Promise<{ ok: true; data: { status: string; file: string } } | { ok: false; error: string }> => {
+  ): Promise<{ ok: true; data: { status: string; file: string; active: boolean } } | { ok: false; error: string }> => {
     const form = new FormData();
     form.append("file", file);
     try {
@@ -59,7 +73,7 @@ export const servicesAPI = {
       notifyConfigMutation(res);
       return {
         ok: true,
-        data: (await res.json()) as { status: string; file: string },
+        data: (await res.json()) as { status: string; file: string; active: boolean },
       };
     } catch (e) {
       return {

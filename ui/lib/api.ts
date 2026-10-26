@@ -49,6 +49,9 @@ export {
 } from "./api-dataplane";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export type { IEC104Inventory } from "./api-inventory";
+export type { RulePreview } from "./api-network";
+export type { TrustedCAUploadResult } from "./api-policy";
+export type { AVDefinition, AVDefinitionList } from "./api-services";
 import { inventoryAPI } from "./api-inventory";
 import { consoleAPI } from "./api-console";
 import { dataplaneAPI } from "./api-dataplane";
@@ -280,8 +283,17 @@ export type FirewallRule = {
   destinations?: string[];
   protocols?: Protocol[];
   ics?: ICSPredicate;
+  identities?: string[];
+  schedule?: RuleSchedule;
   action: "ALLOW" | "DENY";
   log?: boolean;
+};
+
+export type RuleSchedule = {
+  daysOfWeek?: string[];
+  startTime?: string;
+  endTime?: string;
+  timezone?: string;
 };
 
 export type NATConfig = {
@@ -873,6 +885,15 @@ export type IDSRuleSource = {
   licenseNote?: string;
 };
 
+// A firewall rule predicate the dataplane cannot evaluate. It resolves toward
+// denial: an ALLOW rule is inactive, a DENY rule applies as if it always matched.
+export type RuleWarning = {
+  ruleId: string;
+  predicate: "identity" | "schedule";
+  action: "ALLOW" | "DENY";
+  message: string;
+};
+
 export type RulesetPreview = {
   ruleset?: string;
   snapshot?: unknown;
@@ -880,6 +901,7 @@ export type RulesetPreview = {
     iec104EnvelopeOpen: boolean;
     reason: string;
   };
+  warnings?: RuleWarning[];
   engineStatus?: unknown;
   engineStatusError?: string;
 };

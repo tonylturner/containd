@@ -4,6 +4,7 @@ package engine
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,14 +43,15 @@ func TestPreviewRuleUnenforcedPredicates(t *testing.T) {
 		action  rules.Action
 		queueID int
 		event   func(time.Time) events.Event
-		want    int // matches among one in-window and one out-of-window event
+		want    int  // matches among one in-window and one out-of-window event
+		warned  bool // the schedule is reported as unenforced
 	}{
-		{"scheduled L4 ALLOW is inactive", l4, rules.ActionAllow, 207, l4Event, 0},
-		{"scheduled L4 DENY ignores its window", l4, rules.ActionDeny, 207, l4Event, 2},
-		{"queued scheduled ICS ALLOW evaluates its window", modbus, rules.ActionAllow, 207, modbusEvent, 1},
-		{"queued scheduled ICS DENY evaluates its window", modbus, rules.ActionDeny, 207, modbusEvent, 1},
-		{"unqueued scheduled ICS ALLOW is inactive", modbus, rules.ActionAllow, 0, modbusEvent, 0},
-		{"unqueued scheduled ICS DENY ignores its window", modbus, rules.ActionDeny, 0, modbusEvent, 2},
+		{"scheduled L4 ALLOW is inactive", l4, rules.ActionAllow, 207, l4Event, 0, true},
+		{"scheduled L4 DENY ignores its window", l4, rules.ActionDeny, 207, l4Event, 2, true},
+		{"queued scheduled ICS ALLOW evaluates its window", modbus, rules.ActionAllow, 207, modbusEvent, 1, false},
+		{"queued scheduled ICS DENY evaluates its window", modbus, rules.ActionDeny, 207, modbusEvent, 1, false},
+		{"unqueued scheduled ICS ALLOW is inactive", modbus, rules.ActionAllow, 0, modbusEvent, 0, true},
+		{"unqueued scheduled ICS DENY ignores its window", modbus, rules.ActionDeny, 0, modbusEvent, 2, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entry := tc.entry
@@ -59,6 +61,7 @@ func TestPreviewRuleUnenforcedPredicates(t *testing.T) {
 			if got.MatchCount != tc.want || got.TotalEvents != 2 {
 				t.Fatalf("preview = %+v, want %d matches", got, tc.want)
 			}
+			checkPreviewWarning(t, got, tc.warned, enforce.PredicateSchedule, tc.action)
 		})
 	}
 	for _, tc := range []struct {
@@ -73,7 +76,28 @@ func TestPreviewRuleUnenforcedPredicates(t *testing.T) {
 			if got.MatchCount != tc.want {
 				t.Fatalf("preview = %+v, want %d matches", got, tc.want)
 			}
+			checkPreviewWarning(t, got, true, enforce.PredicateIdentity, tc.action)
 		})
+	}
+}
+
+// checkPreviewWarning asserts the preview reports exactly the expected
+// unenforced predicate, worded for its action, or no warning at all.
+func checkPreviewWarning(t *testing.T, got PreviewRuleResponse, warned bool, p enforce.UnenforcedPredicate, action rules.Action) {
+	t.Helper()
+	if !warned {
+		if len(got.Warnings) != 0 {
+			t.Fatalf("warnings = %+v, want none", got.Warnings)
+		}
+		return
+	}
+	effect := "ALLOW rule inactive"
+	if action != rules.ActionAllow {
+		effect = "applies as if the " + string(p) + " always matched"
+	}
+	if len(got.Warnings) != 1 || got.Warnings[0].RuleID != "candidate" || got.Warnings[0].Predicate != p ||
+		got.Warnings[0].Action != action || !strings.Contains(got.Warnings[0].Message, effect) {
+		t.Fatalf("warnings = %+v, want one %s warning for %s containing %q", got.Warnings, p, action, effect)
 	}
 }
 

@@ -38,11 +38,12 @@ Each affected rule produces a warning with its rule ID, the predicate
   warnings.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset.
+- The rule editor's **Preview impact**, and `warnings` in the
+  `POST /api/v1/firewall/rules/preview` response, for the previewed rule.
 
-The rule impact preview (`POST /api/v1/firewall/rules/preview`) resolves these
-predicates the same way under the running engine's NFQUEUE setting, so an
-affected `ALLOW` rule previews no matches and an affected `DENY` rule matches
-regardless of the predicate.
+The rule impact preview resolves these predicates the same way under the
+running engine's NFQUEUE setting, so an affected `ALLOW` rule previews no
+matches and an affected `DENY` rule matches regardless of the predicate.
 
 DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
 global bypass: enforce-mode rules and independent kernel decisions can still

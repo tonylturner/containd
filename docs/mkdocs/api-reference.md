@@ -191,9 +191,10 @@ state and the IDS bank. Users, credentials, MFA, sessions and existing audit
 records are not wiped on an apply failure; the reset-intent audit record remains.
 A failed recovery is explicitly reported and leaves runtime health unavailable.
 
-Only after runtime apply succeeds does reset replace users and sessions with the
-default admin in one users-database transaction, then clear audit history and
-the browser auth cookie. A user-reset failure rolls back the users and sessions
+Only after runtime apply succeeds does reset clear the engine's temporary
+blocks and connection revocations, which the defaults do not replace, and
+replace users and sessions with the default admin in one users-database
+transaction, then clear audit history and the browser auth cookie. A user-reset failure rolls back the users and sessions
 to their prior state and returns HTTP 500. It does not undo the successfully
 applied configuration: the config and users databases do not share a
 transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`, indicating
@@ -202,7 +203,9 @@ use the default credentials. Configuration history, pending rollback and the old
 IDS bank are replaced, not retained for rollback.
 
 The response includes `warnings` and the `X-Containd-Warnings` header when an
-auxiliary apply fails, including engine-side service configuration. HTTP 200
+auxiliary apply fails, including engine-side service configuration, or when
+the engine cannot clear its blocks (a `dynamic blocks:` warning: they remain
+in force until they expire). HTTP 200
 means the reset was applied, not that every subsystem converged. With warnings,
 `message` reports incomplete convergence rather than completion; inspect the
 warnings and runtime health before continuing. Mandatory daemon, dataplane or
