@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 
 import type {
   DashboardData,
   FlowSummary,
+  ServicesStatus,
   TelemetryEvent,
   Zone,
 } from "../lib/api";
@@ -43,65 +44,25 @@ export function NetworkPulseStats({
   );
 }
 
+const zoneLevelColor: Record<ZoneThreat["level"], string> = {
+  critical: "#ef4444",
+  elevated: "#f59e0b",
+  clear: "#22c55e",
+};
+
+/**
+ * Zone topology around the firewall. Each zone node takes the colour of its
+ * threat level from zone-attributed IDS alerts; nothing is animated, because
+ * no event stream carries per-edge traffic to show.
+ */
 export function NetworkPulseCanvas({
   zones,
-  flows,
-  events,
+  threatMap,
 }: {
   zones: Zone[];
-  flows: FlowSummary[];
-  events: TelemetryEvent[];
+  threatMap: Record<string, ZoneThreat>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
-  const packetsRef = useRef<
-    Array<{
-      fromIdx: number;
-      toIdx: number;
-      t: number;
-      speed: number;
-      color: string;
-    }>
-  >([]);
-  const dataRateRef = useRef({ flowCount: 0, eventCount: 0 });
-
-  useEffect(() => {
-    dataRateRef.current = {
-      flowCount: flows.length,
-      eventCount: events.length,
-    };
-  }, [flows.length, events.length]);
-
-  const buildNodes = useCallback(() => {
-    const core = {
-      id: "CORE FW",
-      x: 0.5,
-      y: 0.5,
-      color: "#06b6d4",
-      r: 14,
-    };
-    const wan = { id: "WAN", x: 0.88, y: 0.48, color: "#6b7280", r: 9 };
-
-    if (zones.length === 0) {
-      return [core, wan];
-    }
-
-    const zoneNodes = zones.slice(0, 8).map((z, i) => {
-      const angle =
-        (i / Math.min(zones.length, 8)) * Math.PI * 2 - Math.PI / 2;
-      const rx = 0.32;
-      const ry = 0.35;
-      return {
-        id: (z.alias || z.name).toUpperCase().slice(0, 10),
-        x: 0.5 + Math.cos(angle) * rx,
-        y: 0.5 + Math.sin(angle) * ry,
-        color: "#22c55e",
-        r: 9,
-      };
-    });
-
-    return [...zoneNodes, core, wan];
-  }, [zones]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -111,100 +72,41 @@ export function NetworkPulseCanvas({
     const canvasEl = canvas;
     const ctx2d = ctx;
 
-    const n = buildNodes();
-    const coreIdx = n.findIndex((nd) => nd.id === "CORE FW");
-    const wanIdx = n.findIndex((nd) => nd.id === "WAN");
-
-    const edges: Array<{ from: number; to: number }> = [];
-    n.forEach((_, i) => {
-      if (i !== coreIdx && i !== wanIdx) edges.push({ from: i, to: coreIdx });
+    const core = { id: "CORE FW", x: 0.5, y: 0.5, color: "#06b6d4", r: 14 };
+    const wan = { id: "WAN", x: 0.88, y: 0.48, color: "#6b7280", r: 9 };
+    const shown = zones.slice(0, 8);
+    const zoneNodes = shown.map((z, i) => {
+      const angle = (i / shown.length) * Math.PI * 2 - Math.PI / 2;
+      return {
+        id: (z.alias || z.name).toUpperCase().slice(0, 10),
+        x: 0.5 + Math.cos(angle) * 0.32,
+        y: 0.5 + Math.sin(angle) * 0.35,
+        color: zoneLevelColor[threatMap[z.name]?.level ?? "clear"],
+        r: 9,
+      };
     });
-    if (wanIdx >= 0 && coreIdx >= 0) {
-      edges.push({ from: coreIdx, to: wanIdx });
-    }
+    const nodes = [...zoneNodes, core, wan];
+    const edges = [...zoneNodes, wan].map((node) => ({ from: node, to: core }));
 
-    const resize = () => {
+    const draw = () => {
       const ratio = window.devicePixelRatio || 1;
-      canvasEl.width = canvasEl.offsetWidth * ratio;
-      canvasEl.height = canvasEl.offsetHeight * ratio;
-      ctx2d.setTransform(ratio, 0, 0, ratio, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-
-    let frame = 0;
-    const packets = packetsRef.current;
-
-    function spawnPacket() {
-      if (edges.length === 0) return;
-      const { flowCount, eventCount } = dataRateRef.current;
-      if (flowCount === 0 && eventCount === 0) return;
-
-      const edge = edges[Math.floor(Math.random() * edges.length)];
-      const reverse = Math.random() > 0.5;
-
-      const roll = Math.random();
-      let color = "#22c55e";
-      if (roll < 0.05) color = "#ef4444";
-      else if (roll < 0.15) color = "#f59e0b";
-
-      packets.push({
-        fromIdx: reverse ? edge.to : edge.from,
-        toIdx: reverse ? edge.from : edge.to,
-        t: 0,
-        speed: 0.006 + Math.random() * 0.01,
-        color,
-      });
-    }
-
-    function draw() {
-      frame++;
       const w = canvasEl.offsetWidth;
       const h = canvasEl.offsetHeight;
+      canvasEl.width = w * ratio;
+      canvasEl.height = h * ratio;
+      ctx2d.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx2d.clearRect(0, 0, w, h);
 
-      const getPos = (idx: number) => ({
-        x: n[idx].x * w,
-        y: n[idx].y * h,
-      });
-
-      edges.forEach((e) => {
-        const a = getPos(e.from);
-        const b = getPos(e.to);
+      edges.forEach(({ from, to }) => {
         ctx2d.beginPath();
-        ctx2d.moveTo(a.x, a.y);
-        ctx2d.lineTo(b.x, b.y);
+        ctx2d.moveTo(from.x * w, from.y * h);
+        ctx2d.lineTo(to.x * w, to.y * h);
         ctx2d.strokeStyle = "rgba(245,158,11,0.1)";
         ctx2d.lineWidth = 1;
         ctx2d.stroke();
       });
 
-      const { flowCount } = dataRateRef.current;
-      const spawnInterval = flowCount > 50 ? 10 : flowCount > 10 ? 20 : flowCount > 0 ? 40 : 0;
-      if (spawnInterval > 0 && frame % spawnInterval === 0) spawnPacket();
-
-      for (let i = packets.length - 1; i >= 0; i--) {
-        const p = packets[i];
-        if (p.fromIdx >= n.length || p.toIdx >= n.length) {
-          packets.splice(i, 1);
-          continue;
-        }
-        const a = getPos(p.fromIdx);
-        const b = getPos(p.toIdx);
-        const x = a.x + (b.x - a.x) * p.t;
-        const y = a.y + (b.y - a.y) * p.t;
-        ctx2d.beginPath();
-        ctx2d.arc(x, y, 3, 0, Math.PI * 2);
-        ctx2d.fillStyle = p.color;
-        ctx2d.shadowColor = p.color;
-        ctx2d.shadowBlur = 8;
-        ctx2d.fill();
-        ctx2d.shadowBlur = 0;
-        p.t += p.speed;
-        if (p.t >= 1) packets.splice(i, 1);
-      }
-
-      n.forEach((nd) => {
+      nodes.forEach((nd) => {
         const nx = nd.x * w;
         const ny = nd.y * h;
         const grd = ctx2d.createRadialGradient(nx, ny, 0, nx, ny, nd.r * 2.5);
@@ -228,33 +130,17 @@ export function NetworkPulseCanvas({
         ctx2d.textAlign = "center";
         ctx2d.fillText(nd.id, nx, ny + nd.r + 14);
       });
-
-      if (!document.hidden) {
-        animRef.current = requestAnimationFrame(draw);
-      }
-    }
-
-    animRef.current = requestAnimationFrame(draw);
-
-    const onVisibility = () => {
-      if (!document.hidden) {
-        cancelAnimationFrame(animRef.current);
-        animRef.current = requestAnimationFrame(draw);
-      }
     };
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      window.removeEventListener("resize", resize);
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(animRef.current);
-    };
-  }, [buildNodes]);
+    draw();
+    window.addEventListener("resize", draw);
+    return () => window.removeEventListener("resize", draw);
+  }, [zones, threatMap]);
 
   return <canvas ref={canvasRef} className="w-full h-full" />;
 }
 
-type ZoneThreat = { alerts: number; blocks: number; level: "critical" | "elevated" | "clear" };
+/** Zone-attributed IDS alerts among the recent events. */
+type ZoneThreat = { alerts: number; level: "critical" | "elevated" | "clear" };
 
 export function ZoneList({ zones, threatMap, sparklineMap }: {
   zones: Zone[];
@@ -264,7 +150,7 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
   return (
     <div className="space-y-2">
       {zones.map((z) => {
-        const threat = threatMap[z.name] ?? { alerts: 0, blocks: 0, level: "clear" as const };
+        const threat = threatMap[z.name] ?? { alerts: 0, level: "clear" as const };
         const sparkline = sparklineMap[z.name] ?? [];
         const badgeInfo = zoneBadge(threat.level);
 
@@ -285,7 +171,6 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
             {threat.alerts > 0 && (
               <div className="mb-1 text-2xs font-mono">
                 {threat.alerts} alert{threat.alerts !== 1 ? "s" : ""}
-                {threat.blocks > 0 && ` · ${threat.blocks} block${threat.blocks !== 1 ? "s" : ""}`}
               </div>
             )}
             {z.description && (
@@ -322,36 +207,12 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
   );
 }
 
+/**
+ * Events per second over the last 60 seconds of the loaded events. A quiet
+ * window draws a flat zero line rather than an invented baseline.
+ */
 export function TrafficChart({ events }: { events: TelemetryEvent[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
-  const histogramRef = useRef<number[]>(new Array(60).fill(0));
-  const isIdleRef = useRef(false);
-
-  useEffect(() => {
-    const now = Date.now();
-    const buckets = new Array(60).fill(0);
-    for (const e of events) {
-      if (!e.timestamp) continue;
-      const age = now - new Date(e.timestamp).getTime();
-      const bucket = 59 - Math.floor(age / 1000);
-      if (bucket >= 0 && bucket < 60) buckets[bucket]++;
-    }
-
-    const hasTraffic = buckets.some((v) => v > 0);
-    isIdleRef.current = !hasTraffic;
-
-    if (!hasTraffic) {
-      for (let i = 0; i < 60; i++) {
-        const t = i / 60;
-        const diurnal = Math.sin(t * Math.PI * 2 - Math.PI / 2) * 0.3 + 0.5;
-        const noise = Math.sin(t * 47) * 0.08 + Math.sin(t * 23) * 0.05;
-        buckets[i] = Math.max(0.05, diurnal + noise);
-      }
-    }
-
-    histogramRef.current = buckets;
-  }, [events]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -361,20 +222,23 @@ export function TrafficChart({ events }: { events: TelemetryEvent[] }) {
     const canvasEl = canvas;
     const ctx2d = ctx;
 
-    const resize = () => {
-      const ratio = window.devicePixelRatio || 1;
-      canvasEl.width = canvasEl.offsetWidth * ratio;
-      canvasEl.height = canvasEl.offsetHeight * ratio;
-      ctx2d.setTransform(ratio, 0, 0, ratio, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
+    const now = Date.now();
+    const data = new Array(60).fill(0);
+    for (const e of events) {
+      if (!e.timestamp) continue;
+      const age = now - new Date(e.timestamp).getTime();
+      const bucket = 59 - Math.floor(age / 1000);
+      if (bucket >= 0 && bucket < 60) data[bucket]++;
+    }
+    const idle = !data.some((v) => v > 0);
 
-    function draw() {
+    const draw = () => {
+      const ratio = window.devicePixelRatio || 1;
       const w = canvasEl.offsetWidth;
       const h = canvasEl.offsetHeight;
-      const data = histogramRef.current;
-
+      canvasEl.width = w * ratio;
+      canvasEl.height = h * ratio;
+      ctx2d.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx2d.clearRect(0, 0, w, h);
 
       const max = Math.max(...data, 1);
@@ -390,12 +254,29 @@ export function TrafficChart({ events }: { events: TelemetryEvent[] }) {
         ctx2d.stroke();
       }
 
-      ctx2d.beginPath();
-      data.forEach((val, i) => {
-        const x = i * step;
-        const y = h - (val / max) * h * 0.85 - 4;
-        i === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
-      });
+      const trace = () => {
+        ctx2d.beginPath();
+        data.forEach((val, i) => {
+          const x = i * step;
+          const y = h - (val / max) * h * 0.85 - 4;
+          if (i === 0) ctx2d.moveTo(x, y);
+          else ctx2d.lineTo(x, y);
+        });
+      };
+
+      if (idle) {
+        trace();
+        ctx2d.strokeStyle = "rgba(245,158,11,0.3)";
+        ctx2d.lineWidth = 1;
+        ctx2d.stroke();
+        ctx2d.fillStyle = "rgba(148,163,184,0.5)";
+        ctx2d.font = "9px monospace";
+        ctx2d.textAlign = "right";
+        ctx2d.fillText("no events", w - 4, 12);
+        return;
+      }
+
+      trace();
       ctx2d.lineTo((data.length - 1) * step, h);
       ctx2d.lineTo(0, h);
       ctx2d.closePath();
@@ -405,81 +286,59 @@ export function TrafficChart({ events }: { events: TelemetryEvent[] }) {
       ctx2d.fillStyle = grad;
       ctx2d.fill();
 
-      ctx2d.beginPath();
-      data.forEach((val, i) => {
-        const x = i * step;
-        const y = h - (val / max) * h * 0.85 - 4;
-        i === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
-      });
-      const idle = isIdleRef.current;
-      ctx2d.strokeStyle = idle ? "rgba(245,158,11,0.3)" : "#f59e0b";
-      ctx2d.lineWidth = idle ? 1 : 1.5;
-      if (idle) ctx2d.setLineDash([4, 4]);
+      trace();
+      ctx2d.strokeStyle = "#f59e0b";
+      ctx2d.lineWidth = 1.5;
       ctx2d.stroke();
-      if (idle) ctx2d.setLineDash([]);
-
-      if (idle) {
-        ctx2d.fillStyle = "rgba(148,163,184,0.5)";
-        ctx2d.font = "9px monospace";
-        ctx2d.textAlign = "right";
-        ctx2d.fillText("24h baseline", w - 4, 12);
-      }
-
-      if (!document.hidden) {
-        animRef.current = requestAnimationFrame(draw);
-      }
-    }
-
-    animRef.current = requestAnimationFrame(draw);
-    const onVisibility = () => {
-      if (!document.hidden) {
-        cancelAnimationFrame(animRef.current);
-        animRef.current = requestAnimationFrame(draw);
-      }
     };
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      window.removeEventListener("resize", resize);
-      document.removeEventListener("visibilitychange", onVisibility);
-      cancelAnimationFrame(animRef.current);
-    };
-  }, []);
+    draw();
+    window.addEventListener("resize", draw);
+    return () => window.removeEventListener("resize", draw);
+  }, [events]);
 
   return <canvas ref={canvasRef} className="w-full h-full" />;
+}
+
+function isIDSAlert(e: TelemetryEvent): boolean {
+  return e.proto === "ids" && e.kind === "alert";
+}
+
+function zoneNames(attrs: Record<string, unknown> | undefined): string[] {
+  if (!attrs) return [];
+  return [attrs.zone, attrs.srcZone, attrs.dstZone].filter(
+    (z): z is string => typeof z === "string" && z !== "",
+  );
+}
+
+/**
+ * The zones an event names: its own zone attributes, or for an IDS alert
+ * those of the event that triggered it. Events without zones belong to none.
+ */
+function eventZones(e: TelemetryEvent): string[] {
+  const own = zoneNames(e.attributes);
+  if (own.length > 0) return own;
+  const source = e.attributes?.event_attrs;
+  if (source && typeof source === "object") {
+    return zoneNames(source as Record<string, unknown>);
+  }
+  return [];
 }
 
 export function buildZoneThreatMap(events: TelemetryEvent[], zones: Zone[]): Record<string, ZoneThreat> {
   const map: Record<string, ZoneThreat> = {};
   for (const z of zones) {
-    map[z.name] = { alerts: 0, blocks: 0, level: "clear" };
+    map[z.name] = { alerts: 0, level: "clear" };
   }
 
   for (const e of events) {
-    const kind = e.kind;
-    const isAlert = kind === "alert" || kind === "ids_alert";
-    const isBlock = kind === "block" || kind === "av_block";
-    if (!isAlert && !isBlock) continue;
-
-    const zoneAttr = e.attributes?.zone as string | undefined;
-    const srcZone = e.attributes?.srcZone as string | undefined;
-    const dstZone = e.attributes?.dstZone as string | undefined;
-    const targetZones = [zoneAttr, srcZone, dstZone].filter(Boolean) as string[];
-
-    if (targetZones.length === 0 && zones.length > 0) {
-      const idx = (e.id ?? 0) % zones.length;
-      targetZones.push(zones[idx].name);
-    }
-
-    for (const zn of targetZones) {
-      if (!map[zn]) continue;
-      if (isAlert) map[zn].alerts++;
-      if (isBlock) map[zn].blocks++;
+    if (!isIDSAlert(e)) continue;
+    for (const zn of new Set(eventZones(e))) {
+      if (map[zn]) map[zn].alerts++;
     }
   }
 
   for (const z of Object.values(map)) {
-    if (z.blocks > 0 || z.alerts >= 5) z.level = "critical";
+    if (z.alerts >= 5) z.level = "critical";
     else if (z.alerts > 0) z.level = "elevated";
   }
 
@@ -497,6 +356,15 @@ function zoneBadge(level: ZoneThreat["level"]): { label: string; cls: string } {
   }
 }
 
+function recentBin(e: TelemetryEvent, now: number, bins: number, windowMs: number): number | null {
+  if (!e.timestamp) return null;
+  const age = now - new Date(e.timestamp).getTime();
+  if (age < 0 || age > windowMs) return null;
+  const bin = bins - 1 - Math.floor((age / windowMs) * bins);
+  return bin >= 0 && bin < bins ? bin : null;
+}
+
+/** Per-zone event counts over the last 60 seconds, zone-attributed only. */
 export function buildZoneSparklines(events: TelemetryEvent[], zones: Zone[]): Record<string, number[]> {
   const BINS = 20;
   const map: Record<string, number[]> = {};
@@ -505,26 +373,10 @@ export function buildZoneSparklines(events: TelemetryEvent[], zones: Zone[]): Re
   }
 
   const now = Date.now();
-  const windowMs = 60_000;
-
   for (const e of events) {
-    if (!e.timestamp) continue;
-    const age = now - new Date(e.timestamp).getTime();
-    if (age < 0 || age > windowMs) continue;
-    const bin = BINS - 1 - Math.floor((age / windowMs) * BINS);
-    if (bin < 0 || bin >= BINS) continue;
-
-    const zoneAttr = e.attributes?.zone as string | undefined;
-    const srcZone = e.attributes?.srcZone as string | undefined;
-    const dstZone = e.attributes?.dstZone as string | undefined;
-    const targetZones = [zoneAttr, srcZone, dstZone].filter(Boolean) as string[];
-
-    if (targetZones.length === 0 && zones.length > 0) {
-      const idx = (e.id ?? 0) % zones.length;
-      targetZones.push(zones[idx].name);
-    }
-
-    for (const zn of targetZones) {
+    const bin = recentBin(e, now, BINS, 60_000);
+    if (bin === null) continue;
+    for (const zn of new Set(eventZones(e))) {
       if (map[zn]) map[zn][bin]++;
     }
   }
@@ -532,68 +384,45 @@ export function buildZoneSparklines(events: TelemetryEvent[], zones: Zone[]): Re
   return map;
 }
 
-function buildServiceSparklines(events: TelemetryEvent[]): Record<string, number[]> {
+/** IDS alerts over the last 60 seconds of the loaded events. */
+function buildIDSSparkline(events: TelemetryEvent[]): number[] {
   const BINS = 15;
-  const windowMs = 60_000;
+  const series = new Array(BINS).fill(0);
   const now = Date.now();
-
-  const serviceMap: Record<string, number[]> = {
-    IPS: new Array(BINS).fill(0),
-    AV: new Array(BINS).fill(0),
-    DNS: new Array(BINS).fill(0),
-    Syslog: new Array(BINS).fill(0),
-    Proxy: new Array(BINS).fill(0),
-    VPN: new Array(BINS).fill(0),
-  };
-
   for (const e of events) {
-    if (!e.timestamp) continue;
-    const age = now - new Date(e.timestamp).getTime();
-    if (age < 0 || age > windowMs) continue;
-    const bin = BINS - 1 - Math.floor((age / windowMs) * BINS);
-    if (bin < 0 || bin >= BINS) continue;
-
-    const kind = e.kind;
-    const proto = (e.proto || "").toLowerCase();
-
-    if (kind === "ids_alert" || kind === "alert") serviceMap.IPS[bin]++;
-    else if (kind === "av_detect" || kind === "av_block") serviceMap.AV[bin]++;
-    else if (proto === "dns") serviceMap.DNS[bin]++;
-    else if (proto === "syslog") serviceMap.Syslog[bin]++;
-    else if (proto === "http" || proto === "tls") serviceMap.Proxy[bin]++;
-    else serviceMap.IPS[bin]++;
+    if (!isIDSAlert(e)) continue;
+    const bin = recentBin(e, now, BINS, 60_000);
+    if (bin !== null) series[bin]++;
   }
-
-  return serviceMap;
+  return series;
 }
 
+/**
+ * Service cards from the services status. Sparklines are each service's own
+ * per-minute meter; IPS, which has no meter, counts IDS alert events.
+ */
 export function deriveServices(
-  status: Record<string, unknown> | null,
+  status: ServicesStatus | null,
   events: TelemetryEvent[],
 ): ServiceInfo[] {
-  const sparklines = buildServiceSparklines(events);
+  const ips = buildIDSSparkline(events);
 
   if (!status) {
     return [
-      { name: "IPS", active: false, detail: "Loading...", href: "/ids/", sparkline: sparklines.IPS },
-      { name: "AV", active: false, detail: "Loading...", href: "/system/services/av/", sparkline: sparklines.AV },
-      { name: "DNS", active: false, detail: "Loading...", href: "/system/services/dns/", sparkline: sparklines.DNS },
-      { name: "VPN", active: false, detail: "Loading...", href: "/vpn/", sparkline: sparklines.VPN },
-      { name: "Syslog", active: false, detail: "Loading...", href: "/system/services/syslog/", sparkline: sparklines.Syslog },
-      { name: "Proxy", active: false, detail: "Loading...", href: "/proxies/", sparkline: sparklines.Proxy },
+      { name: "IPS", active: false, detail: "Loading...", href: "/ids/", sparkline: ips },
+      { name: "AV", active: false, detail: "Loading...", href: "/system/services/av/" },
+      { name: "DNS", active: false, detail: "Loading...", href: "/system/services/dns/" },
+      { name: "VPN", active: false, detail: "Loading...", href: "/vpn/" },
+      { name: "Syslog", active: false, detail: "Loading...", href: "/system/services/syslog/" },
+      { name: "Proxy", active: false, detail: "Loading...", href: "/proxies/" },
     ];
   }
 
-  const av = status.av as Record<string, unknown> | undefined;
-  const vpn = status.vpn as Record<string, unknown> | undefined;
-  const proxy = status.proxy as Record<string, unknown> | undefined;
-  const syslog = status.syslog as Record<string, unknown> | undefined;
-  const dns = status.dns as Record<string, unknown> | undefined;
-
-  const syslogConfigured = ((syslog?.configured_forwarders as number) ?? 0) > 0;
-  const envoyActive = proxy?.forward_enabled && proxy?.envoy_running;
-  const nginxActive = proxy?.reverse_enabled && proxy?.nginx_running;
-  const avEnabled = !!av?.enabled;
+  const { av, vpn, proxy, syslog, dns } = status;
+  const syslogConfigured = (syslog?.configured_forwarders ?? 0) > 0;
+  const envoyActive = !!(proxy?.forward_enabled && proxy.envoy_running);
+  const nginxActive = !!(proxy?.reverse_enabled && proxy.nginx_running);
+  const avEnabled = av.available && av.enabled;
   const vpnActive = !!vpn?.wireguard_enabled || !!vpn?.openvpn_running;
   const dnsActive = !!dns?.enabled;
 
@@ -603,45 +432,45 @@ export function deriveServices(
       active: true,
       detail: "Active",
       href: "/ids/",
-      sparkline: sparklines.IPS,
+      sparkline: ips,
     },
     {
       name: "AV",
       active: avEnabled,
-      detail: avEnabled ? (av?.mode as string) ?? "Enabled" : "Disabled",
+      detail: !av.available ? "Engine unavailable" : avEnabled ? av.mode || "Enabled" : "Disabled",
       href: "/system/services/av/",
-      sparkline: sparklines.AV,
+      sparkline: av.available ? av.sparkline : undefined,
     },
     {
       name: "DNS",
       active: dnsActive,
       detail: dnsActive ? "Resolving" : "Disabled",
       href: "/system/services/dns/",
-      sparkline: sparklines.DNS,
+      sparkline: dns?.sparkline,
     },
     {
       name: "VPN",
       active: vpnActive,
       detail: vpnActive ? "Tunnel up" : "No tunnels",
       href: "/vpn/",
-      sparkline: sparklines.VPN,
+      sparkline: vpn?.sparkline,
     },
     {
       name: "Syslog",
       active: syslogConfigured,
       detail: syslogConfigured
-        ? `${syslog?.configured_forwarders} fwd · ${((syslog?.rate_per_min as number) ?? 0).toFixed(0)}/min`
+        ? `${syslog?.configured_forwarders} fwd · ${(syslog?.rate_per_min ?? 0).toFixed(0)}/min`
         : "No forwarders",
       href: "/system/services/syslog/",
-      sparkline: sparklines.Syslog,
-      errorRate: (syslog?.errors_rate_per_min as number) ?? undefined,
+      sparkline: syslog?.sparkline,
+      errorRate: syslog?.errors_rate_per_min,
     },
     {
       name: "Proxy",
-      active: !!(envoyActive || nginxActive),
+      active: envoyActive || nginxActive,
       detail: envoyActive || nginxActive ? "Active" : "Disabled",
       href: "/proxies/",
-      sparkline: sparklines.Proxy,
+      sparkline: proxy?.sparkline,
     },
   ];
 }

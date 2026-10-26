@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
-import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
+import { api, type FlowSummary, type ServicesStatus, type TelemetryEvent } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { Sparkline } from "../../components/Sparkline";
@@ -14,7 +14,7 @@ export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [flowStatus, setFlowStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
-  const [services, setServices] = useState<Record<string, unknown> | null>(null);
+  const [services, setServices] = useState<ServicesStatus | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -151,18 +151,9 @@ export default function MonitoringOverviewPage() {
     };
   }, [flows]);
 
-  const envoyRate =
-    typeof (services as any)?.envoy?.rate_per_min === "number"
-      ? (services as any).envoy.rate_per_min
-      : null;
-  const envoyErrors =
-    typeof (services as any)?.envoy?.errors_rate_per_min === "number"
-      ? (services as any).envoy.errors_rate_per_min
-      : null;
-  const nginxRate =
-    typeof (services as any)?.nginx?.rate_per_min === "number"
-      ? (services as any).nginx.rate_per_min
-      : null;
+  const envoyRate = services?.envoy?.rate_per_min ?? null;
+  const envoyErrors = services?.envoy?.errors_rate_per_min ?? null;
+  const nginxRate = services?.nginx?.rate_per_min ?? null;
 
   const serviceCards = services
     ? [
@@ -170,45 +161,42 @@ export default function MonitoringOverviewPage() {
           key: "dns",
           label: "DNS",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.dns?.running ? "running" : "stopped",
+          status: services.dns?.running ? "running" : "stopped",
           hint: "Unbound resolver",
         },
         {
           key: "ntp",
           label: "NTP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.ntp?.running ? "running" : "stopped",
+          status: services.ntp?.running ? "running" : "stopped",
           hint: "chrony NTP client",
         },
         {
           key: "dhcp",
           label: "DHCP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.dhcp?.enabled ? "enabled" : "off",
+          status: services.dhcp?.enabled ? "enabled" : "off",
           hint: "LAN leases",
         },
         {
           key: "vpn",
           label: "VPN",
           icon: staticAssetURL("/icons/wireguard.svg"),
-          status:
-            (services as any)?.vpn?.wireguard_enabled || (services as any)?.vpn?.openvpn_running
-              ? "active"
-              : "off",
+          status: services.vpn?.wireguard_enabled || services.vpn?.openvpn_running ? "active" : "off",
           hint: "WireGuard/OpenVPN",
         },
         {
           key: "proxy",
           label: "Proxies",
           icon: staticAssetURL("/icons/nginx.svg"),
-          status: (services as any)?.proxy?.envoy_running || (services as any)?.proxy?.nginx_running ? "running" : "stopped",
+          status: services.proxy?.envoy_running || services.proxy?.nginx_running ? "running" : "stopped",
           hint: "Envoy + Nginx",
         },
         {
           key: "av",
           label: "AV",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.av?.enabled ? "enabled" : "off",
+          status: !services.av.available ? "unavailable" : services.av.enabled ? "enabled" : "off",
           hint: "ICAP/ClamAV",
         },
       ]

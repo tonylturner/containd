@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 
 import {
@@ -8,6 +8,7 @@ import {
   type TelemetryEvent,
   type Zone,
   type FlowSummary,
+  type ServicesStatus,
   type SystemStats,
   api,
 } from "../lib/api";
@@ -44,6 +45,7 @@ export default function Home() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [clock, setClock] = useState("");
@@ -71,6 +73,7 @@ export default function Home() {
       api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
+      api.getServicesStatus(signal).then((r) => r && setServicesStatus(r)).catch(() => {});
       api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
       api.diffConfig().then((r) => {
         if (!r) return;
@@ -117,19 +120,13 @@ export default function Home() {
 
   const health = data?.health ?? null;
   const eventStats = data?.eventStats ?? null;
-  const servicesStatus = data?.services ?? null;
   const hasAlerts =
     eventStats &&
     (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
-  // Derive services list from real status data, with sparklines from event history
-  const services = deriveServices(servicesStatus, events);
-
-  // Per-zone threat posture: count IDS alerts per zone from events
-  const zoneThreatMap = buildZoneThreatMap(events, zones);
-
-  // Per-zone traffic sparklines: bucket events by zone over 60s
-  const zoneSparklineMap = buildZoneSparklines(events, zones);
+  const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
+  const zoneThreatMap = useMemo(() => buildZoneThreatMap(events, zones), [events, zones]);
+  const zoneSparklineMap = useMemo(() => buildZoneSparklines(events, zones), [events, zones]);
 
   return (
     <Shell title="Dashboard">
@@ -256,7 +253,7 @@ export default function Home() {
             {!flowsUnavailable && <NetworkPulseStats flows={flows} eventStats={eventStats} />}
           </div>
           {flowsUnavailable ? <div role="status" className="p-4 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button></div> : <div className="h-[220px]">
-            <NetworkPulseCanvas zones={zones} flows={flows} events={events} />
+            <NetworkPulseCanvas zones={zones} threatMap={zoneThreatMap} />
           </div>}
         </div>
 
@@ -285,10 +282,7 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
-              {events.some((e) => {
-                if (!e.timestamp) return false;
-                return Date.now() - new Date(e.timestamp).getTime() < 60_000;
-              }) ? "60s window" : "24h baseline"}
+              60s window
             </span>
           </h3>
           <div className="h-[120px] mb-3">

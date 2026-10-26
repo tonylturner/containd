@@ -112,7 +112,7 @@ func (m *DHCPManager) Status() map[string]any {
 		"listen_ifaces": len(m.lastCfg.ListenIfaces),
 		"pools":         len(m.lastCfg.Pools),
 		"reservations":  len(m.lastCfg.Reservations),
-		"last_render":   m.lastRender.Format(time.RFC3339Nano),
+		"last_render":   formatMaybe(m.lastRender),
 		"last_error":    m.lastError,
 		"note":          "DHCP runtime is handled by the engine; this status reflects config render state.",
 	}
