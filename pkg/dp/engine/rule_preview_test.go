@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -198,5 +199,21 @@ func TestPreviewRuleEmpty(t *testing.T) {
 	got := e.PreviewRule(rules.Entry{})
 	if got.MatchCount != 0 || got.TotalEvents != 0 || got.TimeRange != nil || got.SampleMatches == nil {
 		t.Fatalf("empty preview = %+v", got)
+	}
+}
+
+// TestPreviewRuleZoneWarnings checks that the preview warns about a zone
+// only when the running configuration assigns it no interface.
+func TestPreviewRuleZoneWarnings(t *testing.T) {
+	e := &Engine{eventStore: events.NewStore(10)}
+	e.ruleSnap.Store(&rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}})
+	bound := rules.Entry{ID: "bound", Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"plant"}}
+	if got := e.previewRule(bound, previewZoneResolver).Warnings; len(got) != 0 {
+		t.Fatalf("bound zones warned: %+v", got)
+	}
+	empty := rules.Entry{ID: "empty", Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"dmz"}}
+	got := e.previewRule(empty, previewZoneResolver).Warnings
+	if len(got) != 1 || got[0].Predicate != enforce.PredicateZone || !reflect.DeepEqual(got[0].Zones, []string{"dmz"}) {
+		t.Fatalf("empty zone warnings = %+v, want one zone warning for dmz", got)
 	}
 }
