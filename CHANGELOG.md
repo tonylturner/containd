@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an independent recovery context. JSON errors report restore/reapply outcomes;
   failed recovery is visible in health. Boot and expiry replay no longer treat
   nft failures as success.
+- Factory reset replaces configuration through the same restore/reapply path as
+  commit. A failed runtime apply restores the prior configuration and leaves
+  users, sessions and audit history in place; they are wiped only after apply
+  succeeds.
 - Keep liveness responsive during commits and recovery with a deadline-bounded
   running metadata/fault snapshot and one shared observation timeout. Brief
   store contention does not hide real state; contention past the budget or

@@ -76,22 +76,19 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pendingTimer != nil {
-		s.pendingTimer.Stop()
-		s.pendingTimer = nil
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin wipe tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs`); err != nil {
-		return fmt.Errorf("wipe configs: %w", err)
+	if err := wipeAllTx(ctx, tx); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM ids_rules`); err != nil {
-		return fmt.Errorf("wipe ids_rules: %w", err)
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-	return tx.Commit()
+	s.stopPendingTimerLocked()
+	return nil
 }
 
 // NewSQLiteStore opens or creates a SQLite database at the given path.

@@ -1983,9 +1983,12 @@ paths:
         Preflights the autobound appliance defaults (shared with first boot) against
         the immutable management reservation before wiping users, sessions, config,
         or audit. Genuine incompatible defaults are refused without changing these
-        stores. A successful reset clears the boot fault and applies the defaults.
-        Factory reset uses the strict runtime apply path, but is destructive and
-        does not restore wiped users/config/audit data if runtime apply fails.
+        stores. Configuration replacement uses atomic restore/reapply recovery.
+        On runtime apply failure users, sessions and existing audit history are not
+        wiped; successful recovery restores running, candidate, previous, pending
+        rollback and the IDS bank. Users and audit are wiped only after runtime apply
+        succeeds. A successful reset clears the boot fault and applies the defaults.
+        A later user-store failure does not undo the successfully applied configuration.
       tags: [System]
       requestBody:
         required: true
@@ -2001,6 +2004,25 @@ paths:
         "400": {description: Invalid confirmation or defaults conflict with reserved management path, content: {application/json: {schema: {
                   $ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "500":
+          description: >
+            Reset failed. A runtime apply failure returns ConfigApplyError with the
+            restored/reapplied recovery results; users, sessions and audit are unchanged.
+            A failed reapply leaves runtime health unavailable. Other store failures
+            return ErrorResponse.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConfigApplyError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: configuration apply failed
+                detail: "ruleset: nft apply failed"
+                restored: true
+                reapplied: true
+        "501": {description: Factory reset requires SQLite config and users stores, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "503": {description: Reset stores unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   # ── Config ────────────────────────────────────────────────────────
   /config/validate:
