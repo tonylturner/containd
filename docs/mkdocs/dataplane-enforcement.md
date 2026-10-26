@@ -83,7 +83,11 @@ reset at both endpoints. A client that lost an established session and
 reconnects from the same source port recovers as described below for other
 ICS protocols. A RST without payload closes a session only at the sequence
 number its receiver expects next; any other passes and the session stays
-inspected.
+inspected. Before the server's SYN-ACK, only the server's RST refusing the
+client's SYN passes (no payload, acknowledging the SYN): the client fails at
+once, as with a station that does not listen, and its next SYN opens a new
+session. Any other packet before the SYN-ACK, except the client's SYN, is
+dropped.
 
 With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
 closed when its stream cannot be inspected: a conflicting overlap, a

@@ -262,7 +262,8 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 
 // tombstonePacketLocked drops every packet of an aborted incarnation and
 // answers challenge ACKs. A SYN with a new ISN starts the next incarnation
-// (opens); a retransmitted old SYN does not.
+// (opens); a retransmitted old SYN does not. The server's SYN-ACK of the
+// next incarnation, or its RST refusing that SYN (refuses), passes.
 func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
 	f := pkt.TCP.Flags
 	if dir == iecDirClient && isSYN(f) {
@@ -282,6 +283,12 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 			return dropped(reasonIECTombstone), true
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+	}
+	if n := s.next; n != nil && f&capture.TCPFlagSYN == 0 && refuses(n, dir, pkt) {
+		// The server refused the next incarnation: the tombstone stays,
+		// and the client's next SYN opens another.
+		s.next = nil
+		return accepted(reasonIECClosed), true
 	}
 	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
 		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
@@ -385,8 +392,13 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		return t.handshakeLocked(s, dir, pkt, now)
 	}
 	if s.dirs[iecDirSrv] == nil {
+		if refuses(s, dir, pkt) {
+			res := accepted(reasonIECClosed)
+			res.acts.merge(t.closeLocked(s, now))
+			return res
+		}
 		if enforce {
-			return dropped(reasonIECInvalid) // nothing before the SYN-ACK
+			return dropped(reasonIECInvalid) // nothing else before the SYN-ACK
 		}
 		return accepted(reasonIECAccept)
 	}
@@ -407,6 +419,17 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		t.finLocked(s, dir, pkt, &res)
 	}
 	return res
+}
+
+// refuses reports the server's RST that refuses the client's SYN of s, an
+// incarnation awaiting its SYN-ACK: no payload, and the ACK the client
+// accepts in SYN-SENT, one past its ISN (RFC 9293). It reaches the client,
+// which fails at once instead of retransmitting its SYN until it times out.
+// The client's kernel ignores any other RST.
+func refuses(s *iecSession, dir int, pkt capture.Packet) bool {
+	f := pkt.TCP.Flags
+	return dir == iecDirSrv && f&capture.TCPFlagRST != 0 && f&capture.TCPFlagACK != 0 &&
+		len(pkt.Payload) == 0 && pkt.TCP.Ack == s.dirs[iecDirClient].isn+1
 }
 
 // ackLocked releases history the receiver of direction dir acknowledged, up
