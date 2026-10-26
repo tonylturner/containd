@@ -19,8 +19,7 @@ export type RulesetPreview = {
   warnings?: RuleWarning[];
   /** Static coverage of the candidate's ICS rules; GET /dataplane/ics-coverage is the UI's source. */
   icsCoverage?: ICSCoverageRule[];
-  engineStatus?: RulesetEngineStatus;
-  engineStatusError?: string;
+  // The preview also carries engineStatus; GET /dataplane/ruleset/status is the UI's source.
 };
 
 /**
@@ -40,13 +39,15 @@ export type SchedulePlannerStatus = {
 };
 
 /**
- * The installed ruleset; icsCoverage includes its runtime faults. A failed
- * apply leaves it in force: ruleset, snapshotVersion, appliedAt and warnings
- * keep describing it, while error, failedSnapshotVersion and failedAt
- * describe the failed apply until the next success clears them.
+ * The installed ruleset, without its text; icsCoverage includes its runtime
+ * faults. A failed apply leaves it in force: installed, snapshotVersion,
+ * appliedAt and warnings keep describing it, while error,
+ * failedSnapshotVersion and failedAt describe the failed apply until the next
+ * success clears them. appliedAt outlives a ruleset released when
+ * enforcement is disabled; installed does not.
  */
-export type RulesetEngineStatus = {
-  ruleset?: string;
+export type InstalledRulesetStatus = {
+  installed: boolean;
   appliedAt?: string;
   error?: string;
   failedSnapshotVersion?: string;
@@ -79,6 +80,11 @@ export async function setDataPlane(
 /** Admin-only: the compiled candidate ruleset; 400 when the candidate is invalid. */
 export async function getRulesetPreview(): Promise<ApiResult<RulesetPreview>> {
   return await getJSONResult<RulesetPreview>("/api/v1/dataplane/ruleset");
+}
+
+/** The installed ruleset's status for any authenticated user; compiles nothing. */
+export async function getInstalledRulesetStatus(): Promise<ApiResult<InstalledRulesetStatus>> {
+  return await getJSONResult<InstalledRulesetStatus>("/api/v1/dataplane/ruleset/status");
 }
 
 /** Candidate and applied ICS coverage for any authenticated user. */

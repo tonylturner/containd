@@ -74,6 +74,7 @@ type Mocks = {
   coverage?: { status: number; json: unknown };
   health?: unknown;
   preview?: unknown;
+  installed?: unknown;
 };
 
 async function mockAPI(page: Page, mocks: Mocks): Promise<{ rulesetRequests: number; errors: string[] }> {
@@ -104,6 +105,7 @@ async function mockAPI(page: Page, mocks: Mocks): Promise<{ rulesetRequests: num
     if (path === "/api/v1/dataplane") body = mocks.dataplane ?? { dpiEnabled: true, dpiMode: "enforce", nfqueueGroup: 101 };
     if (path === "/api/v1/health") body = mocks.health ?? health;
     if (path === "/api/v1/firewall/rules/preview") body = mocks.preview ?? {};
+    if (path === "/api/v1/dataplane/ruleset/status") body = mocks.installed ?? { installed: true, appliedAt: "2026-10-26T06:00:00Z" };
     await route.fulfill({ json: body });
   });
   return seen;
@@ -260,9 +262,11 @@ test("a candidate error keeps the applied coverage and names the fault", async (
 test("a failed apply is reported and applied coverage describes the previous rules", async ({ page }) => {
   await mockAPI(page, {
     coverage: { status: 200, json: { ...report, applyError: "nft: syntax error" } },
+    installed: { installed: true, appliedAt: "2026-10-26T06:00:00Z", error: "nft: syntax error" },
   });
   await open(page, "/ics/");
-  await expect(page.getByText("The last apply failed: nft: syntax error. Applied coverage describes the rules still in force from before it.")).toBeVisible();
+  await expect(page.getByText("The last apply failed, so applied coverage describes the rules still in force from before it.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Failed apply" })).toContainText("nft: syntax error");
   await expect(coverageOf(page, "plc-read").getByText("applied: enforcing")).toBeVisible();
   await expect(page.getByText("Last apply attempt:", { exact: false })).toBeVisible();
 });

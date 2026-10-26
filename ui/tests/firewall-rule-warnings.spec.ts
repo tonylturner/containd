@@ -15,7 +15,7 @@ const shadowed = {
   message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
 };
 
-async function openFirewall(page: Page, previews: unknown[], engineStatus?: unknown) {
+async function openFirewall(page: Page, previews: unknown[], installed: unknown = { installed: true, appliedAt: "2026-10-26T06:00:00Z" }) {
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -30,15 +30,19 @@ async function openFirewall(page: Page, previews: unknown[], engineStatus?: unkn
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
     if (path === "/api/v1/dataplane/ruleset") {
-      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [unbound, shadowed], engineStatus };
+      body = { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [unbound, shadowed] };
     }
+    if (path === "/api/v1/dataplane/ruleset/status") body = installed;
     if (path === "/api/v1/firewall/rules/preview") {
       previews.push(request.postDataJSON());
       body = { match_count: 0, sample_matches: [], time_range: null, total_events: 12, warnings: [unbound] };
     }
     await route.fulfill({ json: body });
   });
-  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
+  const loaded = Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules"),
+    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/dataplane/ruleset/status"),
+  ]);
   await page.goto("/firewall/");
   await loaded;
 }
@@ -73,10 +77,11 @@ test("ruleset preview lists unbound identities and shadowed rules", async ({ pag
 });
 
 test("applied warnings are listed apart from the candidate's", async ({ page }) => {
-  await openFirewall(page, [], { appliedAt: "2026-10-26T06:00:00Z", warnings: [shadowed] });
+  await openFirewall(page, [], { installed: true, appliedAt: "2026-10-26T06:00:00Z", warnings: [shadowed] });
+  const applied = page.getByRole("status", { name: "Applied rule warnings" });
+  await expect(applied.getByRole("listitem")).toHaveCount(1);
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   const candidate = page.getByRole("status", { name: "Candidate rule warnings" });
-  const applied = page.getByRole("status", { name: "Applied rule warnings" });
   await expect(candidate.getByRole("listitem")).toHaveCount(2);
   await expect(applied).toContainText("the running ruleset");
   await expect(applied.getByRole("listitem")).toHaveCount(1);
@@ -85,7 +90,7 @@ test("applied warnings are listed apart from the candidate's", async ({ page }) 
 });
 
 test("no applied warnings shows no applied list", async ({ page }) => {
-  await openFirewall(page, [], { appliedAt: "2026-10-26T06:00:00Z" });
+  await openFirewall(page, []);
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByRole("status", { name: "Candidate rule warnings" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Applied rule warnings" })).toHaveCount(0);

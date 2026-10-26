@@ -29,6 +29,8 @@ import {
 import { summarizeIEC104 } from "./iec104";
 import { IEC104HealthIndicator } from "./iec104-health";
 import { useHealth } from "../../hooks/useHealth";
+import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
+import { InstalledRulesetUnavailable, RulesetFaults } from "../firewall/firewall-ruleset-status";
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
 import { useICSCoverage } from "./use-ics-coverage";
@@ -48,6 +50,7 @@ export default function ICSPolicyPage() {
   });
   const coverage = useICSCoverage();
   const health = useHealth();
+  const installed = useInstalledRuleset();
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
   async function refresh() {
@@ -148,6 +151,8 @@ export default function ICSPolicyPage() {
           <EnforcementHealthIndicator health={health?.enforcement} />
           <ICSEnforcementIndicator health={health?.icsEnforcement} />
           <IEC104HealthIndicator health={health?.iec104Enforcement} />
+          {installed.state === "loaded" && <RulesetFaults status={installed.status} />}
+          <InstalledRulesetUnavailable view={installed} />
         </div>
         <div className="mt-2">
           <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">

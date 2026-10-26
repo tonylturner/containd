@@ -33,7 +33,7 @@ import {
 import { DPIConfigSection } from "./firewall-dpi-config";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
-import { AppliedRulesetStatus } from "./firewall-ruleset-status";
+import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ruleset-status";
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
@@ -41,6 +41,7 @@ import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
 import { useHealth } from "../../hooks/useHealth";
+import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -60,6 +61,7 @@ export default function FirewallPage() {
   const [rulesetError, setRulesetError] = useState("");
   const coverage = useICSCoverage();
   const health = useHealth();
+  const installed = useInstalledRuleset();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const confirm = useConfirm();
@@ -355,6 +357,13 @@ export default function FirewallPage() {
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
         <EnforcementHealthIndicator health={health?.enforcement} />
+        {installed.state === "loaded" && (
+          <>
+            <AppliedRulesetStatus status={installed.status} />
+            <RuleWarningList scope="applied" warnings={installed.status.warnings} />
+          </>
+        )}
+        <InstalledRulesetUnavailable view={installed} />
       </Card>
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -426,20 +435,13 @@ export default function FirewallPage() {
             Ruleset preview unavailable: {rulesetError}. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
           </div>
         )}
-        {rulesetPreview?.engineStatusError && (
-          <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Engine status unavailable: {rulesetPreview.engineStatusError}
-          </div>
-        )}
         {rulesetPreview?.runtime && (
           <p className="mt-3 text-xs text-(--text-muted)">
             {rulesetPreview.runtime.reason}.
             {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
           </p>
         )}
-        {rulesetPreview?.engineStatus && <AppliedRulesetStatus status={rulesetPreview.engineStatus} />}
         <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
-        <RuleWarningList scope="applied" warnings={rulesetPreview?.engineStatus?.warnings} />
         {rulesetPreview?.ruleset && (
           <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {rulesetPreview.ruleset}
