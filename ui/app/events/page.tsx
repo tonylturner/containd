@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { api, type TelemetryEvent } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { describeICSEvidence } from "./iec104-evidence";
@@ -350,7 +351,7 @@ function EventsInner() {
               {eventSubtitle(ev)}
             </div>
             <div className="mt-1 text-xs text-(--text)">
-              {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}
+              {formatEndpoint(ev.srcIp, ev.srcPort)} → {formatEndpoint(ev.dstIp, ev.dstPort)}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
             </div>
             {evidence && (

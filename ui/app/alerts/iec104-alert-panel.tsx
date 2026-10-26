@@ -2,6 +2,7 @@
 
 import { StatusBadge } from "../../components/StatusBadge";
 import type { TelemetryEvent } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 import type { EvidenceView } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
 
@@ -49,8 +50,8 @@ export function IEC104EvidencePanel({
         </DetailSection>
 
         <DetailSection label="Network">
-          <DetailRow label="Source" value={`${event.srcIp}:${event.srcPort}`} mono />
-          <DetailRow label="Destination" value={`${event.dstIp}:${event.dstPort}`} mono />
+          <DetailRow label="Source" value={formatEndpoint(event.srcIp, event.srcPort)} mono />
+          <DetailRow label="Destination" value={formatEndpoint(event.dstIp, event.dstPort)} mono />
           {event.transport && <DetailRow label="Transport" value={event.transport.toUpperCase()} />}
           {event.flowId && <DetailRow label="Flow ID" value={event.flowId} mono />}
         </DetailSection>

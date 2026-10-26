@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { api, type FlowSummary } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
 import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -209,7 +210,7 @@ function FlowsInner() {
                     {f.application || f.transport || "Unknown"}
                   </td>
                   <td className="px-4 py-3 text-(--text)">
-                    {f.srcIp}:{f.srcPort} → {f.dstIp}:{f.dstPort}
+                    {formatEndpoint(f.srcIp, f.srcPort)} → {formatEndpoint(f.dstIp, f.dstPort)}
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     <TagList tags={f.tags} />

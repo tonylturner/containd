@@ -3,10 +3,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { MAX_ZONE_NAME_BYTES, validateZoneName } from "../lib/validate";
 
 // The server refuses a zone name that is blank, has leading or trailing
-// whitespace, or is longer than 125 bytes of UTF-8. The zone form refuses
-// those names before saving, also keeps names to letters, digits, dash and
-// underscore (a '/' breaks /zones/{name}), and shows the server's error if
-// one still returns.
+// whitespace, or is longer than MAX_ZONE_NAME_BYTES of UTF-8. The zone form
+// refuses those names before saving, also keeps names to letters, digits,
+// dash and underscore (a '/' breaks /zones/{name}), and shows the server's
+// error if one still returns.
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
@@ -41,16 +41,17 @@ const create = (page: Page) => page.getByRole("button", { name: "Create", exact:
 const nameError = (page: Page) => page.getByRole("alert", { name: "Zone name error" });
 
 const IDENTIFIER = "Only letters, numbers, dash, and underscore allowed (no spaces).";
-const atLimit = "z".repeat(125);
-const overLimit = "z".repeat(126);
-// "a" plus 62 two-byte characters: 125 bytes, but not an identifier.
-const multibyte = "a" + "é".repeat(62);
+const atLimit = "z".repeat(MAX_ZONE_NAME_BYTES);
+const overLimit = "z".repeat(MAX_ZONE_NAME_BYTES + 1);
+const overLimitMessage = `Zone name is ${MAX_ZONE_NAME_BYTES + 1} bytes; the limit is ${MAX_ZONE_NAME_BYTES} bytes.`;
+// Two-byte characters within the byte limit, but not an identifier.
+const multibyte = "é".repeat(Math.floor(MAX_ZONE_NAME_BYTES / 2));
 
 for (const [label, value, message] of [
   ["blank", "   ", "Zone name is required."],
   ["leading whitespace", " ot", "Zone name cannot start or end with a space."],
   ["trailing whitespace", "ot ", "Zone name cannot start or end with a space."],
-  ["over 125 bytes", overLimit, "Zone name is 126 bytes; the limit is 125 bytes."],
+  ["too long", overLimit, overLimitMessage],
   ["multibyte", multibyte, IDENTIFIER],
   ["slash", "ot/cell", IDENTIFIER],
 ] as const) {
@@ -64,7 +65,7 @@ for (const [label, value, message] of [
   });
 }
 
-test("a zone name of exactly 125 bytes is saved as typed", async ({ page }) => {
+test("a zone name of exactly the byte limit is saved as typed", async ({ page }) => {
   const posts = await openZones(page);
   await nameField(page).fill(atLimit);
   await expect(nameError(page)).toHaveCount(0);
@@ -87,7 +88,7 @@ test("zone name rules", () => {
   expect(new TextEncoder().encode(atLimit).length).toBe(MAX_ZONE_NAME_BYTES);
   expect(validateZoneName(atLimit)).toBeNull();
   expect(validateZoneName("ot_cell-1")).toBeNull();
-  expect(validateZoneName(overLimit)).toBe("Zone name is 126 bytes; the limit is 125 bytes.");
+  expect(validateZoneName(overLimit)).toBe(overLimitMessage);
   expect(validateZoneName(multibyte)).toBe(IDENTIFIER);
   expect(validateZoneName("ot.cell")).toBe(IDENTIFIER);
   expect(validateZoneName("ot ")).toContain("start or end with a space");

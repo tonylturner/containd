@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -331,10 +332,10 @@ func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
 		sdata[k] = v
 	}
 	if ev.SrcIP != "" {
-		sdata["src"] = fmt.Sprintf("%s:%d", ev.SrcIP, ev.SrcPort)
+		sdata["src"] = syslogEndpoint(ev.SrcIP, ev.SrcPort)
 	}
 	if ev.DstIP != "" {
-		sdata["dst"] = fmt.Sprintf("%s:%d", ev.DstIP, ev.DstPort)
+		sdata["dst"] = syslogEndpoint(ev.DstIP, ev.DstPort)
 	}
 	if ev.Transport != "" {
 		sdata["transport"] = ev.Transport
@@ -342,6 +343,15 @@ func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
 	sdJSON, _ := json.Marshal(sdata)
 	pri := "<14>" // facility=user(1)*8 + severity=informational(6)
 	return fmt.Sprintf("%s1 %s %s containd - - - [containd@47450 %s]", pri, timestamp, host, string(sdJSON))
+}
+
+// syslogEndpoint is ip alone when port is zero, as for ICMP, and ip:port
+// otherwise, with an IPv6 address in brackets: [ip]:port.
+func syslogEndpoint(ip string, port uint16) string {
+	if port == 0 {
+		return ip
+	}
+	return net.JoinHostPort(ip, strconv.Itoa(int(port)))
 }
 
 func syslogHostname(host string) string {
