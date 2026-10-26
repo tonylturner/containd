@@ -113,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before upgrading and restore that backup to roll back. `POST /config/import`
   now stages; RangerDanger uses it only as a fallback when candidate→commit
   fails, and in neither version does that fallback change the live firewall.
+  RangerDanger still reports that fallback as a success: 0.1.32 replaced the
+  running config, while 0.1.33 keeps it and stages the import. Check the
+  `X-Containd-Config: staged` response header and commit the candidate.
 - **Malformed management listener addresses are rejected** at validation.
   A listener value must be `host:port` or `:port`.
 
