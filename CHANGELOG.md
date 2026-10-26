@@ -87,10 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `dataplane.enforceTable` must start with a letter or underscore and be at most
   248 characters, which is what nftables can address, and must not be
-  `containd_dhcp`. Staging rejects other names. Revocations now work with
+  `containd_dhcp` or an nft keyword such as `table` or `inet`. Staging and the
+  engine apply the same rule. Revocations now work with
   table names that contain upper case or hyphens.
 - Staging rejects a ClamAV `updateSchedule` that is not a positive duration, a
-  `timeoutSec` outside 0–300 and a `maxSizeBytes` outside 0–100 MiB.
+  `timeoutSec` outside 0–300, a `maxSizeBytes` outside 0–100 MiB and a
+  negative `blockTtlSeconds` or `cacheTtl`.
   `clamav.socketPath` is optional and defaults to `/run/clamav/clamd.sock`.
 - The Compose files keep ClamAV databases in the `clamav-db` volume across
   container replacement.
@@ -142,8 +144,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The rule impact preview returns `warnings`, and the firewall rule editor's
   Preview impact explains why an ALLOW rule with an identity or schedule
   matches nothing.
-- Trusted CA upload shows the applied bundle revision, or says the bundle was
-  stored but the engine could not apply it.
+- Trusted CA upload shows the applied bundle revision, or the stored revision
+  and why the engine did not apply it. `POST /api/v1/system/tls/trusted-ca`
+  then returns 200 with `status: "stored"` and `warnings`; 503 now means only
+  that the config store is unavailable.
+- Committing a candidate that moves an interface to another device and gives
+  its old device to another interface no longer fails with `duplicate
+  interface device binding`. Commits and engine replay apply explicit
+  interface bindings as staged and fill only unbound default interfaces.
+- The ICS filter editor's impact preview works again: it uses the signed-in
+  session, previews the whole rule and lists predicates that resolve toward
+  denial.
+- The services overview charts only series that services report, and no
+  longer shows simulated trends or default antivirus settings when the engine
+  is unreachable.
+- When the engine runs as root, each ClamAV apply gives the persisted
+  `clamav-db` volume's files to the image's clamav account, without following
+  symbolic links.
 - The services overview no longer shows a made-up antivirus trend.
 - The engine no longer flushes the whole nftables ruleset on every apply and
   at boot. Docker's embedded DNS (so CLI `diag`, FreshClam and other name
