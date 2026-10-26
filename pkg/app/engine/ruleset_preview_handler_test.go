@@ -53,7 +53,8 @@ func TestRulesetPreviewHandler(t *testing.T) {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
 	if !strings.Contains(preview.Ruleset, "group 205") || !strings.Contains(preview.Ruleset, "table inet candidate") ||
-		!regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" queue num 209;`).MatchString(preview.Ruleset) ||
+		!regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(preview.Ruleset) ||
+		!strings.Contains(preview.Ruleset, "ct status assured meta mark set meta mark and 0xf0ffffff queue num 209;") ||
 		!strings.Contains(preview.Runtime.Reason, "not owned") || dp.CurrentRules() != nil {
 		t.Fatalf("candidate preview = %+v", preview)
 	}
