@@ -218,7 +218,12 @@ export default function AVPage() {
         </div>
       )}
 
-      {status && cfg.enabled !== (status?.enabled ?? false) && (
+      {status?.available === false && (
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+          Engine antivirus unavailable: {status?.error ?? "no response"}
+        </div>
+      )}
+      {status && status?.available !== false && cfg.enabled !== (status?.enabled ?? false) && (
         <div className="mb-4 rounded-lg border px-3 py-2 text-sm">
           Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status?.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
         </div>
@@ -233,6 +238,9 @@ export default function AVPage() {
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
             <div>Enabled: <span className="text-(--text)">{status?.enabled ? "yes" : "no"}</span></div>
+            <div>Backend ready: <span className="text-(--text)">{status?.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
+            <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
+            <div>Detections: <span className="text-(--text)">{status?.detections ?? 0}</span></div>
             <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "icap"}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
             <div>
@@ -252,21 +260,13 @@ export default function AVPage() {
             <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
             <div>Block TTL: <span className="text-(--text)">{status?.block_ttl ?? cfg.blockTtlSeconds ?? 600}s</span></div>
-            <div>Custom defs path: <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
+            <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
             <div className="md:col-span-3">
               <Sparkline
-                values={[
-                  (status?.clamav_custom_defs ?? 0) + 2,
-                  5,
-                  (status?.block_ttl ?? 6) / 60,
-                  8,
-                  (defs?.length ?? 1) + 4,
-                  7,
-                  9,
-                ]}
+                values={status?.sparkline ?? []}
                 color="var(--purple)"
                 background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                title="AV detections/updates trend (simulated)"
+                title="Engine AV scans per minute"
               />
             </div>
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
@@ -301,7 +301,7 @@ export default function AVPage() {
                   if (mode === "clamav") {
                     next.clamav = {
                       ...(c.clamav ?? {}),
-                      socketPath: c.clamav?.socketPath || "/var/run/clamav/clamd.sock",
+                      socketPath: c.clamav?.socketPath || "/run/clamav/clamd.sock",
                       freshclamEnabled: c.clamav?.freshclamEnabled ?? true,
                     };
                   }
@@ -436,7 +436,7 @@ export default function AVPage() {
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), socketPath: e.target.value } }))
                 }
-                placeholder="/var/run/clamav/clamd.sock"
+                placeholder="/run/clamav/clamd.sock"
                 className="mt-1 w-full input-industrial"
               />
             </div>
@@ -448,7 +448,7 @@ export default function AVPage() {
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), customDefsPath: e.target.value } }))
                 }
-                placeholder="/data/clamav/custom.d"
+                placeholder="/data/clamav/custom"
                 className="mt-1 w-full input-industrial"
               />
             </div>
@@ -460,7 +460,7 @@ export default function AVPage() {
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), updateSchedule: e.target.value } }))
                 }
-                placeholder="e.g. 4h or cron expr"
+                placeholder="e.g. 4h (Go duration)"
                 className="mt-1 w-full input-industrial"
               />
             </div>

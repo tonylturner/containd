@@ -38,7 +38,8 @@ reachable only by management or a trusted private network; see the
 
 The management image installs Wolfi `nginx-mainline`, `chrony`, `unbound`,
 `clamav`, `openvpn`, and `nftables`, and copies Envoy into the image. The engine
-image also installs Wolfi `nftables`. WireGuard uses Linux kernel interfaces.
+image installs Wolfi `nftables`, `clamav` and CA roots, because the engine owns
+the antivirus backend in every deployment. WireGuard uses Linux kernel interfaces.
 Enabling a service and supervising its daemon is separate from having its binary
 in the image. See [Services](services.md) and [Third-Party Licenses](SPDX.md).
 

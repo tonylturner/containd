@@ -95,11 +95,68 @@ To configure managed server mode:
 
 ## AV
 
-- Config model: `services.av` (ICAP and optional ClamAV supervision).
+- Config model: `services.av` (ICAP or an engine-supervised ClamAV daemon).
 - API:
-  - `GET/POST /api/v1/services/av`
+  - `GET/POST /api/v1/services/av` (stages the candidate; commit to apply)
   - `POST /api/v1/services/av/update`
   - `GET/POST/DELETE /api/v1/services/av/defs`
+  - The `av` entry of `GET /api/v1/services/status`
+
+The engine is the only antivirus owner, in split and combined (`all`)
+deployments alike. It applies the committed AV settings, runs clamd and the
+FreshClam schedule, stores custom definitions and scans the HTTP previews the
+dataplane queues. Management delegates status, updates and definitions to the
+engine over its internal API; when the engine is unreachable these routes
+return `503` and the status `av` entry reports `"available": false`.
+
+ClamAV mode:
+
+- The engine renders `clamd.conf` from the settings: clamd listens only on
+  `clamav.socketPath` (default `/run/clamav/clamd.sock`) and loads every
+  database in `/var/lib/clamav`. clamd restarts only when that rendered
+  configuration changes.
+- clamd needs at least one signature database before it starts. With
+  `freshclamEnabled`, FreshClam runs once when enabled and then every
+  `updateSchedule` (a Go duration such as `4h`; default `6h`; cron syntax is
+  rejected). A successful download reloads clamd, or starts it if it was
+  waiting for a database. Exit status "already up to date" is not an error.
+- `POST /services/av/update` queues an immediate run on the same schedule and
+  returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
+- Custom definitions are ClamAV database files (`.ndb`, `.hdb`, `.ldb`,
+  `.yar` and the other ClamAV database types), at most 64 MiB. The engine
+  validates each upload with `clamscan`, stores it under
+  `clamav.customDefsPath` (default `/data/clamav/custom`, engine-local),
+  installs it in the database directory and reloads clamd. Deleting a
+  definition removes it and reloads clamd.
+- Official databases live in `/var/lib/clamav` inside the engine container.
+  Mount a volume there to keep them across container replacement.
+
+Applying AV fails, and the commit reports a `services:` warning, when the
+backend is missing, clamd exits or does not answer `PING` within three
+seconds, or the first ICAP server does not answer `OPTIONS`. A freshly started
+clamd with the full official database can take longer to load; the status
+`ready` field turns true once it answers.
+
+Scanning:
+
+- `timeoutSec` bounds every scan and probe (default 5 s); `maxSizeBytes`
+  rejects larger payloads before they are sent (0 = no limit). Both apply to
+  ClamAV and ICAP, and resetting either to 0 restores the default.
+- Scan failures follow `failPolicy`: `closed` reports `error`, `open` reports
+  `bypass`; `failOpenIcs` forces `bypass` for ICS tasks. Only a malware
+  verdict triggers a temporary flow block.
+- Cached verdicts are keyed by content hash, backend and definitions
+  generation, so new definitions or another server never reuse old verdicts.
+- ICAP uses RFC 3507 `RESPMOD` with the payload as a chunked response body.
+  `204 No Content` is clean; an `X-ICAP-Status` header containing
+  `VirusFound` is malware; any other reply, including `200` with adapted
+  content, is a scan error. `useTls` connects with verified TLS 1.2 or
+  newer, using the configured host as the server name and the system roots;
+  there is no plaintext fallback.
+
+Status (`av` entry) reports the applied settings, `ready` and `db_version`
+from a live clamd `PING`/`VERSION` (or ICAP `OPTIONS`), scan, error and
+detection counters, the clamd process and the FreshClam schedule.
 
 ## Proxies
 
@@ -121,7 +178,7 @@ To configure managed server mode:
 ## Reset and reload
 
 Factory reset reapplies appliance defaults to services as well as dataplane
-policy. Disabling AV stops its managed ClamAV daemon. DNS and proxy shutdowns
+policy. Disabling AV stops the engine's clamd and FreshClam schedule. DNS and proxy shutdowns
 wait for daemon exit, escalating to a kill after two seconds and reporting an
 error if exit cannot be confirmed within another two seconds.
 

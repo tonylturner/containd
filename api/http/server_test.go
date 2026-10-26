@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -180,6 +181,12 @@ type mockEngine struct {
 	lastSvc config.ServicesConfig
 	state   []config.InterfaceState
 	ruleset dpengine.RulesetStatus
+
+	avErr        error
+	avUpdates    int
+	avUploadName string
+	avUpload     []byte
+	avDeleted    string
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -279,6 +286,46 @@ func (m *mockEngine) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Dura
 
 func (m *mockEngine) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
 	return nil
+}
+
+func (m *mockEngine) AVStatus(ctx context.Context) (map[string]any, error) {
+	if m.avErr != nil {
+		return nil, m.avErr
+	}
+	return map[string]any{"enabled": true, "ready": true}, nil
+}
+
+func (m *mockEngine) TriggerAVUpdate(ctx context.Context) error {
+	if m.avErr == nil {
+		m.avUpdates++
+	}
+	return m.avErr
+}
+
+func (m *mockEngine) ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error) {
+	if m.avErr != nil {
+		return cpservices.AVDefinitionList{}, m.avErr
+	}
+	return cpservices.AVDefinitionList{Path: "/engine/defs", Files: []string{"engine.ndb"}}, nil
+}
+
+func (m *mockEngine) UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error) {
+	if m.avErr != nil {
+		return cpservices.AVDefinition{}, m.avErr
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return cpservices.AVDefinition{}, err
+	}
+	m.avUploadName, m.avUpload = name, data
+	return cpservices.AVDefinition{Name: name, Size: int64(len(data)), Active: true}, nil
+}
+
+func (m *mockEngine) DeleteAVDef(ctx context.Context, name string) error {
+	if m.avErr == nil {
+		m.avDeleted = name
+	}
+	return m.avErr
 }
 
 func TestGetConfigNotFound(t *testing.T) {

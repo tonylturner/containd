@@ -104,10 +104,13 @@ func TestProxyDisableReapsUnresponsiveDaemons(t *testing.T) {
 }
 
 func TestAVDisableReapsUnresponsiveClamd(t *testing.T) {
-	m := NewAVManager()
-	m.clamdPath = managedDaemonScript(t)
-	m.startClamd(context.Background(), config.ClamAVConfig{})
-	t.Cleanup(func() { _ = m.stopClamd() })
+	m := newTestAVManager(t, AVOptions{ClamdPath: managedDaemonScript(t)})
+	if err := m.startClamd("unused"); err != nil {
+		t.Fatal(err)
+	}
 	waitDaemonReady(t)
-	assertReaped(t, m.clamdDone, m.Apply(context.Background(), config.AVConfig{}))
+	m.mu.Lock()
+	done := m.clamd.done
+	m.mu.Unlock()
+	assertReaped(t, done, m.Apply(context.Background(), config.AVConfig{}))
 }

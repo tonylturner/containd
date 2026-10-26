@@ -5,8 +5,10 @@ package engineapp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,30 +19,43 @@ import (
 	"go.uber.org/zap"
 )
 
+type failingAVApplier struct{ applied int }
+
+func (f *failingAVApplier) Apply(context.Context, config.AVConfig) error {
+	f.applied++
+	return errors.New("clamd not ready")
+}
+
 func TestServicesApplyReportsAVFailure(t *testing.T) {
 	dp, err := dpengine.New(dpengine.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dp.SetAVSink(&avSinkAdapter{})
+	av := &failingAVApplier{}
 	rec := httptest.NewRecorder()
-	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "AV service apply failed") {
+	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, av).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
+	if av.applied != 1 {
+		t.Fatalf("AV applied %d times, want 1", av.applied)
+	}
+	if runtime.GOOS != "linux" {
+		// WireGuard cannot apply off Linux and is reported first.
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("non-linux services apply = %d %s", rec.Code, rec.Body)
+		}
+		return
+	}
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "AV service apply failed: clamd not ready") {
 		t.Fatalf("AV failure was hidden: %d %s", rec.Code, rec.Body)
 	}
 }
 
 func TestAVSinkAdapterHelpers(t *testing.T) {
-	t.Parallel()
-
-	if err := (&avSinkAdapter{}).ApplyAVConfig(context.Background(), config.AVConfig{}); err == nil {
-		t.Fatal("expected nil adapter to reject ApplyAVConfig")
-	}
 	if gotSrc, gotDst, gotPort, gotProto := parseHostPort("10.0.0.1:1234", "10.0.0.2:8443"); gotSrc == nil || gotDst == nil || gotPort != "8443" || gotProto != "tcp" {
 		t.Fatalf("parseHostPort = %v %v %q %q", gotSrc, gotDst, gotPort, gotProto)
 	}
 
-	avMgr := services.NewAVManager()
+	avMgr := services.NewAVManager(context.Background(), services.AVOptions{StateDir: t.TempDir(), DatabaseDir: t.TempDir()})
+	t.Cleanup(func() { _ = avMgr.Stop() })
 	adapter := &avSinkAdapter{av: avMgr}
 	adapter.EnqueueAVScan(context.Background(), dpengine.AVScanTask{
 		Hash:      "sha256:abc",
@@ -53,19 +68,8 @@ func TestAVSinkAdapterHelpers(t *testing.T) {
 	if avMgr.Current().Enabled {
 		t.Fatal("unexpected AV config mutation from enqueue")
 	}
-	if avMgr.Status()["queue_depth"] == nil {
-		t.Fatalf("expected queue depth in AV status: %#v", avMgr.Status())
-	}
-	if got := avMgr.Status()["queue_depth"]; got != 1 {
+	if got := avMgr.Status(context.Background())["queue_depth"]; got != 1 {
 		t.Fatalf("queue_depth = %#v, want 1", got)
-	}
-
-	cfg := config.AVConfig{Enabled: true, Mode: "icap", FailOpenICS: true, BlockTTL: 30}
-	if err := adapter.ApplyAVConfig(context.Background(), cfg); err != nil {
-		t.Fatalf("ApplyAVConfig: %v", err)
-	}
-	if got := avMgr.Current(); !got.Enabled || got.Mode != "icap" {
-		t.Fatalf("unexpected AV config after apply: %#v", got)
 	}
 }
 
@@ -76,11 +80,12 @@ func TestWireAVEventsAndVerdicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
 	}
-	avMgr := services.NewAVManager()
-	adapter := &avSinkAdapter{av: avMgr, dp: dp}
-	dp.SetAVSink(adapter)
-	if err := adapter.ApplyAVConfig(context.Background(), config.AVConfig{Enabled: true, FailOpenICS: true, BlockTTL: 30}); err != nil {
-		t.Fatalf("ApplyAVConfig: %v", err)
+	avMgr := services.NewAVManager(context.Background(), services.AVOptions{StateDir: t.TempDir(), DatabaseDir: t.TempDir()})
+	t.Cleanup(func() { _ = avMgr.Stop() })
+	dp.SetAVSink(&avSinkAdapter{av: avMgr})
+	cfg := config.AVConfig{Enabled: false, FailOpenICS: true, BlockTTL: 30}
+	if err := avMgr.Apply(context.Background(), cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
 
 	wireAVEvents(avMgr, dp)
@@ -93,7 +98,7 @@ func TestWireAVEventsAndVerdicts(t *testing.T) {
 		t.Fatalf("unexpected AV event list: %#v", events)
 	}
 
-	handleAVVerdict(dp, services.ScanTask{
+	handleAVVerdict(dp, cfg, services.ScanTask{
 		Hash:     "sha256:def",
 		Proto:    "http",
 		Source:   "10.0.0.1:1234",
@@ -102,7 +107,7 @@ func TestWireAVEventsAndVerdicts(t *testing.T) {
 	}, services.ScanResult{Verdict: "clean"})
 
 	before := len(dp.Events().List(20))
-	handleAVVerdict(dp, services.ScanTask{
+	handleAVVerdict(dp, cfg, services.ScanTask{
 		Hash:     "sha256:ghi",
 		Proto:    "modbus",
 		Source:   "10.0.0.3:502",

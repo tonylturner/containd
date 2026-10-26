@@ -4,13 +4,15 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
@@ -226,118 +228,109 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 	}
 }
 
-func triggerAVUpdateHandler(services ServicesApplier) gin.HandlerFunc {
+// engineAVError passes engine request errors through and reports any other
+// failure as the engine antivirus being unavailable. Management never
+// substitutes local state for the engine's.
+func engineAVError(c *gin.Context, err error) {
+	var se *engineclient.StatusError
+	if errors.As(err, &se) && se.Code >= 400 && se.Code < 500 {
+		apiError(c, se.Code, se.Detail)
+		return
+	}
+	apiErrorDetail(c, http.StatusServiceUnavailable, "engine antivirus unavailable", err.Error())
+}
+
+func engineUnavailable(c *gin.Context) {
+	apiError(c, http.StatusServiceUnavailable, "engine unavailable")
+}
+
+func triggerAVUpdateHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		updater, ok := services.(AVUpdater)
-		if !ok || updater == nil {
-			apiError(c, http.StatusNotImplemented, "av updater not available")
+		if engine == nil {
+			engineUnavailable(c)
 			return
 		}
-		if err := updater.TriggerAVUpdate(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		if err := engine.TriggerAVUpdate(c.Request.Context()); err != nil {
+			engineAVError(c, err)
 			return
 		}
+		auditLog(c, audit.Record{Action: "services.av.update", Target: "engine"})
 		c.JSON(http.StatusAccepted, gin.H{"status": "freshclam started"})
 	}
 }
 
-func listAVDefsHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func listAVDefsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		if engine == nil {
+			engineUnavailable(c)
 			return
 		}
-		path := "/data/clamav/custom"
-		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
-			path = am.CustomDefsPath()
-		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
-			path = cfg.Services.AV.ClamAV.CustomDefsPath
-		}
-		entries, err := os.ReadDir(path)
+		list, err := engine.ListAVDefs(c.Request.Context())
 		if err != nil {
-			if os.IsNotExist(err) {
-				c.JSON(http.StatusOK, gin.H{"files": []string{}})
-				return
-			}
-			internalError(c, err)
+			engineAVError(c, err)
 			return
 		}
-		var files []string
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			files = append(files, e.Name())
-		}
-		c.JSON(http.StatusOK, gin.H{"files": files, "path": path})
+		c.JSON(http.StatusOK, list)
 	}
 }
 
-func uploadAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+// uploadAVDefHandler streams the multipart "file" part to the engine without
+// storing it on management.
+func uploadAVDefHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
+		if engine == nil {
+			engineUnavailable(c)
 			return
 		}
-		path := "/data/clamav/custom"
-		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
-			path = am.CustomDefsPath()
-		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
-			path = cfg.Services.AV.ClamAV.CustomDefsPath
-		}
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			internalError(c, err)
-			return
-		}
-		file, err := c.FormFile("file")
+		mr, err := c.Request.MultipartReader()
 		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "file is required", err.Error())
 			return
 		}
-		name := filepath.Base(file.Filename)
-		if name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
-			apiError(c, http.StatusBadRequest, "invalid filename")
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "file is required", err.Error())
+				return
+			}
+			if part.FormName() != "file" {
+				_ = part.Close()
+				continue
+			}
+			name := filepath.Base(part.FileName())
+			if err := cpservices.ValidateDefinitionName(name); err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			def, err := engine.UploadAVDef(c.Request.Context(), name, part)
+			if err != nil {
+				engineAVError(c, err)
+				return
+			}
+			auditLog(c, audit.Record{Action: "services.av.defs.upload", Target: name})
+			c.JSON(http.StatusOK, gin.H{"status": "uploaded", "file": def.Name, "active": def.Active})
 			return
 		}
-		dst := filepath.Join(path, name)
-		if !strings.HasPrefix(filepath.Clean(dst), filepath.Clean(path)) {
-			apiError(c, http.StatusBadRequest, "invalid filename")
-			return
-		}
-		if err := c.SaveUploadedFile(file, dst); err != nil {
-			internalError(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "uploaded", "file": name})
 	}
 }
 
-func deleteAVDefHandler(store config.Store, services ServicesApplier) gin.HandlerFunc {
+func deleteAVDefHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
 		file := strings.TrimSpace(c.Query("file"))
 		if file == "" {
 			apiError(c, http.StatusBadRequest, "file query parameter required")
 			return
 		}
-		path := "/data/clamav/custom"
-		if am, ok := services.(AVDefsManager); ok && am != nil && am.CustomDefsPath() != "" {
-			path = am.CustomDefsPath()
-		} else if strings.TrimSpace(cfg.Services.AV.ClamAV.CustomDefsPath) != "" {
-			path = cfg.Services.AV.ClamAV.CustomDefsPath
-		}
-		target := filepath.Join(path, filepath.Base(file))
-		if err := os.Remove(target); err != nil {
-			internalError(c, err)
+		if engine == nil {
+			engineUnavailable(c)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "deleted", "file": filepath.Base(file)})
+		if err := engine.DeleteAVDef(c.Request.Context(), file); err != nil {
+			engineAVError(c, err)
+			return
+		}
+		auditLog(c, audit.Record{Action: "services.av.defs.delete", Target: file})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted", "file": file})
 	}
 }
 
@@ -431,16 +424,33 @@ func setReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func getServicesStatusHandler(services ServicesApplier) gin.HandlerFunc {
+// getServicesStatusHandler reports management-run services and the engine's
+// antivirus status. An unreachable engine is reported in the av entry, never
+// replaced with management state.
+func getServicesStatusHandler(services ServicesApplier, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if services == nil {
-			c.JSON(http.StatusOK, gin.H{"status": "unavailable"})
-			return
+		out := map[string]any{}
+		if s, ok := services.(interface{ Status() any }); ok && s != nil {
+			if m, ok := s.Status().(map[string]any); ok {
+				out = m
+			}
 		}
-		if s, ok := services.(interface{ Status() any }); ok {
-			c.JSON(http.StatusOK, s.Status())
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "unknown"})
+		out["av"] = engineAVStatus(c.Request.Context(), engine)
+		c.JSON(http.StatusOK, out)
 	}
+}
+
+func engineAVStatus(ctx context.Context, engine EngineClient) map[string]any {
+	if engine == nil {
+		return map[string]any{"available": false, "error": "engine unavailable"}
+	}
+	status, err := engine.AVStatus(ctx)
+	if err != nil {
+		return map[string]any{"available": false, "error": err.Error()}
+	}
+	if status == nil {
+		status = map[string]any{}
+	}
+	status["available"] = true
+	return status
 }

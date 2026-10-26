@@ -19,10 +19,18 @@ RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
     -ldflags "-s -w -X github.com/tonylturner/containd/pkg/cp/config.BuildVersion=${version} -X github.com/tonylturner/containd/pkg/cp/config.BuildCommit=${COMMIT}" \
     -o /out/containd ./cmd/containd
 
-# Wolfi-based runtime with nftables (the only runtime dependency for the engine).
+# Wolfi-based runtime: nftables for enforcement, ClamAV for the engine-owned
+# antivirus backend, and CA roots for FreshClam and ICAP over TLS.
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7
 
-RUN apk update && apk add --no-cache nftables && rm -rf /var/cache/apk/*
+RUN apk update && apk add --no-cache ca-certificates-bundle clamav nftables && rm -rf /var/cache/apk/*
+
+# ClamAV runtime shared by the engine and combined images. The engine renders
+# clamd and FreshClam configs; clamd runs as the clamav account.
+RUN addgroup -S clamav \
+    && adduser -S -D -H -G clamav -h /var/lib/clamav -s /sbin/nologin clamav \
+    && mkdir -p /var/lib/clamav /run/clamav \
+    && chown clamav:clamav /var/lib/clamav /run/clamav
 
 LABEL org.opencontainers.image.title="containd-engine" \
       org.opencontainers.image.description="containd data plane (engine-only)" \

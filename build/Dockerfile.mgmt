@@ -73,6 +73,13 @@ RUN apk update && apk add --no-cache \
     && mkdir -p /var/lib/chrony /var/log/chrony \
     && chown chrony:chrony /var/lib/chrony /var/log/chrony
 
+# ClamAV runtime shared by the engine and combined images. The engine renders
+# clamd and FreshClam configs; clamd runs as the clamav account.
+RUN addgroup -S clamav \
+    && adduser -S -D -H -G clamav -h /var/lib/clamav -s /sbin/nologin clamav \
+    && mkdir -p /var/lib/clamav /run/clamav \
+    && chown clamav:clamav /var/lib/clamav /run/clamav
+
 # Envoy needs libstdc++ which is not pulled in by default.
 COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
